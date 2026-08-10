@@ -55,7 +55,7 @@ test("client add / get / list roundtrip", async () => {
   });
 
   expect(created.title).toBe("Hello");
-  expect(created.id).toBeTruthy();
+  expect(created.id).toMatch(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i);
 
   const got = await client.posts.get(created.id);
   expect(got?.body).toBe("world");

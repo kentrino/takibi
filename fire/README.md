@@ -70,14 +70,56 @@ Inside the DO (trusted / admin path, ACL bypassed):
 
 In memory mode (`{ memory: true }`), the same API is on `handler.storage`.
 
+Documents are stored with the Durable Object Storage KV API
+(`get` / `put` / `delete` / `list`) under keys `fire:${resource}:${id}`.
+One document is one entry. The library does **not** use `state.storage.sql` or
+manage application SQL schemas / migrations.
+
+Auto-generated document ids are monotonic ULIDs (26 Crockford Base32 characters).
+Caller-supplied ids are still accepted; creation-order lexicographic sort is
+guaranteed only for library-generated ULIDs.
+
 ## Wrangler
 
-Bind one DO per tenant (`idFromName(tenantId)`):
+Register a **new** Durable Object class with SQLite storage. Backend choice is
+fixed when the class namespace is created.
 
 ```jsonc
 {
   "durable_objects": {
     "bindings": [{ "name": "TENANT_STORE", "class_name": "TenantStore" }],
   },
+  "exports": {
+    "TenantStore": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
 }
 ```
+
+Legacy Workers that still use the `migrations` array can create a SQLite-backed
+class with `new_sqlite_classes` instead of `exports`. Prefer `exports` for new
+projects.
+
+Notes:
+
+- Bind one DO per tenant (`idFromName(tenantId)`).
+- Existing Legacy KV-backed namespaces **cannot** be converted in place to
+  SQLite. Move data to a new SQLite-backed class / namespace separately.
+- Do not create new Legacy KV-backed classes for `@takibi/fire`.
+
+## Limits and layout
+
+| Backend                                     | Per-entry size         |
+| ------------------------------------------- | ---------------------- |
+| SQLite-backed DO (required for new classes) | key + value ≤ **2 MB** |
+| Legacy KV-backed DO                         | value ≤ **128 KiB**    |
+
+- `get` / `update` / `list` always read or write the **whole** document value.
+  There is no field projection or partial array read.
+- Growing collections belong in child resources (for example `postItems` with a
+  parent id field), not as unbounded arrays embedded in a parent document.
+  Keep embedded arrays small and bounded.
+- `list` returns full documents, paged with `{ limit?, cursor? }` over id order
+  (prefix + `startAfter`). It does not offer `where` / `orderBy` / offset.

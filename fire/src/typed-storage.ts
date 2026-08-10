@@ -1,6 +1,7 @@
 import { NotFoundError } from "./errors";
 import { parseSchema } from "./schema";
 import type { ClientOf, ListOptions, ResourceDefinition, StorageDriver, WithId } from "./types";
+import { generateUlid } from "./ulid";
 
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
 export async function storageAdd(
@@ -10,8 +11,7 @@ export async function storageAdd(
   input: unknown,
 ): Promise<WithId<Record<string, unknown>>> {
   const parsed = (await parseSchema(def.schema, input ?? {})) as Record<string, unknown>;
-  const id =
-    typeof parsed.id === "string" && parsed.id.length > 0 ? parsed.id : crypto.randomUUID();
+  const id = typeof parsed.id === "string" && parsed.id.length > 0 ? parsed.id : generateUlid();
   const doc = { ...parsed, id };
   await storage.put(resource, doc);
   return doc;

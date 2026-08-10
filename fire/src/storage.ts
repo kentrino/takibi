@@ -60,17 +60,18 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
   };
 }
 
+/**
+ * Memory-side pagination matching Durable Object `list({ startAfter })`:
+ * start strictly after the cursor id (lexicographic), even if that id is missing.
+ */
 function paginate(
   items: WithId<Record<string, unknown>>[],
   opts?: ListOptions,
 ): { items: WithId<Record<string, unknown>>[]; nextCursor?: string } {
   const sorted = [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-  let start = 0;
-  if (opts?.cursor) {
-    const idx = sorted.findIndex((d) => d.id === opts.cursor);
-    start = idx >= 0 ? idx + 1 : 0;
-  }
+  const start = opts?.cursor ? sorted.findIndex((d) => d.id > opts.cursor!) : 0;
+  if (start < 0) return { items: [] };
   const page = sorted.slice(start, start + limit);
   const next = sorted[start + limit];
   return next ? { items: page, nextCursor: page.at(-1)?.id } : { items: page };
