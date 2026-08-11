@@ -2,19 +2,54 @@
 
 Typed, Firebase-like resource store for Cloudflare Durable Objects — with oRPC-style end-to-end types, tenant isolation, and access control.
 
+## AuthN vs AuthZ
+
+**AuthN** (who is calling, which tenant they may use) is owned by your application.
+**AuthZ** (what that identity may do to a resource) is owned by `@takibi/fire`
+via `accessControl`.
+
+`createContext({ resolve })` is the trust boundary. Inside `resolve` you must:
+
+1. Verify a credential, session, or trusted gateway assertion and set `user`
+2. Decide the tenant for this request (from the identity claim and/or an
+   application-approved selector)
+3. Confirm the user may use that tenant, then return `{ tenantId, user, ... }`
+
+Do **not** trust client-declared identity or tenant headers (for example
+`x-user` / `x-tenant-id`). The library never parses those. Anonymous apps return
+`user: null` explicitly from `resolve`. Public tenant selection is also a
+`resolve` decision — empty `tenantId` is rejected with 401.
+
 ## Server
 
 ```ts
-import { ALL, EDIT, READ, createContext } from "@takibi/fire";
+import { ALL, EDIT, READ, UnauthorizedError, createContext } from "@takibi/fire";
 import { Hono } from "hono";
 import { z } from "zod";
 
-type User = { id: string; role: "admin" | "member" };
+type User = { id: string; role: "admin" | "member"; tenantIds: string[] };
 
-const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
-  tenantId,
-  user: user as User | null,
-}));
+async function authenticate(request: Request): Promise<User | null> {
+  // Verify Bearer / Cookie / Access JWT / etc. — your choice of library & IdP.
+  // Return null for anonymous access when your app allows it.
+  void request;
+  return null;
+}
+
+const context = createContext<{ tenantId: string; user: User | null }>({
+  resolve: async ({ request }) => {
+    const user = await authenticate(request);
+    const requested = request.headers.get("x-tenant-id"); // optional hint only
+    const tenantId =
+      (user && requested && user.tenantIds.includes(requested) ? requested : null) ??
+      user?.tenantIds[0] ??
+      null;
+    if (!tenantId) {
+      throw new UnauthorizedError("Unknown tenant");
+    }
+    return { tenantId, user };
+  },
+});
 
 const handler = context.resources({
   posts: {
@@ -38,12 +73,13 @@ app.route("/foo", handler);
 export default app;
 ```
 
-Default auth extraction:
-
-- tenant: `x-tenant-id` header
-- user: `x-user` JSON header (override with `getUser` / `resolve`)
+Prefer throwing `UnauthorizedError` (or returning only after membership checks) from
+`resolve` when AuthN / tenant membership fails. The library also rejects an empty
+`tenantId` after `resolve` returns.
 
 ## Client
+
+Carry credentials your server trusts — not self-declared role or membership JSON.
 
 ```ts
 import { createClient } from "@takibi/fire";
@@ -51,8 +87,9 @@ import type { Handler } from "./server";
 
 const client = createClient<Handler>("https://localhost:3000/foo", {
   headers: () => ({
+    Authorization: `Bearer ${getAccessToken()}`,
+    // Optional routing hint; the server must authorize it inside resolve.
     "x-tenant-id": "acme",
-    "x-user": JSON.stringify({ id: "u1", role: "member" }),
   }),
 });
 
@@ -115,6 +152,32 @@ const post = result.data;
 `get` / `update` / `delete` use the same `NOT_FOUND` failure when the document is missing.
 `set` remains upsert and succeeds for a new id.
 
+### Migrating `createContext` to `{ resolve }`
+
+Removed: function shorthand, `AuthBits`, `getTenantId`, `getUser`, `context`, and any
+default parsers for `x-user` / `x-tenant-id`.
+
+```ts
+// Before (trusted client-declared headers — do not keep this)
+createContext(({ tenantId, user }) => ({ tenantId, user }));
+
+createContext({
+  getUser: async (request) => {
+    /* ... */
+  },
+  context: ({ tenantId, user }) => ({ tenantId, user }),
+});
+
+// After — one trust boundary for AuthN + tenant membership
+createContext({
+  resolve: async ({ request }) => {
+    const user = await authenticate(request);
+    const tenantId = await authorizeTenant(request, user);
+    return { tenantId, user };
+  },
+});
+```
+
 ## Durable Object storage
 
 Inside the DO (trusted / admin path, ACL bypassed):
@@ -161,7 +224,7 @@ projects.
 
 Notes:
 
-- Bind one DO per tenant (`idFromName(tenantId)`).
+- Bind one DO per tenant (`idFromName(tenantId)` from `resolve`).
 - Existing Legacy KV-backed namespaces **cannot** be converted in place to
   SQLite. Move data to a new SQLite-backed class / namespace separately.
 - Do not create new Legacy KV-backed classes for `@takibi/fire`.

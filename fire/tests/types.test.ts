@@ -1,7 +1,10 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { ALL, READ, createClient, createContext } from "../src/index";
-import type { DocumentId, FireFailure, FireResult, WithId } from "../src/index";
+import type { ContextConfig, DocumentId, FireFailure, FireResult, WithId } from "../src/index";
+
+type User = { id: string; role: "admin" | "member" };
+type AppCtx = { tenantId: string; user: User | null };
 
 test("client methods are typed from resource schemas", () => {
   const Post = z.object({
@@ -9,12 +12,12 @@ test("client methods are typed from resource schemas", () => {
     body: z.string(),
   });
 
-  const context = createContext<{ tenantId: string; user: { id: string } | null }>(
-    ({ tenantId, user }) => ({
-      tenantId,
-      user: user as { id: string } | null,
-    }),
-  );
+  const context = createContext<AppCtx>({
+    resolve: async ({ request }) => {
+      void request;
+      return { tenantId: "acme", user: { id: "u1", role: "member" } };
+    },
+  });
 
   const handler = context.resources(
     {
@@ -85,6 +88,53 @@ test("client methods are typed from resource schemas", () => {
     }>
   >();
   expectTypeOf<Extract<StorageGot, { ok: true }>["data"]>().not.toMatchTypeOf<null>();
+});
+
+test("resolve concrete user type flows into accessControl without cast", () => {
+  createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
+  }).resources({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessControl({ user }) {
+        expectTypeOf(user).toEqualTypeOf<User | null>();
+        if (user?.role === "admin") return ALL;
+        return READ;
+      },
+    },
+  });
+});
+
+test("createContext rejects function shorthand and staged config keys", () => {
+  // @ts-expect-error function shorthand removed — pass { resolve }
+  createContext<AppCtx>(({ tenantId, user }) => ({ tenantId, user }));
+
+  // @ts-expect-error resolve is required; staged keys are gone
+  createContext<AppCtx>({});
+
+  createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: null }),
+    // @ts-expect-error getUser removed
+    getUser: async () => null,
+  });
+
+  createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: null }),
+    // @ts-expect-error getTenantId removed
+    getTenantId: () => "acme",
+  });
+
+  createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: null }),
+    // @ts-expect-error context removed
+    context: () => ({ tenantId: "acme", user: null }),
+  });
+
+  type OnlyResolve = ContextConfig<AppCtx>;
+  expectTypeOf<OnlyResolve>().toEqualTypeOf<{ resolve: OnlyResolve["resolve"] }>();
+  expectTypeOf<OnlyResolve>().not.toHaveProperty("getUser");
+  expectTypeOf<OnlyResolve>().not.toHaveProperty("getTenantId");
+  expectTypeOf<OnlyResolve>().not.toHaveProperty("context");
 });
 
 test("WithId replaces conflicting id types with DocumentId", () => {

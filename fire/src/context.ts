@@ -13,26 +13,15 @@ import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { createTypedStorage } from "./typed-storage";
 import type { ClientOf, ResourceDefinition, ResourcesDef, StorageDriver } from "./types";
 
-export type AuthBits = {
-  tenantId: string;
-  user: unknown;
-  request: Request;
-};
+/**
+ * Application-owned trust boundary: verify credentials, authorize tenant
+ * membership, and return a complete context. The library treats the result as
+ * trusted Worker-side values and never overlays request body / client headers.
+ */
+export type ContextResolver<TCtx> = (input: { request: Request }) => TCtx | Promise<TCtx>;
 
 export type ContextConfig<TCtx extends { tenantId: string; user: unknown }> = {
-  /** Extract tenant id (default: `x-tenant-id` header). */
-  getTenantId?: (
-    request: Request,
-  ) => string | null | undefined | Promise<string | null | undefined>;
-  /** Extract / verify user (default: parse `x-user` JSON header, else null). */
-  getUser?: (request: Request) => Promise<unknown>;
-  /**
-   * Build the request context from tenant + user.
-   * Must return at least `{ tenantId, user }`.
-   */
-  context?: (auth: AuthBits) => TCtx | Promise<TCtx>;
-  /** Full-control resolver; when set, getTenantId / getUser / context are ignored. */
-  resolve?: (input: { request: Request }) => TCtx | Promise<TCtx>;
+  resolve: ContextResolver<TCtx>;
 };
 
 export type ResourcesOptions = {
@@ -64,17 +53,10 @@ export type FireHandler<
   TResources = ResourcesDef<TCtx>,
 > = Hono<{ Bindings: Record<string, unknown> }> & FireBrand<TCtx, TResources>;
 
-type ContextBuilder<TCtx extends { tenantId: string; user: unknown }> =
-  | ContextConfig<TCtx>
-  | ((auth: AuthBits) => TCtx | Promise<TCtx>);
-
 export function createContext<TCtx extends { tenantId: string; user: unknown }>(
-  config: ContextBuilder<TCtx>,
+  config: ContextConfig<TCtx>,
 ) {
-  const normalized: ContextConfig<TCtx> =
-    typeof config === "function" ? { context: config } : config;
-
-  const resolve = createResolver(normalized);
+  const { resolve } = config;
 
   return {
     resources<const TResources extends ResourcesDef<TCtx>>(
@@ -160,46 +142,6 @@ export function createContext<TCtx extends { tenantId: string; user: unknown }>(
       handler.DurableObject = DurableObjectClass as FireHandler<TCtx, TResources>["DurableObject"];
       return handler;
     },
-  };
-}
-
-function createResolver<TCtx extends { tenantId: string; user: unknown }>(
-  config: ContextConfig<TCtx>,
-): (input: { request: Request }) => Promise<TCtx> {
-  if (config.resolve) {
-    return async (input) => config.resolve!(input);
-  }
-
-  const getTenantId =
-    config.getTenantId ?? ((request: Request) => request.headers.get("x-tenant-id"));
-
-  const getUser =
-    config.getUser ??
-    (async (request: Request) => {
-      const raw = request.headers.get("x-user");
-      if (!raw) return null;
-      try {
-        return JSON.parse(raw) as unknown;
-      } catch {
-        throw new UnauthorizedError("Invalid x-user header");
-      }
-    });
-
-  const build =
-    config.context ??
-    ((auth: AuthBits) =>
-      ({
-        tenantId: auth.tenantId,
-        user: auth.user,
-      }) as TCtx);
-
-  return async ({ request }) => {
-    const tenantId = await getTenantId(request);
-    if (!tenantId) {
-      throw new UnauthorizedError("Missing tenant id (x-tenant-id)");
-    }
-    const user = await getUser(request);
-    return build({ tenantId, user, request });
   };
 }
 

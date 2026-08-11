@@ -2,7 +2,7 @@ export { createClient } from "./client";
 export type { CreateClientOptions, InferHandlerResources } from "./client";
 
 export { createContext } from "./context";
-export type { AuthBits, ContextConfig, FireHandler, ResourcesOptions } from "./context";
+export type { ContextConfig, ContextResolver, FireHandler, ResourcesOptions } from "./context";
 
 export { ALL, CREATE, DELETE, EDIT, READ, UPDATE, allows, expandPermissions } from "./permissions";
 export type { AccessGrant, Permission } from "./permissions";

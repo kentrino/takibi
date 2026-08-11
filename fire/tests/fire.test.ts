@@ -4,6 +4,18 @@ import { ALL, CREATE, EDIT, READ, createClient, createContext } from "../src/ind
 import type { WireRequest, WireResponse } from "../src/protocol";
 
 type User = { id: string; role: "admin" | "member" };
+type AppCtx = { tenantId: string; user: User | null };
+
+/**
+ * Test-only context assembly. Not a package export — production apps must
+ * verify credentials and tenant membership inside their own `resolve`.
+ */
+function resolveTestContext({ request }: { request: Request }): AppCtx {
+  const tenantId = request.headers.get("x-test-tenant") ?? "";
+  const raw = request.headers.get("x-test-user");
+  if (!raw) return { tenantId, user: null };
+  return { tenantId, user: JSON.parse(raw) as User };
+}
 
 const Post = z.object({
   title: z.string().min(1),
@@ -12,10 +24,7 @@ const Post = z.object({
 });
 
 function createTestApp() {
-  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
-    tenantId,
-    user: user as User | null,
-  }));
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
 
   const handler = context.resources(
     {
@@ -35,10 +44,7 @@ function createTestApp() {
 }
 
 function createCreateOnlyApp() {
-  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
-    tenantId,
-    user: user as User | null,
-  }));
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
 
   return context.resources(
     {
@@ -56,10 +62,7 @@ function createCreateOnlyApp() {
 }
 
 function createStrictApp() {
-  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
-    tenantId,
-    user: user as User | null,
-  }));
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
 
   return context.resources(
     {
@@ -81,8 +84,8 @@ function createStrictApp() {
 }
 
 function headers(tenantId: string, user: User | null) {
-  const h = new Headers({ "x-tenant-id": tenantId });
-  if (user) h.set("x-user", JSON.stringify(user));
+  const h = new Headers({ "x-test-tenant": tenantId });
+  if (user) h.set("x-test-user", JSON.stringify(user));
   return h;
 }
 
@@ -203,10 +206,7 @@ test("add rejects reserved id in data and empty option id", async () => {
 });
 
 test("schema transform that injects id is rejected", async () => {
-  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
-    tenantId,
-    user: user as User | null,
-  }));
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
 
   const handler = context.resources(
     {
@@ -350,6 +350,143 @@ test("anonymous cannot create", async () => {
   expect(result).toMatchObject({
     ok: false,
     error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+});
+
+test("explicit anonymous resolve (user: null) can still read", async () => {
+  const context = createContext<AppCtx>({
+    resolve: () => ({ tenantId: "public", user: null }),
+  });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessControl({ user }) {
+          if (user) return ALL;
+          return READ;
+        },
+      },
+    },
+    { memory: true },
+  );
+
+  await handler.storage.posts.add(
+    { title: "public", body: "ok", authorId: "system" },
+    { id: "p1" },
+  );
+
+  const client = createClient<typeof handler>("http://fire.test/", {
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const listed = await client.posts.list();
+  expect(listed.ok).toBe(true);
+  if (!listed.ok) return;
+  expect(listed.data.items).toHaveLength(1);
+
+  const created = await client.posts.add({ title: "nope", body: "x", authorId: "anon" });
+  expect(created).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+});
+
+test("client-claimed x-user does not change identity or permissions", async () => {
+  const context = createContext<AppCtx>({
+    resolve: () => ({ tenantId: "tenant-a", user: null }),
+  });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessControl({ user }) {
+          if (user?.role === "admin") return ALL;
+          if (user) return [READ, CREATE, EDIT];
+          return READ;
+        },
+      },
+    },
+    { memory: true },
+  );
+
+  const res = await handler.request("http://fire.test/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user": JSON.stringify({ id: "attacker", role: "admin" }),
+    },
+    body: JSON.stringify({
+      resource: "posts",
+      operation: "add",
+      input: { title: "hijack", body: "x", authorId: "attacker" },
+    }),
+  });
+  expect(res.status).toBe(403);
+  const json = (await res.json()) as WireResponse;
+  expect(json).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+});
+
+test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
+  const idFromNameCalls: string[] = [];
+  let forwardedContext: unknown;
+
+  const fakeNs = {
+    idFromName(name: string) {
+      idFromNameCalls.push(name);
+      return name as unknown as DurableObjectId;
+    },
+    get(_id: DurableObjectId) {
+      return {
+        fetch: async (request: Request) => {
+          const body = (await request.json()) as WireRequest;
+          forwardedContext = body.context;
+          return Response.json({
+            ok: true,
+            data: { items: [], nextCursor: null },
+          } satisfies WireResponse);
+        },
+      };
+    },
+  };
+
+  const context = createContext<AppCtx>({
+    resolve: () => ({
+      tenantId: "resolved-tenant",
+      user: { id: "u1", role: "member" },
+    }),
+  });
+  const handler = context.resources({
+    posts: {
+      schema: Post,
+      accessControl() {
+        return ALL;
+      },
+    },
+  });
+
+  const res = await handler.request(
+    "http://fire.test/",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": "attacker-tenant",
+      },
+      body: JSON.stringify({
+        resource: "posts",
+        operation: "list",
+      }),
+    },
+    { TENANT_STORE: fakeNs },
+  );
+
+  expect(res.status).toBe(200);
+  expect(idFromNameCalls).toEqual(["resolved-tenant"]);
+  expect(forwardedContext).toEqual({
+    tenantId: "resolved-tenant",
+    user: { id: "u1", role: "member" },
   });
 });
 
@@ -508,8 +645,22 @@ test("transport and protocol failures reject instead of returning FireFailure", 
   await expect(badEnvelopeClient.posts.list()).rejects.toThrow("Invalid response envelope");
 });
 
-test("missing tenant is unauthorized", async () => {
-  const handler = createTestApp();
+test("empty tenantId from resolve is unauthorized", async () => {
+  const context = createContext<AppCtx>({
+    resolve: () => ({ tenantId: "", user: null }),
+  });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessControl() {
+          return READ;
+        },
+      },
+    },
+    { memory: true },
+  );
+
   const res = await handler.request("http://fire.test/", {
     method: "POST",
     headers: { "content-type": "application/json" },
