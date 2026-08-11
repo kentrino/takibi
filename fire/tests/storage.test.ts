@@ -1,17 +1,23 @@
 import { expect, test } from "vite-plus/test";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
-import type { WithId } from "../src/types";
+import type { WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
+
+const TS = "2026-08-09T14:12:00.000Z";
+
+function meta<T extends Record<string, unknown>>(doc: { id: string } & T): WithMetadata<T> {
+  return { ...doc, createdAt: TS, updatedAt: TS };
+}
 
 /** In-memory stand-in for DurableObjectStorage KV API used by createDurableObjectStorage. */
 function createFakeDurableObjectStorage() {
-  const store = new Map<string, WithId<Record<string, unknown>>>();
+  const store = new Map<string, WithMetadata<Record<string, unknown>>>();
 
   return {
     async get<T>(key: string): Promise<T | undefined> {
       return store.get(key) as T | undefined;
     },
-    async put(key: string, value: WithId<Record<string, unknown>>): Promise<void> {
+    async put(key: string, value: WithMetadata<Record<string, unknown>>): Promise<void> {
       store.set(key, structuredClone(value));
     },
     async delete(key: string): Promise<boolean> {
@@ -58,11 +64,11 @@ test("memory and DO KV pagination agree on order, boundary, and nextCursor", asy
   const durable = createDurableObjectStorage(createFakeDurableObjectStorage());
 
   const docs = [
-    { id: "c", title: "C" },
-    { id: "a", title: "A" },
-    { id: "b", title: "B" },
-    { id: "d", title: "D" },
-    { id: "e", title: "E" },
+    meta({ id: "c", title: "C" }),
+    meta({ id: "a", title: "A" }),
+    meta({ id: "b", title: "B" }),
+    meta({ id: "d", title: "D" }),
+    meta({ id: "e", title: "E" }),
   ];
 
   for (const doc of docs) {
@@ -71,9 +77,9 @@ test("memory and DO KV pagination agree on order, boundary, and nextCursor", asy
   }
 
   // Distinct resources with the same id must not collide on DO keys.
-  await durable.put("comments", { id: "a", body: "x" });
-  expect(await durable.get("posts", "a")).toEqual({ id: "a", title: "A" });
-  expect(await durable.get("comments", "a")).toEqual({ id: "a", body: "x" });
+  await durable.put("comments", meta({ id: "a", body: "x" }));
+  expect(await durable.get("posts", "a")).toEqual(meta({ id: "a", title: "A" }));
+  expect(await durable.get("comments", "a")).toEqual(meta({ id: "a", body: "x" }));
 
   const page1Memory = await memory.list("posts", { limit: 2 });
   const page1Durable = await durable.list("posts", { limit: 2 });
@@ -103,10 +109,10 @@ test("memory and DO KV pagination agree on order, boundary, and nextCursor", asy
 test("DO get reads only fire:${resource}:${id}", async () => {
   const fake = createFakeDurableObjectStorage();
   const durable = createDurableObjectStorage(fake);
-  await durable.put("posts", { id: "p1", title: "hi" });
-  await fake.put("fire:posts:p2", { id: "p2", title: "other" });
-  await fake.put("unrelated", { id: "x", title: "nope" });
+  await durable.put("posts", meta({ id: "p1", title: "hi" }));
+  await fake.put("fire:posts:p2", meta({ id: "p2", title: "other" }));
+  await fake.put("unrelated", meta({ id: "x", title: "nope" }));
 
-  expect(await durable.get("posts", "p1")).toEqual({ id: "p1", title: "hi" });
+  expect(await durable.get("posts", "p1")).toEqual(meta({ id: "p1", title: "hi" }));
   expect(await durable.get("posts", "missing")).toBeNull();
 });

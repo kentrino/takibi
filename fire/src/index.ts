@@ -28,6 +28,7 @@ export type {
   ClientOf,
   CollectionApi,
   DocumentId,
+  DocumentMetadata,
   FireFailure,
   FireOperationFailure,
   FireResult,
@@ -42,4 +43,5 @@ export type {
   StorageDriver,
   ValidationIssue,
   WithId,
+  WithMetadata,
 } from "./types";

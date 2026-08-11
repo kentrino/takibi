@@ -1,7 +1,7 @@
-import type { ListOptions, StorageDriver, WithId } from "./types";
+import type { ListOptions, StorageDriver, WithMetadata } from "./types";
 
 export function createMemoryStorage(): StorageDriver {
-  const tables = new Map<string, Map<string, WithId<Record<string, unknown>>>>();
+  const tables = new Map<string, Map<string, WithMetadata<Record<string, unknown>>>>();
 
   const table = (resource: string) => {
     let t = tables.get(resource);
@@ -34,7 +34,9 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
 
   return {
     async get(resource, id) {
-      return (await storage.get<WithId<Record<string, unknown>>>(keyOf(resource, id))) ?? null;
+      return (
+        (await storage.get<WithMetadata<Record<string, unknown>>>(keyOf(resource, id))) ?? null
+      );
     },
     async put(resource, doc) {
       await storage.put(keyOf(resource, doc.id), doc);
@@ -45,7 +47,7 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
     async list(resource, opts) {
       const prefix = prefixOf(resource);
       const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-      const result = await storage.list<WithId<Record<string, unknown>>>({
+      const result = await storage.list<WithMetadata<Record<string, unknown>>>({
         prefix,
         limit: limit + 1,
         startAfter: opts?.cursor ? keyOf(resource, opts.cursor) : undefined,
@@ -65,9 +67,9 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
  * start strictly after the cursor id (lexicographic), even if that id is missing.
  */
 function paginate(
-  items: WithId<Record<string, unknown>>[],
+  items: WithMetadata<Record<string, unknown>>[],
   opts?: ListOptions,
-): { items: WithId<Record<string, unknown>>[]; nextCursor?: string } {
+): { items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string } {
   const sorted = [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
   const start = opts?.cursor ? sorted.findIndex((d) => d.id > opts.cursor!) : 0;

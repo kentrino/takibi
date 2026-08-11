@@ -2,6 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { ALL, CREATE, EDIT, READ, createClient, createContext } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
+import { setClockForTests } from "../src/typed-storage";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -678,5 +679,226 @@ test("empty tenantId from resolve is unauthorized", async () => {
       code: "UNAUTHORIZED",
       status: 401,
     });
+  }
+});
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+test("add stamps equal createdAt / updatedAt; HTTP and trusted storage agree", async () => {
+  const t0 = new Date("2026-08-09T14:12:00.000Z");
+  setClockForTests(() => t0);
+  try {
+    const handler = createTestApp();
+    const client = createClient<typeof handler>("http://fire.test/", {
+      headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+      fetch: (input, init) => handler.request(input, init),
+    });
+
+    const created = await client.posts.add({
+      title: "Hello",
+      body: "world",
+      authorId: "u1",
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.data.createdAt).toBe("2026-08-09T14:12:00.000Z");
+    expect(created.data.updatedAt).toBe(created.data.createdAt);
+    expect(created.data.createdAt).toMatch(ISO_RE);
+
+    const storageCreated = await handler.storage.posts.add({
+      title: "via storage",
+      body: "trusted",
+      authorId: "system",
+    });
+    expect(storageCreated.ok).toBe(true);
+    if (!storageCreated.ok) return;
+    expect(storageCreated.data.createdAt).toBe("2026-08-09T14:12:00.000Z");
+    expect(storageCreated.data.updatedAt).toBe(storageCreated.data.createdAt);
+
+    const listed = await client.posts.list();
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    for (const item of listed.data.items) {
+      expect(item.createdAt).toMatch(ISO_RE);
+      expect(item.updatedAt).toMatch(ISO_RE);
+    }
+  } finally {
+    setClockForTests(undefined);
+  }
+});
+
+test("set create and overwrite preserve createdAt; empty writes still bump updatedAt", async () => {
+  const t0 = new Date("2026-08-09T14:12:00.000Z");
+  const t1 = new Date("2026-08-09T15:00:00.000Z");
+  let now = t0;
+  setClockForTests(() => now);
+  try {
+    const handler = createTestApp();
+    const client = createClient<typeof handler>("http://fire.test/", {
+      headers: () => headers("tenant-a", { id: "u1", role: "admin" }),
+      fetch: (input, init) => handler.request(input, init),
+    });
+
+    const created = await client.posts.set("doc-1", {
+      title: "first",
+      body: "a",
+      authorId: "u1",
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.data.createdAt).toBe(created.data.updatedAt);
+    expect(created.data.createdAt).toBe("2026-08-09T14:12:00.000Z");
+
+    now = t1;
+    const overwritten = await client.posts.set("doc-1", {
+      title: "second",
+      body: "a",
+      authorId: "u1",
+    });
+    expect(overwritten.ok).toBe(true);
+    if (!overwritten.ok) return;
+    expect(overwritten.data.createdAt).toBe("2026-08-09T14:12:00.000Z");
+    expect(overwritten.data.updatedAt).toBe("2026-08-09T15:00:00.000Z");
+
+    const sameValue = await client.posts.set("doc-1", {
+      title: "second",
+      body: "a",
+      authorId: "u1",
+    });
+    expect(sameValue.ok).toBe(true);
+    if (!sameValue.ok) return;
+    expect(sameValue.data.createdAt).toBe("2026-08-09T14:12:00.000Z");
+    expect(sameValue.data.updatedAt).toBe("2026-08-09T15:00:00.000Z");
+
+    const emptyPatch = await client.posts.update("doc-1", {});
+    expect(emptyPatch.ok).toBe(true);
+    if (!emptyPatch.ok) return;
+    expect(emptyPatch.data.createdAt).toBe("2026-08-09T14:12:00.000Z");
+    expect(emptyPatch.data.updatedAt).toBe("2026-08-09T15:00:00.000Z");
+    expect(emptyPatch.data.title).toBe("second");
+  } finally {
+    setClockForTests(undefined);
+  }
+});
+
+test("same-millisecond consecutive writes may share updatedAt", async () => {
+  const fixed = new Date("2026-08-09T14:12:00.000Z");
+  setClockForTests(() => fixed);
+  try {
+    const handler = createTestApp();
+    const first = await handler.storage.posts.add(
+      { title: "a", body: "x", authorId: "u1" },
+      { id: "same-ms" },
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = await handler.storage.posts.update("same-ms", { title: "b" });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.data.createdAt).toBe(first.data.createdAt);
+    expect(second.data.updatedAt).toBe(first.data.updatedAt);
+    expect(second.data.updatedAt).toBe("2026-08-09T14:12:00.000Z");
+  } finally {
+    setClockForTests(undefined);
+  }
+});
+
+test("reserved createdAt / updatedAt in input and schema transform are rejected", async () => {
+  const handler = createTestApp();
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const sneakyCreated = await client.posts.add({
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+    // @ts-expect-error createdAt is server-managed
+    createdAt: "2020-01-01T00:00:00.000Z",
+  });
+  expect(sneakyCreated).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+  if (!sneakyCreated.ok && sneakyCreated.error.kind === "validation") {
+    expect(sneakyCreated.error.issues.some((issue) => issue.path?.includes("createdAt"))).toBe(
+      true,
+    );
+  }
+
+  const sneakyUpdated = await handler.storage.posts.set("x", {
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+    // @ts-expect-error updatedAt is server-managed
+    updatedAt: "2020-01-01T00:00:00.000Z",
+  });
+  expect(sneakyUpdated).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+  if (!sneakyUpdated.ok && sneakyUpdated.error.kind === "validation") {
+    expect(sneakyUpdated.error.issues.some((issue) => issue.path?.includes("updatedAt"))).toBe(
+      true,
+    );
+  }
+
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const transformHandler = context.resources(
+    {
+      posts: {
+        schema: z
+          .object({
+            title: z.string(),
+            body: z.string(),
+            authorId: z.string(),
+          })
+          .transform((value) => ({
+            ...value,
+            createdAt: "2020-01-01T00:00:00.000Z",
+          })),
+        accessControl() {
+          return ALL;
+        },
+      },
+    },
+    { memory: true },
+  );
+
+  const fromSchema = await transformHandler.storage.posts.add({
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+  });
+  expect(fromSchema).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+  if (!fromSchema.ok && fromSchema.error.kind === "validation") {
+    expect(fromSchema.error.issues.some((issue) => issue.path?.includes("createdAt"))).toBe(true);
+  }
+});
+
+test("list remains ordered by id, not timestamp", async () => {
+  const tEarly = new Date("2026-08-09T10:00:00.000Z");
+  const tLate = new Date("2026-08-09T20:00:00.000Z");
+  let now = tLate;
+  setClockForTests(() => now);
+  try {
+    const handler = createTestApp();
+    await handler.storage.posts.add({ title: "z-late", body: "x", authorId: "u1" }, { id: "z" });
+    now = tEarly;
+    await handler.storage.posts.add({ title: "a-early", body: "x", authorId: "u1" }, { id: "a" });
+
+    const listed = await handler.storage.posts.list();
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data.items.map((d) => d.id)).toEqual(["a", "z"]);
+    expect(listed.data.items[0]!.createdAt).toBe("2026-08-09T10:00:00.000Z");
+    expect(listed.data.items[1]!.createdAt).toBe("2026-08-09T20:00:00.000Z");
+  } finally {
+    setClockForTests(undefined);
   }
 });

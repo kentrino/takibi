@@ -1,7 +1,15 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { ALL, READ, createClient, createContext } from "../src/index";
-import type { ContextConfig, DocumentId, FireFailure, FireResult, WithId } from "../src/index";
+import type {
+  ContextConfig,
+  DocumentId,
+  DocumentMetadata,
+  FireFailure,
+  FireResult,
+  WithId,
+  WithMetadata,
+} from "../src/index";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -39,21 +47,27 @@ test("client methods are typed from resource schemas", () => {
     body: string;
   }>();
   expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ id?: string }>();
+  expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ createdAt?: string }>();
+  expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ updatedAt?: string }>();
   expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: DocumentId } | undefined>();
 
   expectTypeOf(client.posts.set).parameter(1).toEqualTypeOf<{
     title: string;
     body: string;
   }>();
+  expectTypeOf(client.posts.set).parameter(1).not.toMatchTypeOf<{ createdAt?: string }>();
   expectTypeOf(client.posts.update).parameter(1).toEqualTypeOf<{
     title?: string;
     body?: string;
   }>();
+  expectTypeOf(client.posts.update).parameter(1).not.toMatchTypeOf<{ updatedAt?: string }>();
 
   type Got = Awaited<ReturnType<typeof client.posts.get>>;
   expectTypeOf<Got>().toMatchTypeOf<
     FireResult<{
       id: string;
+      createdAt: string;
+      updatedAt: string;
       title: string;
       body: string;
     }>
@@ -62,10 +76,14 @@ test("client methods are typed from resource schemas", () => {
   type GotSuccess = Extract<Got, { ok: true }>;
   expectTypeOf<GotSuccess["data"]>().toMatchTypeOf<{
     id: string;
+    createdAt: string;
+    updatedAt: string;
     title: string;
     body: string;
   }>();
   expectTypeOf<GotSuccess["data"]["id"]>().toEqualTypeOf<DocumentId>();
+  expectTypeOf<GotSuccess["data"]["createdAt"]>().toEqualTypeOf<string>();
+  expectTypeOf<GotSuccess["data"]["updatedAt"]>().toEqualTypeOf<string>();
   expectTypeOf<GotSuccess["data"]>().not.toMatchTypeOf<null>();
 
   type GotFailure = Extract<Got, { ok: false }>;
@@ -83,6 +101,8 @@ test("client methods are typed from resource schemas", () => {
   expectTypeOf<StorageGot>().toMatchTypeOf<
     FireResult<{
       id: string;
+      createdAt: string;
+      updatedAt: string;
       title: string;
       body: string;
     }>
@@ -142,4 +162,13 @@ test("WithId replaces conflicting id types with DocumentId", () => {
   expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
   expectTypeOf<Doc["title"]>().toEqualTypeOf<string>();
   expectTypeOf<Doc>().not.toMatchTypeOf<{ id: number }>();
+});
+
+test("WithMetadata requires DocumentMetadata and replaces conflicts", () => {
+  type Doc = WithMetadata<{ id: number; createdAt: number; title: string }>;
+  expectTypeOf<Doc>().toEqualTypeOf<DocumentMetadata & { title: string }>();
+  expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
+  expectTypeOf<Doc["createdAt"]>().toEqualTypeOf<string>();
+  expectTypeOf<Doc["updatedAt"]>().toEqualTypeOf<string>();
+  expectTypeOf<Doc>().not.toMatchTypeOf<{ createdAt: number }>();
 });

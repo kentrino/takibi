@@ -5,7 +5,15 @@ export type Json = string | number | boolean | null | Json[] | { [key: string]: 
 
 export type DocumentId = string;
 
+export type DocumentMetadata = {
+  id: DocumentId;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
+
+export type WithMetadata<T> = Omit<T, keyof DocumentMetadata> & DocumentMetadata;
 
 export type ResourceOperation = "add" | "set" | "get" | "update" | "delete" | "list";
 
@@ -31,14 +39,14 @@ export type ResourcesDef<TCtx = any> = {
 };
 
 export type InferResourceDoc<R> = R extends { schema: infer S extends StandardSchemaV1 }
-  ? WithId<StandardSchemaV1.InferOutput<S>>
+  ? WithMetadata<StandardSchemaV1.InferOutput<S>>
   : never;
 
 export type InferResourceInput<R> = R extends { schema: infer S extends StandardSchemaV1 }
   ? StandardSchemaV1.InferInput<S>
   : never;
 
-export type ResourceDataInput<R> = Omit<InferResourceInput<R>, "id">;
+export type ResourceDataInput<R> = Omit<InferResourceInput<R>, keyof DocumentMetadata>;
 
 export type ValidationIssue = {
   message: string;
@@ -94,11 +102,11 @@ export type ListOptions = {
 };
 
 export type StorageDriver = {
-  get(resource: string, id: string): Promise<WithId<Record<string, unknown>> | null>;
-  put(resource: string, doc: WithId<Record<string, unknown>>): Promise<void>;
+  get(resource: string, id: string): Promise<WithMetadata<Record<string, unknown>> | null>;
+  put(resource: string, doc: WithMetadata<Record<string, unknown>>): Promise<void>;
   delete(resource: string, id: string): Promise<boolean>;
   list(
     resource: string,
     opts?: ListOptions,
-  ): Promise<{ items: WithId<Record<string, unknown>>[]; nextCursor?: string }>;
+  ): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }>;
 };

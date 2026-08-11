@@ -125,6 +125,15 @@ Document `id` is not part of the resource schema. Pass domain fields only in `da
 use `add(data, { id })` when you need a caller-chosen id. `add` fails with
 `ALREADY_EXISTS` (409) if that id already exists — use `set(id, data)` to upsert.
 
+Every saved document also carries server-managed `createdAt` / `updatedAt` (UTC ISO 8601
+via `Date.prototype.toISOString()`, e.g. `2026-08-09T14:12:00.000Z`). Do not define those
+fields in the resource schema and do not send them from the client — both input own
+properties and schema transforms that emit them fail validation. `add` and create-via-`set`
+set both timestamps to the same write-time value; overwrite `set` / `update` keep
+`createdAt` and refresh `updatedAt`. Empty patches and same-value writes still bump
+`updatedAt`. These timestamps are observational only — not revisions, ETags, or optimistic
+lock tokens. Same-millisecond writes may share a value.
+
 ### Migrating from the previous throw / null API
 
 ```ts
@@ -198,6 +207,11 @@ manage application SQL schemas / migrations.
 Auto-generated document ids are monotonic ULIDs (26 Crockford Base32 characters).
 Caller-supplied ids are still accepted; creation-order lexicographic sort is
 guaranteed only for library-generated ULIDs.
+
+**Breaking change — document timestamps:** stored documents now require `createdAt` /
+`updatedAt`. Existing PoC namespaces / fixtures without those fields must be cleared and
+recreated. Environments that must keep data need a one-off migration that sets both fields
+to the migration time before deploy; this package does not ship a migration tool.
 
 ## Wrangler
 

@@ -8,25 +8,44 @@ import type {
   ListOptions,
   ResourceDefinition,
   StorageDriver,
-  WithId,
+  WithMetadata,
 } from "./types";
 import { generateUlid } from "./ulid";
 
-const RESERVED_ID_MESSAGE = "id is reserved and must not appear in document data";
+const RESERVED_METADATA_KEYS = ["id", "createdAt", "updatedAt"] as const;
 
-function assertNoReservedIdInData(input: unknown): void {
-  if (
-    input !== null &&
-    typeof input === "object" &&
-    Object.prototype.hasOwnProperty.call(input, "id")
-  ) {
-    throw new SchemaValidationError([{ message: RESERVED_ID_MESSAGE, path: ["id"] }]);
+type Clock = () => Date;
+
+/** Production clock: wall time via `new Date()`. Overridable in tests. */
+let clock: Clock = () => new Date();
+
+/** Replace the write-path clock. Pass `undefined` to restore `new Date()`. Tests only. */
+export function setClockForTests(next: Clock | undefined): void {
+  clock = next ?? (() => new Date());
+}
+
+function nowIso(): string {
+  return clock().toISOString();
+}
+
+function reservedMessage(key: (typeof RESERVED_METADATA_KEYS)[number]): string {
+  return `${key} is reserved and must not appear in document data`;
+}
+
+function assertNoReservedMetadataInData(input: unknown): void {
+  if (input === null || typeof input !== "object") return;
+  for (const key of RESERVED_METADATA_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(input, key)) {
+      throw new SchemaValidationError([{ message: reservedMessage(key), path: [key] }]);
+    }
   }
 }
 
-function assertNoParsedId(parsed: Record<string, unknown>): void {
-  if (Object.prototype.hasOwnProperty.call(parsed, "id")) {
-    throw new SchemaValidationError([{ message: RESERVED_ID_MESSAGE, path: ["id"] }]);
+function assertNoParsedMetadata(parsed: Record<string, unknown>): void {
+  for (const key of RESERVED_METADATA_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(parsed, key)) {
+      throw new SchemaValidationError([{ message: reservedMessage(key), path: [key] }]);
+    }
   }
 }
 
@@ -42,6 +61,13 @@ function asDataObject(input: unknown): Record<string, unknown> {
   return typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
 }
 
+function domainDataFromExisting(
+  existing: WithMetadata<Record<string, unknown>>,
+): Record<string, unknown> {
+  const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...domain } = existing;
+  return domain;
+}
+
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
 export async function storageAdd(
   def: ResourceDefinition,
@@ -49,16 +75,17 @@ export async function storageAdd(
   resource: string,
   input: unknown,
   options?: { id?: DocumentId },
-): Promise<WithId<Record<string, unknown>>> {
-  assertNoReservedIdInData(input);
+): Promise<WithMetadata<Record<string, unknown>>> {
+  assertNoReservedMetadataInData(input);
   const parsed = (await parseSchema(def.schema, input ?? {})) as Record<string, unknown>;
-  assertNoParsedId(parsed);
+  assertNoParsedMetadata(parsed);
   const id = resolveDocumentId(options?.id);
   const existing = await storage.get(resource, id);
   if (existing) {
     throw new ConflictError(`Document already exists: ${id}`);
   }
-  const doc = { ...parsed, id };
+  const now = nowIso();
+  const doc = { ...parsed, id, createdAt: now, updatedAt: now };
   await storage.put(resource, doc);
   return doc;
 }
@@ -69,11 +96,14 @@ export async function storageSet(
   resource: string,
   id: string,
   input: unknown,
-): Promise<WithId<Record<string, unknown>>> {
-  assertNoReservedIdInData(input);
+): Promise<WithMetadata<Record<string, unknown>>> {
+  const existing = await storage.get(resource, id);
+  assertNoReservedMetadataInData(input);
   const parsed = (await parseSchema(def.schema, asDataObject(input))) as Record<string, unknown>;
-  assertNoParsedId(parsed);
-  const doc = { ...parsed, id };
+  assertNoParsedMetadata(parsed);
+  const now = nowIso();
+  const createdAt = existing?.createdAt ?? now;
+  const doc = { ...parsed, id, createdAt, updatedAt: now };
   await storage.put(resource, doc);
   return doc;
 }
@@ -84,18 +114,18 @@ export async function storageUpdate(
   resource: string,
   id: string,
   input: unknown,
-): Promise<WithId<Record<string, unknown>>> {
+): Promise<WithMetadata<Record<string, unknown>>> {
   const existing = await storage.get(resource, id);
   if (!existing) throw new NotFoundError(`Document not found: ${id}`);
-  assertNoReservedIdInData(input);
-  const { id: _ignored, ...existingData } = existing;
+  assertNoReservedMetadataInData(input);
   const merged = {
-    ...existingData,
+    ...domainDataFromExisting(existing),
     ...asDataObject(input),
   };
   const parsed = (await parseSchema(def.schema, merged)) as Record<string, unknown>;
-  assertNoParsedId(parsed);
-  const doc = { ...parsed, id };
+  assertNoParsedMetadata(parsed);
+  const now = nowIso();
+  const doc = { ...parsed, id, createdAt: existing.createdAt, updatedAt: now };
   await storage.put(resource, doc);
   return doc;
 }
@@ -120,7 +150,7 @@ export function createTypedStorage<TResources extends Record<string, ResourceDef
     api[name] = {
       add: (data, options) => asFireResult(() => storageAdd(def, driver, name, data, options)),
       set: (id, data) => asFireResult(() => storageSet(def, driver, name, id, data)),
-      get: async (id): Promise<FireResult<WithId<Record<string, unknown>>>> => {
+      get: async (id): Promise<FireResult<WithMetadata<Record<string, unknown>>>> => {
         const doc = await driver.get(name, id);
         if (!doc) {
           return {
