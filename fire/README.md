@@ -19,7 +19,6 @@ const context = createContext<{ tenantId: string; user: User | null }>(({ tenant
 const handler = context.resources({
   posts: {
     schema: z.object({
-      id: z.string().optional(),
       title: z.string(),
       body: z.string(),
     }),
@@ -58,12 +57,17 @@ const client = createClient<Handler>("https://localhost:3000/foo", {
 });
 
 const created = await client.posts.add({ title: "Hi", body: "..." });
+// Or pick the document id yourself:
+// const created = await client.posts.add({ title: "Hi", body: "..." }, { id: "post-1" });
 if (!created.ok) {
   if (created.error.kind === "validation") {
     // Field errors for forms: message + path only
     for (const issue of created.error.issues) {
       console.error(issue.path?.join("."), issue.message);
     }
+  } else if (created.error.code === "ALREADY_EXISTS") {
+    // add is create-only; use set(id, data) to upsert
+    console.error(created.error.message);
   } else {
     console.error(created.error.code, created.error.message);
   }
@@ -74,11 +78,15 @@ const post = created.data;
 ```
 
 All `CollectionApi` methods return `Promise<FireResult<T>>`.
-Server-decided failures (`NOT_FOUND`, `FORBIDDEN`, `VALIDATION`, …) resolve as
-`{ ok: false, error }` — they do **not** reject.
+Server-decided failures (`NOT_FOUND`, `FORBIDDEN`, `VALIDATION`, `ALREADY_EXISTS`, …)
+resolve as `{ ok: false, error }` — they do **not** reject.
 
 Transport / protocol problems still reject the Promise (fetch failure, abort, invalid
 JSON, invalid response envelope). Use `try/catch` only for those.
+
+Document `id` is not part of the resource schema. Pass domain fields only in `data`;
+use `add(data, { id })` when you need a caller-chosen id. `add` fails with
+`ALREADY_EXISTS` (409) if that id already exists — use `set(id, data)` to upsert.
 
 ### Migrating from the previous throw / null API
 

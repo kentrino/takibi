@@ -37,3 +37,10 @@ export class BadRequestError extends FireError {
     this.name = "BadRequestError";
   }
 }
+
+export class ConflictError extends FireError {
+  constructor(message = "Already exists") {
+    super("ALREADY_EXISTS", message, 409);
+    this.name = "ConflictError";
+  }
+}

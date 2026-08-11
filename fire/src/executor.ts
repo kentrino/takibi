@@ -55,7 +55,7 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
 
   switch (req.operation) {
     case "add":
-      return storageAdd(def, storage, req.resource, req.input);
+      return storageAdd(def, storage, req.resource, req.input, { id: req.id });
     case "set":
       if (!req.id) throw new NotFoundError("Missing id");
       return storageSet(def, storage, req.resource, req.id, req.input);

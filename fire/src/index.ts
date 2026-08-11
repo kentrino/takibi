@@ -9,6 +9,7 @@ export type { AccessGrant, Permission } from "./permissions";
 
 export {
   BadRequestError,
+  ConflictError,
   FireError,
   ForbiddenError,
   NotFoundError,
@@ -34,6 +35,7 @@ export type {
   InferResourceDoc,
   InferResourceInput,
   ListOptions,
+  ResourceDataInput,
   ResourceDefinition,
   ResourceOperation,
   ResourcesDef,

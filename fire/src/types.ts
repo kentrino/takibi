@@ -5,7 +5,7 @@ export type Json = string | number | boolean | null | Json[] | { [key: string]: 
 
 export type DocumentId = string;
 
-export type WithId<T> = T & { id: DocumentId };
+export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
 
 export type ResourceOperation = "add" | "set" | "get" | "update" | "delete" | "list";
 
@@ -38,6 +38,8 @@ export type InferResourceInput<R> = R extends { schema: infer S extends Standard
   ? StandardSchemaV1.InferInput<S>
   : never;
 
+export type ResourceDataInput<R> = Omit<InferResourceInput<R>, "id">;
+
 export type ValidationIssue = {
   message: string;
   path?: readonly (string | number)[];
@@ -64,15 +66,16 @@ export type FireResult<T> = { ok: true; data: T } | { ok: false; error: FireFail
 
 export type CollectionApi<R> = {
   add: (
-    data: Omit<InferResourceInput<R>, "id"> & { id?: string },
+    data: ResourceDataInput<R>,
+    options?: { id?: DocumentId },
   ) => Promise<FireResult<InferResourceDoc<R>>>;
-  set: (id: string, data: InferResourceInput<R>) => Promise<FireResult<InferResourceDoc<R>>>;
-  get: (id: string) => Promise<FireResult<InferResourceDoc<R>>>;
+  set: (id: DocumentId, data: ResourceDataInput<R>) => Promise<FireResult<InferResourceDoc<R>>>;
+  get: (id: DocumentId) => Promise<FireResult<InferResourceDoc<R>>>;
   update: (
-    id: string,
-    data: Partial<InferResourceInput<R>>,
+    id: DocumentId,
+    data: Partial<ResourceDataInput<R>>,
   ) => Promise<FireResult<InferResourceDoc<R>>>;
-  delete: (id: string) => Promise<FireResult<{ id: string }>>;
+  delete: (id: DocumentId) => Promise<FireResult<{ id: DocumentId }>>;
   list: (opts?: { limit?: number; cursor?: string }) => Promise<
     FireResult<{
       items: InferResourceDoc<R>[];

@@ -1,11 +1,10 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { ALL, READ, createClient, createContext } from "../src/index";
-import type { FireFailure, FireResult } from "../src/index";
+import type { DocumentId, FireFailure, FireResult, WithId } from "../src/index";
 
 test("client methods are typed from resource schemas", () => {
   const Post = z.object({
-    id: z.string().optional(),
     title: z.string(),
     body: z.string(),
   });
@@ -32,10 +31,20 @@ test("client methods are typed from resource schemas", () => {
   type Handler = typeof handler;
   const client = createClient<Handler>("http://localhost/foo");
 
-  expectTypeOf(client.posts.add).parameter(0).toMatchTypeOf<{
+  expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{
     title: string;
     body: string;
-    id?: string;
+  }>();
+  expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ id?: string }>();
+  expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: DocumentId } | undefined>();
+
+  expectTypeOf(client.posts.set).parameter(1).toEqualTypeOf<{
+    title: string;
+    body: string;
+  }>();
+  expectTypeOf(client.posts.update).parameter(1).toEqualTypeOf<{
+    title?: string;
+    body?: string;
   }>();
 
   type Got = Awaited<ReturnType<typeof client.posts.get>>;
@@ -53,16 +62,19 @@ test("client methods are typed from resource schemas", () => {
     title: string;
     body: string;
   }>();
+  expectTypeOf<GotSuccess["data"]["id"]>().toEqualTypeOf<DocumentId>();
   expectTypeOf<GotSuccess["data"]>().not.toMatchTypeOf<null>();
 
   type GotFailure = Extract<Got, { ok: false }>;
   expectTypeOf<GotFailure["error"]>().toMatchTypeOf<FireFailure>();
 
-  expectTypeOf(handler.storage.posts.add).parameter(0).toMatchTypeOf<{
+  expectTypeOf(handler.storage.posts.add).parameter(0).toEqualTypeOf<{
     title: string;
     body: string;
-    id?: string;
   }>();
+  expectTypeOf(handler.storage.posts.add)
+    .parameter(1)
+    .toEqualTypeOf<{ id?: DocumentId } | undefined>();
 
   type StorageGot = Awaited<ReturnType<typeof handler.storage.posts.get>>;
   expectTypeOf<StorageGot>().toMatchTypeOf<
@@ -73,4 +85,11 @@ test("client methods are typed from resource schemas", () => {
     }>
   >();
   expectTypeOf<Extract<StorageGot, { ok: true }>["data"]>().not.toMatchTypeOf<null>();
+});
+
+test("WithId replaces conflicting id types with DocumentId", () => {
+  type Doc = WithId<{ id: number; title: string }>;
+  expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
+  expectTypeOf<Doc["title"]>().toEqualTypeOf<string>();
+  expectTypeOf<Doc>().not.toMatchTypeOf<{ id: number }>();
 });

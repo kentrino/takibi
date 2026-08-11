@@ -80,7 +80,7 @@ function createCollectionClient(
   };
 
   return {
-    add: (data) => call("add", { input: data }),
+    add: (data, options) => call("add", { id: options?.id, input: data }),
     set: (id, data) => call("set", { id, input: data }),
     get: (id) => call("get", { id }),
     update: (id, data) => call("update", { id, input: data }),

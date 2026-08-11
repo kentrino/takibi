@@ -1,12 +1,11 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { ALL, CREATE, EDIT, READ, createClient, createContext } from "../src/index";
-import type { WireResponse } from "../src/protocol";
+import type { WireRequest, WireResponse } from "../src/protocol";
 
 type User = { id: string; role: "admin" | "member" };
 
 const Post = z.object({
-  id: z.string().optional(),
   title: z.string().min(1),
   body: z.string(),
   authorId: z.string(),
@@ -33,6 +32,52 @@ function createTestApp() {
   );
 
   return handler;
+}
+
+function createCreateOnlyApp() {
+  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
+    tenantId,
+    user: user as User | null,
+  }));
+
+  return context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessControl({ user }) {
+          if (user?.role === "admin") return ALL;
+          if (user) return CREATE;
+          return READ;
+        },
+      },
+    },
+    { memory: true },
+  );
+}
+
+function createStrictApp() {
+  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
+    tenantId,
+    user: user as User | null,
+  }));
+
+  return context.resources(
+    {
+      posts: {
+        schema: z
+          .object({
+            title: z.string().min(1),
+            body: z.string(),
+            authorId: z.string(),
+          })
+          .strict(),
+        accessControl({ user }) {
+          return user ? ALL : READ;
+        },
+      },
+    },
+    { memory: true },
+  );
 }
 
 function headers(tenantId: string, user: User | null) {
@@ -67,6 +112,231 @@ test("client add / get / list roundtrip", async () => {
   expect(listed.ok).toBe(true);
   if (!listed.ok) return;
   expect(listed.data.items).toHaveLength(1);
+});
+
+test("add with caller-chosen id", async () => {
+  const handler = createTestApp();
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const created = await client.posts.add(
+    { title: "Hello", body: "world", authorId: "u1" },
+    { id: "post-1" },
+  );
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  expect(created.data.id).toBe("post-1");
+
+  const storageCreated = await handler.storage.posts.add(
+    { title: "via storage", body: "trusted", authorId: "system" },
+    { id: "post-storage" },
+  );
+  expect(storageCreated.ok).toBe(true);
+  if (!storageCreated.ok) return;
+  expect(storageCreated.data.id).toBe("post-storage");
+});
+
+test("add wire payload separates id from input", async () => {
+  const handler = createTestApp();
+  let captured: WireRequest | undefined;
+
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: async (input, init) => {
+      const body = init?.body;
+      captured = JSON.parse(typeof body === "string" ? body : "") as WireRequest;
+      return handler.request(input, init);
+    },
+  });
+
+  await client.posts.add({ title: "Hi", body: "x", authorId: "u1" }, { id: "wire-id" });
+  expect(captured).toMatchObject({
+    resource: "posts",
+    operation: "add",
+    id: "wire-id",
+    input: { title: "Hi", body: "x", authorId: "u1" },
+  });
+  expect(captured?.input).not.toHaveProperty("id");
+});
+
+test("add rejects reserved id in data and empty option id", async () => {
+  const handler = createTestApp();
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const reserved = await client.posts.add({
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+    // @ts-expect-error id belongs in options, not data
+    id: "sneaky",
+  });
+  expect(reserved).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+  if (!reserved.ok && reserved.error.kind === "validation") {
+    expect(reserved.error.issues.some((issue) => issue.path?.includes("id"))).toBe(true);
+  }
+
+  const emptyId = await client.posts.add({ title: "Hi", body: "x", authorId: "u1" }, { id: "" });
+  expect(emptyId).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+
+  const storageReserved = await handler.storage.posts.add({
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+    // @ts-expect-error id belongs in options, not data
+    id: "sneaky",
+  });
+  expect(storageReserved).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+});
+
+test("schema transform that injects id is rejected", async () => {
+  const context = createContext<{ tenantId: string; user: User | null }>(({ tenantId, user }) => ({
+    tenantId,
+    user: user as User | null,
+  }));
+
+  const handler = context.resources(
+    {
+      posts: {
+        schema: z
+          .object({
+            title: z.string(),
+            body: z.string(),
+            authorId: z.string(),
+          })
+          .transform((value) => ({ ...value, id: "from-schema" })),
+        accessControl() {
+          return ALL;
+        },
+      },
+    },
+    { memory: true },
+  );
+
+  const result = await handler.storage.posts.add({
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+  });
+  expect(result).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+  if (!result.ok && result.error.kind === "validation") {
+    expect(result.error.issues.some((issue) => issue.path?.includes("id"))).toBe(true);
+  }
+});
+
+test("strict schema succeeds for add / set / update", async () => {
+  const handler = createStrictApp();
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "admin" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const created = await client.posts.add({
+    title: "strict",
+    body: "ok",
+    authorId: "u1",
+  });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+
+  const set = await client.posts.set("strict-1", {
+    title: "set",
+    body: "ok",
+    authorId: "u1",
+  });
+  expect(set.ok).toBe(true);
+
+  const updated = await client.posts.update(created.data.id, { title: "updated" });
+  expect(updated.ok).toBe(true);
+  if (!updated.ok) return;
+  expect(updated.data.title).toBe("updated");
+  expect(updated.data.id).toBe(created.data.id);
+});
+
+test("add collision returns ALREADY_EXISTS without overwriting", async () => {
+  const handler = createTestApp();
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const first = await client.posts.add(
+    { title: "original", body: "keep", authorId: "u1" },
+    { id: "same-id" },
+  );
+  expect(first.ok).toBe(true);
+
+  const second = await client.posts.add(
+    { title: "overwrite?", body: "nope", authorId: "u1" },
+    { id: "same-id" },
+  );
+  expect(second).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "ALREADY_EXISTS", status: 409 },
+  });
+
+  const got = await client.posts.get("same-id");
+  expect(got.ok).toBe(true);
+  if (!got.ok) return;
+  expect(got.data.title).toBe("original");
+
+  const storageSecond = await handler.storage.posts.add(
+    { title: "storage overwrite?", body: "nope", authorId: "system" },
+    { id: "same-id" },
+  );
+  expect(storageSecond).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "ALREADY_EXISTS", status: 409 },
+  });
+});
+
+test("CREATE-only grant cannot overwrite via add", async () => {
+  const handler = createCreateOnlyApp();
+  const admin = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "admin", role: "admin" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const seeded = await admin.posts.set("owned", {
+    title: "admin doc",
+    body: "secret",
+    authorId: "admin",
+  });
+  expect(seeded.ok).toBe(true);
+
+  const attempt = await member.posts.add(
+    { title: "hijack", body: "stolen", authorId: "u1" },
+    { id: "owned" },
+  );
+  expect(attempt).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "ALREADY_EXISTS", status: 409 },
+  });
+
+  const got = await admin.posts.get("owned");
+  expect(got.ok).toBe(true);
+  if (!got.ok) return;
+  expect(got.data.title).toBe("admin doc");
 });
 
 test("anonymous cannot create", async () => {
