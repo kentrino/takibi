@@ -1,11 +1,36 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { ALL, CREATE, EDIT, READ, createClient, createContext } from "../src/index";
+import { createClient, createContext } from "../src/index";
+import type { AccessAction, AccessContext } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { setClockForTests } from "../src/typed-storage";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
+
+function memberPolicy({ user, action }: AccessContext<AppCtx>): boolean {
+  if (user?.role === "admin") return true;
+  if (action === "get" || action === "list") return true;
+  return user != null;
+}
+
+function createOnlyPolicy({ user, action }: AccessContext<AppCtx>): boolean {
+  if (user?.role === "admin") return true;
+  if (action === "get" || action === "list") return true;
+  if (action === "create") return user != null;
+  return false;
+}
+
+function updateOnlyPolicy({ user, action }: AccessContext<AppCtx>): boolean {
+  if (user?.role === "admin") return true;
+  if (action === "get" || action === "list") return true;
+  if (action === "update") return user != null;
+  return false;
+}
+
+function readPolicy({ action }: AccessContext<AppCtx>): boolean {
+  return action === "get" || action === "list";
+}
 
 /**
  * Test-only context assembly. Not a package export — production apps must
@@ -31,11 +56,7 @@ function createTestApp() {
     {
       posts: {
         schema: Post,
-        accessControl({ user }) {
-          if (user?.role === "admin") return ALL;
-          if (user) return [READ, CREATE, EDIT];
-          return READ;
-        },
+        accessPolicy: memberPolicy,
       },
     },
     { memory: true },
@@ -51,11 +72,7 @@ function createCreateOnlyApp() {
     {
       posts: {
         schema: Post,
-        accessControl({ user }) {
-          if (user?.role === "admin") return ALL;
-          if (user) return CREATE;
-          return READ;
-        },
+        accessPolicy: createOnlyPolicy,
       },
     },
     { memory: true },
@@ -75,9 +92,7 @@ function createStrictApp() {
             authorId: z.string(),
           })
           .strict(),
-        accessControl({ user }) {
-          return user ? ALL : READ;
-        },
+        accessPolicy: memberPolicy,
       },
     },
     { memory: true },
@@ -219,8 +234,8 @@ test("schema transform that injects id is rejected", async () => {
             authorId: z.string(),
           })
           .transform((value) => ({ ...value, id: "from-schema" })),
-        accessControl() {
-          return ALL;
+        accessPolicy() {
+          return true;
         },
       },
     },
@@ -307,7 +322,7 @@ test("add collision returns ALREADY_EXISTS without overwriting", async () => {
   });
 });
 
-test("CREATE-only grant cannot overwrite via add", async () => {
+test("create-only policy cannot overwrite via add", async () => {
   const handler = createCreateOnlyApp();
   const admin = createClient<typeof handler>("http://fire.test/", {
     headers: () => headers("tenant-a", { id: "admin", role: "admin" }),
@@ -340,6 +355,103 @@ test("CREATE-only grant cannot overwrite via add", async () => {
   expect(got.data.title).toBe("admin doc");
 });
 
+test("create-only policy cannot overwrite via set", async () => {
+  const handler = createCreateOnlyApp();
+  const admin = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "admin", role: "admin" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const seeded = await admin.posts.set("owned", {
+    title: "admin doc",
+    body: "secret",
+    authorId: "admin",
+  });
+  expect(seeded.ok).toBe(true);
+
+  const attempt = await member.posts.set("owned", {
+    title: "hijack",
+    body: "stolen",
+    authorId: "u1",
+  });
+  expect(attempt).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+
+  const got = await admin.posts.get("owned");
+  expect(got.ok).toBe(true);
+  if (!got.ok) return;
+  expect(got.data.title).toBe("admin doc");
+});
+
+test("update-only policy cannot create via set", async () => {
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessPolicy: updateOnlyPolicy,
+      },
+    },
+    { memory: true },
+  );
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const attempt = await member.posts.set("new-id", {
+    title: "new",
+    body: "x",
+    authorId: "u1",
+  });
+  expect(attempt).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+});
+
+test("accessPolicy receives create/update action for set", async () => {
+  const seen: AccessAction[] = [];
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessPolicy({ action }) {
+          seen.push(action);
+          return true;
+        },
+      },
+    },
+    { memory: true },
+  );
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const created = await client.posts.set("doc-1", {
+    title: "one",
+    body: "x",
+    authorId: "u1",
+  });
+  expect(created.ok).toBe(true);
+
+  const updated = await client.posts.set("doc-1", {
+    title: "two",
+    body: "y",
+    authorId: "u1",
+  });
+  expect(updated.ok).toBe(true);
+  expect(seen).toEqual(["create", "update"]);
+});
+
 test("anonymous cannot create", async () => {
   const handler = createTestApp();
   const client = createClient<typeof handler>("http://fire.test/", {
@@ -362,10 +474,7 @@ test("explicit anonymous resolve (user: null) can still read", async () => {
     {
       posts: {
         schema: Post,
-        accessControl({ user }) {
-          if (user) return ALL;
-          return READ;
-        },
+        accessPolicy: memberPolicy,
       },
     },
     { memory: true },
@@ -399,11 +508,7 @@ test("client-claimed x-user does not change identity or permissions", async () =
     {
       posts: {
         schema: Post,
-        accessControl({ user }) {
-          if (user?.role === "admin") return ALL;
-          if (user) return [READ, CREATE, EDIT];
-          return READ;
-        },
+        accessPolicy: memberPolicy,
       },
     },
     { memory: true },
@@ -461,8 +566,8 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
   const handler = context.resources({
     posts: {
       schema: Post,
-      accessControl() {
-        return ALL;
+      accessPolicy() {
+        return true;
       },
     },
   });
@@ -654,9 +759,7 @@ test("empty tenantId from resolve is unauthorized", async () => {
     {
       posts: {
         schema: Post,
-        accessControl() {
-          return READ;
-        },
+        accessPolicy: readPolicy,
       },
     },
     { memory: true },
@@ -859,8 +962,8 @@ test("reserved createdAt / updatedAt in input and schema transform are rejected"
             ...value,
             createdAt: "2020-01-01T00:00:00.000Z",
           })),
-        accessControl() {
-          return ALL;
+        accessPolicy() {
+          return true;
         },
       },
     },

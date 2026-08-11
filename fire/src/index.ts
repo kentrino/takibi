@@ -4,9 +4,6 @@ export type { CreateClientOptions, InferHandlerResources } from "./client";
 export { createContext } from "./context";
 export type { ContextConfig, ContextResolver, FireHandler, ResourcesOptions } from "./context";
 
-export { ALL, CREATE, DELETE, EDIT, READ, UPDATE, allows, expandPermissions } from "./permissions";
-export type { AccessGrant, Permission } from "./permissions";
-
 export {
   BadRequestError,
   ConflictError,
@@ -24,6 +21,7 @@ export { createTypedStorage } from "./typed-storage";
 export { executeOperation } from "./executor";
 
 export type {
+  AccessAction,
   AccessContext,
   ClientOf,
   CollectionApi,

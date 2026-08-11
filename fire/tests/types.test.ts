@@ -1,7 +1,8 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { ALL, READ, createClient, createContext } from "../src/index";
+import { createClient, createContext } from "../src/index";
 import type {
+  AccessAction,
   ContextConfig,
   DocumentId,
   DocumentMetadata,
@@ -31,8 +32,10 @@ test("client methods are typed from resource schemas", () => {
     {
       posts: {
         schema: Post,
-        accessControl({ user }) {
-          return user ? ALL : READ;
+        accessPolicy({ user, action }) {
+          if (user?.role === "admin") return true;
+          if (action === "get" || action === "list") return true;
+          return user != null;
         },
       },
     },
@@ -110,16 +113,18 @@ test("client methods are typed from resource schemas", () => {
   expectTypeOf<Extract<StorageGot, { ok: true }>["data"]>().not.toMatchTypeOf<null>();
 });
 
-test("resolve concrete user type flows into accessControl without cast", () => {
+test("resolve concrete user type flows into accessPolicy without cast", () => {
   createContext<AppCtx>({
     resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
   }).resources({
     posts: {
       schema: z.object({ title: z.string() }),
-      accessControl({ user }) {
+      accessPolicy({ user, action }) {
         expectTypeOf(user).toEqualTypeOf<User | null>();
-        if (user?.role === "admin") return ALL;
-        return READ;
+        expectTypeOf(action).toEqualTypeOf<AccessAction>();
+        if (user?.role === "admin") return true;
+        if (action === "get" || action === "list") return true;
+        return user != null;
       },
     },
   });

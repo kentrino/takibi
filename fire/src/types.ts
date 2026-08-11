@@ -1,5 +1,4 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { AccessGrant } from "./permissions";
 
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
@@ -17,11 +16,14 @@ export type WithMetadata<T> = Omit<T, keyof DocumentMetadata> & DocumentMetadata
 
 export type ResourceOperation = "add" | "set" | "get" | "update" | "delete" | "list";
 
+export type AccessAction = "create" | "get" | "list" | "update" | "delete";
+
 export type AccessContext<TCtx> = TCtx & {
   tenantId: string;
   user: unknown;
   resource: string;
   operation: ResourceOperation;
+  action: AccessAction;
 };
 
 export type ResourceDefinition<
@@ -31,7 +33,7 @@ export type ResourceDefinition<
   TCtx = any,
 > = {
   schema: TSchema;
-  accessControl: (ctx: AccessContext<TCtx>) => AccessGrant | Promise<AccessGrant>;
+  accessPolicy: (ctx: AccessContext<TCtx>) => boolean | Promise<boolean>;
 };
 
 export type ResourcesDef<TCtx = any> = {

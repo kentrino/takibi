@@ -96,8 +96,10 @@ export async function storageSet(
   resource: string,
   id: string,
   input: unknown,
+  options?: { existing?: WithMetadata<Record<string, unknown>> | null },
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing = await storage.get(resource, id);
+  const existing =
+    options && "existing" in options ? options.existing : await storage.get(resource, id);
   assertNoReservedMetadataInData(input);
   const parsed = (await parseSchema(def.schema, asDataObject(input))) as Record<string, unknown>;
   assertNoParsedMetadata(parsed);

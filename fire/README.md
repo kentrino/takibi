@@ -6,7 +6,7 @@ Typed, Firebase-like resource store for Cloudflare Durable Objects — with oRPC
 
 **AuthN** (who is calling, which tenant they may use) is owned by your application.
 **AuthZ** (what that identity may do to a resource) is owned by `@takibi/fire`
-via `accessControl`.
+via `accessPolicy`.
 
 `createContext({ resolve })` is the trust boundary. Inside `resolve` you must:
 
@@ -23,7 +23,7 @@ Do **not** trust client-declared identity or tenant headers (for example
 ## Server
 
 ```ts
-import { ALL, EDIT, READ, UnauthorizedError, createContext } from "@takibi/fire";
+import { UnauthorizedError, createContext } from "@takibi/fire";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -57,10 +57,10 @@ const handler = context.resources({
       title: z.string(),
       body: z.string(),
     }),
-    accessControl({ user }) {
-      if (user?.role === "admin") return ALL;
-      if (user) return [READ, EDIT];
-      return READ;
+    accessPolicy({ user, action }) {
+      if (user?.role === "admin") return true;
+      if (action === "get" || action === "list") return true;
+      return user != null;
     },
   },
 });
@@ -189,7 +189,7 @@ createContext({
 
 ## Durable Object storage
 
-Inside the DO (trusted / admin path, ACL bypassed):
+Inside the DO (trusted / admin path, `accessPolicy` bypassed):
 
 ```ts
 const result = await this.storage.posts.add({ title: "Hi", body: "..." });
