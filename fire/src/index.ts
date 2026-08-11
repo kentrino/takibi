@@ -27,6 +27,10 @@ export type {
   ClientOf,
   CollectionApi,
   DocumentId,
+  FireFailure,
+  FireOperationFailure,
+  FireResult,
+  FireValidationFailure,
   InferResourceDoc,
   InferResourceInput,
   ListOptions,
@@ -34,5 +38,6 @@ export type {
   ResourceOperation,
   ResourcesDef,
   StorageDriver,
+  ValidationIssue,
   WithId,
 } from "./types";

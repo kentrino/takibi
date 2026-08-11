@@ -38,16 +38,47 @@ export type InferResourceInput<R> = R extends { schema: infer S extends Standard
   ? StandardSchemaV1.InferInput<S>
   : never;
 
+export type ValidationIssue = {
+  message: string;
+  path?: readonly (string | number)[];
+};
+
+export type FireValidationFailure = {
+  kind: "validation";
+  code: "VALIDATION";
+  message: string;
+  status: 400;
+  issues: readonly ValidationIssue[];
+};
+
+export type FireOperationFailure = {
+  kind: "operation";
+  code: string;
+  message: string;
+  status: number;
+};
+
+export type FireFailure = FireValidationFailure | FireOperationFailure;
+
+export type FireResult<T> = { ok: true; data: T } | { ok: false; error: FireFailure };
+
 export type CollectionApi<R> = {
-  add: (data: Omit<InferResourceInput<R>, "id"> & { id?: string }) => Promise<InferResourceDoc<R>>;
-  set: (id: string, data: InferResourceInput<R>) => Promise<InferResourceDoc<R>>;
-  get: (id: string) => Promise<InferResourceDoc<R> | null>;
-  update: (id: string, data: Partial<InferResourceInput<R>>) => Promise<InferResourceDoc<R>>;
-  delete: (id: string) => Promise<{ id: string }>;
-  list: (opts?: { limit?: number; cursor?: string }) => Promise<{
-    items: InferResourceDoc<R>[];
-    nextCursor?: string;
-  }>;
+  add: (
+    data: Omit<InferResourceInput<R>, "id"> & { id?: string },
+  ) => Promise<FireResult<InferResourceDoc<R>>>;
+  set: (id: string, data: InferResourceInput<R>) => Promise<FireResult<InferResourceDoc<R>>>;
+  get: (id: string) => Promise<FireResult<InferResourceDoc<R>>>;
+  update: (
+    id: string,
+    data: Partial<InferResourceInput<R>>,
+  ) => Promise<FireResult<InferResourceDoc<R>>>;
+  delete: (id: string) => Promise<FireResult<{ id: string }>>;
+  list: (opts?: { limit?: number; cursor?: string }) => Promise<
+    FireResult<{
+      items: InferResourceDoc<R>[];
+      nextCursor?: string;
+    }>
+  >;
 };
 
 export type ClientOf<TResources> = {

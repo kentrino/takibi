@@ -7,6 +7,7 @@ import {
   type WireRequest,
   type WireResponse,
 } from "./protocol";
+import { toFireFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { createTypedStorage } from "./typed-storage";
@@ -98,7 +99,12 @@ export function createContext<TCtx extends { tenantId: string; user: unknown }>(
           return c.json(
             {
               ok: false,
-              error: { code: "BAD_REQUEST", message: "Expected JSON body", status: 400 },
+              error: {
+                kind: "operation",
+                code: "BAD_REQUEST",
+                message: "Expected JSON body",
+                status: 400,
+              },
             } satisfies WireResponse,
             400,
           );
@@ -231,13 +237,17 @@ function createDurableObjectClass<TResources extends Record<string, ResourceDefi
 function createUnavailableStorage<TResources extends Record<string, ResourceDefinition>>(
   resources: TResources,
 ): ClientOf<TResources> {
-  const fail = () => {
-    throw new FireError(
-      "NO_STORAGE",
-      "handler.storage is only available with `{ memory: true }`; in production use the Durable Object's `this.storage`",
-      500,
-    );
-  };
+  const fail = async () =>
+    ({
+      ok: false as const,
+      error: {
+        kind: "operation" as const,
+        code: "NO_STORAGE",
+        message:
+          "handler.storage is only available with `{ memory: true }`; in production use the Durable Object's `this.storage`",
+        status: 500,
+      },
+    }) as const;
   const api = {} as Record<string, unknown>;
   for (const name of Object.keys(resources)) {
     api[name] = {
@@ -253,26 +263,13 @@ function createUnavailableStorage<TResources extends Record<string, ResourceDefi
 }
 
 function toWireError(err: unknown): WireFailure {
-  if (err instanceof SchemaValidationError) {
-    return {
-      ok: false,
-      error: {
-        code: "VALIDATION",
-        message: err.message,
-        status: 400,
-        issues: err.issues,
-      },
-    };
-  }
-  if (err instanceof FireError) {
-    return {
-      ok: false,
-      error: { code: err.code, message: err.message, status: err.status },
-    };
+  if (err instanceof SchemaValidationError || err instanceof FireError) {
+    return { ok: false, error: toFireFailure(err) };
   }
   return {
     ok: false,
     error: {
+      kind: "operation",
       code: "INTERNAL",
       message: err instanceof Error ? err.message : String(err),
       status: 500,

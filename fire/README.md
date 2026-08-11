@@ -57,19 +57,68 @@ const client = createClient<Handler>("https://localhost:3000/foo", {
   }),
 });
 
-await client.posts.add({ title: "Hi", body: "..." });
+const created = await client.posts.add({ title: "Hi", body: "..." });
+if (!created.ok) {
+  if (created.error.kind === "validation") {
+    // Field errors for forms: message + path only
+    for (const issue of created.error.issues) {
+      console.error(issue.path?.join("."), issue.message);
+    }
+  } else {
+    console.error(created.error.code, created.error.message);
+  }
+  return;
+}
+
+const post = created.data;
 ```
+
+All `CollectionApi` methods return `Promise<FireResult<T>>`.
+Server-decided failures (`NOT_FOUND`, `FORBIDDEN`, `VALIDATION`, …) resolve as
+`{ ok: false, error }` — they do **not** reject.
+
+Transport / protocol problems still reject the Promise (fetch failure, abort, invalid
+JSON, invalid response envelope). Use `try/catch` only for those.
+
+### Migrating from the previous throw / null API
+
+```ts
+// Before
+const post = await client.posts.get(id); // null when missing
+try {
+  await client.posts.update(id, patch);
+} catch (err) {
+  if (err instanceof FireError && err.code === "NOT_FOUND") {
+    /* ... */
+  }
+}
+
+// After
+const result = await client.posts.get(id);
+if (!result.ok) {
+  if (result.error.code === "NOT_FOUND") {
+    /* ... */
+  }
+  return;
+}
+const post = result.data;
+```
+
+`get` / `update` / `delete` use the same `NOT_FOUND` failure when the document is missing.
+`set` remains upsert and succeeds for a new id.
 
 ## Durable Object storage
 
 Inside the DO (trusted / admin path, ACL bypassed):
 
 ```ts
-// this.storage.posts.add({ ... })
+const result = await this.storage.posts.add({ title: "Hi", body: "..." });
+if (result.ok) {
+  // result.data
+}
 ```
 
-In memory mode (`{ memory: true }`), the same API is on `handler.storage`.
-
+In memory mode (`{ memory: true }`), the same Result-shaped API is on `handler.storage`.
 Documents are stored with the Durable Object Storage KV API
 (`get` / `put` / `delete` / `list`) under keys `fire:${resource}:${id}`.
 One document is one entry. The library does **not** use `state.storage.sql` or

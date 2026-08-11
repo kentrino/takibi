@@ -61,7 +61,9 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
       return storageSet(def, storage, req.resource, req.id, req.input);
     case "get": {
       if (!req.id) throw new NotFoundError("Missing id");
-      return storage.get(req.resource, req.id);
+      const doc = await storage.get(req.resource, req.id);
+      if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
+      return doc;
     }
     case "update": {
       if (!req.id) throw new NotFoundError("Missing id");

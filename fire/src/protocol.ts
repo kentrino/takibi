@@ -1,4 +1,4 @@
-import type { ResourceOperation } from "./types";
+import type { FireFailure, ResourceOperation } from "./types";
 
 export type WireRequest = {
   resource: string;
@@ -16,12 +16,7 @@ export type WireRequest = {
 export type WireSuccess = { ok: true; data: unknown };
 export type WireFailure = {
   ok: false;
-  error: {
-    code: string;
-    message: string;
-    status: number;
-    issues?: unknown;
-  };
+  error: FireFailure;
 };
 export type WireResponse = WireSuccess | WireFailure;
 
@@ -38,4 +33,22 @@ export function decodeWireRequest(body: unknown): WireRequest {
     throw new Error("Invalid wire request");
   }
   return r as WireRequest;
+}
+
+export function isWireResponse(value: unknown): value is WireResponse {
+  if (!value || typeof value !== "object") return false;
+  const r = value as Record<string, unknown>;
+  if (r.ok === true) return "data" in r;
+  if (r.ok !== false) return false;
+  const error = r.error;
+  if (!error || typeof error !== "object") return false;
+  const e = error as Record<string, unknown>;
+  if (typeof e.code !== "string" || typeof e.message !== "string" || typeof e.status !== "number") {
+    return false;
+  }
+  if (e.kind === "validation") {
+    return e.code === "VALIDATION" && e.status === 400 && Array.isArray(e.issues);
+  }
+  if (e.kind === "operation") return true;
+  return false;
 }

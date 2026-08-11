@@ -1,7 +1,6 @@
 import type { FireHandler } from "./context";
-import { FireError } from "./errors";
-import type { WireRequest, WireResponse } from "./protocol";
-import type { ClientOf, CollectionApi, ResourceOperation } from "./types";
+import { isWireResponse, type WireRequest, type WireResponse } from "./protocol";
+import type { ClientOf, CollectionApi, FireResult, ResourceOperation } from "./types";
 
 export type InferHandlerResources<H> = H extends {
   readonly "~fire": { resources: infer R };
@@ -38,10 +37,10 @@ function createCollectionClient(
   resource: string,
   options: CreateClientOptions,
 ): CollectionApi<{ schema: never }> {
-  const call = async (
+  const call = async <T>(
     operation: ResourceOperation,
     parts: { id?: string; input?: unknown; list?: { limit?: number; cursor?: string } } = {},
-  ) => {
+  ): Promise<FireResult<T>> => {
     const payload: Omit<WireRequest, "context"> = {
       resource,
       operation,
@@ -62,19 +61,30 @@ function createCollectionClient(
       body: JSON.stringify(payload),
     });
 
-    const json = (await res.json()) as WireResponse;
-    if (!json.ok) {
-      throw new FireError(json.error.code, json.error.message, json.error.status);
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch (err) {
+      throw err instanceof Error ? err : new Error("Failed to decode response JSON");
     }
-    return json.data;
+
+    if (!isWireResponse(json)) {
+      throw new Error("Invalid response envelope");
+    }
+
+    const wire = json as WireResponse;
+    if (!wire.ok) {
+      return { ok: false, error: wire.error };
+    }
+    return { ok: true, data: wire.data as T };
   };
 
   return {
-    add: (data) => call("add", { input: data }) as never,
-    set: (id, data) => call("set", { id, input: data }) as never,
-    get: (id) => call("get", { id }) as never,
-    update: (id, data) => call("update", { id, input: data }) as never,
-    delete: (id) => call("delete", { id }) as never,
-    list: (opts) => call("list", { list: opts }) as never,
+    add: (data) => call("add", { input: data }),
+    set: (id, data) => call("set", { id, input: data }),
+    get: (id) => call("get", { id }),
+    update: (id, data) => call("update", { id, input: data }),
+    delete: (id) => call("delete", { id }),
+    list: (opts) => call("list", { list: opts }),
   };
 }

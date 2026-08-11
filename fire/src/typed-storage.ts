@@ -1,6 +1,14 @@
 import { NotFoundError } from "./errors";
+import { asFireResult } from "./result";
 import { parseSchema } from "./schema";
-import type { ClientOf, ListOptions, ResourceDefinition, StorageDriver, WithId } from "./types";
+import type {
+  ClientOf,
+  FireResult,
+  ListOptions,
+  ResourceDefinition,
+  StorageDriver,
+  WithId,
+} from "./types";
 import { generateUlid } from "./ulid";
 
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
@@ -71,12 +79,26 @@ export function createTypedStorage<TResources extends Record<string, ResourceDef
   for (const name of Object.keys(resources) as (keyof TResources & string)[]) {
     const def = resources[name]!;
     api[name] = {
-      add: (data) => storageAdd(def, driver, name, data),
-      set: (id, data) => storageSet(def, driver, name, id, data),
-      get: (id) => driver.get(name, id),
-      update: (id, data) => storageUpdate(def, driver, name, id, data),
-      delete: (id) => storageDelete(driver, name, id),
-      list: (opts?: ListOptions) => driver.list(name, opts),
+      add: (data) => asFireResult(() => storageAdd(def, driver, name, data)),
+      set: (id, data) => asFireResult(() => storageSet(def, driver, name, id, data)),
+      get: async (id): Promise<FireResult<WithId<Record<string, unknown>>>> => {
+        const doc = await driver.get(name, id);
+        if (!doc) {
+          return {
+            ok: false,
+            error: {
+              kind: "operation",
+              code: "NOT_FOUND",
+              message: `Document not found: ${id}`,
+              status: 404,
+            },
+          };
+        }
+        return { ok: true, data: doc };
+      },
+      update: (id, data) => asFireResult(() => storageUpdate(def, driver, name, id, data)),
+      delete: (id) => asFireResult(() => storageDelete(driver, name, id)),
+      list: (opts?: ListOptions) => asFireResult(() => driver.list(name, opts)),
     } as ClientOf<TResources>[typeof name];
   }
   return api;
