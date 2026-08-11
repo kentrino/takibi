@@ -73,6 +73,46 @@ app.route("/foo", handler);
 export default app;
 ```
 
+`accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
+
+| operation | `doc`                               | `nextDoc`                    |
+| --------- | ----------------------------------- | ---------------------------- |
+| add       | —                                   | validated create candidate   |
+| get       | saved value                         | —                            |
+| list      | —                                   | —                            |
+| update    | saved value                         | merge + validation candidate |
+| delete    | saved value                         | —                            |
+| set       | saved value if present, else absent | validated replace candidate  |
+
+Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying an **existing** document (get / update / delete / existing set) also returns `NOT_FOUND` so IDs are not leaked. Denying create / new set / list returns `FORBIDDEN`.
+
+### Owner-scoped resources with `ownedBy`
+
+Owner identity is **domain data** in your schema (commonly `ownerId`), not library system metadata. Clients must send the owner field; fire does not auto-insert it. Trusted `handler.storage` / DO storage still bypasses `accessPolicy`, but schema validation still requires the field.
+
+Use `defineResource` when a policy (or `ownedBy`) should see typed `doc` / `nextDoc` fields — TypeScript cannot reverse-infer the schema into an inline `accessPolicy` callback inside `resources({ ... })`.
+
+```ts
+import { ownedBy, defineResource, createContext } from "@takibi/fire";
+
+const handler = context.resources({
+  notes: defineResource({
+    schema: z.object({
+      ownerId: z.string().min(1),
+      title: z.string(),
+    }),
+    accessPolicy: ownedBy({
+      subject: ({ user }) => (user as User | null)?.id,
+      bypass: ({ user }) => (user as User | null)?.role === "admin",
+    }),
+  }),
+});
+```
+
+Rules: create / new set require `nextDoc[field] === subject`; get / delete require `doc[field] === subject`; update / existing set require **both** (so owners cannot reassign the field through normal client writes). Default `field` is `"ownerId"`; use `field: "authorId"` (or any schema string field) when needed. `bypass: true` allows all operations including `list`.
+
+**Owner-scoped list is not supported yet.** Without `bypass`, `ownedBy` rejects `list` with `FORBIDDEN` rather than filtering after fetch. Indexed owner queries belong in a later change.
+
 Prefer throwing `UnauthorizedError` (or returning only after membership checks) from
 `resolve` when AuthN / tenant membership fails. The library also rejects an empty
 `tenantId` after `resolve` returns.
@@ -256,4 +296,6 @@ Notes:
   parent id field), not as unbounded arrays embedded in a parent document.
   Keep embedded arrays small and bounded.
 - `list` returns full documents, paged with `{ limit?, cursor? }` over id order
-  (prefix + `startAfter`). It does not offer `where` / `orderBy` / offset.
+  (prefix + `startAfter`). It does not offer `where` / `orderBy` / offset, and
+  does not filter by owner. Use `ownedBy` only when collection-wide list is
+  admin/`bypass`-only until owner-scoped list ships.

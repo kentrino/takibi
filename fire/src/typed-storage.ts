@@ -68,6 +68,67 @@ function domainDataFromExisting(
   return domain;
 }
 
+/** Build the document that would be stored for `add`, without collision check or put. */
+export async function prepareAddDoc(
+  def: ResourceDefinition,
+  input: unknown,
+  options?: { id?: DocumentId },
+): Promise<WithMetadata<Record<string, unknown>>> {
+  assertNoReservedMetadataInData(input);
+  const parsed = (await parseSchema(def.schema, input ?? {})) as Record<string, unknown>;
+  assertNoParsedMetadata(parsed);
+  const id = resolveDocumentId(options?.id);
+  const now = nowIso();
+  return { ...parsed, id, createdAt: now, updatedAt: now };
+}
+
+/** CREATE-only put: rejects when `doc.id` already exists. */
+export async function commitAddDoc(
+  storage: StorageDriver,
+  resource: string,
+  doc: WithMetadata<Record<string, unknown>>,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  const existing = await storage.get(resource, doc.id);
+  if (existing) {
+    throw new ConflictError(`Document already exists: ${doc.id}`);
+  }
+  await storage.put(resource, doc);
+  return doc;
+}
+
+/** Build the document that would be stored for `set`, without put. */
+export async function prepareSetDoc(
+  def: ResourceDefinition,
+  id: string,
+  input: unknown,
+  existing: WithMetadata<Record<string, unknown>> | null,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  assertNoReservedMetadataInData(input);
+  const parsed = (await parseSchema(def.schema, asDataObject(input))) as Record<string, unknown>;
+  assertNoParsedMetadata(parsed);
+  const now = nowIso();
+  const createdAt = existing?.createdAt ?? now;
+  return { ...parsed, id, createdAt, updatedAt: now };
+}
+
+/** Build the document that would be stored for `update`, without put. */
+export async function prepareUpdateDoc(
+  def: ResourceDefinition,
+  id: string,
+  input: unknown,
+  existing: WithMetadata<Record<string, unknown>>,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  assertNoReservedMetadataInData(input);
+  const merged = {
+    ...domainDataFromExisting(existing),
+    ...asDataObject(input),
+  };
+  const parsed = (await parseSchema(def.schema, merged)) as Record<string, unknown>;
+  assertNoParsedMetadata(parsed);
+  const now = nowIso();
+  return { ...parsed, id, createdAt: existing.createdAt, updatedAt: now };
+}
+
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
 export async function storageAdd(
   def: ResourceDefinition,
@@ -76,18 +137,8 @@ export async function storageAdd(
   input: unknown,
   options?: { id?: DocumentId },
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  assertNoReservedMetadataInData(input);
-  const parsed = (await parseSchema(def.schema, input ?? {})) as Record<string, unknown>;
-  assertNoParsedMetadata(parsed);
-  const id = resolveDocumentId(options?.id);
-  const existing = await storage.get(resource, id);
-  if (existing) {
-    throw new ConflictError(`Document already exists: ${id}`);
-  }
-  const now = nowIso();
-  const doc = { ...parsed, id, createdAt: now, updatedAt: now };
-  await storage.put(resource, doc);
-  return doc;
+  const doc = await prepareAddDoc(def, input, options);
+  return commitAddDoc(storage, resource, doc);
 }
 
 export async function storageSet(
@@ -100,12 +151,7 @@ export async function storageSet(
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const existing =
     options && "existing" in options ? options.existing : await storage.get(resource, id);
-  assertNoReservedMetadataInData(input);
-  const parsed = (await parseSchema(def.schema, asDataObject(input))) as Record<string, unknown>;
-  assertNoParsedMetadata(parsed);
-  const now = nowIso();
-  const createdAt = existing?.createdAt ?? now;
-  const doc = { ...parsed, id, createdAt, updatedAt: now };
+  const doc = await prepareSetDoc(def, id, input, existing ?? null);
   await storage.put(resource, doc);
   return doc;
 }
@@ -119,15 +165,7 @@ export async function storageUpdate(
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const existing = await storage.get(resource, id);
   if (!existing) throw new NotFoundError(`Document not found: ${id}`);
-  assertNoReservedMetadataInData(input);
-  const merged = {
-    ...domainDataFromExisting(existing),
-    ...asDataObject(input),
-  };
-  const parsed = (await parseSchema(def.schema, merged)) as Record<string, unknown>;
-  assertNoParsedMetadata(parsed);
-  const now = nowIso();
-  const doc = { ...parsed, id, createdAt: existing.createdAt, updatedAt: now };
+  const doc = await prepareUpdateDoc(def, id, input, existing);
   await storage.put(resource, doc);
   return doc;
 }

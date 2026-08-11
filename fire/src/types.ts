@@ -18,12 +18,16 @@ export type ResourceOperation = "add" | "set" | "get" | "update" | "delete" | "l
 
 export type AccessAction = "create" | "get" | "list" | "update" | "delete";
 
-export type AccessContext<TCtx> = TCtx & {
+export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = TCtx & {
   tenantId: string;
   user: unknown;
   resource: string;
   operation: ResourceOperation;
   action: AccessAction;
+  /** Saved document for get / update / delete / existing set. Absent for add / list / new set. */
+  doc?: TDoc;
+  /** Validated write candidate for add / update / set. Absent for get / delete / list. */
+  nextDoc?: TDoc;
 };
 
 export type ResourceDefinition<
@@ -33,11 +37,14 @@ export type ResourceDefinition<
   TCtx = any,
 > = {
   schema: TSchema;
-  accessPolicy: (ctx: AccessContext<TCtx>) => boolean | Promise<boolean>;
+  accessPolicy: (
+    ctx: AccessContext<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>,
+  ) => boolean | Promise<boolean>;
 };
 
 export type ResourcesDef<TCtx = any> = {
-  [key: string]: ResourceDefinition<StandardSchemaV1, TCtx>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- concrete schemas live on each entry
+  [key: string]: ResourceDefinition<any, TCtx>;
 };
 
 export type InferResourceDoc<R> = R extends { schema: infer S extends StandardSchemaV1 }

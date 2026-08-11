@@ -1,6 +1,6 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, createContext } from "../src/index";
+import { createClient, createContext, defineResource, ownedBy } from "../src/index";
 import type {
   AccessAction,
   ContextConfig,
@@ -8,6 +8,7 @@ import type {
   DocumentMetadata,
   FireFailure,
   FireResult,
+  InferResourceDoc,
   WithId,
   WithMetadata,
 } from "../src/index";
@@ -176,4 +177,84 @@ test("WithMetadata requires DocumentMetadata and replaces conflicts", () => {
   expectTypeOf<Doc["createdAt"]>().toEqualTypeOf<string>();
   expectTypeOf<Doc["updatedAt"]>().toEqualTypeOf<string>();
   expectTypeOf<Doc>().not.toMatchTypeOf<{ createdAt: number }>();
+});
+
+test("accessPolicy receives typed doc / nextDoc from resource schema", () => {
+  createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  }).resources({
+    notes: defineResource({
+      schema: z.object({
+        ownerId: z.string(),
+        title: z.string(),
+      }),
+      accessPolicy(ctx) {
+        expectTypeOf(ctx.action).toEqualTypeOf<AccessAction>();
+        if (ctx.doc) {
+          expectTypeOf(ctx.doc.ownerId).toEqualTypeOf<string>();
+          expectTypeOf(ctx.doc.title).toEqualTypeOf<string>();
+          expectTypeOf(ctx.doc.id).toEqualTypeOf<DocumentId>();
+          expectTypeOf(ctx.doc.createdAt).toEqualTypeOf<string>();
+        }
+        if (ctx.nextDoc) {
+          expectTypeOf(ctx.nextDoc.ownerId).toEqualTypeOf<string>();
+          expectTypeOf(ctx.nextDoc.id).toEqualTypeOf<DocumentId>();
+        }
+        return true;
+      },
+    }),
+  });
+});
+
+test("ownedBy default ownerId and custom string field are assignable", () => {
+  createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  }).resources({
+    notes: defineResource({
+      schema: z.object({
+        ownerId: z.string(),
+        title: z.string(),
+      }),
+      accessPolicy: ownedBy({
+        subject: ({ user }) => (user as User | null)?.id,
+        bypass: ({ user }) => (user as User | null)?.role === "admin",
+      }),
+    }),
+    posts: defineResource({
+      schema: z.object({
+        authorId: z.string(),
+        title: z.string(),
+      }),
+      accessPolicy: ownedBy({
+        field: "authorId",
+        subject: ({ user }) => (user as User | null)?.id,
+      }),
+    }),
+  });
+});
+
+test("ownedBy rejects a field missing from the schema output", () => {
+  const schema = z.object({
+    title: z.string(),
+  });
+  type Def = import("../src/types").ResourceDefinition<typeof schema, AppCtx>;
+  // @ts-expect-error ownedBy requires ownerId on the document
+  const _policy: Def["accessPolicy"] = ownedBy({
+    subject: ({ user }) => (user as User | null)?.id,
+  });
+  void _policy;
+});
+
+test("InferResourceDoc matches accessPolicy doc shape", () => {
+  const Note = z.object({
+    ownerId: z.string(),
+    title: z.string(),
+  });
+  type NoteDef = { schema: typeof Note };
+  type Doc = InferResourceDoc<NoteDef>;
+  expectTypeOf<Doc["ownerId"]>().toEqualTypeOf<string>();
+  expectTypeOf<Doc["title"]>().toEqualTypeOf<string>();
+  expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
+  expectTypeOf<Doc["createdAt"]>().toEqualTypeOf<string>();
+  expectTypeOf<Doc["updatedAt"]>().toEqualTypeOf<string>();
 });

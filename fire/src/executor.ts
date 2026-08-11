@@ -1,5 +1,11 @@
 import { ForbiddenError, NotFoundError } from "./errors";
-import { storageAdd, storageDelete, storageSet, storageUpdate } from "./typed-storage";
+import {
+  commitAddDoc,
+  prepareAddDoc,
+  prepareSetDoc,
+  prepareUpdateDoc,
+  storageDelete,
+} from "./typed-storage";
 import type {
   AccessAction,
   AccessContext,
@@ -42,6 +48,26 @@ function resolveAction(
   }
 }
 
+/**
+ * Map accessPolicy denial to the public error code.
+ * Document-level denials (existing get / update / delete / set) become NOT_FOUND
+ * so IDs are not leaked. Create / new set / list denials stay FORBIDDEN.
+ */
+async function assertAccess(
+  def: ResourceDefinition,
+  // Executor passes runtime docs; resource-specific TDoc is enforced at definition time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AccessContext TDoc varies per resource
+  accessCtx: AccessContext<any, any>,
+  options: { conceal: boolean; id?: string },
+): Promise<void> {
+  const allowed = await def.accessPolicy(accessCtx);
+  if (allowed) return;
+  if (options.conceal) {
+    throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
+  }
+  throw new ForbiddenError();
+}
+
 export async function executeOperation<TCtx extends { tenantId: string; user: unknown }>(
   resources: ResourcesDef<TCtx>,
   storage: StorageDriver,
@@ -53,48 +79,93 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
     throw new NotFoundError(`Unknown resource: ${req.resource}`);
   }
 
-  let existingForSet: WithMetadata<Record<string, unknown>> | null | undefined;
-  if (req.operation === "set") {
-    if (!req.id) throw new NotFoundError("Missing id");
-    existingForSet = await storage.get(req.resource, req.id);
-  }
-
-  const action = resolveAction(req.operation, existingForSet);
-  const accessCtx: AccessContext<TCtx> = {
-    ...ctx,
-    resource: req.resource,
-    operation: req.operation,
-    action,
-  };
-  const allowed = await def.accessPolicy(accessCtx);
-  if (!allowed) {
-    throw new ForbiddenError();
-  }
-
   switch (req.operation) {
-    case "add":
-      return storageAdd(def, storage, req.resource, req.input, { id: req.id });
-    case "set":
+    case "add": {
+      const nextDoc = await prepareAddDoc(def, req.input, { id: req.id });
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        resource: req.resource,
+        operation: "add",
+        action: "create",
+        nextDoc,
+      };
+      await assertAccess(def, accessCtx, { conceal: false });
+      return commitAddDoc(storage, req.resource, nextDoc);
+    }
+    case "set": {
       if (!req.id) throw new NotFoundError("Missing id");
-      return storageSet(def, storage, req.resource, req.id, req.input, {
-        existing: existingForSet ?? null,
+      const existing = await storage.get(req.resource, req.id);
+      const nextDoc = await prepareSetDoc(def, req.id, req.input, existing);
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        resource: req.resource,
+        operation: "set",
+        action: resolveAction("set", existing),
+        ...(existing ? { doc: existing } : {}),
+        nextDoc,
+      };
+      await assertAccess(def, accessCtx, {
+        conceal: existing != null,
+        id: req.id,
       });
+      await storage.put(req.resource, nextDoc);
+      return nextDoc;
+    }
     case "get": {
       if (!req.id) throw new NotFoundError("Missing id");
       const doc = await storage.get(req.resource, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        resource: req.resource,
+        operation: "get",
+        action: "get",
+        doc,
+      };
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
       return doc;
     }
     case "update": {
       if (!req.id) throw new NotFoundError("Missing id");
-      return storageUpdate(def, storage, req.resource, req.id, req.input);
+      const doc = await storage.get(req.resource, req.id);
+      if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
+      const nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc);
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        resource: req.resource,
+        operation: "update",
+        action: "update",
+        doc,
+        nextDoc,
+      };
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
+      await storage.put(req.resource, nextDoc);
+      return nextDoc;
     }
     case "delete": {
       if (!req.id) throw new NotFoundError("Missing id");
+      const doc = await storage.get(req.resource, req.id);
+      if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        resource: req.resource,
+        operation: "delete",
+        action: "delete",
+        doc,
+      };
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
       return storageDelete(storage, req.resource, req.id);
     }
-    case "list":
+    case "list": {
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        resource: req.resource,
+        operation: "list",
+        action: "list",
+      };
+      await assertAccess(def, accessCtx, { conceal: false });
       return storage.list(req.resource, req.list);
+    }
     default: {
       const _exhaustive: never = req.operation;
       return _exhaustive;

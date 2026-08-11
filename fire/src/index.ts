@@ -16,6 +16,10 @@ export {
 export { SchemaValidationError, parseSchema } from "./schema";
 export type { AnySchema, InferSchemaInput, InferSchemaOutput } from "./schema";
 
+export { ownedBy } from "./owned-by";
+export type { OwnedByOptions } from "./owned-by";
+export { defineResource } from "./define-resource";
+
 export { createDurableObjectStorage, createMemoryStorage } from "./storage";
 export { createTypedStorage } from "./typed-storage";
 export { executeOperation } from "./executor";

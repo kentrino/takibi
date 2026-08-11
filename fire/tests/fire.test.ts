@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, createContext } from "../src/index";
+import { createClient, createContext, defineResource, ownedBy } from "../src/index";
 import type { AccessAction, AccessContext } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { setClockForTests } from "../src/typed-storage";
@@ -378,9 +378,10 @@ test("create-only policy cannot overwrite via set", async () => {
     body: "stolen",
     authorId: "u1",
   });
+  // Existing-document denial conceals existence.
   expect(attempt).toMatchObject({
     ok: false,
-    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+    error: { kind: "operation", code: "NOT_FOUND", status: 404 },
   });
 
   const got = await admin.posts.get("owned");
@@ -1004,4 +1005,294 @@ test("list remains ordered by id, not timestamp", async () => {
   } finally {
     setClockForTests(undefined);
   }
+});
+
+const OwnedNote = z.object({
+  ownerId: z.string().min(1),
+  title: z.string().min(1),
+});
+
+function createOwnedApp() {
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  return context.resources(
+    {
+      notes: defineResource({
+        schema: OwnedNote,
+        accessPolicy: ownedBy({
+          subject: ({ user }) => (user as User | null)?.id,
+          bypass: ({ user }) => (user as User | null)?.role === "admin",
+        }),
+      }),
+    },
+    { memory: true },
+  );
+}
+
+function createAuthorOwnedApp() {
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  return context.resources(
+    {
+      posts: defineResource({
+        schema: Post,
+        accessPolicy: ownedBy({
+          field: "authorId",
+          subject: ({ user }) => (user as User | null)?.id,
+          bypass: ({ user }) => (user as User | null)?.role === "admin",
+        }),
+      }),
+    },
+    { memory: true },
+  );
+}
+
+test("ownedBy: owner can add/get/update/delete; stranger gets NOT_FOUND", async () => {
+  const handler = createOwnedApp();
+  const owner = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const stranger = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u2", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const created = await owner.notes.add({ ownerId: "u1", title: "mine" }, { id: "n1" });
+  expect(created.ok).toBe(true);
+
+  const got = await owner.notes.get("n1");
+  expect(got.ok).toBe(true);
+
+  const updated = await owner.notes.update("n1", { title: "mine-2" });
+  expect(updated.ok).toBe(true);
+  if (!updated.ok) return;
+  expect(updated.data.title).toBe("mine-2");
+
+  for (const result of [
+    await stranger.notes.get("n1"),
+    await stranger.notes.update("n1", { title: "hijack" }),
+    await stranger.notes.delete("n1"),
+  ]) {
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+    });
+  }
+
+  const stillThere = await owner.notes.get("n1");
+  expect(stillThere.ok).toBe(true);
+
+  const deleted = await owner.notes.delete("n1");
+  expect(deleted.ok).toBe(true);
+});
+
+test("ownedBy: create with foreign ownerId is FORBIDDEN; existing set denial is NOT_FOUND", async () => {
+  const handler = createOwnedApp();
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const foreignAdd = await member.notes.add({ ownerId: "other", title: "nope" });
+  expect(foreignAdd).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+
+  const foreignSet = await member.notes.set("new-note", { ownerId: "other", title: "nope" });
+  expect(foreignSet).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+
+  const owned = await member.notes.set("n1", { ownerId: "u1", title: "ok" });
+  expect(owned.ok).toBe(true);
+
+  const transfer = await member.notes.set("n1", { ownerId: "u2", title: "steal" });
+  expect(transfer).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+  });
+
+  const patchOwner = await member.notes.update("n1", { ownerId: "u2" });
+  expect(patchOwner).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+  });
+
+  const unchanged = await member.notes.get("n1");
+  expect(unchanged.ok).toBe(true);
+  if (!unchanged.ok) return;
+  expect(unchanged.data.ownerId).toBe("u1");
+  expect(unchanged.data.title).toBe("ok");
+});
+
+test("ownedBy: list is FORBIDDEN for members; admin bypass allows all ops", async () => {
+  const handler = createOwnedApp();
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const admin = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "admin", role: "admin" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  await handler.storage.notes.add({ ownerId: "u1", title: "a" }, { id: "a" });
+  await handler.storage.notes.add({ ownerId: "u2", title: "b" }, { id: "b" });
+
+  const memberList = await member.notes.list();
+  expect(memberList).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+
+  const adminList = await admin.notes.list();
+  expect(adminList.ok).toBe(true);
+  if (!adminList.ok) return;
+  expect(adminList.data.items).toHaveLength(2);
+
+  const adminGet = await admin.notes.get("b");
+  expect(adminGet.ok).toBe(true);
+
+  const adminUpdate = await admin.notes.update("b", { title: "b2", ownerId: "admin" });
+  expect(adminUpdate.ok).toBe(true);
+});
+
+test("ownedBy: missing docs never call policy; nextDoc matches stored value", async () => {
+  const seen: Array<{
+    operation: string;
+    action: string;
+    docOwner?: string;
+    nextOwner?: string;
+    nextId?: string;
+    nextUpdatedAt?: string;
+  }> = [];
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const handler = context.resources(
+    {
+      notes: defineResource({
+        schema: OwnedNote,
+        accessPolicy(ctx) {
+          seen.push({
+            operation: ctx.operation,
+            action: ctx.action,
+            docOwner: ctx.doc?.ownerId,
+            nextOwner: ctx.nextDoc?.ownerId,
+            nextId: ctx.nextDoc?.id,
+            nextUpdatedAt: ctx.nextDoc?.updatedAt,
+          });
+          return ownedBy({
+            subject: ({ user }: AccessContext<AppCtx>) => user?.id,
+          })(ctx);
+        },
+      }),
+    },
+    { memory: true },
+  );
+  const client = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const beforeMissing = seen.length;
+  for (const result of [
+    await client.notes.get("missing"),
+    await client.notes.update("missing", { title: "x" }),
+    await client.notes.delete("missing"),
+  ]) {
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+    });
+  }
+  expect(seen.length).toBe(beforeMissing);
+
+  const created = await client.notes.add({ ownerId: "u1", title: "t" }, { id: "n1" });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  const addSeen = seen.find((s) => s.operation === "add");
+  expect(addSeen).toMatchObject({
+    action: "create",
+    nextOwner: "u1",
+    nextId: "n1",
+  });
+  expect(addSeen?.nextUpdatedAt).toBe(created.data.updatedAt);
+  expect(addSeen?.docOwner).toBeUndefined();
+
+  const updated = await client.notes.update("n1", { title: "t2" });
+  expect(updated.ok).toBe(true);
+  if (!updated.ok) return;
+  const updateSeen = seen.find((s) => s.operation === "update");
+  expect(updateSeen).toMatchObject({
+    action: "update",
+    docOwner: "u1",
+    nextOwner: "u1",
+    nextId: "n1",
+  });
+  expect(updateSeen?.nextUpdatedAt).toBe(updated.data.updatedAt);
+});
+
+test("ownedBy field: authorId works; trusted storage bypasses policy but validates schema", async () => {
+  const handler = createAuthorOwnedApp();
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const created = await member.posts.add({
+    title: "Hi",
+    body: "x",
+    authorId: "u1",
+  });
+  expect(created.ok).toBe(true);
+
+  const trusted = await handler.storage.posts.add(
+    { title: "sys", body: "x", authorId: "system" },
+    { id: "sys-1" },
+  );
+  expect(trusted.ok).toBe(true);
+
+  const invalid = await handler.storage.posts.add({
+    title: "bad",
+    body: "x",
+    authorId: 1 as unknown as string,
+  });
+  expect(invalid.ok).toBe(false);
+
+  const strangerGet = await member.posts.get("sys-1");
+  expect(strangerGet).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+  });
+});
+
+test("custom accessPolicy without owner field still works", async () => {
+  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const handler = context.resources(
+    {
+      posts: defineResource({
+        schema: z.object({ title: z.string(), published: z.boolean() }),
+        accessPolicy({ user, action, nextDoc }) {
+          if (user?.role === "admin") return true;
+          if (action === "create") return nextDoc?.published === false;
+          if (action === "get" || action === "list") return true;
+          return false;
+        },
+      }),
+    },
+    { memory: true },
+  );
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const draft = await member.posts.add({ title: "draft", published: false });
+  expect(draft.ok).toBe(true);
+
+  const published = await member.posts.add({ title: "live", published: true });
+  expect(published).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
 });
