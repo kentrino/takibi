@@ -37,7 +37,7 @@ function incrementRandom(bytes: Uint8Array): void {
 }
 
 function fillRandom(bytes: Uint8Array): void {
-  crypto.getRandomValues(bytes);
+  crypto.getRandomValues(bytes as Parameters<Crypto["getRandomValues"]>[0]);
   for (let i = 0; i < RANDOM_LEN; i++) {
     bytes[i] = bytes[i]! & 31;
   }
