@@ -98,6 +98,34 @@ When initial context is empty and you use `{ memory: true }`, you can still moun
 with `app.route("/foo", handler)` for simple demos and tests. Durable Object mode
 always needs `stub` (and usually `handle` so AuthN / env reach `resolve` / `stub`).
 
+### Resource seeds
+
+Use `seed` for production defaults. It returns schema inputs keyed by document
+ID, so IDs do not need to be repeated inside document data:
+
+```ts
+const handler = context.resources({
+  settings: {
+    schema: z.object({
+      bookingUrl: z.string(),
+    }),
+    accessPolicy: () => true,
+    seed: () => ({
+      default: {
+        bookingUrl: "",
+      },
+    }),
+  },
+});
+```
+
+Seeds run before the Durable Object accepts requests and before memory-mode
+storage operations. They are create-only: an existing document is never
+overwritten, including when a Durable Object is reactivated. Adding another ID
+to the returned record creates that default on the next activation. Seed values
+are validated by the resource schema and bypass `accessPolicy`, like trusted
+storage operations.
+
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
 
 | operation | `doc`                               | `nextDoc`                    |
@@ -115,7 +143,9 @@ Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying a
 
 Owner identity is **domain data** in your schema (commonly `ownerId`), not library system metadata. Clients must send the owner field; fire does not auto-insert it. Trusted `handler.storage` / DO storage still bypasses `accessPolicy`, but schema validation still requires the field.
 
-Use `defineResource` when a policy (or `ownedBy`) should see typed `doc` / `nextDoc` fields — TypeScript cannot reverse-infer the schema into an inline `accessPolicy` callback inside `resources({ ... })`.
+Use `defineResource` when a resource definition is reused or declared separately
+from `resources({ ... })`. Inline definitions infer `accessPolicy`, `seed`, and
+document types directly from their schema.
 
 ```ts
 import { ownedBy, defineResource, fire } from "@takibi/fire";

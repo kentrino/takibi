@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import { FireError, UnauthorizedError } from "./errors";
 import { executeOperation } from "./executor";
@@ -10,7 +11,7 @@ import {
 import { toFireFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
-import { createTypedStorage } from "./typed-storage";
+import { createTypedStorage, storageAdd } from "./typed-storage";
 import type { ClientOf, ResourceDefinition, ResourcesDef, StorageDriver } from "./types";
 
 /**
@@ -113,20 +114,24 @@ export type FireHandler<
 
 type FireCtxConstraint = { tenantId: string; user: unknown };
 
-type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
-  resources<const TResources extends ResourcesDef<TCtx>>(
-    resources: TResources,
-    options?: ResourcesOptions,
-  ): FireHandler<TCtx, TResources, TInitial>;
+type ResourceDefinitions<TSchemas extends Record<string, StandardSchemaV1>, TCtx> = {
+  [K in keyof TSchemas]: ResourceDefinition<TSchemas[K], TCtx>;
 };
 
-type CreateContextFn<TInitial> = <R extends FireCtxConstraint | Promise<FireCtxConstraint>>(
-  config: {
-    resolve: (input: ContextResolverInput<TInitial>) => R;
-    /** Required for Durable Object mode (omit when using `{ memory: true }`). */
-    stub?: ContextStubResolver<Awaited<R>, TInitial>;
-  },
-) => CreateContextBuilder<Awaited<R>, TInitial>;
+type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
+  resources<const TSchemas extends Record<string, StandardSchemaV1>>(
+    resources: ResourceDefinitions<TSchemas, TCtx>,
+    options?: ResourcesOptions,
+  ): FireHandler<TCtx, ResourceDefinitions<TSchemas, TCtx>, TInitial>;
+};
+
+type CreateContextFn<TInitial> = <
+  R extends FireCtxConstraint | Promise<FireCtxConstraint>,
+>(config: {
+  resolve: (input: ContextResolverInput<TInitial>) => R;
+  /** Required for Durable Object mode (omit when using `{ memory: true }`). */
+  stub?: ContextStubResolver<Awaited<R>, TInitial>;
+}) => CreateContextBuilder<Awaited<R>, TInitial>;
 
 /**
  * Bind typed initial context (`handle(..., { context })` deps), then call the
@@ -148,7 +153,9 @@ type CreateContextFn<TInitial> = <R extends FireCtxConstraint | Promise<FireCtxC
  */
 export function initialContext<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
   return ((config) =>
-    buildContext(config as ContextConfig<FireCtxConstraint, TInitial>)) as CreateContextFn<TInitial>;
+    buildContext(
+      config as ContextConfig<FireCtxConstraint, TInitial>,
+    )) as CreateContextFn<TInitial>;
 }
 
 /**
@@ -171,8 +178,9 @@ function buildContext<TInitial>(
       const app = new Hono<{ Bindings: Record<string, unknown> }>();
 
       const memoryDriver = memory ? createMemoryStorage() : null;
+      const memoryReady = memoryDriver ? seedResources(resources, memoryDriver) : Promise.resolve();
       const storageApi = memoryDriver
-        ? createTypedStorage(resources, memoryDriver)
+        ? createTypedStorage(resources, afterInitialization(memoryDriver, memoryReady))
         : createUnavailableStorage(resources);
 
       const run = async (request: Request, initial: unknown): Promise<Response> => {
@@ -195,6 +203,7 @@ function buildContext<TInitial>(
         }
 
         try {
+          await memoryReady;
           const input = { request, context: initial as TInitial };
           const ctx = (await resolve(input)) as FireCtxConstraint;
           if (!ctx.tenantId) {
@@ -310,15 +319,18 @@ function createDurableObjectClass<TResources extends Record<string, ResourceDefi
 ) {
   return class FireTenantObject implements DurableObject {
     readonly #driver: StorageDriver;
+    readonly #ready: Promise<void>;
     readonly storage: ClientOf<TResources>;
 
     constructor(state: DurableObjectState, _env: unknown) {
       this.#driver = createDurableObjectStorage(state.storage);
-      this.storage = createTypedStorage(resources, this.#driver);
+      this.#ready = state.blockConcurrencyWhile(() => seedResources(resources, this.#driver));
+      this.storage = createTypedStorage(resources, afterInitialization(this.#driver, this.#ready));
     }
 
     async fetch(request: Request): Promise<Response> {
       try {
+        await this.#ready;
         const body = decodeWireRequest(await request.json());
         const { context, ...op } = body;
         const data = await executeOperation(
@@ -333,6 +345,42 @@ function createDurableObjectClass<TResources extends Record<string, ResourceDefi
         return Response.json(wire, { status: wire.error.status });
       }
     }
+  };
+}
+
+async function seedResources(
+  resources: Record<string, ResourceDefinition>,
+  driver: StorageDriver,
+): Promise<void> {
+  for (const [resource, definition] of Object.entries(resources)) {
+    if (!definition.seed) continue;
+
+    const documents = await definition.seed();
+    for (const [id, data] of Object.entries(documents)) {
+      if (await driver.get(resource, id)) continue;
+      await storageAdd(definition, driver, resource, data, { id });
+    }
+  }
+}
+
+function afterInitialization(driver: StorageDriver, ready: Promise<void>): StorageDriver {
+  return {
+    async get(resource, id) {
+      await ready;
+      return driver.get(resource, id);
+    },
+    async put(resource, doc) {
+      await ready;
+      return driver.put(resource, doc);
+    },
+    async delete(resource, id) {
+      await ready;
+      return driver.delete(resource, id);
+    },
+    async list(resource, options) {
+      await ready;
+      return driver.list(resource, options);
+    },
   };
 }
 

@@ -40,6 +40,19 @@ export type ResourceDefinition<
   accessPolicy: (
     ctx: AccessContext<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>,
   ) => boolean | Promise<boolean>;
+  /**
+   * Initial documents keyed by document ID. Seeds are create-only: existing
+   * documents are never overwritten when a Durable Object is reactivated.
+   */
+  seed?: () =>
+    | Readonly<
+        Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, keyof DocumentMetadata>>
+      >
+    | Promise<
+        Readonly<
+          Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, keyof DocumentMetadata>>
+        >
+      >;
 };
 
 export type ResourcesDef<TCtx = any> = {

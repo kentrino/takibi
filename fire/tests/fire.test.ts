@@ -101,11 +101,116 @@ function createStrictApp() {
   );
 }
 
+function createFakeDurableObjectStorage(): DurableObjectStorage {
+  const values = new Map<string, unknown>();
+  return {
+    async get<T>(key: string): Promise<T | undefined> {
+      return values.get(key) as T | undefined;
+    },
+    async put(key: string, value: unknown): Promise<void> {
+      values.set(key, structuredClone(value));
+    },
+    async delete(key: string): Promise<boolean> {
+      return values.delete(key);
+    },
+    async list<T>(options?: {
+      prefix?: string;
+      limit?: number;
+      startAfter?: string;
+    }): Promise<Map<string, T>> {
+      const entries = [...values.entries()]
+        .filter(([key]) => key.startsWith(options?.prefix ?? ""))
+        .filter(([key]) => (options?.startAfter ? key > options.startAfter : true))
+        .sort(([left], [right]) => left.localeCompare(right));
+      const limited = options?.limit === undefined ? entries : entries.slice(0, options.limit);
+      return new Map(limited) as Map<string, T>;
+    },
+  } as unknown as DurableObjectStorage;
+}
+
+function createFakeDurableObjectState(storage: DurableObjectStorage): DurableObjectState {
+  return {
+    storage,
+    blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
+      return callback();
+    },
+  } as unknown as DurableObjectState;
+}
+
 function headers(tenantId: string, user: User | null) {
   const h = new Headers({ "x-test-tenant": tenantId });
   if (user) h.set("x-test-user", JSON.stringify(user));
   return h;
 }
+
+test("resource seeds are ready before memory storage access", async () => {
+  const context = createContext({ resolve: resolveTestContext });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessPolicy: memberPolicy,
+        seed: async () => ({
+          welcome: {
+            title: "Welcome",
+            body: "seeded",
+            authorId: "system",
+          },
+        }),
+      },
+    },
+    { memory: true },
+  );
+
+  const seeded = await handler.storage.posts.get("welcome");
+  expect(seeded.ok).toBe(true);
+  if (!seeded.ok) return;
+  expect(seeded.data.title).toBe("Welcome");
+});
+
+test("resource seeds do not overwrite documents when a Durable Object reactivates", async () => {
+  const context = createContext({ resolve: resolveTestContext });
+  let includeNewSeed = false;
+  const handler = context.resources({
+    posts: {
+      schema: Post,
+      accessPolicy: memberPolicy,
+      seed: () => ({
+        welcome: {
+          title: "Welcome",
+          body: "seeded",
+          authorId: "system",
+        },
+        ...(includeNewSeed
+          ? {
+              "new-default": {
+                title: "New default",
+                body: "seeded later",
+                authorId: "system",
+              },
+            }
+          : {}),
+      }),
+    },
+  });
+  const durableStorage = createFakeDurableObjectStorage();
+
+  const first = new handler.DurableObject(createFakeDurableObjectState(durableStorage), {});
+  const changed = await first.storage.posts.update("welcome", {
+    title: "Customized",
+  });
+  expect(changed.ok).toBe(true);
+
+  includeNewSeed = true;
+  const reactivated = new handler.DurableObject(createFakeDurableObjectState(durableStorage), {});
+  const loaded = await reactivated.storage.posts.get("welcome");
+  expect(loaded.ok).toBe(true);
+  if (!loaded.ok) return;
+  expect(loaded.data.title).toBe("Customized");
+
+  const added = await reactivated.storage.posts.get("new-default");
+  expect(added.ok).toBe(true);
+});
 
 test("client add / get / list roundtrip", async () => {
   const handler = createTestApp();

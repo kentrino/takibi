@@ -134,6 +134,35 @@ test("resolve concrete user type flows into accessPolicy without cast", () => {
   });
 });
 
+test("resource seed values are inferred from the schema input", () => {
+  createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  }).resources({
+    posts: {
+      schema: z.object({
+        title: z.string(),
+        published: z.boolean().default(false),
+      }),
+      accessPolicy({ doc }) {
+        if (doc) {
+          expectTypeOf(doc.title).toEqualTypeOf<string>();
+          expectTypeOf(doc.published).toEqualTypeOf<boolean>();
+        }
+        return true;
+      },
+      // @ts-expect-error seed values are checked against the schema input
+      seed: () => ({
+        welcome: {
+          title: "Welcome",
+        },
+        invalid: {
+          title: 123,
+        },
+      }),
+    },
+  });
+});
+
 test("execution context is inferred from resolve return without type args", () => {
   createContext({
     resolve: () => ({
