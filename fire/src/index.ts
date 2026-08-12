@@ -1,7 +1,7 @@
 export { createClient } from "./client";
 export type { CreateClientOptions, InferHandlerResources } from "./client";
 
-export { createContext, fire, initialContext } from "./context";
+export { fire, initialContext } from "./context";
 export type {
   ContextConfig,
   ContextResolver,

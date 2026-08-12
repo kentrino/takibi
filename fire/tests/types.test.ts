@@ -1,6 +1,6 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, createContext, defineResource, fire, ownedBy } from "../src/index";
+import { createClient, defineResource, fire, ownedBy } from "../src/index";
 import type {
   AccessAction,
   ContextConfig,
@@ -13,6 +13,8 @@ import type {
   WithId,
   WithMetadata,
 } from "../src/index";
+
+const createContext = fire.initialContext();
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -150,7 +152,7 @@ test("execution context is inferred from resolve return without type args", () =
   });
 });
 
-test("createContext rejects function shorthand and staged config keys", () => {
+test("initialContext createContext rejects function shorthand and staged config keys", () => {
   // @ts-expect-error function shorthand removed — pass { resolve }
   createContext(({ tenantId, user }) => ({ tenantId, user }));
 
@@ -171,7 +173,7 @@ test("createContext rejects function shorthand and staged config keys", () => {
 
   createContext({
     resolve: () => ({ tenantId: "acme", user: null }),
-    // @ts-expect-error context key is not a createContext config option
+    // @ts-expect-error context key is not an initialContext config option
     context: () => ({ tenantId: "acme", user: null }),
   });
 

@@ -8,7 +8,7 @@ Typed, Firebase-like resource store for Cloudflare Durable Objects — with oRPC
 **AuthZ** (what that identity may do to a resource) is owned by `@takibi/fire`
 via `accessPolicy`.
 
-`createContext({ resolve })` is the trust boundary. Inside `resolve` you must:
+`fire.initialContext()({ resolve })` is the trust boundary. Inside `resolve` you must:
 
 1. Verify a credential, session, or trusted gateway assertion and set `user`
 2. Decide the tenant for this request (from the identity claim and/or an
@@ -28,7 +28,7 @@ deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
 `{ resolve, stub? }`. `TCtx` is inferred from `resolve`'s return (annotate with
 `Promise<AppCtx>` when you want a named / wider type). `stub` receives the same
 input plus `tenantId` and returns a Durable Object stub — no library-side `env` /
-`bindings` option. Empty initial can use the `createContext({ resolve })` shortcut.
+`bindings` option. Empty initial uses `fire.initialContext()` (no type argument).
 
 ```ts
 import { UnauthorizedError, fire } from "@takibi/fire";
@@ -118,7 +118,12 @@ Owner identity is **domain data** in your schema (commonly `ownerId`), not libra
 Use `defineResource` when a policy (or `ownedBy`) should see typed `doc` / `nextDoc` fields — TypeScript cannot reverse-infer the schema into an inline `accessPolicy` callback inside `resources({ ... })`.
 
 ```ts
-import { ownedBy, defineResource, createContext } from "@takibi/fire";
+import { ownedBy, defineResource, fire } from "@takibi/fire";
+
+const createContext = fire.initialContext();
+const context = createContext({
+  resolve: () => ({ tenantId: "acme", user: null as User | null }),
+});
 
 const handler = context.resources({
   notes: defineResource({
@@ -226,10 +231,10 @@ const post = result.data;
 `get` / `update` / `delete` use the same `NOT_FOUND` failure when the document is missing.
 `set` remains upsert and succeeds for a new id.
 
-### Migrating `createContext` to `{ resolve }`
+### Migrating to `fire.initialContext`
 
-Removed: function shorthand, `AuthBits`, `getTenantId`, `getUser`, `context`, and any
-default parsers for `x-user` / `x-tenant-id`.
+Removed: the `createContext` shortcut, function shorthand, `AuthBits`, `getTenantId`,
+`getUser`, `context`, and any default parsers for `x-user` / `x-tenant-id`.
 
 ```ts
 // Before (trusted client-declared headers — do not keep this)
@@ -243,6 +248,7 @@ createContext({
 });
 
 // After — one trust boundary for AuthN + tenant membership
+const createContext = fire.initialContext();
 createContext({
   resolve: async ({ request }) => {
     const user = await authenticate(request);

@@ -152,30 +152,12 @@ export function initialContext<TInitial = Record<string, never>>(): CreateContex
 }
 
 /**
- * Namespace entry for context setup. Prefer `fire.initialContext<Initial>()`.
- * For empty initial (tests / demos), `fire.initialContext()({ resolve })` or
- * the `createContext` shortcut.
+ * Namespace entry for context setup. Use `fire.initialContext<Initial>()`
+ * (or `fire.initialContext()` when initial deps are empty).
  */
 export const fire = {
   initialContext,
 } as const;
-
-/**
- * Shortcut for `fire.initialContext()({ ... })` when initial context is empty.
- *
- * @example
- * createContext({
- *   resolve: () => ({ tenantId: "acme", user: null }),
- * })
- */
-export function createContext<R extends FireCtxConstraint | Promise<FireCtxConstraint>>(
-  config: {
-    resolve: (input: ContextResolverInput<Record<string, never>>) => R;
-    stub?: ContextStubResolver<Awaited<R>, Record<string, never>>;
-  },
-): CreateContextBuilder<Awaited<R>, Record<string, never>> {
-  return initialContext<Record<string, never>>()(config);
-}
 
 function buildContext<TInitial>(
   config: ContextConfig<FireCtxConstraint, TInitial>,
@@ -229,7 +211,7 @@ function buildContext<TInitial>(
           if (!resolveStub) {
             throw new FireError(
               "MISSING_STUB",
-              "Durable Object mode requires createContext({ stub }) — or use resources(..., { memory: true }) for tests",
+              "Durable Object mode requires stub on fire.initialContext()({ stub }) — or use resources(..., { memory: true }) for tests",
               500,
             );
           }
@@ -238,7 +220,7 @@ function buildContext<TInitial>(
           if (!doStub || typeof doStub.fetch !== "function") {
             throw new FireError(
               "MISSING_STUB",
-              "createContext({ stub }) did not return a Durable Object stub (use namespace.get(id))",
+              "fire.initialContext()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
               500,
             );
           }

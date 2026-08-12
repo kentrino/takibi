@@ -1,9 +1,11 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, createContext, defineResource, fire, ownedBy } from "../src/index";
+import { createClient, defineResource, fire, ownedBy } from "../src/index";
 import type { AccessAction, AccessContext } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { setClockForTests } from "../src/typed-storage";
+
+const createContext = fire.initialContext();
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
