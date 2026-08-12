@@ -22,23 +22,25 @@ Do **not** trust client-declared identity or tenant headers (for example
 
 ## Server
 
+Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
+deps (`di`, `env`, …) on `handle(..., { context })`. `resolve` turns that into
+the trusted execution context (`tenantId`, `user`). `stub` picks the Durable
+Object namespace from the same input — no library-side `env` / `bindings` option.
+
 ```ts
 import { UnauthorizedError, createContext } from "@takibi/fire";
 import { Hono } from "hono";
 import { z } from "zod";
 
 type User = { id: string; role: "admin" | "member"; tenantIds: string[] };
+type Initial = {
+  di: { getSession(request: Request): Promise<User | null> };
+  env: { TENANT_STORE: DurableObjectNamespace };
+};
 
-async function authenticate(request: Request): Promise<User | null> {
-  // Verify Bearer / Cookie / Access JWT / etc. — your choice of library & IdP.
-  // Return null for anonymous access when your app allows it.
-  void request;
-  return null;
-}
-
-const context = createContext<{ tenantId: string; user: User | null }>({
-  resolve: async ({ request }) => {
-    const user = await authenticate(request);
+const context = createContext<{ tenantId: string; user: User | null }, Initial>({
+  resolve: async ({ request, context }) => {
+    const user = await context.di.getSession(request);
     const requested = request.headers.get("x-tenant-id"); // optional hint only
     const tenantId =
       (user && requested && user.tenantIds.includes(requested) ? requested : null) ??
@@ -49,6 +51,7 @@ const context = createContext<{ tenantId: string; user: User | null }>({
     }
     return { tenantId, user };
   },
+  stub: ({ context }) => context.env.TENANT_STORE,
 });
 
 const handler = context.resources({
@@ -69,9 +72,23 @@ export type Handler = typeof handler;
 export class TenantStore extends handler.DurableObject {}
 
 const app = new Hono<{ Bindings: { TENANT_STORE: DurableObjectNamespace } }>();
-app.route("/foo", handler);
+app.all("/foo", async (c) => {
+  const { matched, response } = await handler.handle(c.req.raw, {
+    prefix: "/foo",
+    context: {
+      di: c.get("di"),
+      env: c.env,
+    },
+  });
+  if (matched) return response;
+  return c.notFound();
+});
 export default app;
 ```
+
+When initial context is empty (`createContext<AppCtx>({ resolve })` with no
+second type param), you can still mount with `app.route("/foo", handler)` for
+simple demos and tests.
 
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
 

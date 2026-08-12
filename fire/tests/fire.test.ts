@@ -1296,3 +1296,123 @@ test("custom accessPolicy without owner field still works", async () => {
     error: { kind: "operation", code: "FORBIDDEN", status: 403 },
   });
 });
+
+test("handle injects typed initial context into resolve", async () => {
+  type Initial = { container: { tenantId: string; user: User | null } };
+
+  const context = createContext<AppCtx, Initial>({
+    resolve: ({ context: input }) => ({
+      tenantId: input.container.tenantId,
+      user: input.container.user,
+    }),
+  });
+
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessPolicy: memberPolicy,
+      },
+    },
+    { memory: true },
+  );
+
+  const client = createClient<typeof handler>("http://fire.test/rpc", {
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      const { matched, response } = await handler.handle(request, {
+        prefix: "/rpc",
+        context: {
+          container: {
+            tenantId: "tenant-a",
+            user: { id: "u1", role: "member" },
+          },
+        },
+      });
+      expect(matched).toBe(true);
+      return response!;
+    },
+  });
+
+  const created = await client.posts.add({
+    title: "Hello",
+    body: "from handle",
+    authorId: "u1",
+  });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  expect(created.data.title).toBe("Hello");
+});
+
+test("handle returns matched:false when prefix does not match", async () => {
+  const handler = createTestApp();
+  const result = await handler.handle(new Request("http://fire.test/other", { method: "POST" }), {
+    prefix: "/rpc",
+  });
+  expect(result).toEqual({ matched: false });
+});
+
+test("handle rejects non-POST with 405 when prefix matches", async () => {
+  const handler = createTestApp();
+  const result = await handler.handle(new Request("http://fire.test/rpc", { method: "GET" }), {
+    prefix: "/rpc",
+  });
+  expect(result.matched).toBe(true);
+  expect(result.response?.status).toBe(405);
+});
+
+test("handle uses stub from initial context for Durable Object routing", async () => {
+  const idFromNameCalls: string[] = [];
+  const fakeNs = {
+    idFromName(name: string) {
+      idFromNameCalls.push(name);
+      return name as unknown as DurableObjectId;
+    },
+    get(_id: DurableObjectId) {
+      return {
+        fetch: async () =>
+          Response.json({
+            ok: true,
+            data: { items: [], nextCursor: null },
+          } satisfies WireResponse),
+      };
+    },
+  } as unknown as DurableObjectNamespace;
+
+  type Initial = {
+    di: { tenantId: string };
+    env: { TENANT_STORE: DurableObjectNamespace };
+  };
+  const context = createContext<AppCtx, Initial>({
+    resolve: ({ context: input }) => ({
+      tenantId: input.di.tenantId,
+      user: { id: "u1", role: "member" },
+    }),
+    stub: ({ context: input }) => input.env.TENANT_STORE,
+  });
+  const handler = context.resources({
+    posts: {
+      schema: Post,
+      accessPolicy: () => true,
+    },
+  });
+
+  const { matched, response } = await handler.handle(
+    new Request("http://fire.test/api/fire", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resource: "posts", operation: "list" }),
+    }),
+    {
+      prefix: "/api/fire",
+      context: {
+        di: { tenantId: "from-di" },
+        env: { TENANT_STORE: fakeNs },
+      },
+    },
+  );
+
+  expect(matched).toBe(true);
+  expect(response?.status).toBe(200);
+  expect(idFromNameCalls).toEqual(["from-di"]);
+});

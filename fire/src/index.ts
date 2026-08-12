@@ -2,7 +2,16 @@ export { createClient } from "./client";
 export type { CreateClientOptions, InferHandlerResources } from "./client";
 
 export { createContext } from "./context";
-export type { ContextConfig, ContextResolver, FireHandler, ResourcesOptions } from "./context";
+export type {
+  ContextConfig,
+  ContextResolver,
+  ContextResolverInput,
+  ContextStubResolver,
+  FireHandler,
+  HandleOptions,
+  HandleResult,
+  ResourcesOptions,
+} from "./context";
 
 export {
   BadRequestError,

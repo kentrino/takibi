@@ -152,15 +152,111 @@ test("createContext rejects function shorthand and staged config keys", () => {
 
   createContext<AppCtx>({
     resolve: () => ({ tenantId: "acme", user: null }),
-    // @ts-expect-error context removed
+    // @ts-expect-error context key is not a createContext config option
     context: () => ({ tenantId: "acme", user: null }),
   });
 
   type OnlyResolve = ContextConfig<AppCtx>;
-  expectTypeOf<OnlyResolve>().toEqualTypeOf<{ resolve: OnlyResolve["resolve"] }>();
+  expectTypeOf<OnlyResolve["resolve"]>().toEqualTypeOf<OnlyResolve["resolve"]>();
+  expectTypeOf<OnlyResolve>().toHaveProperty("resolve");
   expectTypeOf<OnlyResolve>().not.toHaveProperty("getUser");
   expectTypeOf<OnlyResolve>().not.toHaveProperty("getTenantId");
-  expectTypeOf<OnlyResolve>().not.toHaveProperty("context");
+  expectTypeOf<OnlyResolve>().not.toHaveProperty("bindings");
+  expectTypeOf<OnlyResolve["stub"]>().toEqualTypeOf<
+    | ((input: {
+        request: Request;
+        context: Record<string, never>;
+      }) => DurableObjectNamespace | Promise<DurableObjectNamespace>)
+    | undefined
+  >();
+});
+
+test("initial context is required on handle and typed into resolve / stub", () => {
+  type Initial = {
+    container: { get(name: "auth"): { id: string } };
+    env: { TENANT_STORE: DurableObjectNamespace };
+  };
+
+  const context = createContext<AppCtx, Initial>({
+    resolve: async ({ request, context: input }) => {
+      void request;
+      expectTypeOf(input.container.get("auth")).toEqualTypeOf<{ id: string }>();
+      return {
+        tenantId: "acme",
+        user: { id: input.container.get("auth").id, role: "member" },
+      };
+    },
+    stub: ({ context: input }) => {
+      expectTypeOf(input.env.TENANT_STORE).toEqualTypeOf<DurableObjectNamespace>();
+      return input.env.TENANT_STORE;
+    },
+  });
+
+  const handler = context.resources(
+    {
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy({ user }) {
+          expectTypeOf(user).toEqualTypeOf<User | null>();
+          return user != null;
+        },
+      },
+    },
+    { memory: true },
+  );
+
+  // @ts-expect-error initial context is required when TInitial has keys
+  void handler.handle(new Request("http://fire.test/"), { prefix: "/rpc" });
+
+  void handler.handle(new Request("http://fire.test/rpc"), {
+    prefix: "/rpc",
+    // @ts-expect-error wrong initial context shape
+    context: { container: 1 },
+  });
+
+  void handler.handle(new Request("http://fire.test/rpc"), {
+    prefix: "/rpc",
+    context: {
+      container: {
+        get(name: "auth") {
+          void name;
+          return { id: "u1" };
+        },
+      },
+      env: { TENANT_STORE: null as unknown as DurableObjectNamespace },
+    },
+  });
+
+  void handler.handle(new Request("http://fire.test/rpc"), {
+    prefix: "/rpc",
+    context: {
+      container: {
+        get(name: "auth") {
+          void name;
+          return { id: "u1" };
+        },
+      },
+      env: { TENANT_STORE: null as unknown as DurableObjectNamespace },
+    },
+    // @ts-expect-error env is not a handle option — put it on initial context
+    env: { TENANT_STORE: null },
+  });
+});
+
+test("empty initial context makes handle context optional", () => {
+  const handler = createContext<AppCtx>({
+    resolve: () => ({ tenantId: "acme", user: null }),
+  }).resources(
+    {
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: () => true,
+      },
+    },
+    { memory: true },
+  );
+
+  void handler.handle(new Request("http://fire.test/"), { prefix: "/" });
 });
 
 test("WithId replaces conflicting id types with DocumentId", () => {

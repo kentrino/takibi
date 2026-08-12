@@ -17,23 +17,67 @@ import type { ClientOf, ResourceDefinition, ResourcesDef, StorageDriver } from "
  * Application-owned trust boundary: verify credentials, authorize tenant
  * membership, and return a complete context. The library treats the result as
  * trusted Worker-side values and never overlays request body / client headers.
+ *
+ * Mirrors oRPC's initial vs execution context:
+ * - input `context` (`TInitial`) — supplied at `handler.handle(..., { context })`
+ * - returned `TCtx` — used by `accessPolicy` (`tenantId`, `user`, …)
+ *
+ * @see https://orpc.dev/docs/context
  */
-export type ContextResolver<TCtx> = (input: { request: Request }) => TCtx | Promise<TCtx>;
+export type ContextResolverInput<TInitial = Record<string, never>> = {
+  request: Request;
+  context: TInitial;
+};
 
-export type ContextConfig<TCtx extends { tenantId: string; user: unknown }> = {
-  resolve: ContextResolver<TCtx>;
+export type ContextResolver<TCtx, TInitial = Record<string, never>> = (
+  input: ContextResolverInput<TInitial>,
+) => TCtx | Promise<TCtx>;
+
+/**
+ * Return the Durable Object namespace for this request. Fire calls
+ * `idFromName(tenantId)` on the result — pick the binding yourself from
+ * initial context (e.g. `context.env.TENANT_STORE`).
+ */
+export type ContextStubResolver<TInitial = Record<string, never>> = (
+  input: ContextResolverInput<TInitial>,
+) => DurableObjectNamespace | Promise<DurableObjectNamespace>;
+
+export type ContextConfig<
+  TCtx extends { tenantId: string; user: unknown },
+  TInitial = Record<string, never>,
+> = {
+  resolve: ContextResolver<TCtx, TInitial>;
+  /** Required for Durable Object mode (omit when using `{ memory: true }`). */
+  stub?: ContextStubResolver<TInitial>;
 };
 
 export type ResourcesOptions = {
-  /** Cloudflare DO binding name. Defaults to `TENANT_STORE`. */
+  /**
+   * Fallback DO binding name for the Hono `app.route` mount when `stub` is
+   * omitted (tests / demos). Defaults to `TENANT_STORE`. Prefer `stub`.
+   */
   binding?: string;
   /** In-memory mode for tests / demos (skips Durable Object). */
   memory?: boolean;
 };
 
-export type FireBrand<TCtx extends { tenantId: string; user: unknown }, TResources> = {
+export type HandleOptions<TInitial> = {
+  /** Path prefix to match (e.g. `/api/fire`). Omit to always match. */
+  prefix?: string;
+} & (Record<string, never> extends TInitial ? { context?: TInitial } : { context: TInitial });
+
+export type HandleResult =
+  | { matched: true; response: Response }
+  | { matched: false; response?: undefined };
+
+export type FireBrand<
+  TCtx extends { tenantId: string; user: unknown },
+  TResources,
+  TInitial = Record<string, never>,
+> = {
   readonly "~fire": {
     context: TCtx;
+    initial: TInitial;
     resources: TResources;
   };
   /**
@@ -46,23 +90,30 @@ export type FireBrand<TCtx extends { tenantId: string; user: unknown }, TResourc
     state: DurableObjectState,
     env: unknown,
   ) => DurableObject & { storage: ClientOf<TResources> };
+  /**
+   * oRPC-style entry: pass framework deps as typed initial `context`.
+   * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
+   */
+  handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
 };
 
 export type FireHandler<
   TCtx extends { tenantId: string; user: unknown } = { tenantId: string; user: unknown },
   TResources = ResourcesDef<TCtx>,
-> = Hono<{ Bindings: Record<string, unknown> }> & FireBrand<TCtx, TResources>;
+  TInitial = Record<string, never>,
+> = Hono<{ Bindings: Record<string, unknown> }> & FireBrand<TCtx, TResources, TInitial>;
 
-export function createContext<TCtx extends { tenantId: string; user: unknown }>(
-  config: ContextConfig<TCtx>,
-) {
-  const { resolve } = config;
+export function createContext<
+  TCtx extends { tenantId: string; user: unknown },
+  TInitial = Record<string, never>,
+>(config: ContextConfig<TCtx, TInitial>) {
+  const { resolve, stub: resolveStub } = config;
 
   return {
     resources<const TResources extends ResourcesDef<TCtx>>(
       resources: TResources,
       options: ResourcesOptions = {},
-    ): FireHandler<TCtx, TResources> {
+    ): FireHandler<TCtx, TResources, TInitial> {
       const binding = options.binding ?? "TENANT_STORE";
       const memory = options.memory ?? false;
 
@@ -73,12 +124,16 @@ export function createContext<TCtx extends { tenantId: string; user: unknown }>(
         ? createTypedStorage(resources, memoryDriver)
         : createUnavailableStorage(resources);
 
-      app.post("/", async (c) => {
+      const run = async (
+        request: Request,
+        initial: TInitial,
+        fallbackEnv?: object,
+      ): Promise<Response> => {
         let body: unknown;
         try {
-          body = await c.req.json();
+          body = await request.json();
         } catch {
-          return c.json(
+          return Response.json(
             {
               ok: false,
               error: {
@@ -88,12 +143,13 @@ export function createContext<TCtx extends { tenantId: string; user: unknown }>(
                 status: 400,
               },
             } satisfies WireResponse,
-            400,
+            { status: 400 },
           );
         }
 
         try {
-          const ctx = await resolve({ request: c.req.raw });
+          const input = { request, context: initial };
+          const ctx = await resolve(input);
           if (!ctx.tenantId) {
             throw new UnauthorizedError("Missing tenantId");
           }
@@ -102,22 +158,29 @@ export function createContext<TCtx extends { tenantId: string; user: unknown }>(
 
           if (memoryDriver) {
             const data = await executeOperation(resources, memoryDriver, ctx, op);
-            return c.json({ ok: true, data } satisfies WireResponse);
+            return Response.json({ ok: true, data } satisfies WireResponse);
           }
 
-          const ns = c.env[binding] as DurableObjectNamespace | undefined;
+          const ns = resolveStub
+            ? await resolveStub(input)
+            : ((fallbackEnv as Record<string, unknown> | undefined)?.[binding] as
+                | DurableObjectNamespace
+                | undefined);
+
           if (!ns || typeof ns.idFromName !== "function") {
             throw new FireError(
               "MISSING_BINDING",
-              `Durable Object binding "${binding}" not found on env`,
+              resolveStub
+                ? "createContext({ stub }) did not return a Durable Object namespace"
+                : `Durable Object binding "${binding}" not found — set createContext({ stub: ({ context }) => context.env.YOUR_DO })`,
               500,
             );
           }
 
-          const stub = ns.get(ns.idFromName(ctx.tenantId));
+          const doStub = ns.get(ns.idFromName(ctx.tenantId));
           const wire: WireRequest = { ...op, context: ctx };
 
-          const res = await stub.fetch(
+          const res = await doStub.fetch(
             new Request("https://fire.internal/", {
               method: "POST",
               headers: { "content-type": "application/json" },
@@ -125,24 +188,75 @@ export function createContext<TCtx extends { tenantId: string; user: unknown }>(
             }),
           );
           const json = (await res.json()) as WireResponse;
-          return c.json(json, (json.ok ? 200 : json.error.status) as 200);
+          return Response.json(json, { status: json.ok ? 200 : json.error.status });
         } catch (err) {
-          return c.json(toWireError(err), statusOf(err) as 400);
+          return Response.json(toWireError(err), { status: statusOf(err) });
         }
+      };
+
+      app.post("/", async (c) => {
+        // Hono mount: empty initial; without `stub`, falls back to c.env[binding].
+        const response = await run(c.req.raw, {} as TInitial, c.env);
+        return c.newResponse(response.body, response);
       });
 
       const DurableObjectClass = createDurableObjectClass(resources);
 
-      const handler = app as FireHandler<TCtx, TResources>;
+      const handler = app as FireHandler<TCtx, TResources, TInitial>;
       Object.defineProperty(handler, "~fire", {
-        value: { context: null as unknown as TCtx, resources },
+        value: {
+          context: null as unknown as TCtx,
+          initial: null as unknown as TInitial,
+          resources,
+        },
         enumerable: false,
       });
       handler.storage = storageApi;
-      handler.DurableObject = DurableObjectClass as FireHandler<TCtx, TResources>["DurableObject"];
+      handler.DurableObject = DurableObjectClass as FireHandler<
+        TCtx,
+        TResources,
+        TInitial
+      >["DurableObject"];
+      handler.handle = async (request, handleOptions) => {
+        if (!matchesPrefix(request, handleOptions.prefix)) {
+          return { matched: false };
+        }
+        if (request.method !== "POST") {
+          return {
+            matched: true,
+            response: Response.json(
+              {
+                ok: false,
+                error: {
+                  kind: "operation",
+                  code: "METHOD_NOT_ALLOWED",
+                  message: "Expected POST",
+                  status: 405,
+                },
+              } satisfies WireResponse,
+              { status: 405 },
+            ),
+          };
+        }
+
+        const initial = (
+          "context" in handleOptions && handleOptions.context !== undefined
+            ? handleOptions.context
+            : {}
+        ) as TInitial;
+        const response = await run(request, initial);
+        return { matched: true, response };
+      };
       return handler;
     },
   };
+}
+
+function matchesPrefix(request: Request, prefix: string | undefined): boolean {
+  if (prefix == null || prefix === "") return true;
+  const pathname = new URL(request.url).pathname.replace(/\/$/, "") || "/";
+  const normalized = prefix.replace(/\/$/, "") || "/";
+  return pathname === normalized;
 }
 
 function createDurableObjectClass<TResources extends Record<string, ResourceDefinition>>(
