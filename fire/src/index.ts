@@ -7,6 +7,7 @@ export type {
   ContextResolver,
   ContextResolverInput,
   ContextStubResolver,
+  ContextStubResolverInput,
   FireHandler,
   HandleOptions,
   HandleResult,

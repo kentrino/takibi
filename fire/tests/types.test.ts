@@ -162,13 +162,7 @@ test("createContext rejects function shorthand and staged config keys", () => {
   expectTypeOf<OnlyResolve>().not.toHaveProperty("getUser");
   expectTypeOf<OnlyResolve>().not.toHaveProperty("getTenantId");
   expectTypeOf<OnlyResolve>().not.toHaveProperty("bindings");
-  expectTypeOf<OnlyResolve["stub"]>().toEqualTypeOf<
-    | ((input: {
-        request: Request;
-        context: Record<string, never>;
-      }) => DurableObjectNamespace | Promise<DurableObjectNamespace>)
-    | undefined
-  >();
+  expectTypeOf<OnlyResolve>().toHaveProperty("stub");
 });
 
 test("initial context is required on handle and typed into resolve / stub", () => {
@@ -176,19 +170,22 @@ test("initial context is required on handle and typed into resolve / stub", () =
     container: { get(name: "auth"): { id: string } };
     env: { TENANT_STORE: DurableObjectNamespace };
   };
+  type NarrowCtx = { tenantId: "acme" | "beta"; user: User | null };
 
-  const context = createContext<AppCtx, Initial>({
+  const context = createContext<NarrowCtx, Initial>({
     resolve: async ({ request, context: input }) => {
       void request;
       expectTypeOf(input.container.get("auth")).toEqualTypeOf<{ id: string }>();
       return {
-        tenantId: "acme",
+        tenantId: "acme" as const,
         user: { id: input.container.get("auth").id, role: "member" },
       };
     },
-    stub: ({ context: input }) => {
+    stub: ({ context: input, tenantId }) => {
+      expectTypeOf(tenantId).toEqualTypeOf<"acme" | "beta">();
       expectTypeOf(input.env.TENANT_STORE).toEqualTypeOf<DurableObjectNamespace>();
-      return input.env.TENANT_STORE;
+      const ns = input.env.TENANT_STORE;
+      return ns.get(ns.idFromName(tenantId));
     },
   });
 

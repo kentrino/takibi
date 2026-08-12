@@ -24,8 +24,9 @@ Do **not** trust client-declared identity or tenant headers (for example
 
 Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
 deps (`di`, `env`, …) on `handle(..., { context })`. `resolve` turns that into
-the trusted execution context (`tenantId`, `user`). `stub` picks the Durable
-Object namespace from the same input — no library-side `env` / `bindings` option.
+the trusted execution context (`tenantId`, `user`). `stub` receives the same
+input plus `tenantId` (typed from the resolve return) and returns a Durable
+Object stub — no library-side `env` / `bindings` option.
 
 ```ts
 import { UnauthorizedError, createContext } from "@takibi/fire";
@@ -51,7 +52,10 @@ const context = createContext<{ tenantId: string; user: User | null }, Initial>(
     }
     return { tenantId, user };
   },
-  stub: ({ context }) => context.env.TENANT_STORE,
+  stub: ({ context, tenantId }) => {
+    const ns = context.env.TENANT_STORE;
+    return ns.get(ns.idFromName(tenantId));
+  },
 });
 
 const handler = context.resources({

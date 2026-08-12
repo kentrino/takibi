@@ -1388,7 +1388,10 @@ test("handle uses stub from initial context for Durable Object routing", async (
       tenantId: input.di.tenantId,
       user: { id: "u1", role: "member" },
     }),
-    stub: ({ context: input }) => input.env.TENANT_STORE,
+    stub: ({ context: input, tenantId }) => {
+      const ns = input.env.TENANT_STORE;
+      return ns.get(ns.idFromName(tenantId));
+    },
   });
   const handler = context.resources({
     posts: {

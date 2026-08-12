@@ -34,13 +34,26 @@ export type ContextResolver<TCtx, TInitial = Record<string, never>> = (
 ) => TCtx | Promise<TCtx>;
 
 /**
- * Return the Durable Object namespace for this request. Fire calls
- * `idFromName(tenantId)` on the result — pick the binding yourself from
- * initial context (e.g. `context.env.TENANT_STORE`).
+ * Resolve a Durable Object **stub** for this request (after `resolve`).
+ * `tenantId` is taken from the resolved execution context (`Pick<TCtx, "tenantId">`).
+ *
+ * @example
+ * stub: ({ context, tenantId }) => {
+ *   const ns = context.env.TENANT_STORE;
+ *   return ns.get(ns.idFromName(tenantId));
+ * }
  */
-export type ContextStubResolver<TInitial = Record<string, never>> = (
-  input: ContextResolverInput<TInitial>,
-) => DurableObjectNamespace | Promise<DurableObjectNamespace>;
+export type ContextStubResolverInput<
+  TCtx extends { tenantId: string; user: unknown },
+  TInitial = Record<string, never>,
+> = ContextResolverInput<TInitial> & Pick<TCtx, "tenantId">;
+
+export type ContextStubResolver<
+  TCtx extends { tenantId: string; user: unknown },
+  TInitial = Record<string, never>,
+> = (
+  input: ContextStubResolverInput<TCtx, TInitial>,
+) => DurableObjectStub | Promise<DurableObjectStub>;
 
 export type ContextConfig<
   TCtx extends { tenantId: string; user: unknown },
@@ -48,7 +61,7 @@ export type ContextConfig<
 > = {
   resolve: ContextResolver<TCtx, TInitial>;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
-  stub?: ContextStubResolver<TInitial>;
+  stub?: ContextStubResolver<TCtx, TInitial>;
 };
 
 export type ResourcesOptions = {
@@ -161,23 +174,28 @@ export function createContext<
             return Response.json({ ok: true, data } satisfies WireResponse);
           }
 
-          const ns = resolveStub
-            ? await resolveStub(input)
-            : ((fallbackEnv as Record<string, unknown> | undefined)?.[binding] as
-                | DurableObjectNamespace
-                | undefined);
+          let doStub: DurableObjectStub | undefined;
+          if (resolveStub) {
+            doStub = await resolveStub({ ...input, tenantId: ctx.tenantId });
+          } else {
+            const ns = (fallbackEnv as Record<string, unknown> | undefined)?.[binding] as
+              | DurableObjectNamespace
+              | undefined;
+            if (ns && typeof ns.idFromName === "function") {
+              doStub = ns.get(ns.idFromName(ctx.tenantId));
+            }
+          }
 
-          if (!ns || typeof ns.idFromName !== "function") {
+          if (!doStub || typeof doStub.fetch !== "function") {
             throw new FireError(
               "MISSING_BINDING",
               resolveStub
-                ? "createContext({ stub }) did not return a Durable Object namespace"
-                : `Durable Object binding "${binding}" not found — set createContext({ stub: ({ context }) => context.env.YOUR_DO })`,
+                ? "createContext({ stub }) did not return a Durable Object stub (use namespace.get(id))"
+                : `Durable Object binding "${binding}" not found — set createContext({ stub: ({ context, tenantId }) => context.env.YOUR_DO.get(context.env.YOUR_DO.idFromName(tenantId)) })`,
               500,
             );
           }
 
-          const doStub = ns.get(ns.idFromName(ctx.tenantId));
           const wire: WireRequest = { ...op, context: ctx };
 
           const res = await doStub.fetch(
