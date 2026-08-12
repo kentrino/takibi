@@ -1,6 +1,6 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, createContext, defineResource, ownedBy } from "../src/index";
+import { createClient, createContext, defineResource, fire, ownedBy } from "../src/index";
 import type {
   AccessAction,
   ContextConfig,
@@ -9,6 +9,7 @@ import type {
   FireFailure,
   FireResult,
   InferResourceDoc,
+  ResourcesOptions,
   WithId,
   WithMetadata,
 } from "../src/index";
@@ -22,7 +23,7 @@ test("client methods are typed from resource schemas", () => {
     body: z.string(),
   });
 
-  const context = createContext<AppCtx>({
+  const context = createContext({
     resolve: async ({ request }) => {
       void request;
       return { tenantId: "acme", user: { id: "u1", role: "member" } };
@@ -115,8 +116,8 @@ test("client methods are typed from resource schemas", () => {
 });
 
 test("resolve concrete user type flows into accessPolicy without cast", () => {
-  createContext<AppCtx>({
-    resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
+  createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
   }).resources({
     posts: {
       schema: z.object({ title: z.string() }),
@@ -131,26 +132,44 @@ test("resolve concrete user type flows into accessPolicy without cast", () => {
   });
 });
 
+test("execution context is inferred from resolve return without type args", () => {
+  createContext({
+    resolve: () => ({
+      tenantId: "acme" as const,
+      user: { id: "u1", role: "admin" as const },
+    }),
+  }).resources({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy({ user, tenantId }) {
+        expectTypeOf(tenantId).toEqualTypeOf<"acme">();
+        expectTypeOf(user).toEqualTypeOf<{ id: string; role: "admin" }>();
+        return true;
+      },
+    },
+  });
+});
+
 test("createContext rejects function shorthand and staged config keys", () => {
   // @ts-expect-error function shorthand removed — pass { resolve }
-  createContext<AppCtx>(({ tenantId, user }) => ({ tenantId, user }));
+  createContext(({ tenantId, user }) => ({ tenantId, user }));
 
   // @ts-expect-error resolve is required; staged keys are gone
-  createContext<AppCtx>({});
+  createContext({});
 
-  createContext<AppCtx>({
+  createContext({
     resolve: () => ({ tenantId: "acme", user: null }),
     // @ts-expect-error getUser removed
     getUser: async () => null,
   });
 
-  createContext<AppCtx>({
+  createContext({
     resolve: () => ({ tenantId: "acme", user: null }),
     // @ts-expect-error getTenantId removed
     getTenantId: () => "acme",
   });
 
-  createContext<AppCtx>({
+  createContext({
     resolve: () => ({ tenantId: "acme", user: null }),
     // @ts-expect-error context key is not a createContext config option
     context: () => ({ tenantId: "acme", user: null }),
@@ -163,6 +182,8 @@ test("createContext rejects function shorthand and staged config keys", () => {
   expectTypeOf<OnlyResolve>().not.toHaveProperty("getTenantId");
   expectTypeOf<OnlyResolve>().not.toHaveProperty("bindings");
   expectTypeOf<OnlyResolve>().toHaveProperty("stub");
+  expectTypeOf<ResourcesOptions>().toHaveProperty("memory");
+  expectTypeOf<ResourcesOptions>().not.toHaveProperty("binding");
 });
 
 test("initial context is required on handle and typed into resolve / stub", () => {
@@ -172,12 +193,13 @@ test("initial context is required on handle and typed into resolve / stub", () =
   };
   type NarrowCtx = { tenantId: "acme" | "beta"; user: User | null };
 
-  const context = createContext<NarrowCtx, Initial>({
-    resolve: async ({ request, context: input }) => {
+  const createContextWithInitial = fire.initialContext<Initial>();
+  const context = createContextWithInitial({
+    resolve: async ({ request, context: input }): Promise<NarrowCtx> => {
       void request;
       expectTypeOf(input.container.get("auth")).toEqualTypeOf<{ id: string }>();
       return {
-        tenantId: "acme" as const,
+        tenantId: "acme",
         user: { id: input.container.get("auth").id, role: "member" },
       };
     },
@@ -241,7 +263,7 @@ test("initial context is required on handle and typed into resolve / stub", () =
 });
 
 test("empty initial context makes handle context optional", () => {
-  const handler = createContext<AppCtx>({
+  const handler = createContext({
     resolve: () => ({ tenantId: "acme", user: null }),
   }).resources(
     {
@@ -273,7 +295,7 @@ test("WithMetadata requires DocumentMetadata and replaces conflicts", () => {
 });
 
 test("accessPolicy receives typed doc / nextDoc from resource schema", () => {
-  createContext<AppCtx>({
+  createContext({
     resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
   }).resources({
     notes: defineResource({
@@ -300,7 +322,7 @@ test("accessPolicy receives typed doc / nextDoc from resource schema", () => {
 });
 
 test("ownedBy default ownerId and custom string field are assignable", () => {
-  createContext<AppCtx>({
+  createContext({
     resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
   }).resources({
     notes: defineResource({

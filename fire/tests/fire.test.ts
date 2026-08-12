@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, createContext, defineResource, ownedBy } from "../src/index";
+import { createClient, createContext, defineResource, fire, ownedBy } from "../src/index";
 import type { AccessAction, AccessContext } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { setClockForTests } from "../src/typed-storage";
@@ -50,7 +50,7 @@ const Post = z.object({
 });
 
 function createTestApp() {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
 
   const handler = context.resources(
     {
@@ -66,7 +66,7 @@ function createTestApp() {
 }
 
 function createCreateOnlyApp() {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
 
   return context.resources(
     {
@@ -80,7 +80,7 @@ function createCreateOnlyApp() {
 }
 
 function createStrictApp() {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
 
   return context.resources(
     {
@@ -222,7 +222,7 @@ test("add rejects reserved id in data and empty option id", async () => {
 });
 
 test("schema transform that injects id is rejected", async () => {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
 
   const handler = context.resources(
     {
@@ -391,7 +391,7 @@ test("create-only policy cannot overwrite via set", async () => {
 });
 
 test("update-only policy cannot create via set", async () => {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   const handler = context.resources(
     {
       posts: {
@@ -419,7 +419,7 @@ test("update-only policy cannot create via set", async () => {
 
 test("accessPolicy receives create/update action for set", async () => {
   const seen: AccessAction[] = [];
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   const handler = context.resources(
     {
       posts: {
@@ -468,7 +468,7 @@ test("anonymous cannot create", async () => {
 });
 
 test("explicit anonymous resolve (user: null) can still read", async () => {
-  const context = createContext<AppCtx>({
+  const context = createContext({
     resolve: () => ({ tenantId: "public", user: null }),
   });
   const handler = context.resources(
@@ -502,7 +502,7 @@ test("explicit anonymous resolve (user: null) can still read", async () => {
 });
 
 test("client-claimed x-user does not change identity or permissions", async () => {
-  const context = createContext<AppCtx>({
+  const context = createContext({
     resolve: () => ({ tenantId: "tenant-a", user: null }),
   });
   const handler = context.resources(
@@ -556,13 +556,19 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
         },
       };
     },
-  };
+  } as unknown as DurableObjectNamespace;
 
-  const context = createContext<AppCtx>({
+  type Initial = { env: { TENANT_STORE: DurableObjectNamespace } };
+  const createContextWithInitial = fire.initialContext<Initial>();
+  const context = createContextWithInitial({
     resolve: () => ({
       tenantId: "resolved-tenant",
       user: { id: "u1", role: "member" },
     }),
+    stub: ({ context: input, tenantId }) => {
+      const ns = input.env.TENANT_STORE;
+      return ns.get(ns.idFromName(tenantId));
+    },
   });
   const handler = context.resources({
     posts: {
@@ -573,9 +579,8 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
     },
   });
 
-  const res = await handler.request(
-    "http://fire.test/",
-    {
+  const { matched, response: res } = await handler.handle(
+    new Request("http://fire.test/", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -585,11 +590,14 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
         resource: "posts",
         operation: "list",
       }),
+    }),
+    {
+      context: { env: { TENANT_STORE: fakeNs } },
     },
-    { TENANT_STORE: fakeNs },
   );
 
-  expect(res.status).toBe(200);
+  expect(matched).toBe(true);
+  expect(res?.status).toBe(200);
   expect(idFromNameCalls).toEqual(["resolved-tenant"]);
   expect(forwardedContext).toEqual({
     tenantId: "resolved-tenant",
@@ -753,7 +761,7 @@ test("transport and protocol failures reject instead of returning FireFailure", 
 });
 
 test("empty tenantId from resolve is unauthorized", async () => {
-  const context = createContext<AppCtx>({
+  const context = createContext({
     resolve: () => ({ tenantId: "", user: null }),
   });
   const handler = context.resources(
@@ -949,7 +957,7 @@ test("reserved createdAt / updatedAt in input and schema transform are rejected"
     );
   }
 
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   const transformHandler = context.resources(
     {
       posts: {
@@ -1013,7 +1021,7 @@ const OwnedNote = z.object({
 });
 
 function createOwnedApp() {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   return context.resources(
     {
       notes: defineResource({
@@ -1029,7 +1037,7 @@ function createOwnedApp() {
 }
 
 function createAuthorOwnedApp() {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   return context.resources(
     {
       posts: defineResource({
@@ -1167,7 +1175,7 @@ test("ownedBy: missing docs never call policy; nextDoc matches stored value", as
     nextId?: string;
     nextUpdatedAt?: string;
   }> = [];
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   const handler = context.resources(
     {
       notes: defineResource({
@@ -1267,7 +1275,7 @@ test("ownedBy field: authorId works; trusted storage bypasses policy but validat
 });
 
 test("custom accessPolicy without owner field still works", async () => {
-  const context = createContext<AppCtx>({ resolve: resolveTestContext });
+  const context = createContext({ resolve: resolveTestContext });
   const handler = context.resources(
     {
       posts: defineResource({
@@ -1300,7 +1308,8 @@ test("custom accessPolicy without owner field still works", async () => {
 test("handle injects typed initial context into resolve", async () => {
   type Initial = { container: { tenantId: string; user: User | null } };
 
-  const context = createContext<AppCtx, Initial>({
+  const createContextWithInitial = fire.initialContext<Initial>();
+  const context = createContextWithInitial({
     resolve: ({ context: input }) => ({
       tenantId: input.container.tenantId,
       user: input.container.user,
@@ -1383,7 +1392,8 @@ test("handle uses stub from initial context for Durable Object routing", async (
     di: { tenantId: string };
     env: { TENANT_STORE: DurableObjectNamespace };
   };
-  const context = createContext<AppCtx, Initial>({
+  const createContextWithInitial = fire.initialContext<Initial>();
+  const context = createContextWithInitial({
     resolve: ({ context: input }) => ({
       tenantId: input.di.tenantId,
       user: { id: "u1", role: "member" },

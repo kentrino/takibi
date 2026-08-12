@@ -65,11 +65,6 @@ export type ContextConfig<
 };
 
 export type ResourcesOptions = {
-  /**
-   * Fallback DO binding name for the Hono `app.route` mount when `stub` is
-   * omitted (tests / demos). Defaults to `TENANT_STORE`. Prefer `stub`.
-   */
-  binding?: string;
   /** In-memory mode for tests / demos (skips Durable Object). */
   memory?: boolean;
 };
@@ -116,18 +111,79 @@ export type FireHandler<
   TInitial = Record<string, never>,
 > = Hono<{ Bindings: Record<string, unknown> }> & FireBrand<TCtx, TResources, TInitial>;
 
-export function createContext<
-  TCtx extends { tenantId: string; user: unknown },
-  TInitial = Record<string, never>,
->(config: ContextConfig<TCtx, TInitial>) {
+type FireCtxConstraint = { tenantId: string; user: unknown };
+
+type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
+  resources<const TResources extends ResourcesDef<TCtx>>(
+    resources: TResources,
+    options?: ResourcesOptions,
+  ): FireHandler<TCtx, TResources, TInitial>;
+};
+
+type CreateContextFn<TInitial> = <R extends FireCtxConstraint | Promise<FireCtxConstraint>>(
+  config: {
+    resolve: (input: ContextResolverInput<TInitial>) => R;
+    /** Required for Durable Object mode (omit when using `{ memory: true }`). */
+    stub?: ContextStubResolver<Awaited<R>, TInitial>;
+  },
+) => CreateContextBuilder<Awaited<R>, TInitial>;
+
+/**
+ * Bind typed initial context (`handle(..., { context })` deps), then call the
+ * returned `createContext` with `{ resolve, stub? }`. Execution context is
+ * inferred from `resolve`'s return type.
+ *
+ * @example
+ * const createContext = fire.initialContext<Initial>()
+ * const app = createContext({
+ *   resolve: async ({ request, context }): Promise<AppCtx> => {
+ *     const user = await context.di.getSession(request)
+ *     return { tenantId: "acme", user }
+ *   },
+ *   stub: ({ context, tenantId }) => {
+ *     const ns = context.env.TENANT_STORE
+ *     return ns.get(ns.idFromName(tenantId))
+ *   },
+ * })
+ */
+export function initialContext<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
+  return ((config) =>
+    buildContext(config as ContextConfig<FireCtxConstraint, TInitial>)) as CreateContextFn<TInitial>;
+}
+
+/**
+ * Namespace entry for context setup. Prefer `fire.initialContext<Initial>()`.
+ * For empty initial (tests / demos), `fire.initialContext()({ resolve })` or
+ * the `createContext` shortcut.
+ */
+export const fire = {
+  initialContext,
+} as const;
+
+/**
+ * Shortcut for `fire.initialContext()({ ... })` when initial context is empty.
+ *
+ * @example
+ * createContext({
+ *   resolve: () => ({ tenantId: "acme", user: null }),
+ * })
+ */
+export function createContext<R extends FireCtxConstraint | Promise<FireCtxConstraint>>(
+  config: {
+    resolve: (input: ContextResolverInput<Record<string, never>>) => R;
+    stub?: ContextStubResolver<Awaited<R>, Record<string, never>>;
+  },
+): CreateContextBuilder<Awaited<R>, Record<string, never>> {
+  return initialContext<Record<string, never>>()(config);
+}
+
+function buildContext<TInitial>(
+  config: ContextConfig<FireCtxConstraint, TInitial>,
+): CreateContextBuilder<FireCtxConstraint, TInitial> {
   const { resolve, stub: resolveStub } = config;
 
   return {
-    resources<const TResources extends ResourcesDef<TCtx>>(
-      resources: TResources,
-      options: ResourcesOptions = {},
-    ): FireHandler<TCtx, TResources, TInitial> {
-      const binding = options.binding ?? "TENANT_STORE";
+    resources(resources, options: ResourcesOptions = {}) {
       const memory = options.memory ?? false;
 
       const app = new Hono<{ Bindings: Record<string, unknown> }>();
@@ -137,11 +193,7 @@ export function createContext<
         ? createTypedStorage(resources, memoryDriver)
         : createUnavailableStorage(resources);
 
-      const run = async (
-        request: Request,
-        initial: TInitial,
-        fallbackEnv?: object,
-      ): Promise<Response> => {
+      const run = async (request: Request, initial: unknown): Promise<Response> => {
         let body: unknown;
         try {
           body = await request.json();
@@ -161,8 +213,8 @@ export function createContext<
         }
 
         try {
-          const input = { request, context: initial };
-          const ctx = await resolve(input);
+          const input = { request, context: initial as TInitial };
+          const ctx = (await resolve(input)) as FireCtxConstraint;
           if (!ctx.tenantId) {
             throw new UnauthorizedError("Missing tenantId");
           }
@@ -174,24 +226,19 @@ export function createContext<
             return Response.json({ ok: true, data } satisfies WireResponse);
           }
 
-          let doStub: DurableObjectStub | undefined;
-          if (resolveStub) {
-            doStub = await resolveStub({ ...input, tenantId: ctx.tenantId });
-          } else {
-            const ns = (fallbackEnv as Record<string, unknown> | undefined)?.[binding] as
-              | DurableObjectNamespace
-              | undefined;
-            if (ns && typeof ns.idFromName === "function") {
-              doStub = ns.get(ns.idFromName(ctx.tenantId));
-            }
+          if (!resolveStub) {
+            throw new FireError(
+              "MISSING_STUB",
+              "Durable Object mode requires createContext({ stub }) — or use resources(..., { memory: true }) for tests",
+              500,
+            );
           }
 
+          const doStub = await resolveStub({ ...input, tenantId: ctx.tenantId });
           if (!doStub || typeof doStub.fetch !== "function") {
             throw new FireError(
-              "MISSING_BINDING",
-              resolveStub
-                ? "createContext({ stub }) did not return a Durable Object stub (use namespace.get(id))"
-                : `Durable Object binding "${binding}" not found — set createContext({ stub: ({ context, tenantId }) => context.env.YOUR_DO.get(context.env.YOUR_DO.idFromName(tenantId)) })`,
+              "MISSING_STUB",
+              "createContext({ stub }) did not return a Durable Object stub (use namespace.get(id))",
               500,
             );
           }
@@ -213,17 +260,17 @@ export function createContext<
       };
 
       app.post("/", async (c) => {
-        // Hono mount: empty initial; without `stub`, falls back to c.env[binding].
-        const response = await run(c.req.raw, {} as TInitial, c.env);
+        // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
+        const response = await run(c.req.raw, {});
         return c.newResponse(response.body, response);
       });
 
       const DurableObjectClass = createDurableObjectClass(resources);
 
-      const handler = app as FireHandler<TCtx, TResources, TInitial>;
+      const handler = app as FireHandler<FireCtxConstraint, typeof resources, TInitial>;
       Object.defineProperty(handler, "~fire", {
         value: {
-          context: null as unknown as TCtx,
+          context: null as unknown as FireCtxConstraint,
           initial: null as unknown as TInitial,
           resources,
         },
@@ -231,8 +278,8 @@ export function createContext<
       });
       handler.storage = storageApi;
       handler.DurableObject = DurableObjectClass as FireHandler<
-        TCtx,
-        TResources,
+        FireCtxConstraint,
+        typeof resources,
         TInitial
       >["DurableObject"];
       handler.handle = async (request, handleOptions) => {
@@ -257,11 +304,10 @@ export function createContext<
           };
         }
 
-        const initial = (
+        const initial =
           "context" in handleOptions && handleOptions.context !== undefined
             ? handleOptions.context
-            : {}
-        ) as TInitial;
+            : {};
         const response = await run(request, initial);
         return { matched: true, response };
       };

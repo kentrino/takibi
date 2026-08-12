@@ -23,13 +23,15 @@ Do **not** trust client-declared identity or tenant headers (for example
 ## Server
 
 Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
-deps (`di`, `env`, …) on `handle(..., { context })`. `resolve` turns that into
-the trusted execution context (`tenantId`, `user`). `stub` receives the same
-input plus `tenantId` (typed from the resolve return) and returns a Durable
-Object stub — no library-side `env` / `bindings` option.
+deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
+`fire.initialContext<Initial>()`, then call the returned `createContext` with
+`{ resolve, stub? }`. `TCtx` is inferred from `resolve`'s return (annotate with
+`Promise<AppCtx>` when you want a named / wider type). `stub` receives the same
+input plus `tenantId` and returns a Durable Object stub — no library-side `env` /
+`bindings` option. Empty initial can use the `createContext({ resolve })` shortcut.
 
 ```ts
-import { UnauthorizedError, createContext } from "@takibi/fire";
+import { UnauthorizedError, fire } from "@takibi/fire";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -38,9 +40,11 @@ type Initial = {
   di: { getSession(request: Request): Promise<User | null> };
   env: { TENANT_STORE: DurableObjectNamespace };
 };
+type AppCtx = { tenantId: string; user: User | null };
 
-const context = createContext<{ tenantId: string; user: User | null }, Initial>({
-  resolve: async ({ request, context }) => {
+const createContext = fire.initialContext<Initial>();
+const context = createContext({
+  resolve: async ({ request, context }): Promise<AppCtx> => {
     const user = await context.di.getSession(request);
     const requested = request.headers.get("x-tenant-id"); // optional hint only
     const tenantId =
@@ -90,9 +94,9 @@ app.all("/foo", async (c) => {
 export default app;
 ```
 
-When initial context is empty (`createContext<AppCtx>({ resolve })` with no
-second type param), you can still mount with `app.route("/foo", handler)` for
-simple demos and tests.
+When initial context is empty and you use `{ memory: true }`, you can still mount
+with `app.route("/foo", handler)` for simple demos and tests. Durable Object mode
+always needs `stub` (and usually `handle` so AuthN / env reach `resolve` / `stub`).
 
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
 
