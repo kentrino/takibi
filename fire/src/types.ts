@@ -18,6 +18,9 @@ export type ResourceOperation = "add" | "set" | "get" | "update" | "delete" | "l
 
 export type AccessAction = "create" | "get" | "list" | "update" | "delete";
 
+/** Permission set a policy grants. Executor allows the request when the set contains `action`. */
+export type AccessGrant = ReadonlySet<AccessAction>;
+
 export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = TCtx & {
   tenantId: string;
   user: unknown;
@@ -30,9 +33,21 @@ export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = 
   nextDoc?: TDoc;
 };
 
-export type AccessPolicy<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = (
+/**
+ * Capability producer: return the actions this subject may perform on this
+ * resource / document. Prefer not switching on `action` — the executor collates
+ * the grant against the current action.
+ */
+export type AccessPolicyFn<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = (
   ctx: AccessContext<TCtx, TDoc>,
-) => boolean | Promise<boolean>;
+) => AccessGrant | Promise<AccessGrant>;
+
+/**
+ * `accessPolicy` value: a function, or a constant grant (`write`, `read`, `none`).
+ */
+export type AccessPolicy<TCtx, TDoc = WithMetadata<Record<string, unknown>>> =
+  | AccessGrant
+  | AccessPolicyFn<TCtx, TDoc>;
 
 export type ResourceDefinition<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,

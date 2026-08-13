@@ -31,7 +31,7 @@ input plus `tenantId` and returns a Durable Object stub — no library-side `env
 `bindings` option. Empty initial uses `fire.initialContext()` (no type argument).
 
 ```ts
-import { UnauthorizedError, fire } from "@takibi/fire";
+import { UnauthorizedError, fire, write, read } from "@takibi/fire";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -68,10 +68,10 @@ const handler = context.resources({
       title: z.string(),
       body: z.string(),
     }),
-    accessPolicy({ user, action }) {
-      if (user?.role === "admin") return true;
-      if (action === "get" || action === "list") return true;
-      return user != null;
+    accessPolicy({ user }) {
+      if (user?.role === "admin") return write;
+      if (user != null) return write;
+      return read;
     },
   },
 });
@@ -109,7 +109,7 @@ const handler = context.resources({
     schema: z.object({
       bookingUrl: z.string(),
     }),
-    accessPolicy: () => true,
+    accessPolicy: write,
     seed: () => ({
       default: {
         bookingUrl: "",
@@ -139,21 +139,42 @@ storage operations.
 
 Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying an **existing** document (get / update / delete / existing set) also returns `NOT_FOUND` so IDs are not leaked. Denying create / new set / list returns `FORBIDDEN`.
 
+### Grants: `write` / `read` / `none` / `grant(...)`
+
+`accessPolicy` returns an **`AccessGrant`** — the set of actions the subject may perform on this resource / document — not a yes/no for the current request. The executor allows the call when the grant contains `action` (`create` / `get` / `list` / `update` / `delete`).
+
+| helper                   | actions                           |
+| ------------------------ | --------------------------------- |
+| `write`                  | create, get, list, update, delete |
+| `read`                   | get, list                         |
+| `none`                   | (empty)                           |
+| `grant("create", "get")` | the actions you list              |
+
+A constant grant is valid (`accessPolicy: write`). Prefer returning a grant without switching on `action`; `action` stays on the context for logging and for helpers like `ownedBy` that distinguish list from get.
+
 ### Typed policies with `context.policy`
 
-`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, `doc` / `nextDoc` from that schema. Schema-less policies are reusable across resources; a schema-bound policy is not assignable to a different schema. Combine with `context.and` (also exported as `and`).
+`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, `doc` / `nextDoc` from that schema. Schema-less policies are reusable across resources; a schema-bound policy is not assignable to a different schema.
+
+`and` intersects grants; `or` unions them (`context.and` / `context.or`, also exported as `and` / `or`). Identity rules and document rules compose:
 
 ```ts
-const staffPolicy = context.policy(({ user }) => user != null);
-const isSeeded = context.policy(itemSchema, ({ doc }) => doc?.isSeeded === true);
+import { none, read, write } from "@takibi/fire";
+
+const staffPolicy = context.policy(({ user }) => (user != null ? write : none));
+const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
+  doc?.isSeeded || nextDoc?.isSeeded ? read : write,
+);
 
 const handler = context.resources({
   items: {
     schema: itemSchema,
-    accessPolicy: context.and(staffPolicy, isSeeded),
+    accessPolicy: context.and(staffPolicy, isSeededData),
   },
 });
 ```
+
+Staff can write unseeded documents; seeded documents stay readable. `and(staffPolicy, read)` is the same pattern with a constant grant.
 
 ### Owner-scoped resources with `ownedBy`
 

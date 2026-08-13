@@ -1,4 +1,5 @@
 import { ForbiddenError, NotFoundError } from "./errors";
+import { allows, evaluateAccessPolicy } from "./policy";
 import {
   commitAddDoc,
   prepareAddDoc,
@@ -60,8 +61,8 @@ async function assertAccess(
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
 ): Promise<void> {
-  const allowed = await def.accessPolicy(accessCtx);
-  if (allowed) return;
+  const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
+  if (allows(granted, accessCtx.action)) return;
   if (options.conceal) {
     throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
   }

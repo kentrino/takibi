@@ -1,7 +1,16 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, defineResource, fire, ownedBy } from "../src/index";
-import type { AccessAction, AccessContext } from "../src/index";
+import {
+  createClient,
+  defineResource,
+  fire,
+  grant,
+  none,
+  ownedBy,
+  read,
+  write,
+} from "../src/index";
+import type { AccessAction, AccessContext, AccessGrant } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { setClockForTests } from "../src/typed-storage";
 
@@ -10,28 +19,20 @@ const createContext = fire.initialContext();
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
 
-function memberPolicy({ user, action }: AccessContext<AppCtx>): boolean {
-  if (user?.role === "admin") return true;
-  if (action === "get" || action === "list") return true;
-  return user != null;
+function memberPolicy({ user }: AccessContext<AppCtx>): AccessGrant {
+  return user != null ? write : read;
 }
 
-function createOnlyPolicy({ user, action }: AccessContext<AppCtx>): boolean {
-  if (user?.role === "admin") return true;
-  if (action === "get" || action === "list") return true;
-  if (action === "create") return user != null;
-  return false;
+function createOnlyPolicy({ user }: AccessContext<AppCtx>): AccessGrant {
+  if (user?.role === "admin") return write;
+  if (user != null) return grant("get", "list", "create");
+  return read;
 }
 
-function updateOnlyPolicy({ user, action }: AccessContext<AppCtx>): boolean {
-  if (user?.role === "admin") return true;
-  if (action === "get" || action === "list") return true;
-  if (action === "update") return user != null;
-  return false;
-}
-
-function readPolicy({ action }: AccessContext<AppCtx>): boolean {
-  return action === "get" || action === "list";
+function updateOnlyPolicy({ user }: AccessContext<AppCtx>): AccessGrant {
+  if (user?.role === "admin") return write;
+  if (user != null) return grant("get", "list", "update");
+  return read;
 }
 
 /**
@@ -341,9 +342,7 @@ test("schema transform that injects id is rejected", async () => {
             authorId: z.string(),
           })
           .transform((value) => ({ ...value, id: "from-schema" })),
-        accessPolicy() {
-          return true;
-        },
+        accessPolicy: write,
       },
     },
     { memory: true },
@@ -533,7 +532,7 @@ test("accessPolicy receives create/update action for set", async () => {
         schema: Post,
         accessPolicy({ action }) {
           seen.push(action);
-          return true;
+          return write;
         },
       },
     },
@@ -681,7 +680,7 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
     posts: {
       schema: Post,
       accessPolicy() {
-        return true;
+        return write;
       },
     },
   });
@@ -875,7 +874,7 @@ test("empty tenantId from resolve is unauthorized", async () => {
     {
       posts: {
         schema: Post,
-        accessPolicy: readPolicy,
+        accessPolicy: read,
       },
     },
     { memory: true },
@@ -1078,9 +1077,7 @@ test("reserved createdAt / updatedAt in input and schema transform are rejected"
             ...value,
             createdAt: "2020-01-01T00:00:00.000Z",
           })),
-        accessPolicy() {
-          return true;
-        },
+        accessPolicy: write,
       },
     },
     { memory: true },
@@ -1387,11 +1384,10 @@ test("custom accessPolicy without owner field still works", async () => {
     {
       posts: defineResource({
         schema: z.object({ title: z.string(), published: z.boolean() }),
-        accessPolicy({ user, action, nextDoc }) {
-          if (user?.role === "admin") return true;
-          if (action === "create") return nextDoc?.published === false;
-          if (action === "get" || action === "list") return true;
-          return false;
+        accessPolicy({ user, nextDoc }) {
+          if (user?.role === "admin") return write;
+          if (nextDoc?.published === false) return grant("get", "list", "create");
+          return read;
         },
       }),
     },
@@ -1418,11 +1414,11 @@ test("fire.policy + and combines identity and document rules", async () => {
     title: z.string(),
     published: z.boolean(),
   });
-  const staffPolicy = context.policy(({ user }) => user != null);
-  const draftOnly = context.policy(Post, ({ action, nextDoc, doc }) => {
-    if (action === "get" || action === "list") return true;
-    if (action === "create") return nextDoc?.published === false;
-    return doc?.published === false;
+  const staffPolicy = context.policy(({ user }) => (user != null ? write : none));
+  const draftOnly = context.policy(Post, ({ nextDoc, doc }) => {
+    if (doc?.published === false) return write;
+    if (!doc && nextDoc?.published === false) return write;
+    return read;
   });
   const handler = context.resources(
     {
@@ -1453,6 +1449,60 @@ test("fire.policy + and combines identity and document rules", async () => {
 
   const anonList = await anon.posts.list();
   expect(anonList).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+});
+
+test("and intersects staff write with seeded read-only", async () => {
+  const context = createContext({ resolve: resolveTestContext });
+  const Item = z.object({
+    title: z.string(),
+    isSeeded: z.boolean(),
+  });
+  const staffPolicy = context.policy(({ user }) => (user != null ? write : none));
+  const isSeededData = context.policy(Item, ({ doc, nextDoc }) =>
+    doc?.isSeeded || nextDoc?.isSeeded ? read : write,
+  );
+  const handler = context.resources(
+    {
+      items: {
+        schema: Item,
+        accessPolicy: context.and(staffPolicy, isSeededData),
+      },
+    },
+    { memory: true },
+  );
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const custom = await member.items.add({ title: "custom", isSeeded: false });
+  expect(custom.ok).toBe(true);
+
+  const seeded = await handler.storage.items.add(
+    { title: "seed", isSeeded: true },
+    { id: "seed-1" },
+  );
+  expect(seeded.ok).toBe(true);
+
+  const got = await member.items.get("seed-1");
+  expect(got.ok).toBe(true);
+
+  const updateSeeded = await member.items.update("seed-1", { title: "nope" });
+  expect(updateSeeded).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+  });
+
+  const updateCustom = await member.items.update(custom.ok ? custom.data.id : "", {
+    title: "ok",
+  });
+  expect(updateCustom.ok).toBe(true);
+
+  const createSeeded = await member.items.add({ title: "new-seed", isSeeded: true });
+  expect(createSeeded).toMatchObject({
     ok: false,
     error: { kind: "operation", code: "FORBIDDEN", status: 403 },
   });
@@ -1559,7 +1609,7 @@ test("handle uses stub from initial context for Durable Object routing", async (
   const handler = context.resources({
     posts: {
       schema: Post,
-      accessPolicy: () => true,
+      accessPolicy: write,
     },
   });
 

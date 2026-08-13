@@ -26,7 +26,7 @@ export {
 export { SchemaValidationError, parseSchema } from "./schema";
 export type { AnySchema, InferSchemaInput, InferSchemaOutput } from "./schema";
 
-export { and } from "./policy";
+export { allows, and, grant, none, or, read, write } from "./policy";
 export type { InferPolicyDoc, PolicyHelper } from "./policy";
 
 export { ownedBy } from "./owned-by";
@@ -40,7 +40,9 @@ export { executeOperation } from "./executor";
 export type {
   AccessAction,
   AccessContext,
+  AccessGrant,
   AccessPolicy,
+  AccessPolicyFn,
   ClientOf,
   CollectionApi,
   DocumentId,

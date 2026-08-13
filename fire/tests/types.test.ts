@@ -1,8 +1,9 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, defineResource, fire, ownedBy } from "../src/index";
+import { createClient, defineResource, fire, none, ownedBy, read, write } from "../src/index";
 import type {
   AccessAction,
+  AccessGrant,
   ContextConfig,
   DocumentId,
   DocumentMetadata,
@@ -36,10 +37,10 @@ test("client methods are typed from resource schemas", () => {
     {
       posts: {
         schema: Post,
-        accessPolicy({ user, action }) {
-          if (user?.role === "admin") return true;
-          if (action === "get" || action === "list") return true;
-          return user != null;
+        accessPolicy({ user }) {
+          if (user?.role === "admin") return write;
+          if (user != null) return write;
+          return read;
         },
       },
     },
@@ -126,9 +127,9 @@ test("resolve concrete user type flows into accessPolicy without cast", () => {
       accessPolicy({ user, action }) {
         expectTypeOf(user).toEqualTypeOf<User | null>();
         expectTypeOf(action).toEqualTypeOf<AccessAction>();
-        if (user?.role === "admin") return true;
-        if (action === "get" || action === "list") return true;
-        return user != null;
+        if (user?.role === "admin") return write;
+        if (user != null) return write;
+        return read;
       },
     },
   });
@@ -148,7 +149,7 @@ test("resource seed values are inferred from the schema input", () => {
           expectTypeOf(doc.title).toEqualTypeOf<string>();
           expectTypeOf(doc.published).toEqualTypeOf<boolean>();
         }
-        return true;
+        return write;
       },
       // @ts-expect-error seed values are checked against the schema input
       seed: () => ({
@@ -175,7 +176,7 @@ test("execution context is inferred from resolve return without type args", () =
       accessPolicy({ user, tenantId }) {
         expectTypeOf(tenantId).toEqualTypeOf<"acme">();
         expectTypeOf(user).toEqualTypeOf<{ id: string; role: "admin" }>();
-        return true;
+        return write;
       },
     },
   });
@@ -248,7 +249,7 @@ test("initial context is required on handle and typed into resolve / stub", () =
         schema: z.object({ title: z.string() }),
         accessPolicy({ user }) {
           expectTypeOf(user).toEqualTypeOf<User | null>();
-          return user != null;
+          return user != null ? write : none;
         },
       },
     },
@@ -300,7 +301,7 @@ test("empty initial context makes handle context optional", () => {
     {
       posts: {
         schema: z.object({ title: z.string() }),
-        accessPolicy: () => true,
+        accessPolicy: write,
       },
     },
     { memory: true },
@@ -346,7 +347,7 @@ test("accessPolicy receives typed doc / nextDoc from resource schema", () => {
           expectTypeOf(ctx.nextDoc.ownerId).toEqualTypeOf<string>();
           expectTypeOf(ctx.nextDoc.id).toEqualTypeOf<DocumentId>();
         }
-        return true;
+        return write;
       },
     }),
   });
@@ -413,7 +414,7 @@ test("fire.policy types user from resolve and doc from schema", () => {
   const staffPolicy = context.policy(({ user, action }) => {
     expectTypeOf(user).toEqualTypeOf<User | null>();
     expectTypeOf(action).toEqualTypeOf<AccessAction>();
-    return user != null;
+    return user != null ? write : none;
   });
 
   const Seeded = z.object({
@@ -432,7 +433,7 @@ test("fire.policy types user from resolve and doc from schema", () => {
     if (nextDoc) {
       expectTypeOf(nextDoc.isSeeded).toEqualTypeOf<boolean>();
     }
-    return doc?.isSeeded === true;
+    return doc?.isSeeded || nextDoc?.isSeeded ? read : write;
   });
 
   context.resources({
@@ -449,7 +450,7 @@ test("schema-bound policy is not assignable to a different resource schema", () 
   });
   const Title = z.object({ title: z.string() });
   const Named = z.object({ name: z.string() });
-  const titlePolicy = context.policy(Title, ({ doc }) => doc?.title === "ok");
+  const titlePolicy = context.policy(Title, ({ doc }) => (doc?.title === "ok" ? write : none));
 
   context.resources({
     titles: {
@@ -460,6 +461,40 @@ test("schema-bound policy is not assignable to a different resource schema", () 
       schema: Named,
       // @ts-expect-error titlePolicy is bound to Title, not Named
       accessPolicy: titlePolicy,
+    },
+  });
+});
+
+test("accessPolicy accepts a constant grant and rejects a boolean", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+
+  context.resources({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy: write,
+    },
+  });
+
+  context.resources({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy() {
+        const granted: AccessGrant = write;
+        expectTypeOf(granted).toEqualTypeOf<AccessGrant>();
+        return granted;
+      },
+    },
+  });
+
+  context.resources({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      // @ts-expect-error policies return a grant, not a boolean
+      accessPolicy() {
+        return true;
+      },
     },
   });
 });

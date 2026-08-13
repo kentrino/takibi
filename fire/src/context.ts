@@ -2,7 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import { FireError, UnauthorizedError } from "./errors";
 import { executeOperation } from "./executor";
-import { and, createPolicyHelper } from "./policy";
+import { and, createPolicyHelper, or } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
   decodeWireRequest,
@@ -16,6 +16,7 @@ import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { createTypedStorage, storageAdd } from "./typed-storage";
 import type {
   AccessPolicy,
+  AccessPolicyFn,
   ClientOf,
   ResourceDefinition,
   ResourcesDef,
@@ -129,12 +130,16 @@ type ResourceDefinitions<TSchemas extends Record<string, StandardSchemaV1>, TCtx
 type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
   /**
    * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
-   * for rules that only use execution context (`user`, `action`, …).
+   * for rules that only use execution context (`user`, …). Return a grant
+   * (`write` / `read` / `none` / `grant(...)`).
    */
   policy: PolicyHelper<TCtx>;
   and<TDoc>(
     ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
-  ): AccessPolicy<TCtx, TDoc>;
+  ): AccessPolicyFn<TCtx, TDoc>;
+  or<TDoc>(
+    ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
+  ): AccessPolicyFn<TCtx, TDoc>;
   resources<const TSchemas extends Record<string, StandardSchemaV1>>(
     resources: ResourceDefinitions<TSchemas, TCtx>,
     options?: ResourcesOptions,
@@ -190,6 +195,7 @@ function buildContext<TInitial>(
   return {
     policy: createPolicyHelper(),
     and,
+    or,
     resources(resources, options: ResourcesOptions = {}) {
       const memory = options.memory ?? false;
 
