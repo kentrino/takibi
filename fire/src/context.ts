@@ -1,7 +1,8 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
-import { FireError, UnauthorizedError } from "./errors";
-import { executeOperation } from "./executor";
+import { FireError, NotFoundError, UnauthorizedError } from "./errors";
+import { executeOperation, type ExecuteRequest } from "./executor";
+import { decodePublicHttp, decodePublicRoute, matchesPublicPrefix } from "./http";
 import { and, createPolicyHelper, or } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
@@ -73,7 +74,11 @@ export type ResourcesOptions = {
 };
 
 export type HandleOptions<TInitial> = {
-  /** Path prefix to match (e.g. `/api/fire`). Omit to always match. */
+  /**
+   * Path prefix for REST routes (e.g. `/api/fire` matches `/api/fire/posts`
+   * and `/api/fire/posts/{id}`, but not `/api/firehose`). Omit to read
+   * resource / id from the whole pathname.
+   */
   prefix?: string;
 } & (Record<string, never> extends TInitial ? { context?: TInitial } : { context: TInitial });
 
@@ -196,25 +201,11 @@ function buildContext<TInitial>(
         ? createTypedStorage(resources, afterInitialization(memoryDriver, memoryReady))
         : createUnavailableStorage(resources);
 
-      const run = async (request: Request, initial: unknown): Promise<Response> => {
-        let body: unknown;
-        try {
-          body = await request.json();
-        } catch {
-          return Response.json(
-            {
-              ok: false,
-              error: {
-                kind: "operation",
-                code: "BAD_REQUEST",
-                message: "Expected JSON body",
-                status: 400,
-              },
-            } satisfies WireResponse,
-            { status: 400 },
-          );
-        }
-
+      const run = async (
+        request: Request,
+        initial: unknown,
+        op: ExecuteRequest,
+      ): Promise<Response> => {
         try {
           await memoryReady;
           const input = { request, context: initial as TInitial };
@@ -222,8 +213,6 @@ function buildContext<TInitial>(
           if (!ctx.tenantId) {
             throw new UnauthorizedError("Missing tenantId");
           }
-
-          const op = decodeWireRequest({ ...(body as object), context: ctx });
 
           if (memoryDriver) {
             const data = await executeOperation(resources, memoryDriver, ctx, op);
@@ -263,9 +252,43 @@ function buildContext<TInitial>(
         }
       };
 
-      app.post("/", async (c) => {
-        // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
-        const response = await run(c.req.raw, {});
+      const serveDecoded = async (
+        request: Request,
+        initial: unknown,
+        decode: () => Promise<ExecuteRequest>,
+      ): Promise<Response> => {
+        try {
+          const op = await decode();
+          return await run(request, initial, op);
+        } catch (err) {
+          return Response.json(toWireError(err), { status: statusOf(err) });
+        }
+      };
+
+      const mountPublicRoute = (path: string, extra = false) => {
+        app.all(path, async (c) => {
+          const response = extra
+            ? Response.json(toWireError(new NotFoundError()), { status: 404 })
+            : await serveDecoded(c.req.raw, {}, () =>
+                decodePublicRoute(
+                  c.req.method,
+                  [c.req.param("resource"), c.req.param("id")].filter(
+                    (segment): segment is string => segment != null && segment !== "",
+                  ),
+                  new URL(c.req.url).searchParams,
+                  () => c.req.json(),
+                ),
+              );
+          return c.newResponse(response.body, response);
+        });
+      };
+
+      // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
+      mountPublicRoute("/:resource");
+      mountPublicRoute("/:resource/:id");
+      mountPublicRoute("/:resource/:id/*", true);
+      app.all("/", async (c) => {
+        const response = await serveDecoded(c.req.raw, {}, () => decodePublicHttp(c.req.raw));
         return c.newResponse(response.body, response);
       });
 
@@ -287,44 +310,22 @@ function buildContext<TInitial>(
         TInitial
       >["DurableObject"];
       handler.handle = async (request, handleOptions) => {
-        if (!matchesPrefix(request, handleOptions.prefix)) {
+        if (!matchesPublicPrefix(new URL(request.url).pathname, handleOptions.prefix)) {
           return { matched: false };
-        }
-        if (request.method !== "POST") {
-          return {
-            matched: true,
-            response: Response.json(
-              {
-                ok: false,
-                error: {
-                  kind: "operation",
-                  code: "METHOD_NOT_ALLOWED",
-                  message: "Expected POST",
-                  status: 405,
-                },
-              } satisfies WireResponse,
-              { status: 405 },
-            ),
-          };
         }
 
         const initial =
           "context" in handleOptions && handleOptions.context !== undefined
             ? handleOptions.context
             : {};
-        const response = await run(request, initial);
+        const response = await serveDecoded(request, initial, () =>
+          decodePublicHttp(request, handleOptions.prefix),
+        );
         return { matched: true, response };
       };
       return handler;
     },
   };
-}
-
-function matchesPrefix(request: Request, prefix: string | undefined): boolean {
-  if (prefix == null || prefix === "") return true;
-  const pathname = new URL(request.url).pathname.replace(/\/$/, "") || "/";
-  const normalized = prefix.replace(/\/$/, "") || "/";
-  return pathname === normalized;
 }
 
 function createDurableObjectClass<TResources extends Record<string, ResourceDefinition>>(

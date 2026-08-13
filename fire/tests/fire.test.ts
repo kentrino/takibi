@@ -265,27 +265,30 @@ test("add with caller-chosen id", async () => {
   expect(storageCreated.data.id).toBe("post-storage");
 });
 
-test("add wire payload separates id from input", async () => {
+test("add with caller-chosen id uses POST /{resource}/{id} and keeps id out of the body", async () => {
   const handler = createTestApp();
-  let captured: WireRequest | undefined;
+  let captured: { method: string; url: string; body: unknown } | undefined;
 
   const client = createClient<typeof handler>("http://fire.test/", {
     headers: () => headers("tenant-a", { id: "u1", role: "member" }),
     fetch: async (input, init) => {
-      const body = init?.body;
-      captured = JSON.parse(typeof body === "string" ? body : "") as WireRequest;
+      const request = new Request(input, init);
+      captured = {
+        method: request.method,
+        url: request.url,
+        body: JSON.parse(typeof init?.body === "string" ? init.body : ""),
+      };
       return handler.request(input, init);
     },
   });
 
   await client.posts.add({ title: "Hi", body: "x", authorId: "u1" }, { id: "wire-id" });
-  expect(captured).toMatchObject({
-    resource: "posts",
-    operation: "add",
-    id: "wire-id",
-    input: { title: "Hi", body: "x", authorId: "u1" },
+  expect(captured).toEqual({
+    method: "POST",
+    url: "http://fire.test/posts/wire-id",
+    body: { title: "Hi", body: "x", authorId: "u1" },
   });
-  expect(captured?.input).not.toHaveProperty("id");
+  expect(captured?.body).not.toHaveProperty("id");
 });
 
 test("add rejects reserved id in data and empty option id", async () => {
@@ -621,17 +624,13 @@ test("client-claimed x-user does not change identity or permissions", async () =
     { memory: true },
   );
 
-  const res = await handler.request("http://fire.test/", {
+  const res = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-user": JSON.stringify({ id: "attacker", role: "admin" }),
     },
-    body: JSON.stringify({
-      resource: "posts",
-      operation: "add",
-      input: { title: "hijack", body: "x", authorId: "attacker" },
-    }),
+    body: JSON.stringify({ title: "hijack", body: "x", authorId: "attacker" }),
   });
   expect(res.status).toBe(403);
   const json = (await res.json()) as WireResponse;
@@ -643,7 +642,7 @@ test("client-claimed x-user does not change identity or permissions", async () =
 
 test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
   const idFromNameCalls: string[] = [];
-  let forwardedContext: unknown;
+  let forwarded: { method: string; url: string; body: WireRequest } | undefined;
 
   const fakeNs = {
     idFromName(name: string) {
@@ -653,8 +652,11 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
     get(_id: DurableObjectId) {
       return {
         fetch: async (request: Request) => {
-          const body = (await request.json()) as WireRequest;
-          forwardedContext = body.context;
+          forwarded = {
+            method: request.method,
+            url: request.url,
+            body: (await request.json()) as WireRequest,
+          };
           return Response.json({
             ok: true,
             data: { items: [], nextCursor: null },
@@ -686,16 +688,11 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
   });
 
   const { matched, response: res } = await handler.handle(
-    new Request("http://fire.test/", {
-      method: "POST",
+    new Request("http://fire.test/posts", {
+      method: "GET",
       headers: {
-        "content-type": "application/json",
         "x-tenant-id": "attacker-tenant",
       },
-      body: JSON.stringify({
-        resource: "posts",
-        operation: "list",
-      }),
     }),
     {
       context: { env: { TENANT_STORE: fakeNs } },
@@ -705,9 +702,15 @@ test("resolve tenantId is used for idFromName, not x-tenant-id", async () => {
   expect(matched).toBe(true);
   expect(res?.status).toBe(200);
   expect(idFromNameCalls).toEqual(["resolved-tenant"]);
-  expect(forwardedContext).toEqual({
-    tenantId: "resolved-tenant",
-    user: { id: "u1", role: "member" },
+  expect(forwarded?.method).toBe("POST");
+  expect(forwarded?.url).toBe("https://fire.internal/");
+  expect(forwarded?.body).toEqual({
+    resource: "posts",
+    operation: "list",
+    context: {
+      tenantId: "resolved-tenant",
+      user: { id: "u1", role: "member" },
+    },
   });
 });
 
@@ -880,13 +883,8 @@ test("empty tenantId from resolve is unauthorized", async () => {
     { memory: true },
   );
 
-  const res = await handler.request("http://fire.test/", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      resource: "posts",
-      operation: "list",
-    }),
+  const res = await handler.request("http://fire.test/posts", {
+    method: "GET",
   });
   expect(res.status).toBe(401);
   const json = (await res.json()) as WireResponse;
@@ -1564,13 +1562,42 @@ test("handle returns matched:false when prefix does not match", async () => {
   expect(result).toEqual({ matched: false });
 });
 
-test("handle rejects non-POST with 405 when prefix matches", async () => {
+test("handle prefix matches /api/fire/posts but not /api/firehose", async () => {
   const handler = createTestApp();
-  const result = await handler.handle(new Request("http://fire.test/rpc", { method: "GET" }), {
-    prefix: "/rpc",
-  });
+
+  const posts = await handler.handle(
+    new Request("http://fire.test/api/fire/posts", {
+      method: "GET",
+      headers: headers("tenant-a", { id: "u1", role: "member" }),
+    }),
+    { prefix: "/api/fire" },
+  );
+  expect(posts.matched).toBe(true);
+  expect(posts.response?.status).toBe(200);
+
+  const firehose = await handler.handle(
+    new Request("http://fire.test/api/firehose", { method: "GET" }),
+    {
+      prefix: "/api/fire",
+    },
+  );
+  expect(firehose).toEqual({ matched: false });
+});
+
+test("handle rejects unknown methods with 405 when prefix matches", async () => {
+  const handler = createTestApp();
+  const result = await handler.handle(
+    new Request("http://fire.test/rpc/posts", { method: "OPTIONS" }),
+    {
+      prefix: "/rpc",
+    },
+  );
   expect(result.matched).toBe(true);
   expect(result.response?.status).toBe(405);
+  await expect(result.response?.json()).resolves.toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "METHOD_NOT_ALLOWED", status: 405 },
+  });
 });
 
 test("handle uses stub from initial context for Durable Object routing", async () => {
@@ -1614,10 +1641,8 @@ test("handle uses stub from initial context for Durable Object routing", async (
   });
 
   const { matched, response } = await handler.handle(
-    new Request("http://fire.test/api/fire", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ resource: "posts", operation: "list" }),
+    new Request("http://fire.test/api/fire/posts", {
+      method: "GET",
     }),
     {
       prefix: "/api/fire",
@@ -1631,4 +1656,194 @@ test("handle uses stub from initial context for Durable Object routing", async (
   expect(matched).toBe(true);
   expect(response?.status).toBe(200);
   expect(idFromNameCalls).toEqual(["from-di"]);
+});
+
+test("createClient maps each CollectionApi operation to the REST method and path", async () => {
+  const handler = createTestApp();
+  const calls: { method: string; url: string; body?: unknown }[] = [];
+  const client = createClient<typeof handler>("http://fire.test/api/fire", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      calls.push({
+        method: request.method,
+        url: request.url,
+        ...(init?.body !== undefined
+          ? { body: JSON.parse(typeof init.body === "string" ? init.body : "") }
+          : {}),
+      });
+      return handler.handle(request, { prefix: "/api/fire" }).then((result) => result.response!);
+    },
+  });
+
+  const created = await client.posts.add({ title: "Hello", body: "world", authorId: "u1" });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  expect(calls.at(-1)).toEqual({
+    method: "POST",
+    url: "http://fire.test/api/fire/posts",
+    body: { title: "Hello", body: "world", authorId: "u1" },
+  });
+
+  const got = await client.posts.get(created.data.id);
+  expect(got.ok).toBe(true);
+  expect(calls.at(-1)).toEqual({
+    method: "GET",
+    url: `http://fire.test/api/fire/posts/${created.data.id}`,
+  });
+
+  const replaced = await client.posts.set(created.data.id, {
+    title: "Replaced",
+    body: "full",
+    authorId: "u1",
+  });
+  expect(replaced.ok).toBe(true);
+  expect(calls.at(-1)).toEqual({
+    method: "PUT",
+    url: `http://fire.test/api/fire/posts/${created.data.id}`,
+    body: { title: "Replaced", body: "full", authorId: "u1" },
+  });
+
+  const patched = await client.posts.update(created.data.id, { title: "Patched" });
+  expect(patched.ok).toBe(true);
+  expect(calls.at(-1)).toEqual({
+    method: "PATCH",
+    url: `http://fire.test/api/fire/posts/${created.data.id}`,
+    body: { title: "Patched" },
+  });
+
+  const listed = await client.posts.list({ limit: 2, cursor: created.data.id });
+  expect(listed.ok).toBe(true);
+  expect(calls.at(-1)).toEqual({
+    method: "GET",
+    url: `http://fire.test/api/fire/posts?limit=2&cursor=${created.data.id}`,
+  });
+
+  const deleted = await client.posts.delete(created.data.id);
+  expect(deleted.ok).toBe(true);
+  expect(calls.at(-1)).toEqual({
+    method: "DELETE",
+    url: `http://fire.test/api/fire/posts/${created.data.id}`,
+  });
+});
+
+test("each public HTTP method executes the matching operation", async () => {
+  const handler = createTestApp();
+  const auth = headers("tenant-a", { id: "u1", role: "member" });
+  const jsonHeaders = { ...Object.fromEntries(auth), "content-type": "application/json" };
+
+  const created = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ title: "Hello", body: "world", authorId: "u1" }),
+  });
+  expect(created.status).toBe(200);
+  const createdJson = (await created.json()) as WireResponse;
+  expect(createdJson).toMatchObject({ ok: true, data: { title: "Hello", body: "world" } });
+  if (!createdJson.ok) return;
+  const id = (createdJson.data as { id: string }).id;
+
+  const got = await handler.request(`http://fire.test/posts/${id}`, {
+    method: "GET",
+    headers: auth,
+  });
+  expect(got.status).toBe(200);
+  await expect(got.json()).resolves.toMatchObject({
+    ok: true,
+    data: { id, title: "Hello", body: "world" },
+  });
+
+  const listed = await handler.request("http://fire.test/posts?limit=10", {
+    method: "GET",
+    headers: auth,
+  });
+  expect(listed.status).toBe(200);
+  await expect(listed.json()).resolves.toMatchObject({
+    ok: true,
+    data: { items: [{ id, title: "Hello" }] },
+  });
+
+  const patched = await handler.request(`http://fire.test/posts/${id}`, {
+    method: "PATCH",
+    headers: jsonHeaders,
+    body: JSON.stringify({ title: "Patched" }),
+  });
+  expect(patched.status).toBe(200);
+  await expect(patched.json()).resolves.toMatchObject({
+    ok: true,
+    data: { id, title: "Patched", body: "world" },
+  });
+
+  const replaced = await handler.request(`http://fire.test/posts/${id}`, {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ title: "Replaced", body: "full", authorId: "u1" }),
+  });
+  expect(replaced.status).toBe(200);
+  await expect(replaced.json()).resolves.toMatchObject({
+    ok: true,
+    data: { id, title: "Replaced", body: "full" },
+  });
+
+  const deleted = await handler.request(`http://fire.test/posts/${id}`, {
+    method: "DELETE",
+    headers: auth,
+  });
+  expect(deleted.status).toBe(200);
+  await expect(deleted.json()).resolves.toMatchObject({ ok: true, data: { id } });
+
+  const missing = await handler.request(`http://fire.test/posts/${id}`, {
+    method: "GET",
+    headers: auth,
+  });
+  expect(missing.status).toBe(404);
+  await expect(missing.json()).resolves.toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "NOT_FOUND", status: 404 },
+  });
+});
+
+test("GET is not treated as POST and PATCH is not treated as PUT", async () => {
+  const handler = createTestApp();
+  const auth = headers("tenant-a", { id: "u1", role: "member" });
+  const jsonHeaders = { ...Object.fromEntries(auth), "content-type": "application/json" };
+
+  const created = await handler.request("http://fire.test/posts/keep-body", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ title: "Original", body: "kept", authorId: "u1" }),
+  });
+  expect(created.status).toBe(200);
+
+  const getOriginal = await handler.request("http://fire.test/posts/keep-body", {
+    method: "GET",
+    headers: auth,
+  });
+  expect(getOriginal.status).toBe(200);
+  await expect(getOriginal.json()).resolves.toMatchObject({
+    ok: true,
+    data: { title: "Original", body: "kept" },
+  });
+
+  const patched = await handler.request("http://fire.test/posts/keep-body", {
+    method: "PATCH",
+    headers: jsonHeaders,
+    body: JSON.stringify({ title: "Patched only" }),
+  });
+  expect(patched.status).toBe(200);
+  await expect(patched.json()).resolves.toMatchObject({
+    ok: true,
+    data: { title: "Patched only", body: "kept", authorId: "u1" },
+  });
+
+  const putPartial = await handler.request("http://fire.test/posts/keep-body", {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ title: "Incomplete" }),
+  });
+  expect(putPartial.status).toBe(400);
+  await expect(putPartial.json()).resolves.toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
 });

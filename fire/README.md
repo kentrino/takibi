@@ -1,6 +1,6 @@
 # @takibi/fire
 
-Typed, Firebase-like resource store for Cloudflare Durable Objects — with oRPC-style end-to-end types, tenant isolation, and access control.
+Typed, Firebase-like resource store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
 ## AuthN vs AuthZ
 
@@ -80,7 +80,7 @@ export type Handler = typeof handler;
 export class TenantStore extends handler.DurableObject {}
 
 const app = new Hono<{ Bindings: { TENANT_STORE: DurableObjectNamespace } }>();
-app.all("/foo", async (c) => {
+app.all("/foo/*", async (c) => {
   const { matched, response } = await handler.handle(c.req.raw, {
     prefix: "/foo",
     context: {
@@ -215,6 +215,27 @@ Prefer throwing `UnauthorizedError` (or returning only after membership checks) 
 `tenantId` after `resolve` returns.
 
 ## Client
+
+`createClient<typeof handler>(baseUrl)` infers the resource map from the handler
+type. Transport is REST-shaped HTTP; the oRPC-style part is that type inference,
+not an RPC wire.
+
+| operation | HTTP                                                                             |
+| --------- | -------------------------------------------------------------------------------- |
+| `add`     | `POST {baseUrl}/{resource}` — caller-chosen id: `POST {baseUrl}/{resource}/{id}` |
+| `set`     | `PUT {baseUrl}/{resource}/{id}`                                                  |
+| `get`     | `GET {baseUrl}/{resource}/{id}`                                                  |
+| `update`  | `PATCH {baseUrl}/{resource}/{id}`                                                |
+| `delete`  | `DELETE {baseUrl}/{resource}/{id}`                                               |
+| `list`    | `GET {baseUrl}/{resource}?limit=&cursor=`                                        |
+
+`POST` / `PUT` / `PATCH` bodies are the document input (not `{ resource, operation, ... }`).
+`GET` / `DELETE` have no body. Worker→Durable Object forwarding stays an internal
+JSON POST and is not part of the public HTTP contract.
+
+Success and failure use the envelope `{ ok: true, data }` / `{ ok: false, error }`.
+HTTP status matches `error.status` on failure (200 on success). This envelope is
+the public HTTP response contract.
 
 Carry credentials your server trusts — not self-declared role or membership JSON.
 

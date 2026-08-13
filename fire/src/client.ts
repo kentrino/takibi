@@ -1,5 +1,5 @@
 import type { FireHandler } from "./context";
-import { isWireResponse, type WireRequest, type WireResponse } from "./protocol";
+import { isWireResponse, type WireResponse } from "./protocol";
 import type { ClientOf, CollectionApi, FireResult, ResourceOperation } from "./types";
 
 export type InferHandlerResources<H> = H extends {
@@ -41,24 +41,32 @@ function createCollectionClient(
     operation: ResourceOperation,
     parts: { id?: string; input?: unknown; list?: { limit?: number; cursor?: string } } = {},
   ): Promise<FireResult<T>> => {
-    const payload: Omit<WireRequest, "context"> = {
-      resource,
-      operation,
-      ...parts,
-    };
+    if (parts.id === "") {
+      return {
+        ok: false,
+        error: {
+          kind: "validation",
+          code: "VALIDATION",
+          message: "id must be a non-empty string",
+          status: 400,
+          issues: [{ message: "id must be a non-empty string", path: ["id"] }],
+        },
+      };
+    }
 
     const headers = new Headers(
       typeof options.headers === "function" ? await options.headers() : (options.headers ?? {}),
     );
-    if (!headers.has("content-type")) {
+    const { method, url, body } = buildPublicRequest(baseUrl, resource, operation, parts);
+    if (body !== undefined && !headers.has("content-type")) {
       headers.set("content-type", "application/json");
     }
 
     const fetchImpl = options.fetch ?? globalThis.fetch;
-    const res = await fetchImpl(baseUrl.replace(/\/$/, ""), {
-      method: "POST",
+    const res = await fetchImpl(url, {
+      method,
       headers,
-      body: JSON.stringify(payload),
+      ...(body !== undefined ? { body } : {}),
     });
 
     let json: unknown;
@@ -87,4 +95,40 @@ function createCollectionClient(
     delete: (id) => call("delete", { id }),
     list: (opts) => call("list", { list: opts }),
   };
+}
+
+function buildPublicRequest(
+  baseUrl: string,
+  resource: string,
+  operation: ResourceOperation,
+  parts: { id?: string; input?: unknown; list?: { limit?: number; cursor?: string } },
+): { method: string; url: string; body?: string } {
+  const prefix = baseUrl.replace(/\/$/, "");
+  const collection = `${prefix}/${encodeURIComponent(resource)}`;
+  const item =
+    parts.id !== undefined ? `${collection}/${encodeURIComponent(parts.id)}` : collection;
+
+  switch (operation) {
+    case "add":
+      return { method: "POST", url: item, body: JSON.stringify(parts.input) };
+    case "set":
+      return { method: "PUT", url: item, body: JSON.stringify(parts.input) };
+    case "get":
+      return { method: "GET", url: item };
+    case "update":
+      return { method: "PATCH", url: item, body: JSON.stringify(parts.input) };
+    case "delete":
+      return { method: "DELETE", url: item };
+    case "list": {
+      const params = new URLSearchParams();
+      if (parts.list?.limit !== undefined) params.set("limit", String(parts.list.limit));
+      if (parts.list?.cursor !== undefined) params.set("cursor", parts.list.cursor);
+      const query = params.toString();
+      return { method: "GET", url: query ? `${collection}?${query}` : collection };
+    }
+    default: {
+      const _exhaustive: never = operation;
+      return _exhaustive;
+    }
+  }
 }
