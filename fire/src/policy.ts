@@ -12,6 +12,16 @@ export type InferPolicyDoc<TSchema extends StandardSchemaV1> = WithMetadata<
   StandardSchemaV1.InferOutput<TSchema>
 >;
 
+/**
+ * Schema-bound policy. Assigns to a resource when every pick-schema key exists
+ * on the resource document — optional vs required does not matter.
+ */
+export type ConstrainedPolicy<TCtx, TPick> = <TDoc>(
+  ctx: AccessContext<TCtx, keyof TPick extends keyof TDoc ? TDoc : never>,
+) => AccessGrant | Promise<AccessGrant>;
+
+type CombinablePolicy<TCtx, TDoc> = AccessPolicy<TCtx, TDoc> | ConstrainedPolicy<TCtx, TDoc>;
+
 const ALL_ACTIONS = [
   "create",
   "get",
@@ -42,11 +52,11 @@ export function allows(decision: AccessGrant, action: AccessAction): boolean {
 }
 
 export async function evaluateAccessPolicy<TCtx, TDoc>(
-  policy: AccessPolicy<TCtx, TDoc>,
+  policy: CombinablePolicy<TCtx, TDoc>,
   ctx: AccessContext<TCtx, TDoc>,
 ): Promise<AccessGrant> {
   if (isAccessGrant(policy)) return policy;
-  return await policy(ctx);
+  return await (policy as AccessPolicyFn<TCtx, TDoc>)(ctx);
 }
 
 function intersect(left: AccessGrant, right: AccessGrant): AccessGrant {
@@ -69,51 +79,51 @@ function isFullWrite(decision: AccessGrant): boolean {
 }
 
 /**
- * Combine policies with AND (grant intersection). Each policy sees the same
- * access context. Schema-less policies stay reusable; a schema-bound policy
- * keeps the combined function tied to that document type.
+ * Combine policies with AND (grant intersection). `TDoc` is inferred from the
+ * arguments: schema-bound policies keep their pick, schema-less ones do not
+ * widen it away.
  */
 export function and<TCtx, TDoc>(
-  ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
-): AccessPolicyFn<TCtx, TDoc> {
-  return async (ctx) => {
+  ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
+): ConstrainedPolicy<TCtx, TDoc> {
+  return (async (ctx) => {
     let acc: AccessGrant | undefined;
     for (const policy of policies) {
-      const next = await evaluateAccessPolicy(policy, ctx);
+      const next = await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>);
       acc = acc ? intersect(acc, next) : next;
       if (acc.size === 0) return none;
     }
     return acc ?? none;
-  };
+  }) as ConstrainedPolicy<TCtx, TDoc>;
 }
 
 /**
- * Combine policies with OR (grant union). Each policy sees the same access
- * context. Schema-less policies stay reusable; a schema-bound policy keeps
- * the combined function tied to that document type.
+ * Combine policies with OR (grant union). `TDoc` is inferred from the
+ * arguments the same way as `and`.
  */
 export function or<TCtx, TDoc>(
-  ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
-): AccessPolicyFn<TCtx, TDoc> {
-  return async (ctx) => {
+  ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
+): ConstrainedPolicy<TCtx, TDoc> {
+  return (async (ctx) => {
     let acc: AccessGrant = none;
     for (const policy of policies) {
-      acc = union(acc, await evaluateAccessPolicy(policy, ctx));
+      acc = union(acc, await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>));
       if (isFullWrite(acc)) return write;
     }
     return acc;
-  };
+  }) as ConstrainedPolicy<TCtx, TDoc>;
 }
 
 export type PolicyHelper<TCtx> = {
   /**
-   * Bind `doc` / `nextDoc` to a resource schema. `user` and the rest of
-   * execution context come from `resolve`. The schema is type-only.
+   * Bind `doc` / `nextDoc` in the callback to a resource schema (or a pick of
+   * its fields). The returned policy assigns to a resource iff those keys
+   * exist on the document; optional vs required does not matter.
    */
   <TSchema extends StandardSchemaV1>(
     schema: TSchema,
     policy: AccessPolicy<TCtx, InferPolicyDoc<TSchema>>,
-  ): AccessPolicy<TCtx, InferPolicyDoc<TSchema>>;
+  ): ConstrainedPolicy<TCtx, InferPolicyDoc<TSchema>>;
   /**
    * Context-only policy (identity, role, …). Assignable to every resource
    * that shares this execution context.

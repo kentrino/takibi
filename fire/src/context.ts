@@ -14,14 +14,7 @@ import { toFireFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { createTypedStorage, storageAdd } from "./typed-storage";
-import type {
-  AccessPolicy,
-  AccessPolicyFn,
-  ClientOf,
-  ResourceDefinition,
-  ResourcesDef,
-  StorageDriver,
-} from "./types";
+import type { ClientOf, ResourceDefinition, ResourcesDef, StorageDriver } from "./types";
 
 /**
  * Application-owned trust boundary: verify credentials, authorize tenant
@@ -134,12 +127,8 @@ type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
    * (`write` / `read` / `none` / `grant(...)`).
    */
   policy: PolicyHelper<TCtx>;
-  and<TDoc>(
-    ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
-  ): AccessPolicyFn<TCtx, TDoc>;
-  or<TDoc>(
-    ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
-  ): AccessPolicyFn<TCtx, TDoc>;
+  and: typeof and;
+  or: typeof or;
   resources<const TSchemas extends Record<string, StandardSchemaV1>>(
     resources: ResourceDefinitions<TSchemas, TCtx>,
     options?: ResourcesOptions,

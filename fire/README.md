@@ -154,7 +154,7 @@ A constant grant is valid (`accessPolicy: write`). Prefer returning a grant with
 
 ### Typed policies with `context.policy`
 
-`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, `doc` / `nextDoc` from that schema. Schema-less policies are reusable across resources; a schema-bound policy is not assignable to a different schema.
+`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, type `doc` / `nextDoc` inside the callback. Pass the resource schema or a pick of its fields. A pick-schema policy assigns to a resource iff those keys exist on the document (optional vs required does not matter). `and` / `or` infer that pick from their arguments.
 
 `and` intersects grants; `or` unions them (`context.and` / `context.or`, also exported as `and` / `or`). Identity rules and document rules compose:
 

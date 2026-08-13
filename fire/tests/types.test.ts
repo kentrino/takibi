@@ -465,6 +465,36 @@ test("schema-bound policy is not assignable to a different resource schema", () 
   });
 });
 
+test("pick-schema policy assigns when the resource field is optional", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
+  });
+  const staffPolicy = context.policy(({ user }) => (user != null ? write : none));
+  const isSeededData = context.policy(z.object({ isSeed: z.boolean() }), ({ doc }) =>
+    doc?.isSeed === true ? none : write,
+  );
+
+  context.resources({
+    treatments: {
+      schema: z.object({
+        name: z.string(),
+        isSeed: z.boolean().optional(),
+      }),
+      accessPolicy: context.and(staffPolicy, isSeededData),
+    },
+    machines: {
+      schema: z.object({ name: z.string() }),
+      // @ts-expect-error machines have no isSeed
+      accessPolicy: isSeededData,
+    },
+    brokers: {
+      schema: z.object({ name: z.string() }),
+      // @ts-expect-error and keeps the isSeed pick from isSeededData
+      accessPolicy: context.and(staffPolicy, isSeededData),
+    },
+  });
+});
+
 test("accessPolicy accepts a constant grant and rejects a boolean", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),

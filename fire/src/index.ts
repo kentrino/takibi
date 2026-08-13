@@ -27,7 +27,7 @@ export { SchemaValidationError, parseSchema } from "./schema";
 export type { AnySchema, InferSchemaInput, InferSchemaOutput } from "./schema";
 
 export { allows, and, grant, none, or, read, write } from "./policy";
-export type { InferPolicyDoc, PolicyHelper } from "./policy";
+export type { ConstrainedPolicy, InferPolicyDoc, PolicyHelper } from "./policy";
 
 export { ownedBy } from "./owned-by";
 export type { OwnedByOptions } from "./owned-by";
