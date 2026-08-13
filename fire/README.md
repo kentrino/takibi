@@ -2,6 +2,8 @@
 
 Typed, Firebase-like resource store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
+The official public API is `fire`, `createClient`, policy helpers, and errors. Lower-level assembly pieces are unpublished.
+
 ## AuthN vs AuthZ
 
 **AuthN** (who is calling, which tenant they may use) is owned by your application.

@@ -23,7 +23,7 @@ export {
   UnauthorizedError,
 } from "./errors";
 
-export { SchemaValidationError, parseSchema } from "./schema";
+export { SchemaValidationError } from "./schema";
 export type { AnySchema, InferSchemaInput, InferSchemaOutput } from "./schema";
 
 export { allows, and, grant, none, or, read, write } from "./policy";
@@ -32,10 +32,6 @@ export type { ConstrainedPolicy, InferPolicyDoc, PolicyHelper } from "./policy";
 export { ownedBy } from "./owned-by";
 export type { OwnedByOptions } from "./owned-by";
 export { defineResource } from "./define-resource";
-
-export { createDurableObjectStorage, createMemoryStorage } from "./storage";
-export { createTypedStorage } from "./typed-storage";
-export { executeOperation } from "./executor";
 
 export type {
   AccessAction,
@@ -56,9 +52,7 @@ export type {
   ListOptions,
   ResourceDataInput,
   ResourceDefinition,
-  ResourceOperation,
   ResourcesDef,
-  StorageDriver,
   ValidationIssue,
   WithId,
   WithMetadata,

@@ -25,7 +25,7 @@ export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = 
   tenantId: string;
   user: unknown;
   resource: string;
-  operation: ResourceOperation;
+  operation: "add" | "set" | "get" | "update" | "delete" | "list";
   action: AccessAction;
   /** Saved document for get / update / delete / existing set. Absent for add / list / new set. */
   doc?: TDoc;
