@@ -2,6 +2,8 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import { FireError, UnauthorizedError } from "./errors";
 import { executeOperation } from "./executor";
+import { and, createPolicyHelper } from "./policy";
+import type { PolicyHelper } from "./policy";
 import {
   decodeWireRequest,
   type WireFailure,
@@ -12,7 +14,13 @@ import { toFireFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { createTypedStorage, storageAdd } from "./typed-storage";
-import type { ClientOf, ResourceDefinition, ResourcesDef, StorageDriver } from "./types";
+import type {
+  AccessPolicy,
+  ClientOf,
+  ResourceDefinition,
+  ResourcesDef,
+  StorageDriver,
+} from "./types";
 
 /**
  * Application-owned trust boundary: verify credentials, authorize tenant
@@ -119,6 +127,14 @@ type ResourceDefinitions<TSchemas extends Record<string, StandardSchemaV1>, TCtx
 };
 
 type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
+  /**
+   * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
+   * for rules that only use execution context (`user`, `action`, …).
+   */
+  policy: PolicyHelper<TCtx>;
+  and<TDoc>(
+    ...policies: [AccessPolicy<TCtx, TDoc>, ...AccessPolicy<TCtx, TDoc>[]]
+  ): AccessPolicy<TCtx, TDoc>;
   resources<const TSchemas extends Record<string, StandardSchemaV1>>(
     resources: ResourceDefinitions<TSchemas, TCtx>,
     options?: ResourcesOptions,
@@ -172,6 +188,8 @@ function buildContext<TInitial>(
   const { resolve, stub: resolveStub } = config;
 
   return {
+    policy: createPolicyHelper(),
+    and,
     resources(resources, options: ResourcesOptions = {}) {
       const memory = options.memory ?? false;
 

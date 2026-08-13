@@ -30,6 +30,10 @@ export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = 
   nextDoc?: TDoc;
 };
 
+export type AccessPolicy<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = (
+  ctx: AccessContext<TCtx, TDoc>,
+) => boolean | Promise<boolean>;
+
 export type ResourceDefinition<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   // Default `any` keeps resource maps assignable regardless of concrete context.
@@ -37,9 +41,7 @@ export type ResourceDefinition<
   TCtx = any,
 > = {
   schema: TSchema;
-  accessPolicy: (
-    ctx: AccessContext<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>,
-  ) => boolean | Promise<boolean>;
+  accessPolicy: AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>;
   /**
    * Initial documents keyed by document ID. Seeds are create-only: existing
    * documents are never overwritten when a Durable Object is reactivated.

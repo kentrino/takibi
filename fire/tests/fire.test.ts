@@ -1412,6 +1412,52 @@ test("custom accessPolicy without owner field still works", async () => {
   });
 });
 
+test("fire.policy + and combines identity and document rules", async () => {
+  const context = createContext({ resolve: resolveTestContext });
+  const Post = z.object({
+    title: z.string(),
+    published: z.boolean(),
+  });
+  const staffPolicy = context.policy(({ user }) => user != null);
+  const draftOnly = context.policy(Post, ({ action, nextDoc, doc }) => {
+    if (action === "get" || action === "list") return true;
+    if (action === "create") return nextDoc?.published === false;
+    return doc?.published === false;
+  });
+  const handler = context.resources(
+    {
+      posts: {
+        schema: Post,
+        accessPolicy: context.and(staffPolicy, draftOnly),
+      },
+    },
+    { memory: true },
+  );
+  const member = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", { id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const anon = createClient<typeof handler>("http://fire.test/", {
+    headers: () => headers("tenant-a", null),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const draft = await member.posts.add({ title: "draft", published: false });
+  expect(draft.ok).toBe(true);
+
+  const live = await member.posts.add({ title: "live", published: true });
+  expect(live).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+
+  const anonList = await anon.posts.list();
+  expect(anonList).toMatchObject({
+    ok: false,
+    error: { kind: "operation", code: "FORBIDDEN", status: 403 },
+  });
+});
+
 test("handle injects typed initial context into resolve", async () => {
   type Initial = { container: { tenantId: string; user: User | null } };
 

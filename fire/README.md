@@ -139,6 +139,22 @@ storage operations.
 
 Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying an **existing** document (get / update / delete / existing set) also returns `NOT_FOUND` so IDs are not leaked. Denying create / new set / list returns `FORBIDDEN`.
 
+### Typed policies with `context.policy`
+
+`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, `doc` / `nextDoc` from that schema. Schema-less policies are reusable across resources; a schema-bound policy is not assignable to a different schema. Combine with `context.and` (also exported as `and`).
+
+```ts
+const staffPolicy = context.policy(({ user }) => user != null);
+const isSeeded = context.policy(itemSchema, ({ doc }) => doc?.isSeeded === true);
+
+const handler = context.resources({
+  items: {
+    schema: itemSchema,
+    accessPolicy: context.and(staffPolicy, isSeeded),
+  },
+});
+```
+
 ### Owner-scoped resources with `ownedBy`
 
 Owner identity is **domain data** in your schema (commonly `ownerId`), not library system metadata. Clients must send the owner field; fire does not auto-insert it. Trusted `handler.storage` / DO storage still bypasses `accessPolicy`, but schema validation still requires the field.

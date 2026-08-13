@@ -404,3 +404,62 @@ test("InferResourceDoc matches accessPolicy doc shape", () => {
   expectTypeOf<Doc["createdAt"]>().toEqualTypeOf<string>();
   expectTypeOf<Doc["updatedAt"]>().toEqualTypeOf<string>();
 });
+
+test("fire.policy types user from resolve and doc from schema", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
+  });
+
+  const staffPolicy = context.policy(({ user, action }) => {
+    expectTypeOf(user).toEqualTypeOf<User | null>();
+    expectTypeOf(action).toEqualTypeOf<AccessAction>();
+    return user != null;
+  });
+
+  const Seeded = z.object({
+    title: z.string(),
+    isSeeded: z.boolean(),
+  });
+  const isSeededData = context.policy(Seeded, ({ doc, nextDoc, user }) => {
+    expectTypeOf(user).toEqualTypeOf<User | null>();
+    if (doc) {
+      expectTypeOf(doc.title).toEqualTypeOf<string>();
+      expectTypeOf(doc.isSeeded).toEqualTypeOf<boolean>();
+      expectTypeOf(doc.id).toEqualTypeOf<DocumentId>();
+      // @ts-expect-error schema has no missingField
+      expectTypeOf(doc.missingField).toEqualTypeOf<unknown>();
+    }
+    if (nextDoc) {
+      expectTypeOf(nextDoc.isSeeded).toEqualTypeOf<boolean>();
+    }
+    return doc?.isSeeded === true;
+  });
+
+  context.resources({
+    items: {
+      schema: Seeded,
+      accessPolicy: context.and(staffPolicy, isSeededData),
+    },
+  });
+});
+
+test("schema-bound policy is not assignable to a different resource schema", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
+  });
+  const Title = z.object({ title: z.string() });
+  const Named = z.object({ name: z.string() });
+  const titlePolicy = context.policy(Title, ({ doc }) => doc?.title === "ok");
+
+  context.resources({
+    titles: {
+      schema: Title,
+      accessPolicy: titlePolicy,
+    },
+    names: {
+      schema: Named,
+      // @ts-expect-error titlePolicy is bound to Title, not Named
+      accessPolicy: titlePolicy,
+    },
+  });
+});
