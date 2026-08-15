@@ -1,530 +1,271 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, defineResource, fire, none, ownedBy, read, write } from "../src/index";
+import { createClient, fire, none, write } from "../src/index";
 import type {
-  AccessAction,
-  AccessGrant,
-  ContextConfig,
+  AccessPermission,
+  CollectionDefinition,
+  CollectionsOptions,
   DocumentId,
-  DocumentMetadata,
-  FireFailure,
   FireResult,
-  InferResourceDoc,
-  ResourcesOptions,
-  WithId,
-  WithMetadata,
+  InferCollectionDoc,
 } from "../src/index";
-
-const createContext = fire.initialContext();
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
 
-test("client methods are typed from resource schemas", () => {
-  const Post = z.object({
-    title: z.string(),
-    body: z.string(),
-  });
+const createContext = fire.initialContext();
 
+test("collection schemas type CRUD clients and trusted collections", () => {
   const context = createContext({
-    resolve: async ({ request }) => {
-      void request;
-      return { tenantId: "acme", user: { id: "u1", role: "member" } };
-    },
-  });
-
-  const handler = context.resources(
-    {
-      posts: {
-        schema: Post,
-        accessPolicy({ user }) {
-          if (user?.role === "admin") return write;
-          if (user != null) return write;
-          return read;
-        },
-      },
-    },
-    { memory: true },
-  );
-
-  type Handler = typeof handler;
-  const client = createClient<Handler>("http://localhost/foo");
-
-  expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{
-    title: string;
-    body: string;
-  }>();
-  expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ id?: string }>();
-  expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ createdAt?: string }>();
-  expectTypeOf(client.posts.add).parameter(0).not.toMatchTypeOf<{ updatedAt?: string }>();
-  expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: DocumentId } | undefined>();
-
-  expectTypeOf(client.posts.set).parameter(1).toEqualTypeOf<{
-    title: string;
-    body: string;
-  }>();
-  expectTypeOf(client.posts.set).parameter(1).not.toMatchTypeOf<{ createdAt?: string }>();
-  expectTypeOf(client.posts.update).parameter(1).toEqualTypeOf<{
-    title?: string;
-    body?: string;
-  }>();
-  expectTypeOf(client.posts.update).parameter(1).not.toMatchTypeOf<{ updatedAt?: string }>();
-
-  type Got = Awaited<ReturnType<typeof client.posts.get>>;
-  expectTypeOf<Got>().toMatchTypeOf<
-    FireResult<{
-      id: string;
-      createdAt: string;
-      updatedAt: string;
-      title: string;
-      body: string;
-    }>
-  >();
-
-  type GotSuccess = Extract<Got, { ok: true }>;
-  expectTypeOf<GotSuccess["data"]>().toMatchTypeOf<{
-    id: string;
-    createdAt: string;
-    updatedAt: string;
-    title: string;
-    body: string;
-  }>();
-  expectTypeOf<GotSuccess["data"]["id"]>().toEqualTypeOf<DocumentId>();
-  expectTypeOf<GotSuccess["data"]["createdAt"]>().toEqualTypeOf<string>();
-  expectTypeOf<GotSuccess["data"]["updatedAt"]>().toEqualTypeOf<string>();
-  expectTypeOf<GotSuccess["data"]>().not.toMatchTypeOf<null>();
-
-  type GotFailure = Extract<Got, { ok: false }>;
-  expectTypeOf<GotFailure["error"]>().toMatchTypeOf<FireFailure>();
-
-  expectTypeOf(handler.storage.posts.add).parameter(0).toEqualTypeOf<{
-    title: string;
-    body: string;
-  }>();
-  expectTypeOf(handler.storage.posts.add)
-    .parameter(1)
-    .toEqualTypeOf<{ id?: DocumentId } | undefined>();
-
-  type StorageGot = Awaited<ReturnType<typeof handler.storage.posts.get>>;
-  expectTypeOf<StorageGot>().toMatchTypeOf<
-    FireResult<{
-      id: string;
-      createdAt: string;
-      updatedAt: string;
-      title: string;
-      body: string;
-    }>
-  >();
-  expectTypeOf<Extract<StorageGot, { ok: true }>["data"]>().not.toMatchTypeOf<null>();
-});
-
-test("resolve concrete user type flows into accessPolicy without cast", () => {
-  createContext({
-    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
-  }).resources({
-    posts: {
-      schema: z.object({ title: z.string() }),
-      accessPolicy({ user, action }) {
-        expectTypeOf(user).toEqualTypeOf<User | null>();
-        expectTypeOf(action).toEqualTypeOf<AccessAction>();
-        if (user?.role === "admin") return write;
-        if (user != null) return write;
-        return read;
-      },
-    },
-  });
-});
-
-test("resource seed values are inferred from the schema input", () => {
-  createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
-  }).resources({
-    posts: {
-      schema: z.object({
-        title: z.string(),
-        published: z.boolean().default(false),
-      }),
-      accessPolicy({ doc }) {
-        if (doc) {
-          expectTypeOf(doc.title).toEqualTypeOf<string>();
-          expectTypeOf(doc.published).toEqualTypeOf<boolean>();
-        }
-        return write;
-      },
-      // @ts-expect-error seed values are checked against the schema input
-      seed: () => ({
-        welcome: {
-          title: "Welcome",
-        },
-        invalid: {
-          title: 123,
-        },
-      }),
-    },
   });
-});
-
-test("execution context is inferred from resolve return without type args", () => {
-  createContext({
-    resolve: () => ({
-      tenantId: "acme" as const,
-      user: { id: "u1", role: "admin" as const },
-    }),
-  }).resources({
-    posts: {
-      schema: z.object({ title: z.string() }),
-      accessPolicy({ user, tenantId }) {
-        expectTypeOf(tenantId).toEqualTypeOf<"acme">();
-        expectTypeOf(user).toEqualTypeOf<{ id: string; role: "admin" }>();
-        return write;
-      },
-    },
-  });
-});
-
-test("initialContext createContext rejects function shorthand and staged config keys", () => {
-  // @ts-expect-error function shorthand removed — pass { resolve }
-  createContext(({ tenantId, user }) => ({ tenantId, user }));
-
-  // @ts-expect-error resolve is required; staged keys are gone
-  createContext({});
-
-  createContext({
-    resolve: () => ({ tenantId: "acme", user: null }),
-    // @ts-expect-error getUser removed
-    getUser: async () => null,
-  });
-
-  createContext({
-    resolve: () => ({ tenantId: "acme", user: null }),
-    // @ts-expect-error getTenantId removed
-    getTenantId: () => "acme",
-  });
-
-  createContext({
-    resolve: () => ({ tenantId: "acme", user: null }),
-    // @ts-expect-error context key is not an initialContext config option
-    context: () => ({ tenantId: "acme", user: null }),
-  });
-
-  type OnlyResolve = ContextConfig<AppCtx>;
-  expectTypeOf<OnlyResolve["resolve"]>().toEqualTypeOf<OnlyResolve["resolve"]>();
-  expectTypeOf<OnlyResolve>().toHaveProperty("resolve");
-  expectTypeOf<OnlyResolve>().not.toHaveProperty("getUser");
-  expectTypeOf<OnlyResolve>().not.toHaveProperty("getTenantId");
-  expectTypeOf<OnlyResolve>().not.toHaveProperty("bindings");
-  expectTypeOf<OnlyResolve>().toHaveProperty("stub");
-  expectTypeOf<ResourcesOptions>().toHaveProperty("memory");
-  expectTypeOf<ResourcesOptions>().not.toHaveProperty("binding");
-});
-
-test("initial context is required on handle and typed into resolve / stub", () => {
-  type Initial = {
-    container: { get(name: "auth"): { id: string } };
-    env: { TENANT_STORE: DurableObjectNamespace };
-  };
-  type NarrowCtx = { tenantId: "acme" | "beta"; user: User | null };
-
-  const createContextWithInitial = fire.initialContext<Initial>();
-  const context = createContextWithInitial({
-    resolve: async ({ request, context: input }): Promise<NarrowCtx> => {
-      void request;
-      expectTypeOf(input.container.get("auth")).toEqualTypeOf<{ id: string }>();
-      return {
-        tenantId: "acme",
-        user: { id: input.container.get("auth").id, role: "member" },
-      };
-    },
-    stub: ({ context: input, tenantId }) => {
-      expectTypeOf(tenantId).toEqualTypeOf<"acme" | "beta">();
-      expectTypeOf(input.env.TENANT_STORE).toEqualTypeOf<DurableObjectNamespace>();
-      const ns = input.env.TENANT_STORE;
-      return ns.get(ns.idFromName(tenantId));
-    },
-  });
-
-  const handler = context.resources(
+  const handler = context.collections(
     {
       posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy({ user }) {
-          expectTypeOf(user).toEqualTypeOf<User | null>();
-          return user != null ? write : none;
-        },
-      },
-    },
-    { memory: true },
-  );
-
-  // @ts-expect-error initial context is required when TInitial has keys
-  void handler.handle(new Request("http://fire.test/"), { prefix: "/rpc" });
-
-  void handler.handle(new Request("http://fire.test/rpc"), {
-    prefix: "/rpc",
-    // @ts-expect-error wrong initial context shape
-    context: { container: 1 },
-  });
-
-  void handler.handle(new Request("http://fire.test/rpc"), {
-    prefix: "/rpc",
-    context: {
-      container: {
-        get(name: "auth") {
-          void name;
-          return { id: "u1" };
-        },
-      },
-      env: { TENANT_STORE: null as unknown as DurableObjectNamespace },
-    },
-  });
-
-  void handler.handle(new Request("http://fire.test/rpc"), {
-    prefix: "/rpc",
-    context: {
-      container: {
-        get(name: "auth") {
-          void name;
-          return { id: "u1" };
-        },
-      },
-      env: { TENANT_STORE: null as unknown as DurableObjectNamespace },
-    },
-    // @ts-expect-error env is not a handle option — put it on initial context
-    env: { TENANT_STORE: null },
-  });
-});
-
-test("empty initial context makes handle context optional", () => {
-  const handler = createContext({
-    resolve: () => ({ tenantId: "acme", user: null }),
-  }).resources(
-    {
-      posts: {
-        schema: z.object({ title: z.string() }),
+        schema: z.object({ title: z.string(), published: z.boolean().default(false) }),
         accessPolicy: write,
       },
     },
     { memory: true },
   );
+  const client = createClient<typeof handler>("http://fire.test");
 
-  void handler.handle(new Request("http://fire.test/"), { prefix: "/" });
+  expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{
+    title: string;
+    published?: boolean;
+  }>();
+  expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: DocumentId } | undefined>();
+  expectTypeOf(client.posts.update).parameter(1).toEqualTypeOf<{
+    title?: string;
+    published?: boolean;
+  }>();
+  expectTypeOf<Awaited<ReturnType<typeof client.posts.get>>>().toMatchTypeOf<
+    FireResult<{
+      id: string;
+      title: string;
+      published: boolean;
+      createdAt: string;
+      updatedAt: string;
+    }>
+  >();
+
+  expectTypeOf(handler.$collections.posts.add).returns.resolves.toMatchTypeOf<{
+    id: string;
+    title: string;
+    published: boolean;
+  }>();
+  expectTypeOf(handler.$collections.posts.get).returns.resolves.not.toHaveProperty("ok");
+  expectTypeOf(handler).not.toHaveProperty("storage");
+  expectTypeOf<CollectionsOptions>().toHaveProperty("memory");
 });
 
-test("WithId replaces conflicting id types with DocumentId", () => {
-  type Doc = WithId<{ id: number; title: string }>;
-  expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
-  expectTypeOf<Doc["title"]>().toEqualTypeOf<string>();
-  expectTypeOf<Doc>().not.toMatchTypeOf<{ id: number }>();
-});
-
-test("WithMetadata requires DocumentMetadata and replaces conflicts", () => {
-  type Doc = WithMetadata<{ id: number; createdAt: number; title: string }>;
-  expectTypeOf<Doc>().toEqualTypeOf<DocumentMetadata & { title: string }>();
-  expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
-  expectTypeOf<Doc["createdAt"]>().toEqualTypeOf<string>();
-  expectTypeOf<Doc["updatedAt"]>().toEqualTypeOf<string>();
-  expectTypeOf<Doc>().not.toMatchTypeOf<{ createdAt: number }>();
-});
-
-test("accessPolicy receives typed doc / nextDoc from resource schema", () => {
-  createContext({
-    resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
-  }).resources({
-    notes: defineResource({
-      schema: z.object({
-        ownerId: z.string(),
-        title: z.string(),
-      }),
-      accessPolicy(ctx) {
-        expectTypeOf(ctx.action).toEqualTypeOf<AccessAction>();
-        if (ctx.doc) {
-          expectTypeOf(ctx.doc.ownerId).toEqualTypeOf<string>();
-          expectTypeOf(ctx.doc.title).toEqualTypeOf<string>();
-          expectTypeOf(ctx.doc.id).toEqualTypeOf<DocumentId>();
-          expectTypeOf(ctx.doc.createdAt).toEqualTypeOf<string>();
-        }
-        if (ctx.nextDoc) {
-          expectTypeOf(ctx.nextDoc.ownerId).toEqualTypeOf<string>();
-          expectTypeOf(ctx.nextDoc.id).toEqualTypeOf<DocumentId>();
-        }
-        return write;
-      },
+test("collection action input/output and scoped handler args are inferred", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({
+      tenantId: "acme",
+      user: { id: "u1", role: "member" },
     }),
   });
-});
-
-test("ownedBy default ownerId and custom string field are assignable", () => {
-  createContext({
-    resolve: () => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
-  }).resources({
-    notes: defineResource({
-      schema: z.object({
-        ownerId: z.string(),
-        title: z.string(),
-      }),
-      accessPolicy: ownedBy({
-        subject: ({ user }) => (user as User | null)?.id,
-        bypass: ({ user }) => (user as User | null)?.role === "admin",
-      }),
+  const posts = context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: write,
+    actions: (defineAction) => ({
+      transformed: defineAction()
+        .input(z.string().transform((value) => value.length))
+        .policy(write)
+        .handler(({ input, ctx, collection, $collection }) => {
+          expectTypeOf(input).toEqualTypeOf<number>();
+          expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
+          expectTypeOf(collection).toEqualTypeOf($collection);
+          return { length: input };
+        }),
+      optional: defineAction()
+        .input(z.string().optional())
+        .policy(write)
+        .handler(({ input }) => ({ value: input ?? null })),
+      coerced: defineAction()
+        .input(z.coerce.number())
+        .policy(write)
+        .handler(({ input }) => {
+          expectTypeOf(input).toEqualTypeOf<number>();
+          return { value: input };
+        }),
+      noInput: defineAction()
+        .policy(write)
+        .handler(({ input }) => {
+          expectTypeOf(input).toEqualTypeOf<undefined>();
+          return { ok: true };
+        }),
     }),
-    posts: defineResource({
-      schema: z.object({
-        authorId: z.string(),
-        title: z.string(),
-      }),
-      accessPolicy: ownedBy({
-        field: "authorId",
-        subject: ({ user }) => (user as User | null)?.id,
-      }),
-    }),
   });
+  const handler = context.collections({ posts }, { memory: true });
+  const client = createClient<typeof handler>("http://fire.test");
+
+  expectTypeOf(client.posts.transformed).parameter(0).toEqualTypeOf<string>();
+  expectTypeOf(client.posts.transformed).returns.resolves.toEqualTypeOf<
+    FireResult<{ length: number }>
+  >();
+  expectTypeOf(client.posts.coerced).parameter(0).toEqualTypeOf<unknown>();
+  const checkCalls = () => {
+    void client.posts.optional();
+    void client.posts.optional("value");
+    void client.posts.noInput();
+    // @ts-expect-error no-input actions do not accept arguments
+    void client.posts.noInput("value");
+  };
+  void checkCalls;
 });
 
-test("ownedBy rejects a field missing from the schema output", () => {
-  const schema = z.object({
-    title: z.string(),
-  });
-  type Def = import("../src/types").ResourceDefinition<typeof schema, AppCtx>;
-  // @ts-expect-error ownedBy requires ownerId on the document
-  const _policy: Def["accessPolicy"] = ownedBy({
-    subject: ({ user }) => (user as User | null)?.id,
-  });
-  void _policy;
-});
-
-test("InferResourceDoc matches accessPolicy doc shape", () => {
-  const Note = z.object({
-    ownerId: z.string(),
-    title: z.string(),
-  });
-  type NoteDef = { schema: typeof Note };
-  type Doc = InferResourceDoc<NoteDef>;
-  expectTypeOf<Doc["ownerId"]>().toEqualTypeOf<string>();
-  expectTypeOf<Doc["title"]>().toEqualTypeOf<string>();
-  expectTypeOf<Doc["id"]>().toEqualTypeOf<DocumentId>();
-  expectTypeOf<Doc["createdAt"]>().toEqualTypeOf<string>();
-  expectTypeOf<Doc["updatedAt"]>().toEqualTypeOf<string>();
-});
-
-test("fire.policy types user from resolve and doc from schema", () => {
-  const context = createContext({
-    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
-  });
-
-  const staffPolicy = context.policy(({ user, action }) => {
-    expectTypeOf(user).toEqualTypeOf<User | null>();
-    expectTypeOf(action).toEqualTypeOf<AccessAction>();
-    return user != null ? write : none;
-  });
-
-  const Seeded = z.object({
-    title: z.string(),
-    isSeeded: z.boolean(),
-  });
-  const isSeededData = context.policy(Seeded, ({ doc, nextDoc, user }) => {
-    expectTypeOf(user).toEqualTypeOf<User | null>();
-    if (doc) {
-      expectTypeOf(doc.title).toEqualTypeOf<string>();
-      expectTypeOf(doc.isSeeded).toEqualTypeOf<boolean>();
-      expectTypeOf(doc.id).toEqualTypeOf<DocumentId>();
-      // @ts-expect-error schema has no missingField
-      expectTypeOf(doc.missingField).toEqualTypeOf<unknown>();
-    }
-    if (nextDoc) {
-      expectTypeOf(nextDoc.isSeeded).toEqualTypeOf<boolean>();
-    }
-    return doc?.isSeeded || nextDoc?.isSeeded ? read : write;
-  });
-
-  context.resources({
-    items: {
-      schema: Seeded,
-      accessPolicy: context.and(staffPolicy, isSeededData),
-    },
-  });
-});
-
-test("schema-bound policy is not assignable to a different resource schema", () => {
-  const context = createContext({
-    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
-  });
-  const Title = z.object({ title: z.string() });
-  const Named = z.object({ name: z.string() });
-  const titlePolicy = context.policy(Title, ({ doc }) => (doc?.title === "ok" ? write : none));
-
-  context.resources({
-    titles: {
-      schema: Title,
-      accessPolicy: titlePolicy,
-    },
-    names: {
-      schema: Named,
-      // @ts-expect-error titlePolicy is bound to Title, not Named
-      accessPolicy: titlePolicy,
-    },
-  });
-});
-
-test("pick-schema policy assigns when the resource field is optional", () => {
-  const context = createContext({
-    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "admin" } }),
-  });
-  const staffPolicy = context.policy(({ user }) => (user != null ? write : none));
-  const isSeededData = context.policy(z.object({ isSeed: z.boolean() }), ({ doc }) =>
-    doc?.isSeed === true ? none : write,
-  );
-
-  context.resources({
-    treatments: {
-      schema: z.object({
-        name: z.string(),
-        isSeed: z.boolean().optional(),
-      }),
-      accessPolicy: context.and(staffPolicy, isSeededData),
-    },
-    machines: {
-      schema: z.object({ name: z.string() }),
-      // @ts-expect-error machines have no isSeed
-      accessPolicy: isSeededData,
-    },
-    brokers: {
-      schema: z.object({ name: z.string() }),
-      // @ts-expect-error and keeps the isSeed pick from isSeededData
-      accessPolicy: context.and(staffPolicy, isSeededData),
-    },
-  });
-});
-
-test("accessPolicy accepts a constant grant and rejects a boolean", () => {
+test("root actions infer all collections and appear flat on the client", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-
-  context.resources({
-    posts: {
-      schema: z.object({ title: z.string() }),
-      accessPolicy: write,
+  const base = context.collections(
+    {
+      posts: { schema: z.object({ title: z.string() }), accessPolicy: write },
+      notes: { schema: z.object({ body: z.string() }), accessPolicy: write },
     },
+    { memory: true },
+  );
+  const exportAll = base
+    .defineAction()
+    .policy(write)
+    .handler(({ input, ctx, collections, $collections }) => {
+      expectTypeOf(input).toEqualTypeOf<undefined>();
+      expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
+      expectTypeOf(collections).toHaveProperty("posts");
+      expectTypeOf(collections).toHaveProperty("notes");
+      expectTypeOf(collections).toEqualTypeOf($collections);
+      return { count: 0 };
+    });
+  const handler = base.actions({ exportAll });
+  const client = createClient<typeof handler>("http://fire.test");
+
+  expectTypeOf(client.exportAll).returns.resolves.toEqualTypeOf<FireResult<{ count: number }>>();
+  expectTypeOf(client.posts).not.toHaveProperty("exportAll");
+});
+
+test("action builder requires policy before handler", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const base = context.collections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: write },
+  });
+  const builder = base.defineAction();
+  expectTypeOf(builder).not.toHaveProperty("handler");
+  const checkMissingHandler = () => {
+    // @ts-expect-error handler is unavailable until policy is set
+    builder.handler(() => null);
+    base
+      .defineAction()
+      // @ts-expect-error action inputs must be JSON-safe before schema parsing
+      .input(z.date());
+  };
+  void checkMissingHandler;
+  builder.policy(write).handler(() => null);
+});
+
+test("action and collection collisions are type errors", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: write,
+    // @ts-expect-error CRUD method names are reserved
+    actions: (defineAction) => ({
+      get: defineAction()
+        .policy(write)
+        .handler(() => null),
+    }),
+  });
+  context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: write,
+    // @ts-expect-error action names must be safe TypeScript identifiers
+    actions: (defineAction) => ({
+      "bad-name": defineAction()
+        .policy(write)
+        .handler(() => null),
+    }),
   });
 
-  context.resources({
+  const base = context.collections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: write },
+  });
+  const action = base
+    .defineAction()
+    .policy(write)
+    .handler(() => null);
+  const symbolName = Symbol("action");
+  const checkCollisions = () => {
+    base.actions({
+      // @ts-expect-error root action names cannot collide with collections
+      posts: action,
+    });
+    base.actions({
+      // @ts-expect-error reflective names are reserved
+      // oxlint-disable-next-line unicorn/no-thenable -- verifies the API rejects thenables
+      then: action,
+    });
+    base.actions({
+      // @ts-expect-error action names must be safe TypeScript identifiers
+      "bad-name": action,
+    });
+    base.actions({
+      // @ts-expect-error numeric action names are not public identifiers
+      1: action,
+    });
+    base.actions({
+      // @ts-expect-error symbol action names are not public identifiers
+      [symbolName]: action,
+    });
+    // @ts-expect-error collection names must be safe TypeScript identifiers
+    context.collections({
+      "bad-name": {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: write,
+      },
+    });
+    // @ts-expect-error numeric collection names are not public identifiers
+    context.collections({
+      1: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: write,
+      },
+    });
+    // @ts-expect-error symbol collection names are not public identifiers
+    context.collections({
+      [symbolName]: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: write,
+      },
+    });
+  };
+  void checkCollisions;
+});
+
+test("policy context uses permission vocabulary", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  context.collections({
     posts: {
       schema: z.object({ title: z.string() }),
-      accessPolicy() {
-        const granted: AccessGrant = write;
-        expectTypeOf(granted).toEqualTypeOf<AccessGrant>();
-        return granted;
+      accessPolicy({ permission, collection }) {
+        expectTypeOf(permission).toEqualTypeOf<Exclude<AccessPermission, "invoke">>();
+        expectTypeOf(collection).toEqualTypeOf<string>();
+        return none;
       },
     },
   });
+});
 
-  context.resources({
-    posts: {
-      schema: z.object({ title: z.string() }),
-      // @ts-expect-error policies return a grant, not a boolean
-      accessPolicy() {
-        return true;
-      },
-    },
-  });
+test("collection definition and inferred document use collection names", () => {
+  const schema = z.object({ title: z.string() });
+  type Definition = CollectionDefinition<typeof schema, AppCtx>;
+  type Document = InferCollectionDoc<Definition>;
+  expectTypeOf<Document["id"]>().toEqualTypeOf<DocumentId>();
+  expectTypeOf<Document["title"]>().toEqualTypeOf<string>();
 });

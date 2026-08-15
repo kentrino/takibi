@@ -67,7 +67,7 @@ function createOwnedByPolicy<TCtx, TField extends string>(
  *
  * Matching requests receive get/create/update/delete (not list). Does not insert owner values;
  * clients must supply them. Trusted storage bypasses this policy.
- * With `defineResource` / `ResourceDefinition`, assigning to a schema that lacks `field`
+ * With `defineCollection` / `CollectionDefinition`, assigning to a schema that lacks `field`
  * (default `"ownerId"`) is a type error.
  */
 export function ownedBy<TCtx = unknown>(

@@ -1,49 +1,26 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import * as Fire from "../src/index";
 import type {
-  AccessAction,
   AccessContext,
   AccessGrant,
-  AccessPolicy,
-  AccessPolicyFn,
-  AnySchema,
+  AccessPermission,
+  ActionGateContext,
   ClientOf,
   CollectionApi,
-  ConstrainedPolicy,
+  CollectionDefinition,
+  CollectionsApi,
+  CollectionsDef,
+  CollectionsOptions,
   ContextConfig,
-  ContextResolver,
-  ContextResolverInput,
-  ContextStubResolver,
-  ContextStubResolverInput,
   CreateClientOptions,
-  DocumentId,
-  DocumentMetadata,
-  FireFailure,
   FireHandler,
-  FireOperationFailure,
   FireResult,
-  FireValidationFailure,
-  HandleOptions,
-  HandleResult,
-  InferHandlerResources,
-  InferPolicyDoc,
-  InferResourceDoc,
-  InferResourceInput,
-  InferSchemaInput,
-  InferSchemaOutput,
-  ListOptions,
-  OwnedByOptions,
-  PolicyHelper,
-  ResourceDataInput,
-  ResourceDefinition,
-  ResourcesDef,
-  ResourcesOptions,
-  ValidationIssue,
-  WithId,
-  WithMetadata,
+  InferCollectionDoc,
+  InferHandlerCollections,
+  JsonValue,
 } from "../src/index";
 
-test("public root exports documented entry points", () => {
+test("public root exports collection/action entry points", () => {
   expectTypeOf(Fire.createClient).toBeFunction();
   expectTypeOf(Fire.fire).toHaveProperty("initialContext");
   expectTypeOf(Fire.initialContext).toBeFunction();
@@ -55,82 +32,49 @@ test("public root exports documented entry points", () => {
   expectTypeOf(Fire.read).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.write).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.ownedBy).toBeFunction();
-  expectTypeOf(Fire.defineResource).toBeFunction();
-  expectTypeOf(Fire.FireError).toBeConstructibleWith("CODE", "message");
-  expectTypeOf(Fire.UnauthorizedError).toBeConstructibleWith();
-  expectTypeOf(Fire.ForbiddenError).toBeConstructibleWith();
-  expectTypeOf(Fire.NotFoundError).toBeConstructibleWith();
-  expectTypeOf(Fire.BadRequestError).toBeConstructibleWith("message");
-  expectTypeOf(Fire.ConflictError).toBeConstructibleWith();
-  expectTypeOf(Fire.SchemaValidationError).toBeConstructibleWith([]);
 });
 
-test("annotation types stay on the public root", () => {
+test("public annotation types use the collection/action vocabulary", () => {
   type Ctx = { tenantId: string; user: unknown };
+  type Definitions = { posts: CollectionDefinition };
   type PublicSurface = {
-    CreateClientOptions: CreateClientOptions;
-    InferHandlerResources: InferHandlerResources<FireHandler>;
-    ClientOf: ClientOf<Record<string, never>>;
-    CollectionApi: CollectionApi<{ schema: AnySchema }>;
-    FireHandler: FireHandler;
-    HandleOptions: HandleOptions<Record<string, never>>;
-    HandleResult: HandleResult;
-    ResourcesOptions: ResourcesOptions;
-    ContextConfig: ContextConfig<Ctx>;
-    ContextResolver: ContextResolver<Ctx>;
-    ContextResolverInput: ContextResolverInput;
-    ContextStubResolver: ContextStubResolver<Ctx>;
-    ContextStubResolverInput: ContextStubResolverInput<Ctx>;
-    AccessAction: AccessAction;
     AccessContext: AccessContext<Ctx>;
     AccessGrant: AccessGrant;
-    AccessPolicy: AccessPolicy<Ctx>;
-    AccessPolicyFn: AccessPolicyFn<Ctx>;
-    ConstrainedPolicy: ConstrainedPolicy<Ctx, { title: string }>;
-    InferPolicyDoc: InferPolicyDoc<AnySchema>;
-    PolicyHelper: PolicyHelper<Ctx>;
-    OwnedByOptions: OwnedByOptions<Ctx>;
-    ResourceDefinition: ResourceDefinition;
-    ResourcesDef: ResourcesDef;
-    InferResourceDoc: InferResourceDoc<{ schema: AnySchema }>;
-    InferResourceInput: InferResourceInput<{ schema: AnySchema }>;
-    ResourceDataInput: ResourceDataInput<{ schema: AnySchema }>;
-    DocumentId: DocumentId;
-    DocumentMetadata: DocumentMetadata;
-    WithId: WithId<{ id: string }>;
-    WithMetadata: WithMetadata<{ id: string }>;
-    ListOptions: ListOptions;
+    AccessPermission: AccessPermission;
+    ActionGateContext: ActionGateContext<Ctx>;
+    ClientOf: ClientOf<Definitions>;
+    CollectionApi: CollectionApi<CollectionDefinition>;
+    CollectionDefinition: CollectionDefinition;
+    CollectionsApi: CollectionsApi<Definitions>;
+    CollectionsDef: CollectionsDef;
+    CollectionsOptions: CollectionsOptions;
+    ContextConfig: ContextConfig<Ctx>;
+    CreateClientOptions: CreateClientOptions;
+    FireHandler: FireHandler;
     FireResult: FireResult<unknown>;
-    FireFailure: FireFailure;
-    FireOperationFailure: FireOperationFailure;
-    FireValidationFailure: FireValidationFailure;
-    ValidationIssue: ValidationIssue;
-    AnySchema: AnySchema;
-    InferSchemaInput: InferSchemaInput<AnySchema>;
-    InferSchemaOutput: InferSchemaOutput<AnySchema>;
+    InferCollectionDoc: InferCollectionDoc<CollectionDefinition>;
+    InferHandlerCollections: InferHandlerCollections<FireHandler>;
+    JsonValue: JsonValue;
   };
   expectTypeOf<PublicSurface>().not.toBeNever();
 });
 
-test("internal assembly APIs are not on the public root", () => {
+test("removed resource/storage aliases and internal assembly APIs are not public", () => {
+  expectTypeOf(Fire).not.toHaveProperty("defineResource");
   expectTypeOf(Fire).not.toHaveProperty("executeOperation");
   expectTypeOf(Fire).not.toHaveProperty("createTypedStorage");
-  expectTypeOf(Fire).not.toHaveProperty("createMemoryStorage");
-  expectTypeOf(Fire).not.toHaveProperty("createDurableObjectStorage");
   expectTypeOf(Fire).not.toHaveProperty("parseSchema");
 
   type PublicModule = typeof import("../src/index");
-  type ForbiddenValues =
+  type Removed =
+    | "AccessAction"
+    | "InferHandlerResources"
+    | "InferResourceDoc"
+    | "ResourceDefinition"
+    | "ResourcesDef"
+    | "ResourcesOptions"
+    | "defineResource"
     | "executeOperation"
-    | "createTypedStorage"
-    | "createMemoryStorage"
-    | "createDurableObjectStorage"
-    | "parseSchema";
-  expectTypeOf<Extract<ForbiddenValues, keyof PublicModule>>().toBeNever();
-
-  // @ts-expect-error StorageDriver is not a public export
-  type UnpublishedStorageDriver = import("../src/index").StorageDriver;
-  // @ts-expect-error ResourceOperation is not a public export
-  type UnpublishedResourceOperation = import("../src/index").ResourceOperation;
-  expectTypeOf<[UnpublishedStorageDriver, UnpublishedResourceOperation]>().not.toBeNever();
+    | "createTypedStorage";
+  expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });

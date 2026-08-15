@@ -4,13 +4,13 @@ import type { AccessContext, AccessGrant } from "../src/index";
 
 type Ctx = { tenantId: string; user: { id: string } | null };
 
-function ctx(action: AccessContext<Ctx>["action"]): AccessContext<Ctx> {
+function ctx(permission: AccessContext<Ctx>["permission"]): AccessContext<Ctx> {
   return {
     tenantId: "t",
     user: { id: "u1" },
-    resource: "items",
-    operation: action === "create" ? "add" : action,
-    action,
+    collection: "items",
+    operation: permission === "create" ? "add" : permission,
+    permission,
   };
 }
 
@@ -18,13 +18,14 @@ function actionsOf(grant: AccessGrant): string[] {
   return [...grant].sort();
 }
 
-test("allows checks the current action against a grant", () => {
+test("allows checks the current permission against a grant", () => {
   expect(allows(write, "delete")).toBe(true);
   expect(allows(read, "get")).toBe(true);
   expect(allows(read, "update")).toBe(false);
   expect(allows(none, "list")).toBe(false);
   expect(allows(grant("create"), "create")).toBe(true);
   expect(allows(grant("create"), "update")).toBe(false);
+  expect(allows(write, "invoke")).toBe(true);
 });
 
 test("and intersects grants and or unions them", async () => {

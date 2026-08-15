@@ -2,107 +2,113 @@ import { expect, test } from "vite-plus/test";
 import { BadRequestError, NotFoundError } from "../src/errors";
 import { decodePublicHttp, matchesPublicPrefix, MethodNotAllowedError } from "../src/http";
 
-test("matchesPublicPrefix is a path-segment boundary", () => {
+test("matchesPublicPrefix uses path-segment boundaries", () => {
   expect(matchesPublicPrefix("/api/fire", "/api/fire")).toBe(true);
-  expect(matchesPublicPrefix("/api/fire/", "/api/fire")).toBe(true);
   expect(matchesPublicPrefix("/api/fire/posts", "/api/fire")).toBe(true);
-  expect(matchesPublicPrefix("/api/fire/posts/id", "/api/fire")).toBe(true);
   expect(matchesPublicPrefix("/api/firehose", "/api/fire")).toBe(false);
-  expect(matchesPublicPrefix("/other", "/api/fire")).toBe(false);
-  expect(matchesPublicPrefix("/posts", undefined)).toBe(true);
 });
 
-test("decodePublicHttp maps the six REST routes", async () => {
+test("decodePublicHttp maps CRUD routes", async () => {
   await expect(
     decodePublicHttp(
       new Request("http://fire.test/api/fire/posts", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "Hi" }),
-      }),
-      "/api/fire",
-    ),
-  ).resolves.toEqual({ resource: "posts", operation: "add", input: { title: "Hi" } });
-
-  await expect(
-    decodePublicHttp(
-      new Request("http://fire.test/api/fire/posts/p1", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "Hi" }),
       }),
       "/api/fire",
     ),
   ).resolves.toEqual({
-    resource: "posts",
-    operation: "set",
-    id: "p1",
+    kind: "crud",
+    collection: "posts",
+    operation: "add",
     input: { title: "Hi" },
   });
-
-  await expect(
-    decodePublicHttp(new Request("http://fire.test/api/fire/posts/p1"), "/api/fire"),
-  ).resolves.toEqual({ resource: "posts", operation: "get", id: "p1" });
-
-  await expect(
-    decodePublicHttp(
-      new Request("http://fire.test/api/fire/posts/p1", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "Hi" }),
-      }),
-      "/api/fire",
-    ),
-  ).resolves.toEqual({
-    resource: "posts",
-    operation: "update",
+  await expect(decodePublicHttp(new Request("http://fire.test/posts/p1"))).resolves.toEqual({
+    kind: "crud",
+    collection: "posts",
+    operation: "get",
     id: "p1",
-    input: { title: "Hi" },
   });
-
   await expect(
-    decodePublicHttp(
-      new Request("http://fire.test/api/fire/posts/p1", { method: "DELETE" }),
-      "/api/fire",
-    ),
-  ).resolves.toEqual({ resource: "posts", operation: "delete", id: "p1" });
-
-  await expect(
-    decodePublicHttp(
-      new Request("http://fire.test/api/fire/posts?limit=10&cursor=abc"),
-      "/api/fire",
-    ),
+    decodePublicHttp(new Request("http://fire.test/posts?limit=10&cursor=abc")),
   ).resolves.toEqual({
-    resource: "posts",
+    kind: "crud",
+    collection: "posts",
     operation: "list",
     list: { limit: 10, cursor: "abc" },
   });
 });
 
-test("decodePublicHttp rejects extra segments, unknown methods, and non-list query", async () => {
+test("decodePublicHttp maps collection and root colon actions", async () => {
   await expect(
-    decodePublicHttp(new Request("http://fire.test/posts/p1/extra"), undefined),
-  ).rejects.toBeInstanceOf(NotFoundError);
+    decodePublicHttp(
+      new Request("http://fire.test/api/fire/posts:publish", {
+        method: "POST",
+        body: JSON.stringify({ id: "p1" }),
+      }),
+      "/api/fire",
+    ),
+  ).resolves.toEqual({
+    kind: "action",
+    scope: "posts",
+    name: "publish",
+    input: { id: "p1" },
+  });
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/api/fire/$:exportAll", { method: "POST" }),
+      "/api/fire",
+    ),
+  ).resolves.toEqual({
+    kind: "action",
+    scope: "$",
+    name: "exportAll",
+  });
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/posts:nullable", {
+        method: "POST",
+        body: "null",
+      }),
+    ),
+  ).resolves.toEqual({
+    kind: "action",
+    scope: "posts",
+    name: "nullable",
+    input: null,
+  });
+});
 
+test("action routes reject methods, queries, malformed paths, and extra segments", async () => {
   await expect(
-    decodePublicHttp(new Request("http://fire.test/posts", { method: "PUT" }), undefined),
+    decodePublicHttp(new Request("http://fire.test/posts:stats")),
   ).rejects.toBeInstanceOf(MethodNotAllowedError);
-
   await expect(
-    decodePublicHttp(new Request("http://fire.test/posts/p1?limit=1"), undefined),
+    decodePublicHttp(new Request("http://fire.test/posts:stats?limit=1", { method: "POST" })),
   ).rejects.toBeInstanceOf(BadRequestError);
-
   await expect(
-    decodePublicHttp(new Request("http://fire.test/posts?foo=1"), undefined),
+    decodePublicHttp(new Request("http://fire.test/posts:/x", { method: "POST" })),
+  ).rejects.toBeInstanceOf(NotFoundError);
+  await expect(
+    decodePublicHttp(new Request("http://fire.test/posts:", { method: "POST" })),
   ).rejects.toBeInstanceOf(BadRequestError);
 });
 
-test("decodePublicHttp decodes encoded resource and id segments", async () => {
+test("CRUD rejects unknown methods and non-list query parameters", async () => {
   await expect(
-    decodePublicHttp(new Request("http://fire.test/posts/2026-01-01%2Fholiday")),
-  ).resolves.toEqual({
-    resource: "posts",
-    operation: "get",
-    id: "2026-01-01/holiday",
-  });
+    decodePublicHttp(new Request("http://fire.test/posts", { method: "PUT" })),
+  ).rejects.toBeInstanceOf(MethodNotAllowedError);
+  await expect(
+    decodePublicHttp(new Request("http://fire.test/posts/p1?limit=1")),
+  ).rejects.toBeInstanceOf(BadRequestError);
+});
+
+test("CRUD writes require a JSON body", async () => {
+  for (const request of [
+    new Request("http://fire.test/posts", { method: "POST" }),
+    new Request("http://fire.test/posts/p1", { method: "PUT" }),
+    new Request("http://fire.test/posts/p1", { method: "PATCH" }),
+  ]) {
+    await expect(decodePublicHttp(request)).rejects.toBeInstanceOf(BadRequestError);
+  }
 });

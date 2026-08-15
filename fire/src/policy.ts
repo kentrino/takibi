@@ -1,8 +1,8 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type {
-  AccessAction,
   AccessContext,
   AccessGrant,
+  AccessPermission,
   AccessPolicy,
   AccessPolicyFn,
   WithMetadata,
@@ -13,8 +13,8 @@ export type InferPolicyDoc<TSchema extends StandardSchemaV1> = WithMetadata<
 >;
 
 /**
- * Schema-bound policy. Assigns to a resource when every pick-schema key exists
- * on the resource document — optional vs required does not matter.
+ * Schema-bound policy. Assigns to a collection when every pick-schema key exists
+ * on the collection document — optional vs required does not matter.
  */
 export type ConstrainedPolicy<TCtx, TPick> = <TDoc>(
   ctx: AccessContext<TCtx, keyof TPick extends keyof TDoc ? TDoc : never>,
@@ -22,33 +22,47 @@ export type ConstrainedPolicy<TCtx, TPick> = <TDoc>(
 
 type CombinablePolicy<TCtx, TDoc> = AccessPolicy<TCtx, TDoc> | ConstrainedPolicy<TCtx, TDoc>;
 
-const ALL_ACTIONS = [
+export const contextPolicyBrand: unique symbol = Symbol("fire.contextPolicy");
+type ContextPolicyFn<TCtx> = (ctx: TCtx) => AccessGrant | Promise<AccessGrant>;
+export type ContextPolicy<TCtx> = {
+  (ctx: TCtx): AccessGrant | Promise<AccessGrant>;
+  readonly [contextPolicyBrand]: true;
+};
+
+export function isContextPolicy(value: unknown): value is ContextPolicy<unknown> {
+  return (
+    typeof value === "function" &&
+    (value as Partial<ContextPolicy<unknown>>)[contextPolicyBrand] === true
+  );
+}
+
+const ALL_PERMISSIONS = [
   "create",
   "get",
   "list",
   "update",
   "delete",
-] as const satisfies readonly AccessAction[];
+] as const satisfies readonly AccessPermission[];
 
-function freezeGrant(actions: readonly AccessAction[]): AccessGrant {
-  return Object.freeze(new Set(actions));
+function freezeGrant(permissions: readonly AccessPermission[]): AccessGrant {
+  return Object.freeze(new Set(permissions));
 }
 
 /** Build a grant from explicit actions. `write` includes every action; `read` is get+list. */
-export function grant(...actions: AccessAction[]): AccessGrant {
-  return freezeGrant(actions);
+export function grant(...permissions: AccessPermission[]): AccessGrant {
+  return freezeGrant(permissions);
 }
 
 export const none: AccessGrant = grant();
 export const read: AccessGrant = grant("get", "list");
-export const write: AccessGrant = grant(...ALL_ACTIONS);
+export const write: AccessGrant = grant(...ALL_PERMISSIONS, "invoke");
 
 export function isAccessGrant(value: unknown): value is AccessGrant {
   return value instanceof Set;
 }
 
-export function allows(decision: AccessGrant, action: AccessAction): boolean {
-  return decision.has(action);
+export function allows(decision: AccessGrant, permission: AccessPermission): boolean {
+  return decision.has(permission);
 }
 
 export async function evaluateAccessPolicy<TCtx, TDoc>(
@@ -60,20 +74,20 @@ export async function evaluateAccessPolicy<TCtx, TDoc>(
 }
 
 function intersect(left: AccessGrant, right: AccessGrant): AccessGrant {
-  const out = new Set<AccessAction>();
-  for (const action of left) {
-    if (right.has(action)) out.add(action);
+  const out = new Set<AccessPermission>();
+  for (const permission of left) {
+    if (right.has(permission)) out.add(permission);
   }
   return out;
 }
 
 function union(left: AccessGrant, right: AccessGrant): AccessGrant {
-  return new Set<AccessAction>([...left, ...right]);
+  return new Set<AccessPermission>([...left, ...right]);
 }
 
 function isFullWrite(decision: AccessGrant): boolean {
-  for (const action of ALL_ACTIONS) {
-    if (!decision.has(action)) return false;
+  for (const permission of [...ALL_PERMISSIONS, "invoke"] as const) {
+    if (!decision.has(permission)) return false;
   }
   return true;
 }
@@ -116,8 +130,8 @@ export function or<TCtx, TDoc>(
 
 export type PolicyHelper<TCtx> = {
   /**
-   * Bind `doc` / `nextDoc` in the callback to a resource schema (or a pick of
-   * its fields). The returned policy assigns to a resource iff those keys
+   * Bind `doc` / `nextDoc` in the callback to a collection schema (or a pick of
+   * its fields). The returned policy assigns to a collection iff those keys
    * exist on the document; optional vs required does not matter.
    */
   <TSchema extends StandardSchemaV1>(
@@ -125,10 +139,10 @@ export type PolicyHelper<TCtx> = {
     policy: AccessPolicy<TCtx, InferPolicyDoc<TSchema>>,
   ): ConstrainedPolicy<TCtx, InferPolicyDoc<TSchema>>;
   /**
-   * Context-only policy (identity, role, …). Assignable to every resource
+   * Context-only policy (identity, role, …). Assignable to every collection
    * that shares this execution context.
    */
-  (policy: AccessPolicy<TCtx, unknown>): AccessPolicy<TCtx, unknown>;
+  (policy: AccessGrant | ContextPolicyFn<TCtx>): AccessGrant | ContextPolicy<TCtx>;
 };
 
 /**
@@ -139,11 +153,17 @@ export type PolicyHelper<TCtx> = {
  */
 export function createPolicyHelper<TCtx>(): PolicyHelper<TCtx> {
   function policy(
-    schemaOrPolicy: StandardSchemaV1 | AccessPolicy<TCtx, unknown>,
+    schemaOrPolicy: StandardSchemaV1 | AccessPolicy<TCtx, unknown> | ContextPolicyFn<TCtx>,
     maybePolicy?: AccessPolicy<TCtx, unknown>,
-  ): AccessPolicy<TCtx, unknown> {
+  ): AccessPolicy<TCtx, unknown> | ContextPolicy<TCtx> {
     if (maybePolicy) return maybePolicy;
-    return schemaOrPolicy as AccessPolicy<TCtx, unknown>;
+    if (isAccessGrant(schemaOrPolicy)) return schemaOrPolicy;
+    const contextPolicy = schemaOrPolicy as ContextPolicy<TCtx>;
+    Object.defineProperty(contextPolicy, contextPolicyBrand, {
+      value: true,
+      enumerable: false,
+    });
+    return contextPolicy;
   }
   return policy as PolicyHelper<TCtx>;
 }

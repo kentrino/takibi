@@ -1,6 +1,12 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
-export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 export type DocumentId = string;
 
@@ -14,19 +20,19 @@ export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
 
 export type WithMetadata<T> = Omit<T, keyof DocumentMetadata> & DocumentMetadata;
 
-export type ResourceOperation = "add" | "set" | "get" | "update" | "delete" | "list";
+export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list";
 
-export type AccessAction = "create" | "get" | "list" | "update" | "delete";
+export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
 
-/** Permission set a policy grants. Executor allows the request when the set contains `action`. */
-export type AccessGrant = ReadonlySet<AccessAction>;
+/** Permission set a policy grants. */
+export type AccessGrant = ReadonlySet<AccessPermission>;
 
 export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = TCtx & {
   tenantId: string;
   user: unknown;
-  resource: string;
+  collection: string;
   operation: "add" | "set" | "get" | "update" | "delete" | "list";
-  action: AccessAction;
+  permission: Exclude<AccessPermission, "invoke">;
   /** Saved document for get / update / delete / existing set. Absent for add / list / new set. */
   doc?: TDoc;
   /** Validated write candidate for add / update / set. Absent for get / delete / list. */
@@ -35,8 +41,8 @@ export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = 
 
 /**
  * Capability producer: return the actions this subject may perform on this
- * resource / document. Prefer not switching on `action` — the executor collates
- * the grant against the current action.
+ * collection / document. Prefer not switching on `permission` — the executor
+ * collates the grant against the required permission.
  */
 export type AccessPolicyFn<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = (
   ctx: AccessContext<TCtx, TDoc>,
@@ -49,11 +55,14 @@ export type AccessPolicy<TCtx, TDoc = WithMetadata<Record<string, unknown>>> =
   | AccessGrant
   | AccessPolicyFn<TCtx, TDoc>;
 
-export type ResourceDefinition<
+export const collectionActionsBrand: unique symbol = Symbol("fire.collectionActions");
+
+export type CollectionDefinition<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  // Default `any` keeps resource maps assignable regardless of concrete context.
+  // Default `any` keeps collection maps assignable regardless of concrete context.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional for assignability
   TCtx = any,
+  TActions = never,
 > = {
   schema: TSchema;
   accessPolicy: AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>;
@@ -70,22 +79,24 @@ export type ResourceDefinition<
           Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, keyof DocumentMetadata>>
         >
       >;
+  /** @internal Carries collection action definitions for assembly and inference. */
+  readonly [collectionActionsBrand]?: TActions;
 };
 
-export type ResourcesDef<TCtx = any> = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- concrete schemas live on each entry
-  [key: string]: ResourceDefinition<any, TCtx>;
+export type CollectionsDef<TCtx = any> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous collection map
+  [key: string]: CollectionDefinition<any, TCtx, any>;
 };
 
-export type InferResourceDoc<R> = R extends { schema: infer S extends StandardSchemaV1 }
+export type InferCollectionDoc<C> = C extends { schema: infer S extends StandardSchemaV1 }
   ? WithMetadata<StandardSchemaV1.InferOutput<S>>
   : never;
 
-export type InferResourceInput<R> = R extends { schema: infer S extends StandardSchemaV1 }
+export type InferCollectionInput<C> = C extends { schema: infer S extends StandardSchemaV1 }
   ? StandardSchemaV1.InferInput<S>
   : never;
 
-export type ResourceDataInput<R> = Omit<InferResourceInput<R>, keyof DocumentMetadata>;
+export type CollectionDataInput<C> = Omit<InferCollectionInput<C>, keyof DocumentMetadata>;
 
 export type ValidationIssue = {
   message: string;
@@ -111,28 +122,49 @@ export type FireFailure = FireValidationFailure | FireOperationFailure;
 
 export type FireResult<T> = { ok: true; data: T } | { ok: false; error: FireFailure };
 
-export type CollectionApi<R> = {
+/** Throwing, server-side CRUD facade used by actions and trusted `$collections`. */
+export type CollectionApi<C> = {
   add: (
-    data: ResourceDataInput<R>,
+    data: CollectionDataInput<C>,
     options?: { id?: DocumentId },
-  ) => Promise<FireResult<InferResourceDoc<R>>>;
-  set: (id: DocumentId, data: ResourceDataInput<R>) => Promise<FireResult<InferResourceDoc<R>>>;
-  get: (id: DocumentId) => Promise<FireResult<InferResourceDoc<R>>>;
+  ) => Promise<InferCollectionDoc<C>>;
+  set: (id: DocumentId, data: CollectionDataInput<C>) => Promise<InferCollectionDoc<C>>;
+  get: (id: DocumentId) => Promise<InferCollectionDoc<C>>;
+  update: (id: DocumentId, data: Partial<CollectionDataInput<C>>) => Promise<InferCollectionDoc<C>>;
+  delete: (id: DocumentId) => Promise<{ id: DocumentId }>;
+  list: (opts?: { limit?: number; cursor?: string }) => Promise<{
+    items: InferCollectionDoc<C>[];
+    nextCursor?: string;
+  }>;
+};
+
+export type CollectionsApi<TCollections> = {
+  [K in keyof TCollections]: CollectionApi<TCollections[K]>;
+};
+
+/** Result-shaped CRUD facade used by the public HTTP client. */
+export type ClientCollectionApi<C> = {
+  add: (
+    data: CollectionDataInput<C>,
+    options?: { id?: DocumentId },
+  ) => Promise<FireResult<InferCollectionDoc<C>>>;
+  set: (id: DocumentId, data: CollectionDataInput<C>) => Promise<FireResult<InferCollectionDoc<C>>>;
+  get: (id: DocumentId) => Promise<FireResult<InferCollectionDoc<C>>>;
   update: (
     id: DocumentId,
-    data: Partial<ResourceDataInput<R>>,
-  ) => Promise<FireResult<InferResourceDoc<R>>>;
+    data: Partial<CollectionDataInput<C>>,
+  ) => Promise<FireResult<InferCollectionDoc<C>>>;
   delete: (id: DocumentId) => Promise<FireResult<{ id: DocumentId }>>;
   list: (opts?: { limit?: number; cursor?: string }) => Promise<
     FireResult<{
-      items: InferResourceDoc<R>[];
+      items: InferCollectionDoc<C>[];
       nextCursor?: string;
     }>
   >;
 };
 
-export type ClientOf<TResources> = {
-  [K in keyof TResources]: CollectionApi<TResources[K]>;
+export type ClientCollectionsApi<TCollections> = {
+  [K in keyof TCollections]: ClientCollectionApi<TCollections[K]>;
 };
 
 export type ListOptions = {

@@ -5,30 +5,36 @@ import {
   prepareAddDoc,
   prepareSetDoc,
   prepareUpdateDoc,
+  storageAdd,
   storageDelete,
+  storageSet,
+  storageUpdate,
 } from "./typed-storage";
 import type {
-  AccessAction,
   AccessContext,
-  ResourceDefinition,
-  ResourceOperation,
-  ResourcesDef,
+  AccessPermission,
+  CollectionApi,
+  CollectionDefinition,
+  CollectionOperation,
+  CollectionsApi,
+  CollectionsDef,
   StorageDriver,
   WithMetadata,
 } from "./types";
 
 export type ExecuteRequest = {
-  resource: string;
-  operation: ResourceOperation;
+  kind: "crud";
+  collection: string;
+  operation: CollectionOperation;
   id?: string;
   input?: unknown;
   list?: { limit?: number; cursor?: string };
 };
 
-function resolveAction(
-  operation: ResourceOperation,
+function resolvePermission(
+  operation: CollectionOperation,
   existing: WithMetadata<Record<string, unknown>> | null | undefined,
-): AccessAction {
+): Exclude<AccessPermission, "invoke"> {
   switch (operation) {
     case "add":
       return "create";
@@ -55,14 +61,14 @@ function resolveAction(
  * so IDs are not leaked. Create / new set / list denials stay FORBIDDEN.
  */
 async function assertAccess(
-  def: ResourceDefinition,
-  // Executor passes runtime docs; resource-specific TDoc is enforced at definition time.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AccessContext TDoc varies per resource
+  def: CollectionDefinition,
+  // Executor passes runtime docs; collection-specific TDoc is enforced at definition time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AccessContext TDoc varies
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
 ): Promise<void> {
   const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
-  if (allows(granted, accessCtx.action)) return;
+  if (allows(granted, accessCtx.permission)) return;
   if (options.conceal) {
     throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
   }
@@ -70,14 +76,14 @@ async function assertAccess(
 }
 
 export async function executeOperation<TCtx extends { tenantId: string; user: unknown }>(
-  resources: ResourcesDef<TCtx>,
+  collections: CollectionsDef<TCtx>,
   storage: StorageDriver,
   ctx: TCtx,
   req: ExecuteRequest,
 ): Promise<unknown> {
-  const def = resources[req.resource] as ResourceDefinition | undefined;
+  const def = collections[req.collection] as CollectionDefinition | undefined;
   if (!def) {
-    throw new NotFoundError(`Unknown resource: ${req.resource}`);
+    throw new NotFoundError(`Unknown collection: ${req.collection}`);
   }
 
   switch (req.operation) {
@@ -85,23 +91,23 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
       const nextDoc = await prepareAddDoc(def, req.input, { id: req.id });
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
-        resource: req.resource,
+        collection: req.collection,
         operation: "add",
-        action: "create",
+        permission: "create",
         nextDoc,
       };
       await assertAccess(def, accessCtx, { conceal: false });
-      return commitAddDoc(storage, req.resource, nextDoc);
+      return commitAddDoc(storage, req.collection, nextDoc);
     }
     case "set": {
       if (!req.id) throw new NotFoundError("Missing id");
-      const existing = await storage.get(req.resource, req.id);
+      const existing = await storage.get(req.collection, req.id);
       const nextDoc = await prepareSetDoc(def, req.id, req.input, existing);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
-        resource: req.resource,
+        collection: req.collection,
         operation: "set",
-        action: resolveAction("set", existing),
+        permission: resolvePermission("set", existing),
         ...(existing ? { doc: existing } : {}),
         nextDoc,
       };
@@ -109,18 +115,18 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
         conceal: existing != null,
         id: req.id,
       });
-      await storage.put(req.resource, nextDoc);
+      await storage.put(req.collection, nextDoc);
       return nextDoc;
     }
     case "get": {
       if (!req.id) throw new NotFoundError("Missing id");
-      const doc = await storage.get(req.resource, req.id);
+      const doc = await storage.get(req.collection, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
-        resource: req.resource,
+        collection: req.collection,
         operation: "get",
-        action: "get",
+        permission: "get",
         doc,
       };
       await assertAccess(def, accessCtx, { conceal: true, id: req.id });
@@ -128,48 +134,128 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
     }
     case "update": {
       if (!req.id) throw new NotFoundError("Missing id");
-      const doc = await storage.get(req.resource, req.id);
+      const doc = await storage.get(req.collection, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
       const nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
-        resource: req.resource,
+        collection: req.collection,
         operation: "update",
-        action: "update",
+        permission: "update",
         doc,
         nextDoc,
       };
       await assertAccess(def, accessCtx, { conceal: true, id: req.id });
-      await storage.put(req.resource, nextDoc);
+      await storage.put(req.collection, nextDoc);
       return nextDoc;
     }
     case "delete": {
       if (!req.id) throw new NotFoundError("Missing id");
-      const doc = await storage.get(req.resource, req.id);
+      const doc = await storage.get(req.collection, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
-        resource: req.resource,
+        collection: req.collection,
         operation: "delete",
-        action: "delete",
+        permission: "delete",
         doc,
       };
       await assertAccess(def, accessCtx, { conceal: true, id: req.id });
-      return storageDelete(storage, req.resource, req.id);
+      return storageDelete(storage, req.collection, req.id);
     }
     case "list": {
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
-        resource: req.resource,
+        collection: req.collection,
         operation: "list",
-        action: "list",
+        permission: "list",
       };
       await assertAccess(def, accessCtx, { conceal: false });
-      return storage.list(req.resource, req.list);
+      return storage.list(req.collection, req.list);
     }
     default: {
       const _exhaustive: never = req.operation;
       return _exhaustive;
     }
   }
+}
+
+export function createPolicyCollections<
+  TCtx extends { tenantId: string; user: unknown },
+  TCollections extends CollectionsDef<TCtx>,
+>(collections: TCollections, storage: StorageDriver, ctx: TCtx): CollectionsApi<TCollections> {
+  const api = Object.create(null) as CollectionsApi<TCollections>;
+  for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
+    api[name] = {
+      add: (input, options) =>
+        executeOperation(collections, storage, ctx, {
+          kind: "crud",
+          collection: name,
+          operation: "add",
+          input,
+          ...(options?.id !== undefined ? { id: options.id } : {}),
+        }),
+      set: (id, input) =>
+        executeOperation(collections, storage, ctx, {
+          kind: "crud",
+          collection: name,
+          operation: "set",
+          id,
+          input,
+        }),
+      get: (id) =>
+        executeOperation(collections, storage, ctx, {
+          kind: "crud",
+          collection: name,
+          operation: "get",
+          id,
+        }),
+      update: (id, input) =>
+        executeOperation(collections, storage, ctx, {
+          kind: "crud",
+          collection: name,
+          operation: "update",
+          id,
+          input,
+        }),
+      delete: (id) =>
+        executeOperation(collections, storage, ctx, {
+          kind: "crud",
+          collection: name,
+          operation: "delete",
+          id,
+        }),
+      list: (list) =>
+        executeOperation(collections, storage, ctx, {
+          kind: "crud",
+          collection: name,
+          operation: "list",
+          ...(list ? { list } : {}),
+        }),
+    } as CollectionApi<TCollections[typeof name]>;
+  }
+  return api;
+}
+
+export function createTrustedCollections<TCollections extends CollectionsDef>(
+  collections: TCollections,
+  storage: StorageDriver,
+): CollectionsApi<TCollections> {
+  const api = Object.create(null) as CollectionsApi<TCollections>;
+  for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
+    const definition = collections[name]!;
+    api[name] = {
+      add: (input, options) => storageAdd(definition, storage, name, input, options),
+      set: (id, input) => storageSet(definition, storage, name, id, input),
+      async get(id) {
+        const doc = await storage.get(name, id);
+        if (!doc) throw new NotFoundError(`Document not found: ${id}`);
+        return doc;
+      },
+      update: (id, input) => storageUpdate(definition, storage, name, id, input),
+      delete: (id) => storageDelete(storage, name, id),
+      list: (options) => storage.list(name, options),
+    } as CollectionApi<TCollections[typeof name]>;
+  }
+  return api;
 }

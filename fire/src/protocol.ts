@@ -1,17 +1,16 @@
-import type { FireFailure, ResourceOperation } from "./types";
+import type { ActionInvocation } from "./action-executor";
+import type { ExecuteRequest } from "./executor";
+import type { FireFailure } from "./types";
 
-export type WireRequest = {
-  resource: string;
-  operation: ResourceOperation;
-  id?: string;
-  input?: unknown;
-  list?: { limit?: number; cursor?: string };
-  context: {
-    tenantId: string;
-    user: unknown;
-    [key: string]: unknown;
-  };
+type WireContext = {
+  tenantId: string;
+  user: unknown;
+  [key: string]: unknown;
 };
+
+export type CrudWireRequest = ExecuteRequest & { context: WireContext };
+export type ActionWireRequest = ActionInvocation & { context: WireContext };
+export type WireRequest = CrudWireRequest | ActionWireRequest;
 
 export type WireSuccess = { ok: true; data: unknown };
 export type WireFailure = {
@@ -25,14 +24,81 @@ export function encodeWireRequest(req: WireRequest): string {
 }
 
 export function decodeWireRequest(body: unknown): WireRequest {
-  if (!body || typeof body !== "object") {
-    throw new Error("Invalid wire request");
-  }
+  if (!isRecord(body)) throw new Error("Invalid wire request");
   const r = body as Record<string, unknown>;
-  if (typeof r.resource !== "string" || typeof r.operation !== "string") {
-    throw new Error("Invalid wire request");
+  assertContext(r.context);
+
+  if (r.kind === "action") {
+    assertExactKeys(r, ["kind", "scope", "name", "input", "context"]);
+    if (typeof r.scope !== "string" || typeof r.name !== "string") {
+      throw new Error("Invalid action wire request");
+    }
+    return r as ActionWireRequest;
   }
-  return r as WireRequest;
+
+  if (r.kind !== "crud") throw new Error("Invalid wire request kind");
+  if (typeof r.collection !== "string" || typeof r.operation !== "string") {
+    throw new Error("Invalid CRUD wire request");
+  }
+  switch (r.operation) {
+    case "add":
+      assertExactKeys(r, ["kind", "collection", "operation", "id", "input", "context"]);
+      if (!("input" in r)) throw new Error("Invalid CRUD wire request");
+      if (r.id !== undefined && typeof r.id !== "string") throw new Error("Invalid CRUD id");
+      break;
+    case "set":
+    case "update":
+      assertExactKeys(r, ["kind", "collection", "operation", "id", "input", "context"]);
+      if (typeof r.id !== "string" || !("input" in r)) {
+        throw new Error("Invalid CRUD wire request");
+      }
+      break;
+    case "get":
+    case "delete":
+      assertExactKeys(r, ["kind", "collection", "operation", "id", "context"]);
+      if (typeof r.id !== "string") throw new Error("Invalid CRUD id");
+      break;
+    case "list":
+      assertExactKeys(r, ["kind", "collection", "operation", "list", "context"]);
+      assertList(r.list);
+      break;
+    default:
+      throw new Error("Invalid CRUD operation");
+  }
+  return r as CrudWireRequest;
+}
+
+function assertContext(value: unknown): asserts value is WireContext {
+  if (
+    !isRecord(value) ||
+    typeof value.tenantId !== "string" ||
+    !Object.prototype.hasOwnProperty.call(value, "user")
+  ) {
+    throw new Error("Invalid wire context");
+  }
+}
+
+function assertList(value: unknown): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) throw new Error("Invalid list options");
+  assertExactKeys(value, ["limit", "cursor"]);
+  if (value.limit !== undefined && typeof value.limit !== "number") {
+    throw new Error("Invalid list limit");
+  }
+  if (value.cursor !== undefined && typeof value.cursor !== "string") {
+    throw new Error("Invalid list cursor");
+  }
+}
+
+function assertExactKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
+  const allowedKeys = new Set(allowed);
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) throw new Error(`Unexpected wire field: ${key}`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function isWireResponse(value: unknown): value is WireResponse {

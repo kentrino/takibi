@@ -1,8 +1,29 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
+import {
+  ActionRegistry,
+  assertCollectionName,
+  createActionBuilder,
+  defineCollection as defineCollectionValue,
+  getCollectionActions,
+} from "./action";
+import type {
+  ActionBuilder,
+  ActionDefinitions,
+  CollectionDefinitionInput,
+  InvalidPublicKeys,
+  ReservedPublicName,
+  RootActionArgs,
+} from "./action";
+import { executeAction, type ActionInvocation } from "./action-executor";
 import { FireError, NotFoundError, UnauthorizedError } from "./errors";
-import { executeOperation, type ExecuteRequest } from "./executor";
-import { decodePublicHttp, decodePublicRoute, matchesPublicPrefix } from "./http";
+import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
+import {
+  decodePublicHttp,
+  decodePublicRoute,
+  matchesPublicPrefix,
+  type PublicRequest,
+} from "./http";
 import { and, createPolicyHelper, or } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
@@ -14,8 +35,9 @@ import {
 import { toFireFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
-import { createTypedStorage, storageAdd } from "./typed-storage";
-import type { ClientOf, ResourceDefinition, ResourcesDef, StorageDriver } from "./types";
+import { storageAdd } from "./typed-storage";
+import { collectionActionsBrand } from "./types";
+import type { CollectionDefinition, CollectionsApi, CollectionsDef, StorageDriver } from "./types";
 
 /**
  * Application-owned trust boundary: verify credentials, authorize tenant
@@ -68,7 +90,7 @@ export type ContextConfig<
   stub?: ContextStubResolver<TCtx, TInitial>;
 };
 
-export type ResourcesOptions = {
+export type CollectionsOptions = {
   /** In-memory mode for tests / demos (skips Durable Object). */
   memory?: boolean;
 };
@@ -77,7 +99,7 @@ export type HandleOptions<TInitial> = {
   /**
    * Path prefix for REST routes (e.g. `/api/fire` matches `/api/fire/posts`
    * and `/api/fire/posts/{id}`, but not `/api/firehose`). Omit to read
-   * resource / id from the whole pathname.
+   * collection / id from the whole pathname.
    */
   prefix?: string;
 } & (Record<string, never> extends TInitial ? { context?: TInitial } : { context: TInitial });
@@ -88,24 +110,35 @@ export type HandleResult =
 
 export type FireBrand<
   TCtx extends { tenantId: string; user: unknown },
-  TResources,
+  TCollections,
   TInitial = Record<string, never>,
+  TRootActions extends ActionDefinitions = Record<never, never>,
 > = {
   readonly "~fire": {
     context: TCtx;
     initial: TInitial;
-    resources: TResources;
+    collections: TCollections;
+    actions: TRootActions;
   };
   /**
-   * Trusted server-side API: `storage.posts.add(...)`.
+   * Trusted server-side API. Bypasses collection access policies.
    * Bypasses ACL (like an admin SDK). Memory mode only on the worker;
-   * inside the Durable Object use `this.storage`.
+   * inside the Durable Object use `this.$collections`.
    */
-  storage: ClientOf<TResources>;
+  $collections: CollectionsApi<TCollections>;
   DurableObject: new (
     state: DurableObjectState,
     env: unknown,
-  ) => DurableObject & { storage: ClientOf<TResources> };
+  ) => DurableObject & { $collections: CollectionsApi<TCollections> };
+  defineAction(): ActionBuilder<TCtx, "root", RootActionArgs<TCtx, TCollections>>;
+  actions<const TActions extends ActionDefinitions>(
+    definitions: TActions &
+      Record<
+        | Extract<keyof TActions, keyof TCollections | keyof TRootActions | ReservedPublicName>
+        | InvalidPublicKeys<TActions>,
+        never
+      >,
+  ): FireHandler<TCtx, TCollections, TInitial, TRootActions & TActions>;
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
    * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
@@ -115,15 +148,13 @@ export type FireBrand<
 
 export type FireHandler<
   TCtx extends { tenantId: string; user: unknown } = { tenantId: string; user: unknown },
-  TResources = ResourcesDef<TCtx>,
+  TCollections = CollectionsDef<TCtx>,
   TInitial = Record<string, never>,
-> = Hono<{ Bindings: Record<string, unknown> }> & FireBrand<TCtx, TResources, TInitial>;
+  TRootActions extends ActionDefinitions = Record<never, never>,
+> = Hono<{ Bindings: Record<string, unknown> }> &
+  FireBrand<TCtx, TCollections, TInitial, TRootActions>;
 
 type FireCtxConstraint = { tenantId: string; user: unknown };
-
-type ResourceDefinitions<TSchemas extends Record<string, StandardSchemaV1>, TCtx> = {
-  [K in keyof TSchemas]: ResourceDefinition<TSchemas[K], TCtx>;
-};
 
 type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
   /**
@@ -134,10 +165,23 @@ type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
   policy: PolicyHelper<TCtx>;
   and: typeof and;
   or: typeof or;
-  resources<const TSchemas extends Record<string, StandardSchemaV1>>(
-    resources: ResourceDefinitions<TSchemas, TCtx>,
-    options?: ResourcesOptions,
-  ): FireHandler<TCtx, ResourceDefinitions<TSchemas, TCtx>, TInitial>;
+  defineCollection<
+    TSchema extends StandardSchemaV1,
+    const TActions extends ActionDefinitions = Record<never, never>,
+  >(
+    definition: CollectionDefinitionInput<TSchema, TCtx, TActions>,
+  ): CollectionDefinition<TSchema, TCtx, TActions> & {
+    readonly [collectionActionsBrand]: TActions;
+  };
+  collections<const TCollections extends CollectionsDef<TCtx>>(
+    collections: TCollections,
+    options?: CollectionsOptions,
+    ...invalidName: [
+      Extract<keyof TCollections, ReservedPublicName> | InvalidPublicKeys<TCollections>,
+    ] extends [never]
+      ? []
+      : ["Collection names must be safe TypeScript identifiers"]
+  ): FireHandler<TCtx, TCollections, TInitial>;
 };
 
 type CreateContextFn<TInitial> = <
@@ -190,21 +234,66 @@ function buildContext<TInitial>(
     policy: createPolicyHelper(),
     and,
     or,
-    resources(resources, options: ResourcesOptions = {}) {
+    defineCollection: defineCollectionValue,
+    collections(collections, options: CollectionsOptions = {}) {
+      const registry = new ActionRegistry();
+      if (typeof collections !== "object" || collections === null) {
+        throw new FireError("INVALID_COLLECTION", "Collections must be an object", 500);
+      }
+      const prototype = Object.getPrototypeOf(collections);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new FireError("INVALID_COLLECTION", "Collections must be a plain object", 500);
+      }
+      const collectionEntries: Array<[string, CollectionsDef<FireCtxConstraint>[string]]> = [];
+      for (const propertyKey of Reflect.ownKeys(collections)) {
+        if (typeof propertyKey !== "string") {
+          throw new FireError("INVALID_COLLECTION", "Collection names must be strings", 500);
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(collections, propertyKey);
+        if (!descriptor?.enumerable || !("value" in descriptor)) {
+          throw new FireError(
+            "INVALID_COLLECTION",
+            `Collections must be enumerable data properties: ${propertyKey}`,
+            500,
+          );
+        }
+        collectionEntries.push([
+          propertyKey,
+          descriptor.value as CollectionsDef<FireCtxConstraint>[string],
+        ]);
+      }
+      const collectionNames = new Set(collectionEntries.map(([name]) => name));
+      for (const [name, definition] of collectionEntries) {
+        assertCollectionName(name);
+        if (
+          Object.prototype.hasOwnProperty.call(definition, "actions") &&
+          getCollectionActions(definition) === null
+        ) {
+          throw new FireError(
+            "INVALID_COLLECTION",
+            `Collection actions require defineCollection(): ${name}`,
+            500,
+          );
+        }
+        const definitions = getCollectionActions(definition);
+        if (definitions) registry.registerCollectionActions(name, definitions);
+      }
       const memory = options.memory ?? false;
 
       const app = new Hono<{ Bindings: Record<string, unknown> }>();
 
       const memoryDriver = memory ? createMemoryStorage() : null;
-      const memoryReady = memoryDriver ? seedResources(resources, memoryDriver) : Promise.resolve();
-      const storageApi = memoryDriver
-        ? createTypedStorage(resources, afterInitialization(memoryDriver, memoryReady))
-        : createUnavailableStorage(resources);
+      const memoryReady = memoryDriver
+        ? seedCollections(collections, memoryDriver)
+        : Promise.resolve();
+      const trustedCollections = memoryDriver
+        ? createTrustedCollections(collections, afterInitialization(memoryDriver, memoryReady))
+        : createUnavailableCollections(collections);
 
       const run = async (
         request: Request,
         initial: unknown,
-        op: ExecuteRequest,
+        invocation: PublicRequest,
       ): Promise<Response> => {
         try {
           await memoryReady;
@@ -213,16 +302,20 @@ function buildContext<TInitial>(
           if (!ctx.tenantId) {
             throw new UnauthorizedError("Missing tenantId");
           }
+          assertSerializableContext(ctx);
 
           if (memoryDriver) {
-            const data = await executeOperation(resources, memoryDriver, ctx, op);
+            const data =
+              invocation.kind === "action"
+                ? await executeAction(registry, collections, memoryDriver, ctx, invocation)
+                : await executeOperation(collections, memoryDriver, ctx, invocation);
             return Response.json({ ok: true, data } satisfies WireResponse);
           }
 
           if (!resolveStub) {
             throw new FireError(
               "MISSING_STUB",
-              "Durable Object mode requires stub on fire.initialContext()({ stub }) — or use resources(..., { memory: true }) for tests",
+              "Durable Object mode requires stub on fire.initialContext()({ stub }) — or use collections(..., { memory: true }) for tests",
               500,
             );
           }
@@ -236,7 +329,7 @@ function buildContext<TInitial>(
             );
           }
 
-          const wire: WireRequest = { ...op, context: ctx };
+          const wire: WireRequest = { ...invocation, context: ctx };
 
           const res = await doStub.fetch(
             new Request("https://fire.internal/", {
@@ -255,7 +348,7 @@ function buildContext<TInitial>(
       const serveDecoded = async (
         request: Request,
         initial: unknown,
-        decode: () => Promise<ExecuteRequest>,
+        decode: () => Promise<PublicRequest>,
       ): Promise<Response> => {
         try {
           const op = await decode();
@@ -272,11 +365,11 @@ function buildContext<TInitial>(
             : await serveDecoded(c.req.raw, {}, () =>
                 decodePublicRoute(
                   c.req.method,
-                  [c.req.param("resource"), c.req.param("id")].filter(
+                  [c.req.param("collection"), c.req.param("id")].filter(
                     (segment): segment is string => segment != null && segment !== "",
                   ),
                   new URL(c.req.url).searchParams,
-                  () => c.req.json(),
+                  () => (c.req.raw.body === null ? Promise.resolve(undefined) : c.req.json()),
                 ),
               );
           return c.newResponse(response.body, response);
@@ -284,31 +377,43 @@ function buildContext<TInitial>(
       };
 
       // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
-      mountPublicRoute("/:resource");
-      mountPublicRoute("/:resource/:id");
-      mountPublicRoute("/:resource/:id/*", true);
+      mountPublicRoute("/:collection");
+      mountPublicRoute("/:collection/:id");
+      mountPublicRoute("/:collection/:id/*", true);
       app.all("/", async (c) => {
         const response = await serveDecoded(c.req.raw, {}, () => decodePublicHttp(c.req.raw));
         return c.newResponse(response.body, response);
       });
 
-      const DurableObjectClass = createDurableObjectClass(resources);
+      const DurableObjectClass = createDurableObjectClass(collections, registry);
 
-      const handler = app as FireHandler<FireCtxConstraint, typeof resources, TInitial>;
+      const rootActions = Object.create(null) as ActionDefinitions;
+      const handler = app as FireHandler<FireCtxConstraint, typeof collections, TInitial>;
       Object.defineProperty(handler, "~fire", {
         value: {
           context: null as unknown as FireCtxConstraint,
           initial: null as unknown as TInitial,
-          resources,
+          collections,
+          actions: rootActions,
         },
         enumerable: false,
       });
-      handler.storage = storageApi;
+      handler.$collections = trustedCollections;
       handler.DurableObject = DurableObjectClass as FireHandler<
         FireCtxConstraint,
-        typeof resources,
+        typeof collections,
         TInitial
       >["DurableObject"];
+      handler.defineAction = () =>
+        createActionBuilder<
+          FireCtxConstraint,
+          "root",
+          RootActionArgs<FireCtxConstraint, typeof collections>
+        >("root");
+      handler.actions = ((definitions: ActionDefinitions) => {
+        registry.registerRootActions(definitions, collectionNames);
+        return handler;
+      }) as typeof handler.actions;
       handler.handle = async (request, handleOptions) => {
         if (!matchesPublicPrefix(new URL(request.url).pathname, handleOptions.prefix)) {
           return { matched: false };
@@ -328,31 +433,40 @@ function buildContext<TInitial>(
   };
 }
 
-function createDurableObjectClass<TResources extends Record<string, ResourceDefinition>>(
-  resources: TResources,
+function createDurableObjectClass<TCollections extends CollectionsDef>(
+  collections: TCollections,
+  registry: ActionRegistry,
 ) {
   return class FireTenantObject implements DurableObject {
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
-    readonly storage: ClientOf<TResources>;
+    readonly $collections: CollectionsApi<TCollections>;
 
     constructor(state: DurableObjectState, _env: unknown) {
       this.#driver = createDurableObjectStorage(state.storage);
-      this.#ready = state.blockConcurrencyWhile(() => seedResources(resources, this.#driver));
-      this.storage = createTypedStorage(resources, afterInitialization(this.#driver, this.#ready));
+      this.#ready = state.blockConcurrencyWhile(() => seedCollections(collections, this.#driver));
+      this.$collections = createTrustedCollections(
+        collections,
+        afterInitialization(this.#driver, this.#ready),
+      );
     }
 
     async fetch(request: Request): Promise<Response> {
       try {
         await this.#ready;
         const body = decodeWireRequest(await request.json());
-        const { context, ...op } = body;
-        const data = await executeOperation(
-          resources,
-          this.#driver,
-          context as { tenantId: string; user: unknown },
-          op,
-        );
+        const { context, ...invocation } = body;
+        const ctx = context as { tenantId: string; user: unknown };
+        const data =
+          invocation.kind === "action"
+            ? await executeAction(
+                registry,
+                collections,
+                this.#driver,
+                ctx,
+                invocation as ActionInvocation,
+              )
+            : await executeOperation(collections, this.#driver, ctx, invocation as ExecuteRequest);
         return Response.json({ ok: true, data } satisfies WireResponse);
       } catch (err) {
         const wire = toWireError(err);
@@ -362,17 +476,17 @@ function createDurableObjectClass<TResources extends Record<string, ResourceDefi
   };
 }
 
-async function seedResources(
-  resources: Record<string, ResourceDefinition>,
+async function seedCollections(
+  collections: Record<string, CollectionDefinition>,
   driver: StorageDriver,
 ): Promise<void> {
-  for (const [resource, definition] of Object.entries(resources)) {
+  for (const [collection, definition] of Object.entries(collections)) {
     if (!definition.seed) continue;
 
     const documents = await definition.seed();
     for (const [id, data] of Object.entries(documents)) {
-      if (await driver.get(resource, id)) continue;
-      await storageAdd(definition, driver, resource, data, { id });
+      if (await driver.get(collection, id)) continue;
+      await storageAdd(definition, driver, collection, data, { id });
     }
   }
 }
@@ -398,22 +512,18 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
   };
 }
 
-function createUnavailableStorage<TResources extends Record<string, ResourceDefinition>>(
-  resources: TResources,
-): ClientOf<TResources> {
-  const fail = async () =>
-    ({
-      ok: false as const,
-      error: {
-        kind: "operation" as const,
-        code: "NO_STORAGE",
-        message:
-          "handler.storage is only available with `{ memory: true }`; in production use the Durable Object's `this.storage`",
-        status: 500,
-      },
-    }) as const;
-  const api = {} as Record<string, unknown>;
-  for (const name of Object.keys(resources)) {
+function createUnavailableCollections<TCollections extends CollectionsDef>(
+  collections: TCollections,
+): CollectionsApi<TCollections> {
+  const fail = async () => {
+    throw new FireError(
+      "NO_STORAGE",
+      "handler.$collections is only available with `{ memory: true }`; in production use the Durable Object's `this.$collections`",
+      500,
+    );
+  };
+  const api = Object.create(null) as Record<string, unknown>;
+  for (const name of Object.keys(collections)) {
     api[name] = {
       add: fail,
       set: fail,
@@ -423,7 +533,7 @@ function createUnavailableStorage<TResources extends Record<string, ResourceDefi
       list: fail,
     };
   }
-  return api as ClientOf<TResources>;
+  return api as CollectionsApi<TCollections>;
 }
 
 function toWireError(err: unknown): WireFailure {
@@ -445,4 +555,63 @@ function statusOf(err: unknown): number {
   if (err instanceof FireError) return err.status;
   if (err instanceof SchemaValidationError) return 400;
   return 500;
+}
+
+function assertSerializableContext(value: unknown, seen = new Set<object>()): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (typeof value !== "object" || seen.has(value)) {
+    throw new FireError("INVALID_CONTEXT", "Resolved context must be JSON-safe", 500);
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor?.enumerable || !("value" in descriptor)) {
+        throw new FireError("INVALID_CONTEXT", "Resolved context arrays must contain data", 500);
+      }
+      assertSerializableContext(descriptor.value, seen);
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (key === "length") continue;
+      if (
+        typeof key !== "string" ||
+        !/^(0|[1-9][0-9]*)$/.test(key) ||
+        Number(key) >= value.length
+      ) {
+        throw new FireError(
+          "INVALID_CONTEXT",
+          "Resolved context arrays must not have custom properties",
+          500,
+        );
+      }
+    }
+    seen.delete(value);
+    return;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new FireError("INVALID_CONTEXT", "Resolved context must use plain objects", 500);
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") {
+      throw new FireError("INVALID_CONTEXT", "Resolved context must not contain symbols", 500);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !("value" in descriptor)) {
+      throw new FireError(
+        "INVALID_CONTEXT",
+        "Resolved context must contain only enumerable data properties",
+        500,
+      );
+    }
+    assertSerializableContext(descriptor.value, seen);
+  }
+  seen.delete(value);
 }

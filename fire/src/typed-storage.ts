@@ -2,11 +2,11 @@ import { ConflictError, NotFoundError } from "./errors";
 import { asFireResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
 import type {
-  ClientOf,
+  ClientCollectionsApi,
+  CollectionDefinition,
   DocumentId,
   FireResult,
   ListOptions,
-  ResourceDefinition,
   StorageDriver,
   WithMetadata,
 } from "./types";
@@ -70,7 +70,7 @@ function domainDataFromExisting(
 
 /** Build the document that would be stored for `add`, without collision check or put. */
 export async function prepareAddDoc(
-  def: ResourceDefinition,
+  def: CollectionDefinition,
   input: unknown,
   options?: { id?: DocumentId },
 ): Promise<WithMetadata<Record<string, unknown>>> {
@@ -85,20 +85,20 @@ export async function prepareAddDoc(
 /** CREATE-only put: rejects when `doc.id` already exists. */
 export async function commitAddDoc(
   storage: StorageDriver,
-  resource: string,
+  collection: string,
   doc: WithMetadata<Record<string, unknown>>,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing = await storage.get(resource, doc.id);
+  const existing = await storage.get(collection, doc.id);
   if (existing) {
     throw new ConflictError(`Document already exists: ${doc.id}`);
   }
-  await storage.put(resource, doc);
+  await storage.put(collection, doc);
   return doc;
 }
 
 /** Build the document that would be stored for `set`, without put. */
 export async function prepareSetDoc(
-  def: ResourceDefinition,
+  def: CollectionDefinition,
   id: string,
   input: unknown,
   existing: WithMetadata<Record<string, unknown>> | null,
@@ -113,7 +113,7 @@ export async function prepareSetDoc(
 
 /** Build the document that would be stored for `update`, without put. */
 export async function prepareUpdateDoc(
-  def: ResourceDefinition,
+  def: CollectionDefinition,
   id: string,
   input: unknown,
   existing: WithMetadata<Record<string, unknown>>,
@@ -131,62 +131,62 @@ export async function prepareUpdateDoc(
 
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
 export async function storageAdd(
-  def: ResourceDefinition,
+  def: CollectionDefinition,
   storage: StorageDriver,
-  resource: string,
+  collection: string,
   input: unknown,
   options?: { id?: DocumentId },
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const doc = await prepareAddDoc(def, input, options);
-  return commitAddDoc(storage, resource, doc);
+  return commitAddDoc(storage, collection, doc);
 }
 
 export async function storageSet(
-  def: ResourceDefinition,
+  def: CollectionDefinition,
   storage: StorageDriver,
-  resource: string,
+  collection: string,
   id: string,
   input: unknown,
   options?: { existing?: WithMetadata<Record<string, unknown>> | null },
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const existing =
-    options && "existing" in options ? options.existing : await storage.get(resource, id);
+    options && "existing" in options ? options.existing : await storage.get(collection, id);
   const doc = await prepareSetDoc(def, id, input, existing ?? null);
-  await storage.put(resource, doc);
+  await storage.put(collection, doc);
   return doc;
 }
 
 export async function storageUpdate(
-  def: ResourceDefinition,
+  def: CollectionDefinition,
   storage: StorageDriver,
-  resource: string,
+  collection: string,
   id: string,
   input: unknown,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing = await storage.get(resource, id);
+  const existing = await storage.get(collection, id);
   if (!existing) throw new NotFoundError(`Document not found: ${id}`);
   const doc = await prepareUpdateDoc(def, id, input, existing);
-  await storage.put(resource, doc);
+  await storage.put(collection, doc);
   return doc;
 }
 
 export async function storageDelete(
   storage: StorageDriver,
-  resource: string,
+  collection: string,
   id: string,
 ): Promise<{ id: string }> {
-  const existed = await storage.delete(resource, id);
+  const existed = await storage.delete(collection, id);
   if (!existed) throw new NotFoundError(`Document not found: ${id}`);
   return { id };
 }
 
-export function createTypedStorage<TResources extends Record<string, ResourceDefinition>>(
-  resources: TResources,
+export function createTypedStorage<TCollections extends Record<string, CollectionDefinition>>(
+  collections: TCollections,
   driver: StorageDriver,
-): ClientOf<TResources> {
-  const api = {} as ClientOf<TResources>;
-  for (const name of Object.keys(resources) as (keyof TResources & string)[]) {
-    const def = resources[name]!;
+): ClientCollectionsApi<TCollections> {
+  const api = {} as ClientCollectionsApi<TCollections>;
+  for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
+    const def = collections[name]!;
     api[name] = {
       add: (data, options) => asFireResult(() => storageAdd(def, driver, name, data, options)),
       set: (id, data) => asFireResult(() => storageSet(def, driver, name, id, data)),
@@ -208,7 +208,7 @@ export function createTypedStorage<TResources extends Record<string, ResourceDef
       update: (id, data) => asFireResult(() => storageUpdate(def, driver, name, id, data)),
       delete: (id) => asFireResult(() => storageDelete(driver, name, id)),
       list: (opts?: ListOptions) => asFireResult(() => driver.list(name, opts)),
-    } as ClientOf<TResources>[typeof name];
+    } as ClientCollectionsApi<TCollections>[typeof name];
   }
   return api;
 }

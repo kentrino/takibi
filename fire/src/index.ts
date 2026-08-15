@@ -1,5 +1,10 @@
 export { createClient } from "./client";
-export type { CreateClientOptions, InferHandlerResources } from "./client";
+export type {
+  ClientOf,
+  CreateClientOptions,
+  InferHandlerActions,
+  InferHandlerCollections,
+} from "./client";
 
 export { fire, initialContext } from "./context";
 export type {
@@ -8,11 +13,13 @@ export type {
   ContextResolverInput,
   ContextStubResolver,
   ContextStubResolverInput,
+  CollectionsOptions,
   FireHandler,
   HandleOptions,
   HandleResult,
-  ResourcesOptions,
 } from "./context";
+
+export type { ActionGateContext, ActionGatePolicy } from "./action";
 
 export {
   BadRequestError,
@@ -27,32 +34,34 @@ export { SchemaValidationError } from "./schema";
 export type { AnySchema, InferSchemaInput, InferSchemaOutput } from "./schema";
 
 export { allows, and, grant, none, or, read, write } from "./policy";
-export type { ConstrainedPolicy, InferPolicyDoc, PolicyHelper } from "./policy";
+export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc, PolicyHelper } from "./policy";
 
 export { ownedBy } from "./owned-by";
 export type { OwnedByOptions } from "./owned-by";
-export { defineResource } from "./define-resource";
 
 export type {
-  AccessAction,
+  AccessPermission,
   AccessContext,
   AccessGrant,
   AccessPolicy,
   AccessPolicyFn,
-  ClientOf,
+  ClientCollectionApi,
+  CollectionDataInput,
+  CollectionDefinition,
+  CollectionOperation,
   CollectionApi,
+  CollectionsApi,
+  CollectionsDef,
   DocumentId,
   DocumentMetadata,
   FireFailure,
   FireOperationFailure,
   FireResult,
   FireValidationFailure,
-  InferResourceDoc,
-  InferResourceInput,
+  InferCollectionDoc,
+  InferCollectionInput,
+  JsonValue,
   ListOptions,
-  ResourceDataInput,
-  ResourceDefinition,
-  ResourcesDef,
   ValidationIssue,
   WithId,
   WithMetadata,
