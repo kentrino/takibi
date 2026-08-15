@@ -1,13 +1,13 @@
 # @takibi/fire
 
-Typed, Firebase-like resource store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
+Typed, Firebase-like collection store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
 The official public API is `fire`, `createClient`, policy helpers, and errors. Lower-level assembly pieces are unpublished.
 
 ## AuthN vs AuthZ
 
 **AuthN** (who is calling, which tenant they may use) is owned by your application.
-**AuthZ** (what that identity may do to a resource) is owned by `@takibi/fire`
+**AuthZ** (what that identity may do to a collection) is owned by `@takibi/fire`
 via `accessPolicy`.
 
 `fire.initialContext()({ resolve })` is the trust boundary. Inside `resolve` you must:
@@ -64,7 +64,7 @@ const context = createContext({
   },
 });
 
-const handler = context.resources({
+const handler = context.collections({
   posts: {
     schema: z.object({
       title: z.string(),
@@ -100,13 +100,13 @@ When initial context is empty and you use `{ memory: true }`, you can still moun
 with `app.route("/foo", handler)` for simple demos and tests. Durable Object mode
 always needs `stub` (and usually `handle` so AuthN / env reach `resolve` / `stub`).
 
-### Resource seeds
+### Collection seeds
 
 Use `seed` for production defaults. It returns schema inputs keyed by document
 ID, so IDs do not need to be repeated inside document data:
 
 ```ts
-const handler = context.resources({
+const handler = context.collections({
   settings: {
     schema: z.object({
       bookingUrl: z.string(),
@@ -125,8 +125,8 @@ Seeds run before the Durable Object accepts requests and before memory-mode
 storage operations. They are create-only: an existing document is never
 overwritten, including when a Durable Object is reactivated. Adding another ID
 to the returned record creates that default on the next activation. Seed values
-are validated by the resource schema and bypass `accessPolicy`, like trusted
-storage operations.
+are validated by the collection schema and bypass `accessPolicy`, like trusted
+`$collections` operations.
 
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
 
@@ -143,20 +143,20 @@ Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying a
 
 ### Grants: `write` / `read` / `none` / `grant(...)`
 
-`accessPolicy` returns an **`AccessGrant`** — the set of actions the subject may perform on this resource / document — not a yes/no for the current request. The executor allows the call when the grant contains `action` (`create` / `get` / `list` / `update` / `delete`).
+`accessPolicy` returns an **`AccessGrant`** — the set of permissions the subject may perform on this collection / document — not a yes/no for the current request. The executor allows the call when the grant contains `permission` (`create` / `get` / `list` / `update` / `delete`).
 
-| helper                   | actions                           |
-| ------------------------ | --------------------------------- |
-| `write`                  | create, get, list, update, delete |
-| `read`                   | get, list                         |
-| `none`                   | (empty)                           |
-| `grant("create", "get")` | the actions you list              |
+| helper                   | permissions                               |
+| ------------------------ | ----------------------------------------- |
+| `write`                  | create, get, list, update, delete, invoke |
+| `read`                   | get, list                                 |
+| `none`                   | (empty)                                   |
+| `grant("create", "get")` | the permissions you list                  |
 
-A constant grant is valid (`accessPolicy: write`). Prefer returning a grant without switching on `action`; `action` stays on the context for logging and for helpers like `ownedBy` that distinguish list from get.
+A constant grant is valid (`accessPolicy: write`). Prefer returning a grant without switching on `permission`; `permission` stays on the context for logging and for helpers like `ownedBy` that distinguish list from get.
 
 ### Typed policies with `context.policy`
 
-`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, type `doc` / `nextDoc` inside the callback. Pass the resource schema or a pick of its fields. A pick-schema policy assigns to a resource iff those keys exist on the document (optional vs required does not matter). `and` / `or` infer that pick from their arguments.
+`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, type `doc` / `nextDoc` inside the callback. Pass the collection schema or a pick of its fields. A pick-schema policy assigns to a collection iff those keys exist on the document (optional vs required does not matter). `and` / `or` infer that pick from their arguments.
 
 `and` intersects grants; `or` unions them (`context.and` / `context.or`, also exported as `and` / `or`). Identity rules and document rules compose:
 
@@ -168,7 +168,7 @@ const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
   doc?.isSeeded || nextDoc?.isSeeded ? read : write,
 );
 
-const handler = context.resources({
+const handler = context.collections({
   items: {
     schema: itemSchema,
     accessPolicy: context.and(staffPolicy, isSeededData),
@@ -178,24 +178,24 @@ const handler = context.resources({
 
 Staff can write unseeded documents; seeded documents stay readable. `and(staffPolicy, read)` is the same pattern with a constant grant.
 
-### Owner-scoped resources with `ownedBy`
+### Owner-scoped collections with `ownedBy`
 
-Owner identity is **domain data** in your schema (commonly `ownerId`), not library system metadata. Clients must send the owner field; fire does not auto-insert it. Trusted `handler.storage` / DO storage still bypasses `accessPolicy`, but schema validation still requires the field.
+Owner identity is **domain data** in your schema (commonly `ownerId`), not library system metadata. Clients must send the owner field; fire does not auto-insert it. Trusted `handler.$collections` / DO `$collections` still bypasses `accessPolicy`, but schema validation still requires the field.
 
-Use `defineResource` when a resource definition is reused or declared separately
-from `resources({ ... })`. Inline definitions infer `accessPolicy`, `seed`, and
+Use `context.defineCollection` when a collection definition is reused, declared
+separately, or owns actions. Inline definitions infer `accessPolicy`, `seed`, and
 document types directly from their schema.
 
 ```ts
-import { ownedBy, defineResource, fire } from "@takibi/fire";
+import { ownedBy, fire } from "@takibi/fire";
 
 const createContext = fire.initialContext();
 const context = createContext({
   resolve: () => ({ tenantId: "acme", user: null as User | null }),
 });
 
-const handler = context.resources({
-  notes: defineResource({
+const handler = context.collections({
+  notes: context.defineCollection({
     schema: z.object({
       ownerId: z.string().min(1),
       title: z.string(),
@@ -216,22 +216,79 @@ Prefer throwing `UnauthorizedError` (or returning only after membership checks) 
 `resolve` when AuthN / tenant membership fails. The library also rejects an empty
 `tenantId` after `resolve` returns.
 
+### Actions
+
+Use actions for named server-side work that CRUD cannot express. Collection
+actions are declared with `defineCollection`; root actions are built from the
+assembled handler and registered with `.actions()`.
+
+```ts
+const posts = context.defineCollection({
+  schema: postSchema,
+  accessPolicy: postPolicy,
+  actions: (defineAction) => ({
+    duplicate: defineAction()
+      .input(z.object({ id: z.string(), title: z.string() }))
+      .policy(staffPolicy)
+      .handler(async ({ input, collection, $collection }) => {
+        const source = await $collection.get(input.id);
+        const { id: _id, createdAt: _c, updatedAt: _u, ...fields } = source;
+        return collection.add({ ...fields, title: input.title });
+      }),
+    stats: defineAction()
+      .requires("list")
+      .policy(staffPolicy)
+      .handler(async ({ collection }) => {
+        const page = await collection.list();
+        return { count: page.items.length };
+      }),
+  }),
+});
+
+const base = context.collections({ posts });
+const exportAll = base
+  .defineAction()
+  .policy(staffPolicy)
+  .handler(async ({ collections }) => ({
+    posts: (await collections.posts.list()).items,
+  }));
+const handler = base.actions({ exportAll });
+```
+
+Every action has a mandatory gate policy. Normal `collection` / `collections`
+CRUD evaluates each collection's `accessPolicy`; `$collection` /
+`$collections` bypasses only that document policy and never bypasses the action
+gate. These server-side facades throw `FireError` on failure.
+
+The public client is flat:
+
+```ts
+await client.posts.duplicate({ id: "p1", title: "Copy" });
+await client.posts.stats();
+await client.exportAll();
+```
+
+Actions use `POST {baseUrl}/{collection}:{name}` and root actions use
+`POST {baseUrl}/$:{name}`. Query parameters are rejected. Input is validated
+with Standard Schema; omitted input remains `undefined`, while JSON `null`
+remains explicit. Outputs must be JSON-safe; `void` becomes `data: null`.
+
 ## Client
 
-`createClient<typeof handler>(baseUrl)` infers the resource map from the handler
+`createClient<typeof handler>(baseUrl)` infers the collection and action maps from the handler
 type. Transport is REST-shaped HTTP; the oRPC-style part is that type inference,
 not an RPC wire.
 
-| operation | HTTP                                                                             |
-| --------- | -------------------------------------------------------------------------------- |
-| `add`     | `POST {baseUrl}/{resource}` — caller-chosen id: `POST {baseUrl}/{resource}/{id}` |
-| `set`     | `PUT {baseUrl}/{resource}/{id}`                                                  |
-| `get`     | `GET {baseUrl}/{resource}/{id}`                                                  |
-| `update`  | `PATCH {baseUrl}/{resource}/{id}`                                                |
-| `delete`  | `DELETE {baseUrl}/{resource}/{id}`                                               |
-| `list`    | `GET {baseUrl}/{resource}?limit=&cursor=`                                        |
+| operation | HTTP                                                                                 |
+| --------- | ------------------------------------------------------------------------------------ |
+| `add`     | `POST {baseUrl}/{collection}` — caller-chosen id: `POST {baseUrl}/{collection}/{id}` |
+| `set`     | `PUT {baseUrl}/{collection}/{id}`                                                    |
+| `get`     | `GET {baseUrl}/{collection}/{id}`                                                    |
+| `update`  | `PATCH {baseUrl}/{collection}/{id}`                                                  |
+| `delete`  | `DELETE {baseUrl}/{collection}/{id}`                                                 |
+| `list`    | `GET {baseUrl}/{collection}?limit=&cursor=`                                          |
 
-`POST` / `PUT` / `PATCH` bodies are the document input (not `{ resource, operation, ... }`).
+`POST` / `PUT` / `PATCH` bodies are the document input (not an internal wire request).
 `GET` / `DELETE` have no body. Worker→Durable Object forwarding stays an internal
 JSON POST and is not part of the public HTTP contract.
 
@@ -274,20 +331,20 @@ if (!created.ok) {
 const post = created.data;
 ```
 
-All `CollectionApi` methods return `Promise<FireResult<T>>`.
+All public client collection methods return `Promise<FireResult<T>>`.
 Server-decided failures (`NOT_FOUND`, `FORBIDDEN`, `VALIDATION`, `ALREADY_EXISTS`, …)
 resolve as `{ ok: false, error }` — they do **not** reject.
 
 Transport / protocol problems still reject the Promise (fetch failure, abort, invalid
 JSON, invalid response envelope). Use `try/catch` only for those.
 
-Document `id` is not part of the resource schema. Pass domain fields only in `data`;
+Document `id` is not part of the collection schema. Pass domain fields only in `data`;
 use `add(data, { id })` when you need a caller-chosen id. `add` fails with
 `ALREADY_EXISTS` (409) if that id already exists — use `set(id, data)` to upsert.
 
 Every saved document also carries server-managed `createdAt` / `updatedAt` (UTC ISO 8601
 via `Date.prototype.toISOString()`, e.g. `2026-08-09T14:12:00.000Z`). Do not define those
-fields in the resource schema and do not send them from the client — both input own
+fields in the collection schema and do not send them from the client — both input own
 properties and schema transforms that emit them fail validation. `add` and create-via-`set`
 set both timestamps to the same write-time value; overwrite `set` / `update` keep
 `createdAt` and refresh `updatedAt`. Empty patches and same-value writes still bump
@@ -348,20 +405,19 @@ createContext({
 });
 ```
 
-## Durable Object storage
+## Durable Object collections
 
 Inside the DO (trusted / admin path, `accessPolicy` bypassed):
 
 ```ts
-const result = await this.storage.posts.add({ title: "Hi", body: "..." });
-if (result.ok) {
-  // result.data
-}
+const post = await this.$collections.posts.add({ title: "Hi", body: "..." });
 ```
 
-In memory mode (`{ memory: true }`), the same Result-shaped API is on `handler.storage`.
+In memory mode (`{ memory: true }`), the same throwing API is on
+`handler.$collections`. In production Worker code it throws `NO_STORAGE`; use
+the generated Durable Object's `this.$collections`.
 Documents are stored with the Durable Object Storage KV API
-(`get` / `put` / `delete` / `list`) under keys `fire:${resource}:${id}`.
+(`get` / `put` / `delete` / `list`) under internal collection-prefixed keys.
 One document is one entry. The library does **not** use `state.storage.sql` or
 manage application SQL schemas / migrations.
 
@@ -413,7 +469,7 @@ Notes:
 
 - `get` / `update` / `list` always read or write the **whole** document value.
   There is no field projection or partial array read.
-- Growing collections belong in child resources (for example `postItems` with a
+- Growing collections belong in child collections (for example `postItems` with a
   parent id field), not as unbounded arrays embedded in a parent document.
   Keep embedded arrays small and bounded.
 - `list` returns full documents, paged with `{ limit?, cursor? }` over id order
