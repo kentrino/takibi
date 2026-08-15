@@ -31,7 +31,6 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Fire.none).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.read).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.write).toEqualTypeOf<AccessGrant>();
-  expectTypeOf(Fire.ownedBy).toBeFunction();
 });
 
 test("public annotation types use the collection/action vocabulary", () => {
@@ -64,6 +63,7 @@ test("removed resource/storage aliases and internal assembly APIs are not public
   expectTypeOf(Fire).not.toHaveProperty("executeOperation");
   expectTypeOf(Fire).not.toHaveProperty("createTypedStorage");
   expectTypeOf(Fire).not.toHaveProperty("parseSchema");
+  expectTypeOf(Fire).not.toHaveProperty("ownedBy");
 
   type PublicModule = typeof import("../src/index");
   type Removed =
@@ -75,6 +75,8 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ResourcesOptions"
     | "defineResource"
     | "executeOperation"
-    | "createTypedStorage";
+    | "createTypedStorage"
+    | "ownedBy"
+    | "OwnedByOptions";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });

@@ -152,7 +152,7 @@ Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying a
 | `none`                   | (empty)                                   |
 | `grant("create", "get")` | the permissions you list                  |
 
-A constant grant is valid (`accessPolicy: write`). Prefer returning a grant without switching on `permission`; `permission` stays on the context for logging and for helpers like `ownedBy` that distinguish list from get.
+A constant grant is valid (`accessPolicy: write`). Prefer returning a grant without switching on `permission`; `permission` stays on the context for logging and policies that need to distinguish list from get.
 
 ### Typed policies with `context.policy`
 
@@ -178,39 +178,12 @@ const handler = context.collections({
 
 Staff can write unseeded documents; seeded documents stay readable. `and(staffPolicy, read)` is the same pattern with a constant grant.
 
-### Owner-scoped collections with `ownedBy`
+### Owner-scoped collections
 
-Owner identity is **domain data** in your schema (commonly `ownerId`), not library system metadata. Clients must send the owner field; fire does not auto-insert it. Trusted `handler.$collections` / DO `$collections` still bypasses `accessPolicy`, but schema validation still requires the field.
-
-Use `context.defineCollection` when a collection definition is reused, declared
-separately, or owns actions. Inline definitions infer `accessPolicy`, `seed`, and
-document types directly from their schema.
-
-```ts
-import { ownedBy, fire } from "@takibi/fire";
-
-const createContext = fire.initialContext();
-const context = createContext({
-  resolve: () => ({ tenantId: "acme", user: null as User | null }),
-});
-
-const handler = context.collections({
-  notes: context.defineCollection({
-    schema: z.object({
-      ownerId: z.string().min(1),
-      title: z.string(),
-    }),
-    accessPolicy: ownedBy({
-      subject: ({ user }) => (user as User | null)?.id,
-      bypass: ({ user }) => (user as User | null)?.role === "admin",
-    }),
-  }),
-});
-```
-
-Rules: create / new set require `nextDoc[field] === subject`; get / delete require `doc[field] === subject`; update / existing set require **both** (so owners cannot reassign the field through normal client writes). Default `field` is `"ownerId"`; use `field: "authorId"` (or any schema string field) when needed. `bypass: true` allows all operations including `list`.
-
-**Owner-scoped list is not supported yet.** Without `bypass`, `ownedBy` rejects `list` with `FORBIDDEN` rather than filtering after fetch. Indexed owner queries belong in a later change.
+Ownership is domain-specific policy rather than library metadata. See the
+[owner-scoped collection policy recipe](./docs/recipes/owner-scoped-collections.md)
+for an application-local policy that prevents owner reassignment and denies
+unfiltered member lists.
 
 Prefer throwing `UnauthorizedError` (or returning only after membership checks) from
 `resolve` when AuthN / tenant membership fails. The library also rejects an empty
@@ -474,5 +447,5 @@ Notes:
   Keep embedded arrays small and bounded.
 - `list` returns full documents, paged with `{ limit?, cursor? }` over id order
   (prefix + `startAfter`). It does not offer `where` / `orderBy` / offset, and
-  does not filter by owner. Use `ownedBy` only when collection-wide list is
-  admin/`bypass`-only until owner-scoped list ships.
+  does not filter by owner. Owner-scoped policies must deny member lists until
+  an indexed owner query is available; never fetch everything and filter afterward.
