@@ -1,4 +1,5 @@
 import { ConflictError, NotFoundError } from "./errors";
+import { compileListOptions } from "./query";
 import { asFireResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
 import type {
@@ -207,7 +208,7 @@ export function createTypedStorage<TCollections extends Record<string, Collectio
       },
       update: (id, data) => asFireResult(() => storageUpdate(def, driver, name, id, data)),
       delete: (id) => asFireResult(() => storageDelete(driver, name, id)),
-      list: (opts?: ListOptions) => asFireResult(() => driver.list(name, opts)),
+      list: (opts?: ListOptions) => asFireResult(() => driver.list(name, compileListOptions(opts))),
     } as ClientCollectionsApi<TCollections>[typeof name];
   }
   return api;

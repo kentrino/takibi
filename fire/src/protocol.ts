@@ -1,6 +1,9 @@
 import type { ActionInvocation } from "./action-executor";
+import { BadRequestError } from "./errors";
 import type { ExecuteRequest } from "./executor";
+import { normalizeQueryExpr } from "./query";
 import type { FireFailure } from "./types";
+import type { StorageListOptions } from "./types";
 
 type WireContext = {
   tenantId: string;
@@ -59,8 +62,12 @@ export function decodeWireRequest(body: unknown): WireRequest {
       if (typeof r.id !== "string") throw new Error("Invalid CRUD id");
       break;
     case "list":
-      assertExactKeys(r, ["kind", "collection", "operation", "list", "context"]);
-      assertList(r.list);
+      try {
+        assertExactKeys(r, ["kind", "collection", "operation", "list", "context"]);
+        r.list = normalizeList(r.list);
+      } catch (error) {
+        throw new BadRequestError(error instanceof Error ? error.message : "Invalid list options");
+      }
       break;
     default:
       throw new Error("Invalid CRUD operation");
@@ -78,16 +85,21 @@ function assertContext(value: unknown): asserts value is WireContext {
   }
 }
 
-function assertList(value: unknown): void {
-  if (value === undefined) return;
+function normalizeList(value: unknown): StorageListOptions | undefined {
+  if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error("Invalid list options");
-  assertExactKeys(value, ["limit", "cursor"]);
+  assertExactKeys(value, ["limit", "cursor", "where"]);
   if (value.limit !== undefined && typeof value.limit !== "number") {
     throw new Error("Invalid list limit");
   }
   if (value.cursor !== undefined && typeof value.cursor !== "string") {
     throw new Error("Invalid list cursor");
   }
+  return {
+    ...(value.limit !== undefined ? { limit: value.limit } : {}),
+    ...(value.cursor !== undefined ? { cursor: value.cursor } : {}),
+    ...(value.where !== undefined ? { where: normalizeQueryExpr(value.where) } : {}),
+  };
 }
 
 function assertExactKeys(value: Record<string, unknown>, allowed: readonly string[]): void {

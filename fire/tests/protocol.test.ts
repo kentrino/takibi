@@ -1,4 +1,5 @@
 import { expect, test } from "vite-plus/test";
+import { BadRequestError } from "../src/errors";
 import { decodeWireRequest } from "../src/protocol";
 
 const context = { tenantId: "tenant-a", user: { id: "u1" } };
@@ -75,4 +76,35 @@ test("decodeWireRequest requires trusted context shape", () => {
       context: { tenantId: "tenant-a" },
     }),
   ).toThrow(/Invalid wire context/);
+});
+
+test("decodeWireRequest normalizes list queries and rejects malformed AST", () => {
+  const request = {
+    kind: "crud",
+    collection: "posts",
+    operation: "list",
+    list: {
+      limit: 10,
+      where: { field: "ownerId", op: "eq", value: "u1" },
+    },
+    context,
+  };
+  expect(decodeWireRequest(request)).toEqual(request);
+
+  expect(() =>
+    decodeWireRequest({
+      ...request,
+      list: {
+        where: { field: "ownerId", op: "eq", value: ["u1"] },
+      },
+    }),
+  ).toThrow(BadRequestError);
+  expect(() =>
+    decodeWireRequest({
+      ...request,
+      list: {
+        where: { field: "ownerId", op: "eq", value: "u1", extra: true },
+      },
+    }),
+  ).toThrow(BadRequestError);
 });

@@ -1,5 +1,6 @@
 import { ForbiddenError, NotFoundError } from "./errors";
 import { allows, evaluateAccessPolicy } from "./policy";
+import { compileListOptions } from "./query";
 import {
   commitAddDoc,
   prepareAddDoc,
@@ -19,6 +20,7 @@ import type {
   CollectionsApi,
   CollectionsDef,
   StorageDriver,
+  StorageListOptions,
   WithMetadata,
 } from "./types";
 
@@ -28,7 +30,7 @@ export type ExecuteRequest = {
   operation: CollectionOperation;
   id?: string;
   input?: unknown;
-  list?: { limit?: number; cursor?: string };
+  list?: StorageListOptions;
 };
 
 function resolvePermission(
@@ -169,6 +171,7 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
         collection: req.collection,
         operation: "list",
         permission: "list",
+        ...(req.list?.where ? { where: req.list.where } : {}),
       };
       await assertAccess(def, accessCtx, { conceal: false });
       return storage.list(req.collection, req.list);
@@ -230,7 +233,7 @@ export function createPolicyCollections<
           kind: "crud",
           collection: name,
           operation: "list",
-          ...(list ? { list } : {}),
+          ...(list ? { list: compileListOptions(list) } : {}),
         }),
     } as CollectionApi<TCollections[typeof name]>;
   }
@@ -254,7 +257,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       },
       update: (id, input) => storageUpdate(definition, storage, name, id, input),
       delete: (id) => storageDelete(storage, name, id),
-      list: (options) => storage.list(name, options),
+      list: (options) => storage.list(name, compileListOptions(options)),
     } as CollectionApi<TCollections[typeof name]>;
   }
   return api;

@@ -1,4 +1,13 @@
-import type { ListOptions, StorageDriver, WithMetadata } from "./types";
+import { BadRequestError } from "./errors";
+import { matchesQuery, normalizeQueryExpr } from "./query";
+import type { QueryExpr, StorageDriver, StorageListOptions, WithMetadata } from "./types";
+
+type ListCursorV2 = {
+  v: 2;
+  collection: string;
+  where: QueryExpr | null;
+  id: string;
+};
 
 export function createMemoryStorage(): StorageDriver {
   const tables = new Map<string, Map<string, WithMetadata<Record<string, unknown>>>>();
@@ -23,7 +32,7 @@ export function createMemoryStorage(): StorageDriver {
       return table(resource).delete(id);
     },
     async list(resource, opts) {
-      return paginate([...table(resource).values()], opts);
+      return paginate(resource, [...table(resource).values()], opts);
     },
   };
 }
@@ -46,35 +55,102 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
     },
     async list(resource, opts) {
       const prefix = prefixOf(resource);
-      const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
       const result = await storage.list<WithMetadata<Record<string, unknown>>>({
         prefix,
-        limit: limit + 1,
-        startAfter: opts?.cursor ? keyOf(resource, opts.cursor) : undefined,
       });
-      const items = [...result.values()];
-      if (items.length > limit) {
-        const page = items.slice(0, limit);
-        return { items: page, nextCursor: page.at(-1)?.id };
-      }
-      return { items };
+      return paginate(resource, [...result.values()], opts);
     },
   };
 }
 
 /**
- * Memory-side pagination matching Durable Object `list({ startAfter })`:
- * start strictly after the cursor id (lexicographic), even if that id is missing.
+ * Shared unindexed query and pagination semantics. Filtering happens before the
+ * cursor and limit, and both drivers return the same id-ordered pages.
  */
 function paginate(
+  resource: string,
   items: WithMetadata<Record<string, unknown>>[],
-  opts?: ListOptions,
+  opts?: StorageListOptions,
 ): { items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string } {
-  const sorted = [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let where: QueryExpr | undefined;
+  try {
+    where = opts?.where === undefined ? undefined : normalizeQueryExpr(opts.where);
+  } catch (error) {
+    throw new BadRequestError(error instanceof Error ? error.message : "Invalid query");
+  }
+
+  const cursor = opts?.cursor === undefined ? undefined : decodeCursor(opts.cursor);
+  if (cursor !== undefined && (cursor.collection !== resource || !sameQuery(cursor.where, where))) {
+    throw new BadRequestError("Cursor does not match this collection and query");
+  }
+
+  const sorted = items
+    .filter((document) => (where ? matchesQuery(document, where) : true))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-  const start = opts?.cursor ? sorted.findIndex((d) => d.id > opts.cursor!) : 0;
+  const start = cursor ? sorted.findIndex((document) => document.id > cursor.id) : 0;
   if (start < 0) return { items: [] };
   const page = sorted.slice(start, start + limit);
   const next = sorted[start + limit];
-  return next ? { items: page, nextCursor: page.at(-1)?.id } : { items: page };
+  const last = page.at(-1);
+  return next && last
+    ? { items: page, nextCursor: encodeCursor(resource, where, last.id) }
+    : { items: page };
+}
+
+function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | undefined): boolean {
+  return JSON.stringify(cursorWhere) === JSON.stringify(where ?? null);
+}
+
+function encodeCursor(collection: string, where: QueryExpr | undefined, id: string): string {
+  const cursor: ListCursorV2 = {
+    v: 2,
+    collection,
+    where: where ?? null,
+    id,
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(cursor));
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function decodeCursor(token: string): ListCursorV2 {
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(token) || token.length % 4 === 1) {
+      throw new Error("Invalid base64url");
+    }
+    const base64 = token.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const json = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+    const value = JSON.parse(json) as unknown;
+    if (!isRecord(value)) throw new Error("Invalid cursor object");
+    assertExactCursorKeys(value);
+    if (
+      value.v !== 2 ||
+      typeof value.collection !== "string" ||
+      value.collection.length === 0 ||
+      typeof value.id !== "string" ||
+      value.id.length === 0
+    ) {
+      throw new Error("Invalid cursor fields");
+    }
+    const where = value.where === null ? null : normalizeQueryExpr(value.where);
+    return { v: 2, collection: value.collection, where, id: value.id };
+  } catch {
+    throw new BadRequestError("Invalid list cursor");
+  }
+}
+
+function assertExactCursorKeys(value: Record<string, unknown>): void {
+  const keys = Object.keys(value);
+  const expected = ["v", "collection", "where", "id"];
+  if (keys.length !== expected.length || keys.some((key) => !expected.includes(key))) {
+    throw new Error("Invalid cursor fields");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -1,8 +1,9 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
-import { createClient, fire, grant, none, read, write } from "../src/index";
-import type { AccessContext } from "../src/index";
+import { executeOperation } from "../src/executor";
+import { createClient, fire, grant, none, queryImpliesEquality, read, write } from "../src/index";
+import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 
 type User = { id: string; role: "admin" | "member" };
@@ -198,6 +199,148 @@ test("action input is validated and client uses one-segment colon routes", async
     ok: false,
     error: { kind: "validation", code: "VALIDATION", status: 400 },
   });
+});
+
+test("client compiles list callbacks to normalized HTTP query AST", async () => {
+  const { handler } = createActionApp();
+  let calls = 0;
+  let capturedUrl = "";
+  const client = createClient<typeof handler>("http://fire.test/api/fire", {
+    fetch: (input) => {
+      calls += 1;
+      capturedUrl =
+        input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+      return Response.json({ ok: true, data: { items: [] } });
+    },
+  });
+  let callbackCalls = 0;
+
+  await client.posts.list({
+    limit: 5,
+    where: (query) => {
+      callbackCalls += 1;
+      return query.and(query.title.eq("hello"), query.createdAt.gte("2026-08-15T00:00:00.000Z"));
+    },
+  });
+
+  expect(callbackCalls).toBe(1);
+  expect(calls).toBe(1);
+  const url = new URL(capturedUrl);
+  expect(url.searchParams.get("limit")).toBe("5");
+  expect(JSON.parse(url.searchParams.get("where")!)).toEqual({
+    op: "and",
+    operands: [
+      { field: "title", op: "eq", value: "hello" },
+      { field: "createdAt", op: "gte", value: "2026-08-15T00:00:00.000Z" },
+    ],
+  });
+});
+
+test("owner policy only grants list when the whole query implies the caller owner", async () => {
+  const context = fire.initialContext()({
+    resolve: resolveTestContext,
+  });
+  const Note = z.object({
+    ownerId: z.string(),
+    status: z.string(),
+  });
+  const handler = context.collections(
+    {
+      notes: {
+        schema: Note,
+        accessPolicy: context.policy(Note.pick({ ownerId: true }), ({ user, operation, where }) => {
+          if (user?.role === "admin") return write;
+          if (operation === "list" && user && queryImpliesEquality(where, "ownerId", user.id)) {
+            return grant("list");
+          }
+          return none;
+        }),
+      },
+    },
+    { memory: true },
+  );
+  await handler.$collections.notes.add({ ownerId: "u1", status: "open" }, { id: "n1" });
+  await handler.$collections.notes.add({ ownerId: "u2", status: "open" }, { id: "n2" });
+  await handler.$collections.notes.add({ ownerId: "u1", status: "closed" }, { id: "n3" });
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const own = await client.notes.list({
+    where: (query) => query.ownerId.eq("u1"),
+  });
+  expect(own).toMatchObject({
+    ok: true,
+    data: { items: [{ id: "n1" }, { id: "n3" }] },
+  });
+  const ownOpen = await client.notes.list({
+    where: (query) => query.and(query.ownerId.eq("u1"), query.status.eq("open")),
+  });
+  expect(ownOpen).toMatchObject({
+    ok: true,
+    data: { items: [{ id: "n1" }] },
+  });
+
+  for (const result of [
+    await client.notes.list(),
+    await client.notes.list({ where: (query) => query.ownerId.eq("u2") }),
+    await client.notes.list({
+      where: (query) => query.or(query.ownerId.eq("u1"), query.status.eq("open")),
+    }),
+    await client.notes.list({
+      where: (query) => query.not(query.ownerId.eq("u2")),
+    }),
+  ]) {
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "FORBIDDEN", status: 403 },
+    });
+  }
+});
+
+test("list policy sees normalized where before storage access", async () => {
+  const where: QueryExpr = { field: "ownerId", op: "eq", value: "u1" };
+  let observed: QueryExpr | undefined;
+  let listCalls = 0;
+  const storage: StorageDriver = {
+    async get() {
+      return null;
+    },
+    async put() {},
+    async delete() {
+      return false;
+    },
+    async list() {
+      listCalls += 1;
+      return { items: [] };
+    },
+  };
+
+  await expect(
+    executeOperation(
+      {
+        notes: {
+          schema: z.object({ ownerId: z.string() }),
+          accessPolicy(context) {
+            observed = context.where;
+            return none;
+          },
+        },
+      },
+      storage,
+      { tenantId: "tenant-a", user: { id: "u1" } },
+      {
+        kind: "crud",
+        collection: "notes",
+        operation: "list",
+        list: { where },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+  expect(observed).toEqual(where);
+  expect(listCalls).toBe(0);
 });
 
 test("gate policy is mandatory at execution and requires can use list grants", async () => {

@@ -182,8 +182,25 @@ Staff can write unseeded documents; seeded documents stay readable. `and(staffPo
 
 Ownership is domain-specific policy rather than library metadata. See the
 [owner-scoped collection policy recipe](./docs/recipes/owner-scoped-collections.md)
-for an application-local policy that prevents owner reassignment and denies
-unfiltered member lists.
+for an application-local policy that prevents owner reassignment and only
+grants member lists when the query guarantees the caller's owner value. The
+policy must prove the whole expression, not merely find an owner leaf that
+could be bypassed by `or` or `not`:
+
+```ts
+import { grant, none, queryImpliesEquality } from "@takibi/fire";
+
+accessPolicy({ user, operation, where }) {
+  if (
+    operation === "list" &&
+    user &&
+    queryImpliesEquality(where, "ownerId", user.id)
+  ) {
+    return grant("list");
+  }
+  return none;
+}
+```
 
 Prefer throwing `UnauthorizedError` (or returning only after membership checks) from
 `resolve` when AuthN / tenant membership fails. The library also rejects an empty
@@ -259,7 +276,7 @@ not an RPC wire.
 | `get`     | `GET {baseUrl}/{collection}/{id}`                                                    |
 | `update`  | `PATCH {baseUrl}/{collection}/{id}`                                                  |
 | `delete`  | `DELETE {baseUrl}/{collection}/{id}`                                                 |
-| `list`    | `GET {baseUrl}/{collection}?limit=&cursor=`                                          |
+| `list`    | `GET {baseUrl}/{collection}?limit=&cursor=&where=`                                   |
 
 `POST` / `PUT` / `PATCH` bodies are the document input (not an internal wire request).
 `GET` / `DELETE` have no body. Worker→Durable Object forwarding stays an internal
@@ -323,6 +340,31 @@ set both timestamps to the same write-time value; overwrite `set` / `update` kee
 `createdAt` and refresh `updatedAt`. Empty patches and same-value writes still bump
 `updatedAt`. These timestamps are observational only — not revisions, ETags, or optimistic
 lock tokens. Same-millisecond writes may share a value.
+
+### List queries
+
+`list.where` is a typed AST builder callback, not a JavaScript predicate over
+documents. It runs synchronously once in the client or server facade and sends
+only the normalized expression to the server:
+
+```ts
+const page = await client.posts.list({
+  where: (query) => query.and(query.ownerId.eq(currentUser.id), query.createdAt.gte(yesterday)),
+  limit: 50,
+});
+```
+
+Top-level scalar fields support `eq`; string and number fields also support
+`gt`, `gte`, `lt`, and `lte`. Compose expressions with `and`, `or`, and `not`.
+Results are always ordered by document id, and filtering happens before
+`cursor` and `limit`.
+
+The initial memory and Durable Object implementations have no field indexes:
+each query reads and filters the whole collection inside the trusted server.
+This is a linear scan, but non-matching documents are never included in the
+HTTP response. Treat `nextCursor` as opaque and reuse it only with the same
+collection and structurally identical query; do not inspect, modify, or guess
+cursor values.
 
 ### Migrating from the previous throw / null API
 
@@ -445,7 +487,9 @@ Notes:
 - Growing collections belong in child collections (for example `postItems` with a
   parent id field), not as unbounded arrays embedded in a parent document.
   Keep embedded arrays small and bounded.
-- `list` returns full documents, paged with `{ limit?, cursor? }` over id order
-  (prefix + `startAfter`). It does not offer `where` / `orderBy` / offset, and
-  does not filter by owner. Owner-scoped policies must deny member lists until
-  an indexed owner query is available; never fetch everything and filter afterward.
+- `list` returns full documents in id order and supports typed `where`,
+  `limit`, and an opaque query-bound `cursor`. It does not offer `orderBy`,
+  offset, or projection.
+- `where` is currently an unindexed server-side linear scan. Non-matching
+  documents remain inside the trusted storage boundary and are not returned to
+  the client.

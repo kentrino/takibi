@@ -1,6 +1,8 @@
 import { BadRequestError, FireError, NotFoundError } from "./errors";
 import type { ActionInvocation } from "./action-executor";
 import type { ExecuteRequest } from "./executor";
+import { normalizeQueryExpr } from "./query";
+import type { StorageListOptions } from "./types";
 
 export class MethodNotAllowedError extends FireError {
   constructor(message = "Method not allowed") {
@@ -151,15 +153,13 @@ function assertNoQuery(
   }
 }
 
-function parseListQuery(
-  searchParams: URLSearchParams,
-): { limit?: number; cursor?: string } | undefined {
+function parseListQuery(searchParams: URLSearchParams): StorageListOptions | undefined {
   for (const key of searchParams.keys()) {
-    if (key !== "limit" && key !== "cursor") {
+    if (key !== "limit" && key !== "cursor" && key !== "where") {
       throw new BadRequestError(`Unknown query parameter: ${key}`);
     }
   }
-  const list: { limit?: number; cursor?: string } = {};
+  const list: StorageListOptions = {};
   if (searchParams.has("limit")) {
     const raw = searchParams.get("limit") ?? "";
     if (!/^[0-9]+$/.test(raw)) {
@@ -169,6 +169,13 @@ function parseListQuery(
   }
   if (searchParams.has("cursor")) {
     list.cursor = searchParams.get("cursor") ?? "";
+  }
+  if (searchParams.has("where")) {
+    try {
+      list.where = normalizeQueryExpr(JSON.parse(searchParams.get("where") ?? ""));
+    } catch (error) {
+      throw new BadRequestError(error instanceof Error ? error.message : "Invalid where query");
+    }
   }
   return Object.keys(list).length > 0 ? list : undefined;
 }

@@ -18,6 +18,11 @@ import type {
   InferCollectionDoc,
   InferHandlerCollections,
   JsonValue,
+  ListOptions,
+  QueryBuilder,
+  QueryExpr,
+  QueryOperator,
+  QueryScalar,
 } from "../src/index";
 
 test("public root exports collection/action entry points", () => {
@@ -28,6 +33,7 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Fire.and).toBeFunction();
   expectTypeOf(Fire.or).toBeFunction();
   expectTypeOf(Fire.grant).toBeFunction();
+  expectTypeOf(Fire.queryImpliesEquality).toBeFunction();
   expectTypeOf(Fire.none).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.read).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.write).toEqualTypeOf<AccessGrant>();
@@ -54,6 +60,11 @@ test("public annotation types use the collection/action vocabulary", () => {
     InferCollectionDoc: InferCollectionDoc<CollectionDefinition>;
     InferHandlerCollections: InferHandlerCollections<FireHandler>;
     JsonValue: JsonValue;
+    ListOptions: ListOptions;
+    QueryBuilder: QueryBuilder<Record<string, string>>;
+    QueryExpr: QueryExpr;
+    QueryOperator: QueryOperator;
+    QueryScalar: QueryScalar;
   };
   expectTypeOf<PublicSurface>().not.toBeNever();
 });

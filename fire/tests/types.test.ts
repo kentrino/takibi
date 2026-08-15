@@ -57,6 +57,32 @@ test("collection schemas type CRUD clients and trusted collections", () => {
   expectTypeOf(handler.$collections.posts.get).returns.resolves.not.toHaveProperty("ok");
   expectTypeOf(handler).not.toHaveProperty("storage");
   expectTypeOf<CollectionsOptions>().toHaveProperty("memory");
+
+  const checkListQueries = () => {
+    void client.posts.list({
+      where: (query) =>
+        query.and(
+          query.createdAt.gte("2026-08-15T00:00:00.000Z"),
+          query.not(query.published.eq(false)),
+        ),
+    });
+    void handler.$collections.posts.list({
+      where: (query) => query.or(query.title.eq("Hello"), query.updatedAt.lt("2027")),
+    });
+    void client.posts.list({
+      // @ts-expect-error unknown fields are not queryable
+      where: (query) => query.missing.eq("value"),
+    });
+    void client.posts.list({
+      // @ts-expect-error booleans only support equality
+      where: (query) => query.published.gte(true),
+    });
+    void client.posts.list({
+      // @ts-expect-error equality values follow the schema output type
+      where: (query) => query.title.eq(42),
+    });
+  };
+  void checkListQueries;
 });
 
 test("collection action input/output and scoped handler args are inferred", () => {

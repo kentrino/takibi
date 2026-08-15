@@ -1,12 +1,28 @@
 import { expect, test } from "vite-plus/test";
+import { BadRequestError } from "../src/errors";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
-import type { WithMetadata } from "../src/types";
+import type { QueryExpr, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
 
 const TS = "2026-08-09T14:12:00.000Z";
 
 function meta<T extends Record<string, unknown>>(doc: { id: string } & T): WithMetadata<T> {
   return { ...doc, createdAt: TS, updatedAt: TS };
+}
+
+function decodeCursor(token: string): Record<string, unknown> {
+  const base64 = token.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+}
+
+function encodeCursor(cursor: Record<string, unknown>): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(cursor));
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 }
 
 /** In-memory stand-in for DurableObjectStorage KV API used by createDurableObjectStorage. */
@@ -85,13 +101,18 @@ test("memory and DO KV pagination agree on order, boundary, and nextCursor", asy
   const page1Durable = await durable.list("posts", { limit: 2 });
   expect(page1Memory).toEqual(page1Durable);
   expect(page1Memory.items.map((d) => d.id)).toEqual(["a", "b"]);
-  expect(page1Memory.nextCursor).toBe("b");
+  expect(decodeCursor(page1Memory.nextCursor!)).toEqual({
+    v: 2,
+    collection: "posts",
+    where: null,
+    id: "b",
+  });
 
   const page2Memory = await memory.list("posts", { limit: 2, cursor: page1Memory.nextCursor });
   const page2Durable = await durable.list("posts", { limit: 2, cursor: page1Durable.nextCursor });
   expect(page2Memory).toEqual(page2Durable);
   expect(page2Memory.items.map((d) => d.id)).toEqual(["c", "d"]);
-  expect(page2Memory.nextCursor).toBe("d");
+  expect(decodeCursor(page2Memory.nextCursor!)).toMatchObject({ id: "d" });
 
   const page3Memory = await memory.list("posts", { limit: 2, cursor: page2Memory.nextCursor });
   const page3Durable = await durable.list("posts", { limit: 2, cursor: page2Durable.nextCursor });
@@ -100,10 +121,67 @@ test("memory and DO KV pagination agree on order, boundary, and nextCursor", asy
   expect(page3Memory.nextCursor).toBeUndefined();
 
   // Missing cursor seeks past that key (startAfter), not rewind to the start.
-  const afterMissingMemory = await memory.list("posts", { limit: 10, cursor: "a0" });
-  const afterMissingDurable = await durable.list("posts", { limit: 10, cursor: "a0" });
+  const missingCursor = encodeCursor({
+    ...decodeCursor(page1Memory.nextCursor!),
+    id: "a0",
+  });
+  const afterMissingMemory = await memory.list("posts", { limit: 10, cursor: missingCursor });
+  const afterMissingDurable = await durable.list("posts", { limit: 10, cursor: missingCursor });
   expect(afterMissingMemory).toEqual(afterMissingDurable);
   expect(afterMissingMemory.items.map((d) => d.id)).toEqual(["b", "c", "d", "e"]);
+
+  await expect(memory.list("posts", { cursor: "b" })).rejects.toBeInstanceOf(BadRequestError);
+});
+
+test("memory and DO filter before limit with query-bound cursors", async () => {
+  const memory = createMemoryStorage();
+  const durable = createDurableObjectStorage(createFakeDurableObjectStorage());
+  const docs = [
+    meta({ id: "a", ownerId: "u2", score: 30 }),
+    meta({ id: "b", ownerId: "u1", score: 10 }),
+    meta({ id: "c", ownerId: "u2", score: 20 }),
+    meta({ id: "d", ownerId: "u1", score: 20 }),
+    meta({ id: "e", ownerId: "u1", score: 30 }),
+  ];
+  for (const doc of docs) {
+    await memory.put("posts", doc);
+    await durable.put("posts", doc);
+  }
+
+  const where: QueryExpr = { field: "ownerId", op: "eq", value: "u1" };
+  const firstMemory = await memory.list("posts", { limit: 2, where });
+  const firstDurable = await durable.list("posts", { limit: 2, where });
+  expect(firstMemory).toEqual(firstDurable);
+  expect(firstMemory.items.map((document) => document.id)).toEqual(["b", "d"]);
+  expect(decodeCursor(firstMemory.nextCursor!)).toEqual({
+    v: 2,
+    collection: "posts",
+    where,
+    id: "d",
+  });
+
+  const secondMemory = await memory.list("posts", {
+    limit: 2,
+    where,
+    cursor: firstMemory.nextCursor,
+  });
+  const secondDurable = await durable.list("posts", {
+    limit: 2,
+    where,
+    cursor: firstDurable.nextCursor,
+  });
+  expect(secondMemory).toEqual(secondDurable);
+  expect(secondMemory.items.map((document) => document.id)).toEqual(["e"]);
+
+  await expect(
+    memory.list("comments", { where, cursor: firstMemory.nextCursor }),
+  ).rejects.toBeInstanceOf(BadRequestError);
+  await expect(
+    memory.list("posts", {
+      where: { field: "ownerId", op: "eq", value: "u2" },
+      cursor: firstMemory.nextCursor,
+    }),
+  ).rejects.toBeInstanceOf(BadRequestError);
 });
 
 test("DO get reads only fire:${resource}:${id}", async () => {

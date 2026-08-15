@@ -39,6 +39,49 @@ test("decodePublicHttp maps CRUD routes", async () => {
   });
 });
 
+test("decodePublicHttp parses and normalizes list where JSON", async () => {
+  const where = {
+    op: "and",
+    operands: [
+      { field: "ownerId", op: "eq", value: "u1" },
+      { field: "createdAt", op: "gte", value: "2026-08-15T00:00:00.000Z" },
+    ],
+  };
+  const params = new URLSearchParams({ where: JSON.stringify(where) });
+
+  await expect(
+    decodePublicHttp(new Request(`http://fire.test/posts?${params.toString()}`)),
+  ).resolves.toEqual({
+    kind: "crud",
+    collection: "posts",
+    operation: "list",
+    list: { where },
+  });
+});
+
+test("decodePublicHttp rejects malformed and excessive list queries", async () => {
+  const leaf = { field: "score", op: "eq", value: 1 };
+  let tooDeep: unknown = leaf;
+  for (let index = 0; index < 8; index += 1) tooDeep = { op: "not", operand: tooDeep };
+  const invalid = [
+    "{",
+    JSON.stringify({ field: "score", op: "wat", value: 1 }),
+    JSON.stringify({ field: "score", op: "eq", value: 1, extra: true }),
+    JSON.stringify({ field: "score", op: "eq", value: { nested: true } }),
+    '{"field":"score","op":"eq","value":1e999}',
+    JSON.stringify({ op: "and", operands: [leaf] }),
+    JSON.stringify({ op: "and", operands: Array.from({ length: 32 }, () => leaf) }),
+    JSON.stringify(tooDeep),
+  ];
+
+  for (const where of invalid) {
+    const params = new URLSearchParams({ where });
+    await expect(
+      decodePublicHttp(new Request(`http://fire.test/posts?${params.toString()}`)),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  }
+});
+
 test("decodePublicHttp maps collection and root colon actions", async () => {
   await expect(
     decodePublicHttp(

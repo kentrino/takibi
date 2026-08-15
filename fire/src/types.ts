@@ -20,6 +20,40 @@ export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
 
 export type WithMetadata<T> = Omit<T, keyof DocumentMetadata> & DocumentMetadata;
 
+export type QueryScalar = string | number | boolean | null;
+
+export type QueryOperator = "eq" | "gt" | "gte" | "lt" | "lte";
+
+export type QueryExpr =
+  | { readonly field: string; readonly op: QueryOperator; readonly value: QueryScalar }
+  | { readonly op: "and" | "or"; readonly operands: readonly QueryExpr[] }
+  | { readonly op: "not"; readonly operand: QueryExpr };
+
+type QueryEqValue<T> = Extract<Exclude<T, undefined>, QueryScalar>;
+type QueryComparableValue<T> = Extract<Exclude<T, undefined | null>, string | number>;
+
+export type QueryField<T> = ([QueryEqValue<T>] extends [never]
+  ? object
+  : { eq(value: QueryEqValue<T>): QueryExpr }) &
+  ([QueryComparableValue<T>] extends [never]
+    ? object
+    : {
+        gt(value: QueryComparableValue<T>): QueryExpr;
+        gte(value: QueryComparableValue<T>): QueryExpr;
+        lt(value: QueryComparableValue<T>): QueryExpr;
+        lte(value: QueryComparableValue<T>): QueryExpr;
+      });
+
+type QueryFields<TDoc> = {
+  [K in keyof TDoc as K extends string ? K : never]-?: QueryField<TDoc[K]>;
+};
+
+export type QueryBuilder<TDoc> = QueryFields<TDoc> & {
+  and(first: QueryExpr, second: QueryExpr, ...rest: QueryExpr[]): QueryExpr;
+  or(first: QueryExpr, second: QueryExpr, ...rest: QueryExpr[]): QueryExpr;
+  not(operand: QueryExpr): QueryExpr;
+};
+
 export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list";
 
 export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
@@ -33,6 +67,8 @@ export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = 
   collection: string;
   operation: "add" | "set" | "get" | "update" | "delete" | "list";
   permission: Exclude<AccessPermission, "invoke">;
+  /** Normalized list query. Present only when list was called with `where`. */
+  where?: QueryExpr;
   /** Saved document for get / update / delete / existing set. Absent for add / list / new set. */
   doc?: TDoc;
   /** Validated write candidate for add / update / set. Absent for get / delete / list. */
@@ -132,7 +168,7 @@ export type CollectionApi<C> = {
   get: (id: DocumentId) => Promise<InferCollectionDoc<C>>;
   update: (id: DocumentId, data: Partial<CollectionDataInput<C>>) => Promise<InferCollectionDoc<C>>;
   delete: (id: DocumentId) => Promise<{ id: DocumentId }>;
-  list: (opts?: { limit?: number; cursor?: string }) => Promise<{
+  list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<{
     items: InferCollectionDoc<C>[];
     nextCursor?: string;
   }>;
@@ -155,7 +191,7 @@ export type ClientCollectionApi<C> = {
     data: Partial<CollectionDataInput<C>>,
   ) => Promise<FireResult<InferCollectionDoc<C>>>;
   delete: (id: DocumentId) => Promise<FireResult<{ id: DocumentId }>>;
-  list: (opts?: { limit?: number; cursor?: string }) => Promise<
+  list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<
     FireResult<{
       items: InferCollectionDoc<C>[];
       nextCursor?: string;
@@ -167,9 +203,16 @@ export type ClientCollectionsApi<TCollections> = {
   [K in keyof TCollections]: ClientCollectionApi<TCollections[K]>;
 };
 
-export type ListOptions = {
+export type ListOptions<TDoc = WithMetadata<Record<string, QueryScalar>>> = {
   limit?: number;
   cursor?: string;
+  where?: (query: QueryBuilder<TDoc>) => QueryExpr;
+};
+
+export type StorageListOptions = {
+  limit?: number;
+  cursor?: string;
+  where?: QueryExpr;
 };
 
 export type StorageDriver = {
@@ -178,6 +221,6 @@ export type StorageDriver = {
   delete(resource: string, id: string): Promise<boolean>;
   list(
     resource: string,
-    opts?: ListOptions,
+    opts?: StorageListOptions,
   ): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }>;
 };

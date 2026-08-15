@@ -2,8 +2,15 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { unsafeClientPropertyNames, type ActionDefinition } from "./action";
 import type { FireHandler } from "./context";
 import { isWireResponse, type WireResponse } from "./protocol";
+import { compileListOptions } from "./query";
 import { collectionActionsBrand } from "./types";
-import type { ClientCollectionApi, CollectionOperation, FireResult, JsonValue } from "./types";
+import type {
+  ClientCollectionApi,
+  CollectionOperation,
+  FireResult,
+  JsonValue,
+  StorageListOptions,
+} from "./types";
 
 export type InferHandlerCollections<H> = H extends {
   readonly "~fire": { collections: infer C };
@@ -110,7 +117,7 @@ function createCollectionClient(
 ): ClientCollectionApi<{ schema: never }> {
   const call = async <T>(
     operation: CollectionOperation,
-    parts: { id?: string; input?: unknown; list?: { limit?: number; cursor?: string } } = {},
+    parts: { id?: string; input?: unknown; list?: StorageListOptions } = {},
   ): Promise<FireResult<T>> => {
     if (parts.id === "") {
       return {
@@ -135,7 +142,7 @@ function createCollectionClient(
     get: (id) => call("get", { id }),
     update: (id, data) => call("update", { id, input: data }),
     delete: (id) => call("delete", { id }),
-    list: (opts) => call("list", { list: opts }),
+    list: (opts) => call("list", { list: compileListOptions(opts) }),
   };
   const actions = new Map<string, unknown>();
   return new Proxy(crud, {
@@ -162,7 +169,7 @@ function createCollectionClient(
 function buildPublicRequest(
   collection: string,
   operation: CollectionOperation,
-  parts: { id?: string; input?: unknown; list?: { limit?: number; cursor?: string } },
+  parts: { id?: string; input?: unknown; list?: StorageListOptions },
 ): { method: string; path: string; input?: unknown; query?: URLSearchParams } {
   const encodedCollection = encodeURIComponent(collection);
   const item =
@@ -185,6 +192,7 @@ function buildPublicRequest(
       const params = new URLSearchParams();
       if (parts.list?.limit !== undefined) params.set("limit", String(parts.list.limit));
       if (parts.list?.cursor !== undefined) params.set("cursor", parts.list.cursor);
+      if (parts.list?.where !== undefined) params.set("where", JSON.stringify(parts.list.where));
       return { method: "GET", path: encodedCollection, query: params };
     }
     default: {

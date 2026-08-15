@@ -8,7 +8,7 @@ The following policy lets an owner create, read, update, and delete notes while
 preventing owner reassignment. Administrators bypass the restriction.
 
 ```ts
-import { fire, grant, none, write } from "@takibi/fire";
+import { fire, grant, none, queryImpliesEquality, write } from "@takibi/fire";
 import { z } from "zod";
 
 type User = {
@@ -32,7 +32,7 @@ const context = createContext({
 const ownerGrant = grant("create", "get", "update", "delete");
 const noteOwnerPolicy = context.policy(
   noteSchema.pick({ ownerId: true }),
-  ({ user, operation, doc, nextDoc }) => {
+  ({ user, operation, doc, nextDoc, where }) => {
     if (user?.role === "admin") return write;
     if (!user?.id) return none;
 
@@ -56,7 +56,7 @@ const noteOwnerPolicy = context.policy(
             ? ownerGrant
             : none;
       case "list":
-        return none;
+        return queryImpliesEquality(where, "ownerId", user.id) ? grant("list") : none;
     }
   },
 );
@@ -73,10 +73,13 @@ Clients must send `ownerId`; fire does not insert it. Trusted
 `handler.$collections` and Durable Object `$collections` calls bypass
 `accessPolicy`, but schema validation still applies.
 
-The member policy deliberately denies `list`. The current list API cannot query
-by owner, and fetching the whole collection before filtering can expose data
-and scales poorly. Provide owner-scoped listing only through an indexed query
-or a server-side action that never reads unrelated documents.
+The member policy grants `list` only when the complete query implies
+`ownerId.eq(user.id)`. This accepts `and(ownerId.eq(user.id), ...)` and rejects
+an absent query, another owner value, `or(ownerId.eq(user.id), ...)`, and
+`not(ownerId.eq(other))`. Filtering runs in trusted server storage before the
+response is built, so unrelated documents are not returned to the client. The
+initial implementation scans the collection without an index; account for that
+linear cost when choosing collection size.
 
 For a different owner field such as `authorId`, pick and compare that field
 instead. If ownership transfer is valid in the domain, model it as a separate
