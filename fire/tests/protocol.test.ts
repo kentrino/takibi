@@ -7,14 +7,14 @@ const context = { tenantId: "tenant-a", user: { id: "u1" } };
 test("decodeWireRequest accepts exact CRUD and action requests", () => {
   expect(
     decodeWireRequest({
-      kind: "crud",
+      kind: "collection",
       collection: "posts",
       operation: "get",
       id: "p1",
       context,
     }),
   ).toEqual({
-    kind: "crud",
+    kind: "collection",
     collection: "posts",
     operation: "get",
     id: "p1",
@@ -49,7 +49,7 @@ test("decodeWireRequest enforces CRUD/action XOR and exact routing fields", () =
   ).toThrow(/Unexpected wire field/);
   expect(() =>
     decodeWireRequest({
-      kind: "crud",
+      kind: "collection",
       collection: "posts",
       operation: "get",
       id: "p1",
@@ -59,7 +59,7 @@ test("decodeWireRequest enforces CRUD/action XOR and exact routing fields", () =
   ).toThrow(/Unexpected wire field/);
   expect(() =>
     decodeWireRequest({
-      kind: "crud",
+      kind: "collection",
       collection: "posts",
       operation: "get",
       context,
@@ -80,7 +80,7 @@ test("decodeWireRequest requires trusted context shape", () => {
 
 test("decodeWireRequest normalizes list queries and rejects malformed AST", () => {
   const request = {
-    kind: "crud",
+    kind: "collection",
     collection: "posts",
     operation: "list",
     list: {

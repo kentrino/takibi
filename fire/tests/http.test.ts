@@ -18,13 +18,13 @@ test("decodePublicHttp maps CRUD routes", async () => {
       "/api/fire",
     ),
   ).resolves.toEqual({
-    kind: "crud",
+    kind: "collection",
     collection: "posts",
     operation: "add",
     input: { title: "Hi" },
   });
   await expect(decodePublicHttp(new Request("http://fire.test/posts/p1"))).resolves.toEqual({
-    kind: "crud",
+    kind: "collection",
     collection: "posts",
     operation: "get",
     id: "p1",
@@ -32,7 +32,7 @@ test("decodePublicHttp maps CRUD routes", async () => {
   await expect(
     decodePublicHttp(new Request("http://fire.test/posts?limit=10&cursor=abc")),
   ).resolves.toEqual({
-    kind: "crud",
+    kind: "collection",
     collection: "posts",
     operation: "list",
     list: { limit: 10, cursor: "abc" },
@@ -52,7 +52,7 @@ test("decodePublicHttp parses and normalizes list where JSON", async () => {
   await expect(
     decodePublicHttp(new Request(`http://fire.test/posts?${params.toString()}`)),
   ).resolves.toEqual({
-    kind: "crud",
+    kind: "collection",
     collection: "posts",
     operation: "list",
     list: { where },

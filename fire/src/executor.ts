@@ -25,7 +25,7 @@ import type {
 } from "./types";
 
 export type ExecuteRequest = {
-  kind: "crud";
+  kind: "collection";
   collection: string;
   operation: CollectionOperation;
   id?: string;
@@ -192,7 +192,7 @@ export function createPolicyCollections<
     api[name] = {
       add: (input, options) =>
         executeOperation(collections, storage, ctx, {
-          kind: "crud",
+          kind: "collection",
           collection: name,
           operation: "add",
           input,
@@ -200,7 +200,7 @@ export function createPolicyCollections<
         }),
       set: (id, input) =>
         executeOperation(collections, storage, ctx, {
-          kind: "crud",
+          kind: "collection",
           collection: name,
           operation: "set",
           id,
@@ -208,14 +208,14 @@ export function createPolicyCollections<
         }),
       get: (id) =>
         executeOperation(collections, storage, ctx, {
-          kind: "crud",
+          kind: "collection",
           collection: name,
           operation: "get",
           id,
         }),
       update: (id, input) =>
         executeOperation(collections, storage, ctx, {
-          kind: "crud",
+          kind: "collection",
           collection: name,
           operation: "update",
           id,
@@ -223,14 +223,14 @@ export function createPolicyCollections<
         }),
       delete: (id) =>
         executeOperation(collections, storage, ctx, {
-          kind: "crud",
+          kind: "collection",
           collection: name,
           operation: "delete",
           id,
         }),
       list: (list) =>
         executeOperation(collections, storage, ctx, {
-          kind: "crud",
+          kind: "collection",
           collection: name,
           operation: "list",
           ...(list ? { list: compileListOptions(list) } : {}),

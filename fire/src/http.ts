@@ -92,7 +92,7 @@ export async function decodePublicRoute(
     if (method === "POST") {
       assertNoQuery(searchParams);
       return {
-        kind: "crud",
+        kind: "collection",
         collection,
         operation: "add",
         input: await readJsonBody(readBody),
@@ -100,7 +100,7 @@ export async function decodePublicRoute(
     }
     if (method === "GET") {
       return {
-        kind: "crud",
+        kind: "collection",
         collection,
         operation: "list",
         list: parseListQuery(searchParams),
@@ -111,16 +111,22 @@ export async function decodePublicRoute(
 
   if (method === "GET") {
     assertNoQuery(searchParams);
-    return { kind: "crud", collection, operation: "get", id };
+    return { kind: "collection", collection, operation: "get", id };
   }
   if (method === "PUT") {
     assertNoQuery(searchParams);
-    return { kind: "crud", collection, operation: "set", id, input: await readJsonBody(readBody) };
+    return {
+      kind: "collection",
+      collection,
+      operation: "set",
+      id,
+      input: await readJsonBody(readBody),
+    };
   }
   if (method === "PATCH") {
     assertNoQuery(searchParams);
     return {
-      kind: "crud",
+      kind: "collection",
       collection,
       operation: "update",
       id,
@@ -129,12 +135,12 @@ export async function decodePublicRoute(
   }
   if (method === "DELETE") {
     assertNoQuery(searchParams);
-    return { kind: "crud", collection, operation: "delete", id };
+    return { kind: "collection", collection, operation: "delete", id };
   }
   if (method === "POST") {
     assertNoQuery(searchParams);
     return {
-      kind: "crud",
+      kind: "collection",
       collection,
       operation: "add",
       id,

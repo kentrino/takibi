@@ -11,9 +11,9 @@ type WireContext = {
   [key: string]: unknown;
 };
 
-export type CrudWireRequest = ExecuteRequest & { context: WireContext };
+export type CollectionWireRequest = ExecuteRequest & { context: WireContext };
 export type ActionWireRequest = ActionInvocation & { context: WireContext };
-export type WireRequest = CrudWireRequest | ActionWireRequest;
+export type WireRequest = CollectionWireRequest | ActionWireRequest;
 
 export type WireSuccess = { ok: true; data: unknown };
 export type WireFailure = {
@@ -39,7 +39,7 @@ export function decodeWireRequest(body: unknown): WireRequest {
     return r as ActionWireRequest;
   }
 
-  if (r.kind !== "crud") throw new Error("Invalid wire request kind");
+  if (r.kind !== "collection") throw new Error("Invalid wire request kind");
   if (typeof r.collection !== "string" || typeof r.operation !== "string") {
     throw new Error("Invalid CRUD wire request");
   }
@@ -72,7 +72,7 @@ export function decodeWireRequest(body: unknown): WireRequest {
     default:
       throw new Error("Invalid CRUD operation");
   }
-  return r as CrudWireRequest;
+  return r as CollectionWireRequest;
 }
 
 function assertContext(value: unknown): asserts value is WireContext {

@@ -339,7 +339,7 @@ test("list policy sees normalized where before storage access", async () => {
       storage,
       { tenantId: "tenant-a", user: { id: "u1" } },
       {
-        kind: "crud",
+        kind: "collection",
         collection: "notes",
         operation: "list",
         list: { where },
