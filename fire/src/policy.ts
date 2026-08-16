@@ -36,26 +36,34 @@ export function isContextPolicy(value: unknown): value is ContextPolicy<unknown>
   );
 }
 
+const WRITE_PERMISSIONS = [
+  "create",
+  "update",
+  "delete",
+] as const satisfies readonly AccessPermission[];
+
 const ALL_PERMISSIONS = [
   "create",
   "get",
   "list",
   "update",
   "delete",
+  "invoke",
 ] as const satisfies readonly AccessPermission[];
 
 function freezeGrant(permissions: readonly AccessPermission[]): AccessGrant {
   return Object.freeze(new Set(permissions));
 }
 
-/** Build a grant from explicit actions. `write` includes every action; `read` is get+list. */
+/** Build a grant from explicit permissions. */
 export function grant(...permissions: AccessPermission[]): AccessGrant {
   return freezeGrant(permissions);
 }
 
 export const none: AccessGrant = grant();
 export const read: AccessGrant = grant("get", "list");
-export const write: AccessGrant = grant(...ALL_PERMISSIONS, "invoke");
+export const write: AccessGrant = grant(...WRITE_PERMISSIONS);
+export const fullAccess: AccessGrant = grant(...ALL_PERMISSIONS);
 
 export function isAccessGrant(value: unknown): value is AccessGrant {
   return value instanceof Set;
@@ -85,8 +93,8 @@ function union(left: AccessGrant, right: AccessGrant): AccessGrant {
   return new Set<AccessPermission>([...left, ...right]);
 }
 
-function isFullWrite(decision: AccessGrant): boolean {
-  for (const permission of [...ALL_PERMISSIONS, "invoke"] as const) {
+function isFullAccess(decision: AccessGrant): boolean {
+  for (const permission of ALL_PERMISSIONS) {
     if (!decision.has(permission)) return false;
   }
   return true;
@@ -122,7 +130,7 @@ export function or<TCtx, TDoc>(
     let acc: AccessGrant = none;
     for (const policy of policies) {
       acc = union(acc, await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>));
-      if (isFullWrite(acc)) return write;
+      if (isFullAccess(acc)) return fullAccess;
     }
     return acc;
   }) as ConstrainedPolicy<TCtx, TDoc>;
@@ -148,8 +156,8 @@ export type PolicyHelper<TCtx> = {
 /**
  * Type-safe `accessPolicy` helper. Runtime is identity — inference is the
  * contract. Use the schema overload so document fields are checked; omit the
- * schema when the rule only looks at `user`. Return a grant (`write` / `read`
- * / `none` / `grant(...)`), not a boolean.
+ * schema when the rule only looks at `user`. Return a grant (`fullAccess` /
+ * `write` / `read` / `none` / `grant(...)`), not a boolean.
  */
 export function createPolicyHelper<TCtx>(): PolicyHelper<TCtx> {
   function policy(

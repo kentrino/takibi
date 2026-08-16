@@ -85,7 +85,8 @@ export type AccessPolicyFn<TCtx, TDoc = WithMetadata<Record<string, unknown>>> =
 ) => AccessGrant | Promise<AccessGrant>;
 
 /**
- * `accessPolicy` value: a function, or a constant grant (`write`, `read`, `none`).
+ * `accessPolicy` value: a function, or a constant grant
+ * (`fullAccess`, `write`, `read`, `none`).
  */
 export type AccessPolicy<TCtx, TDoc = WithMetadata<Record<string, unknown>>> =
   | AccessGrant

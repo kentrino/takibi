@@ -2,7 +2,15 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
 import { executeOperation } from "../src/executor";
-import { createClient, fire, grant, none, queryImpliesEquality, read, write } from "../src/index";
+import {
+  createClient,
+  fire,
+  fullAccess,
+  grant,
+  none,
+  queryImpliesEquality,
+  read,
+} from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 
@@ -29,15 +37,15 @@ const Post = z.object({
 });
 
 function postPolicy({ user, doc, nextDoc }: AccessContext<AppCtx>): ReturnType<typeof grant> {
-  if (user?.role === "admin") return write;
+  if (user?.role === "admin") return fullAccess;
   if (!user) return none;
   if (doc?.secret === true || nextDoc?.secret === true) return grant("list");
-  return write;
+  return fullAccess;
 }
 
 function createActionApp() {
   const context = fire.initialContext()({ resolve: resolveTestContext });
-  const staff = context.policy(({ user }) => (user ? write : none));
+  const staff = context.policy(({ user }) => (user ? fullAccess : none));
 
   const posts = context.defineCollection({
     schema: Post,
@@ -249,7 +257,7 @@ test("owner policy only grants list when the whole query implies the caller owne
       notes: {
         schema: Note,
         accessPolicy: context.policy(Note.pick({ ownerId: true }), ({ user, operation, where }) => {
-          if (user?.role === "admin") return write;
+          if (user?.role === "admin") return fullAccess;
           if (operation === "list" && user && queryImpliesEquality(where, "ownerId", user.id)) {
             return grant("list");
           }
@@ -367,7 +375,7 @@ test("action gate keeps resolved context under ctx without claim collisions", as
     }),
   });
   const base = context.collections(
-    { posts: { schema: Post, accessPolicy: write } },
+    { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
   const inspect = base
@@ -377,7 +385,7 @@ test("action gate keeps resolved context under ctx without claim collisions", as
       ctx.scope === "application-scope" &&
       permission === "invoke" &&
       scope.kind === "root"
-        ? write
+        ? fullAccess
         : none,
     )
     .handler(({ ctx }) => ({ permission: ctx.permission, scope: ctx.scope }));
@@ -459,11 +467,11 @@ test("Worker forwards only the action invocation and resolved context", async ()
       }) as DurableObjectStub,
   });
   const base = context.collections({
-    posts: { schema: Post, accessPolicy: write },
+    posts: { schema: Post, accessPolicy: fullAccess },
   });
   const ping = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler(() => ({ pong: true }));
   const handler = base.actions({ ping });
 
@@ -488,12 +496,12 @@ test("action registration is atomic and validates collisions", async () => {
     resolve: () => ({ tenantId: "t", user: { id: "u", role: "admin" as const } }),
   });
   const base = context.collections(
-    { posts: { schema: Post, accessPolicy: write } },
+    { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
   const valid = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler(() => ({ ok: true }));
   const invalid = { ...valid, kind: "collection" } as never;
   const register = (definitions: ActionDefinitions) => base.actions(definitions as never);
@@ -541,11 +549,11 @@ test("collection action definitions reject CRUD names and require defineCollecti
   });
   const invalid = context.defineCollection({
     schema: Post,
-    accessPolicy: write,
+    accessPolicy: fullAccess,
     // @ts-expect-error CRUD action names are rejected by the public builder type
     actions: (defineAction) => ({
       get: defineAction()
-        .policy(write)
+        .policy(fullAccess)
         .handler(() => ({ bad: true })),
     }),
   });
@@ -555,7 +563,7 @@ test("collection action definitions reject CRUD names and require defineCollecti
     context.collections({
       posts: {
         schema: Post,
-        accessPolicy: write,
+        accessPolicy: fullAccess,
         actions: () => ({}),
       } as never,
     }),
@@ -566,7 +574,7 @@ test("collection registration rejects hidden, symbol, and inherited entries", ()
   const context = fire.initialContext()({
     resolve: () => ({ tenantId: "t", user: null }),
   });
-  const definition = { schema: Post, accessPolicy: write };
+  const definition = { schema: Post, accessPolicy: fullAccess };
   const hidden = {};
   Object.defineProperty(hidden, "posts", {
     value: definition,
@@ -605,12 +613,12 @@ test("non-JSON action output is rejected before the success envelope", async () 
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
   const base = context.collections(
-    { posts: { schema: Post, accessPolicy: write } },
+    { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
   const invalid = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler((() => new Date()) as never);
   const handler = base.actions({ invalid });
   const response = await handler.request("http://fire.test/$:invalid", {
@@ -628,12 +636,12 @@ test("custom serialization hooks are rejected from action output", async () => {
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
   const base = context.collections(
-    { posts: { schema: Post, accessPolicy: write } },
+    { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
   const serialize = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler(() => {
       const output = { safe: true };
       Object.defineProperty(output, "toJSON", {
@@ -685,12 +693,12 @@ test("action output arrays reject ignored custom and accessor properties", async
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
   const base = context.collections(
-    { posts: { schema: Post, accessPolicy: write } },
+    { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
   const invalidArray = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler(() => {
       const output = [1, 2];
       Object.defineProperty(output, "3", {
@@ -727,7 +735,7 @@ test("non-JSON resolved context is rejected equally before memory or DO dispatch
       },
     });
     return context.collections(
-      { posts: { schema: Post, accessPolicy: write } },
+      { posts: { schema: Post, accessPolicy: fullAccess } },
       memory ? { memory: true } : undefined,
     );
   };

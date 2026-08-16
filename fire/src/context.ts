@@ -160,7 +160,7 @@ type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
   /**
    * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
    * for rules that only use execution context (`user`, …). Return a grant
-   * (`write` / `read` / `none` / `grant(...)`).
+   * (`fullAccess` / `write` / `read` / `none` / `grant(...)`).
    */
   policy: PolicyHelper<TCtx>;
   and: typeof and;

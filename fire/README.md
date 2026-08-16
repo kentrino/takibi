@@ -33,7 +33,7 @@ input plus `tenantId` and returns a Durable Object stub — no library-side `env
 `bindings` option. Empty initial uses `fire.initialContext()` (no type argument).
 
 ```ts
-import { UnauthorizedError, fire, write, read } from "@takibi/fire";
+import { UnauthorizedError, fire, fullAccess, grant, read } from "@takibi/fire";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -64,6 +64,7 @@ const context = createContext({
   },
 });
 
+const memberAccess = grant("create", "get", "list", "update", "delete");
 const handler = context.collections({
   posts: {
     schema: z.object({
@@ -71,8 +72,8 @@ const handler = context.collections({
       body: z.string(),
     }),
     accessPolicy({ user }) {
-      if (user?.role === "admin") return write;
-      if (user != null) return write;
+      if (user?.role === "admin") return fullAccess;
+      if (user != null) return memberAccess;
       return read;
     },
   },
@@ -111,7 +112,7 @@ const handler = context.collections({
     schema: z.object({
       bookingUrl: z.string(),
     }),
-    accessPolicy: write,
+    accessPolicy: fullAccess,
     seed: () => ({
       default: {
         bookingUrl: "",
@@ -141,18 +142,23 @@ are validated by the collection schema and bypass `accessPolicy`, like trusted
 
 Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying an **existing** document (get / update / delete / existing set) also returns `NOT_FOUND` so IDs are not leaked. Denying create / new set / list returns `FORBIDDEN`.
 
-### Grants: `write` / `read` / `none` / `grant(...)`
+### Grants: `fullAccess` / `write` / `read` / `none` / `grant(...)`
 
 `accessPolicy` returns an **`AccessGrant`** — the set of permissions the subject may perform on this collection / document — not a yes/no for the current request. The executor allows the call when the grant contains `permission` (`create` / `get` / `list` / `update` / `delete`).
 
 | helper                   | permissions                               |
 | ------------------------ | ----------------------------------------- |
-| `write`                  | create, get, list, update, delete, invoke |
+| `fullAccess`             | create, get, list, update, delete, invoke |
+| `write`                  | create, update, delete                    |
 | `read`                   | get, list                                 |
 | `none`                   | (empty)                                   |
 | `grant("create", "get")` | the permissions you list                  |
 
-A constant grant is valid (`accessPolicy: write`). Prefer returning a grant without switching on `permission`; `permission` stays on the context for logging and policies that need to distinguish list from get.
+A constant grant is valid (`accessPolicy: write`). Combine `or(read, write)` for
+CRUD without action invocation, and use `fullAccess` when `invoke` is also
+intended. Prefer returning a grant without switching on `permission`;
+`permission` stays on the context for logging and policies that need to
+distinguish list from get.
 
 ### Typed policies with `context.policy`
 
@@ -161,11 +167,11 @@ A constant grant is valid (`accessPolicy: write`). Prefer returning a grant with
 `and` intersects grants; `or` unions them (`context.and` / `context.or`, also exported as `and` / `or`). Identity rules and document rules compose:
 
 ```ts
-import { none, read, write } from "@takibi/fire";
+import { fullAccess, none, read } from "@takibi/fire";
 
-const staffPolicy = context.policy(({ user }) => (user != null ? write : none));
+const staffPolicy = context.policy(({ user }) => (user != null ? fullAccess : none));
 const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
-  doc?.isSeeded || nextDoc?.isSeeded ? read : write,
+  doc?.isSeeded || nextDoc?.isSeeded ? read : fullAccess,
 );
 
 const handler = context.collections({
@@ -176,7 +182,9 @@ const handler = context.collections({
 });
 ```
 
-Staff can write unseeded documents; seeded documents stay readable. `and(staffPolicy, read)` is the same pattern with a constant grant.
+Staff can read and write unseeded documents and invoke actions; seeded documents
+stay readable. `and(staffPolicy, read)` is the same pattern with a constant
+grant.
 
 ### Owner-scoped collections
 

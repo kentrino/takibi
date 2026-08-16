@@ -37,6 +37,7 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Fire.none).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.read).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Fire.write).toEqualTypeOf<AccessGrant>();
+  expectTypeOf(Fire.fullAccess).toEqualTypeOf<AccessGrant>();
 });
 
 test("public annotation types use the collection/action vocabulary", () => {

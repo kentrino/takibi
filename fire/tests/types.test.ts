@@ -1,6 +1,6 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, fire, none, write } from "../src/index";
+import { createClient, fire, fullAccess, none } from "../src/index";
 import type {
   AccessPermission,
   CollectionDefinition,
@@ -23,7 +23,7 @@ test("collection schemas type CRUD clients and trusted collections", () => {
     {
       posts: {
         schema: z.object({ title: z.string(), published: z.boolean().default(false) }),
-        accessPolicy: write,
+        accessPolicy: fullAccess,
       },
     },
     { memory: true },
@@ -94,11 +94,11 @@ test("collection action input/output and scoped handler args are inferred", () =
   });
   const posts = context.defineCollection({
     schema: z.object({ title: z.string() }),
-    accessPolicy: write,
+    accessPolicy: fullAccess,
     actions: (defineAction) => ({
       transformed: defineAction()
         .input(z.string().transform((value) => value.length))
-        .policy(write)
+        .policy(fullAccess)
         .handler(({ input, ctx, collection, $collection }) => {
           expectTypeOf(input).toEqualTypeOf<number>();
           expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
@@ -107,17 +107,17 @@ test("collection action input/output and scoped handler args are inferred", () =
         }),
       optional: defineAction()
         .input(z.string().optional())
-        .policy(write)
+        .policy(fullAccess)
         .handler(({ input }) => ({ value: input ?? null })),
       coerced: defineAction()
         .input(z.coerce.number())
-        .policy(write)
+        .policy(fullAccess)
         .handler(({ input }) => {
           expectTypeOf(input).toEqualTypeOf<number>();
           return { value: input };
         }),
       noInput: defineAction()
-        .policy(write)
+        .policy(fullAccess)
         .handler(({ input }) => {
           expectTypeOf(input).toEqualTypeOf<undefined>();
           return { ok: true };
@@ -148,14 +148,14 @@ test("root actions infer all collections and appear flat on the client", () => {
   });
   const base = context.collections(
     {
-      posts: { schema: z.object({ title: z.string() }), accessPolicy: write },
-      notes: { schema: z.object({ body: z.string() }), accessPolicy: write },
+      posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+      notes: { schema: z.object({ body: z.string() }), accessPolicy: fullAccess },
     },
     { memory: true },
   );
   const exportAll = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler(({ input, ctx, collections, $collections }) => {
       expectTypeOf(input).toEqualTypeOf<undefined>();
       expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
@@ -176,7 +176,7 @@ test("action builder requires policy before handler", () => {
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const base = context.collections({
-    posts: { schema: z.object({ title: z.string() }), accessPolicy: write },
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
   });
   const builder = base.defineAction();
   expectTypeOf(builder).not.toHaveProperty("handler");
@@ -189,7 +189,7 @@ test("action builder requires policy before handler", () => {
       .input(z.date());
   };
   void checkMissingHandler;
-  builder.policy(write).handler(() => null);
+  builder.policy(fullAccess).handler(() => null);
 });
 
 test("action and collection collisions are type errors", () => {
@@ -198,31 +198,31 @@ test("action and collection collisions are type errors", () => {
   });
   context.defineCollection({
     schema: z.object({ title: z.string() }),
-    accessPolicy: write,
+    accessPolicy: fullAccess,
     // @ts-expect-error CRUD method names are reserved
     actions: (defineAction) => ({
       get: defineAction()
-        .policy(write)
+        .policy(fullAccess)
         .handler(() => null),
     }),
   });
   context.defineCollection({
     schema: z.object({ title: z.string() }),
-    accessPolicy: write,
+    accessPolicy: fullAccess,
     // @ts-expect-error action names must be safe TypeScript identifiers
     actions: (defineAction) => ({
       "bad-name": defineAction()
-        .policy(write)
+        .policy(fullAccess)
         .handler(() => null),
     }),
   });
 
   const base = context.collections({
-    posts: { schema: z.object({ title: z.string() }), accessPolicy: write },
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
   });
   const action = base
     .defineAction()
-    .policy(write)
+    .policy(fullAccess)
     .handler(() => null);
   const symbolName = Symbol("action");
   const checkCollisions = () => {
@@ -251,21 +251,21 @@ test("action and collection collisions are type errors", () => {
     context.collections({
       "bad-name": {
         schema: z.object({ title: z.string() }),
-        accessPolicy: write,
+        accessPolicy: fullAccess,
       },
     });
     // @ts-expect-error numeric collection names are not public identifiers
     context.collections({
       1: {
         schema: z.object({ title: z.string() }),
-        accessPolicy: write,
+        accessPolicy: fullAccess,
       },
     });
     // @ts-expect-error symbol collection names are not public identifiers
     context.collections({
       [symbolName]: {
         schema: z.object({ title: z.string() }),
-        accessPolicy: write,
+        accessPolicy: fullAccess,
       },
     });
   };

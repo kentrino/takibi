@@ -8,7 +8,7 @@ The following policy lets an owner create, read, update, and delete notes while
 preventing owner reassignment. Administrators bypass the restriction.
 
 ```ts
-import { fire, grant, none, queryImpliesEquality, write } from "@takibi/fire";
+import { fire, fullAccess, grant, none, queryImpliesEquality } from "@takibi/fire";
 import { z } from "zod";
 
 type User = {
@@ -33,7 +33,7 @@ const ownerGrant = grant("create", "get", "update", "delete");
 const noteOwnerPolicy = context.policy(
   noteSchema.pick({ ownerId: true }),
   ({ user, operation, doc, nextDoc, where }) => {
-    if (user?.role === "admin") return write;
+    if (user?.role === "admin") return fullAccess;
     if (!user?.id) return none;
 
     const ownsCurrent = doc?.ownerId === user.id;
