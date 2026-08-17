@@ -120,12 +120,6 @@ export type FireBrand<
     collections: TCollections;
     actions: TRootActions;
   };
-  /**
-   * Trusted server-side API. Bypasses collection access policies.
-   * Bypasses ACL (like an admin SDK). Memory mode only on the worker;
-   * inside the Durable Object use `this.$collections`.
-   */
-  $collections: CollectionsApi<TCollections>;
   DurableObject: new (
     state: DurableObjectState,
     env: unknown,
@@ -286,9 +280,6 @@ function buildContext<TInitial>(
       const memoryReady = memoryDriver
         ? seedCollections(collections, memoryDriver)
         : Promise.resolve();
-      const trustedCollections = memoryDriver
-        ? createTrustedCollections(collections, afterInitialization(memoryDriver, memoryReady))
-        : createUnavailableCollections(collections);
 
       const run = async (
         request: Request,
@@ -398,7 +389,6 @@ function buildContext<TInitial>(
         },
         enumerable: false,
       });
-      handler.$collections = trustedCollections;
       handler.DurableObject = DurableObjectClass as FireHandler<
         FireCtxConstraint,
         typeof collections,
@@ -510,30 +500,6 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       return driver.list(resource, options);
     },
   };
-}
-
-function createUnavailableCollections<TCollections extends CollectionsDef>(
-  collections: TCollections,
-): CollectionsApi<TCollections> {
-  const fail = async () => {
-    throw new FireError(
-      "NO_STORAGE",
-      "handler.$collections is only available with `{ memory: true }`; in production use the Durable Object's `this.$collections`",
-      500,
-    );
-  };
-  const api = Object.create(null) as Record<string, unknown>;
-  for (const name of Object.keys(collections)) {
-    api[name] = {
-      add: fail,
-      set: fail,
-      get: fail,
-      update: fail,
-      delete: fail,
-      list: fail,
-    };
-  }
-  return api as CollectionsApi<TCollections>;
 }
 
 function toWireError(err: unknown): WireFailure {

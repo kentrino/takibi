@@ -436,9 +436,6 @@ Inside the DO (trusted / admin path, `accessPolicy` bypassed):
 const post = await this.$collections.posts.add({ title: "Hi", body: "..." });
 ```
 
-In memory mode (`{ memory: true }`), the same throwing API is on
-`handler.$collections`. In production Worker code it throws `NO_STORAGE`; use
-the generated Durable Object's `this.$collections`.
 Documents are stored with the Durable Object Storage KV API
 (`get` / `put` / `delete` / `list`) under internal collection-prefixed keys.
 One document is one entry. The library does **not** use `state.storage.sql` or

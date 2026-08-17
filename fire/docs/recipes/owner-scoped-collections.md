@@ -69,9 +69,8 @@ const handler = context.collections({
 });
 ```
 
-Clients must send `ownerId`; fire does not insert it. Trusted
-`handler.$collections` and Durable Object `$collections` calls bypass
-`accessPolicy`, but schema validation still applies.
+Clients must send `ownerId`; fire does not insert it. Trusted Durable Object
+`$collections` calls bypass `accessPolicy`, but schema validation still applies.
 
 The member policy grants `list` only when the complete query implies
 `ownerId.eq(user.id)`. This accepts `and(ownerId.eq(user.id), ...)` and rejects

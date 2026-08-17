@@ -149,6 +149,7 @@ function createFakeDurableObjectState(storage: DurableObjectStorage): DurableObj
 
 test("CRUD and collection/root actions roundtrip in memory mode", async () => {
   const { handler } = createActionApp();
+  expect(handler).not.toHaveProperty("$collections");
   const client = clientFor(handler);
 
   const created = await client.posts.add({ title: "first" }, { id: "p1" });
@@ -187,7 +188,10 @@ test("action input is validated and client uses one-segment colon routes", async
     },
   });
 
-  await handler.$collections.posts.add({ title: "source" }, { id: "p1" });
+  expect(await client.posts.add({ title: "source" }, { id: "p1" })).toMatchObject({
+    ok: true,
+    data: { id: "p1", title: "source" },
+  });
   const duplicate = await client.posts.duplicate({ id: "p1", title: "copy" });
   expect(duplicate).toMatchObject({ ok: true, data: { title: "copy:u1" } });
   expect(calls.at(-1)).toEqual({
@@ -267,9 +271,13 @@ test("owner policy only grants list when the whole query implies the caller owne
     },
     { memory: true },
   );
-  await handler.$collections.notes.add({ ownerId: "u1", status: "open" }, { id: "n1" });
-  await handler.$collections.notes.add({ ownerId: "u2", status: "open" }, { id: "n2" });
-  await handler.$collections.notes.add({ ownerId: "u1", status: "closed" }, { id: "n3" });
+  const admin = createClient<typeof handler>("http://fire.test", {
+    headers: () => headers({ id: "admin", role: "admin" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  await admin.notes.add({ ownerId: "u1", status: "open" }, { id: "n1" });
+  await admin.notes.add({ ownerId: "u2", status: "open" }, { id: "n2" });
+  await admin.notes.add({ ownerId: "u1", status: "closed" }, { id: "n3" });
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -402,7 +410,8 @@ test("action gate keeps resolved context under ctx without claim collisions", as
 
 test("normal action CRUD enforces accessPolicy and $collection bypass is local", async () => {
   const { handler } = createActionApp();
-  await handler.$collections.posts.add({ title: "secret", secret: true }, { id: "secret" });
+  const admin = clientFor(handler, { id: "admin", role: "admin" });
+  await admin.posts.add({ title: "secret", secret: true }, { id: "secret" });
   const client = clientFor(handler);
 
   expect(await client.posts.readSecret("secret")).toMatchObject({
@@ -474,6 +483,7 @@ test("Worker forwards only the action invocation and resolved context", async ()
     .policy(fullAccess)
     .handler(() => ({ pong: true }));
   const handler = base.actions({ ping });
+  expect(handler).not.toHaveProperty("$collections");
 
   const client = createClient<typeof handler>("http://fire.test", {
     fetch: (input, init) => handler.request(input, init),

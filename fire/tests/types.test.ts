@@ -15,19 +15,18 @@ type AppCtx = { tenantId: string; user: User | null };
 
 const createContext = fire.initialContext();
 
-test("collection schemas type CRUD clients and trusted collections", () => {
+test("collection schemas type CRUD clients without handler $collections", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const handler = context.collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string(), published: z.boolean().default(false) }),
-        accessPolicy: fullAccess,
-      },
+  const collections = {
+    posts: {
+      schema: z.object({ title: z.string(), published: z.boolean().default(false) }),
+      accessPolicy: fullAccess,
     },
-    { memory: true },
-  );
+  };
+  const handler = context.collections(collections, { memory: true });
+  const durableHandler = context.collections(collections);
   const client = createClient<typeof handler>("http://fire.test");
 
   expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{
@@ -49,14 +48,22 @@ test("collection schemas type CRUD clients and trusted collections", () => {
     }>
   >();
 
-  expectTypeOf(handler.$collections.posts.add).returns.resolves.toMatchTypeOf<{
+  expectTypeOf(handler).not.toHaveProperty("$collections");
+  expectTypeOf(durableHandler).not.toHaveProperty("$collections");
+  expectTypeOf(handler).not.toHaveProperty("storage");
+  expectTypeOf<CollectionsOptions>().toHaveProperty("memory");
+
+  type DurableInstance = InstanceType<typeof handler.DurableObject>;
+  expectTypeOf<DurableInstance>().toHaveProperty("$collections");
+  expectTypeOf(durableHandler.DurableObject).instance.toHaveProperty("$collections");
+  expectTypeOf<DurableInstance["$collections"]["posts"]["add"]>().returns.resolves.toMatchTypeOf<{
     id: string;
     title: string;
     published: boolean;
   }>();
-  expectTypeOf(handler.$collections.posts.get).returns.resolves.not.toHaveProperty("ok");
-  expectTypeOf(handler).not.toHaveProperty("storage");
-  expectTypeOf<CollectionsOptions>().toHaveProperty("memory");
+  expectTypeOf<
+    DurableInstance["$collections"]["posts"]["get"]
+  >().returns.resolves.not.toHaveProperty("ok");
 
   const checkListQueries = () => {
     void client.posts.list({
@@ -65,9 +72,6 @@ test("collection schemas type CRUD clients and trusted collections", () => {
           query.createdAt.gte("2026-08-15T00:00:00.000Z"),
           query.not(query.published.eq(false)),
         ),
-    });
-    void handler.$collections.posts.list({
-      where: (query) => query.or(query.title.eq("Hello"), query.updatedAt.lt("2027")),
     });
     void client.posts.list({
       // @ts-expect-error unknown fields are not queryable
