@@ -40,8 +40,6 @@ export type {
   CollectionApi,
   CollectionsApi,
   CollectionsDef,
-  DocumentId,
-  DocumentMetadata,
   TakibiResult,
   InferCollectionDoc,
   InferCollectionInput,
@@ -51,5 +49,4 @@ export type {
   QueryField,
   QueryOperator,
   QueryScalar,
-  WithMetadata,
 } from "./types";

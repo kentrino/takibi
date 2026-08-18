@@ -126,7 +126,10 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "TakibiFailure"
     | "TakibiValidationFailure"
     | "TakibiOperationFailure"
-    | "ValidationIssue";
+    | "ValidationIssue"
+    | "DocumentId"
+    | "DocumentMetadata"
+    | "WithMetadata";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -215,6 +218,15 @@ test("result leaf types are not public root types", () => {
   type _TakibiOperationFailure = import("../src/index").TakibiOperationFailure;
   // @ts-expect-error ValidationIssue must not remain on the public root
   type _ValidationIssue = import("../src/index").ValidationIssue;
+});
+
+test("document metadata helpers are not public root types", () => {
+  // @ts-expect-error DocumentId must not remain on the public root
+  type _DocumentId = import("../src/index").DocumentId;
+  // @ts-expect-error DocumentMetadata must not remain on the public root
+  type _DocumentMetadata = import("../src/index").DocumentMetadata;
+  // @ts-expect-error WithMetadata must not remain on the public root
+  type _WithMetadata = import("../src/index").WithMetadata;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

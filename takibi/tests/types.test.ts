@@ -7,7 +7,6 @@ import type {
   AccessPermission,
   CollectionDefinition,
   CollectionsOptions,
-  DocumentId,
   JsonValue,
   TakibiResult,
   InferCollectionDoc,
@@ -37,7 +36,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     title: string;
     published?: boolean;
   }>();
-  expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: DocumentId } | undefined>();
+  expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: string } | undefined>();
   expectTypeOf(client.posts.update).parameter(1).toEqualTypeOf<{
     title?: string;
     published?: boolean;
@@ -339,15 +338,17 @@ test("collection definition and inferred document use collection names", () => {
   const schema = z.object({ title: z.string() });
   type Definition = CollectionDefinition<typeof schema, AppCtx>;
   type Document = InferCollectionDoc<Definition>;
-  expectTypeOf<Document["id"]>().toEqualTypeOf<DocumentId>();
+  expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
   expectTypeOf<Document["title"]>().toEqualTypeOf<string>();
 });
 
-test("JsonValue includes arrays and DocumentId is any non-empty string at the type level", () => {
+test("JsonValue includes arrays and inferred document ids are unconstrained strings", () => {
   expectTypeOf<string[]>().toExtend<JsonValue>();
   expectTypeOf<JsonValue[]>().toExtend<JsonValue>();
-  expectTypeOf<DocumentId>().toEqualTypeOf<string>();
-  const dotted: DocumentId = "post.1:item";
+  const schema = z.object({ title: z.string() });
+  type Document = InferCollectionDoc<CollectionDefinition<typeof schema, AppCtx>>;
+  expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
+  const dotted: Document["id"] = "post.1:item";
   void dotted;
   expectTypeOf<keyof StorageDriver>().toEqualTypeOf<"delete" | "get" | "list" | "put">();
 });
