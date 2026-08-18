@@ -33,7 +33,6 @@ export {
 export { SchemaValidationError } from "./schema";
 
 export { allows, and, fullAccess, grant, none, or, read, write } from "./policy";
-export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc, PolicyHelper } from "./policy";
 export { queryImpliesEquality } from "./query";
 
 export type {

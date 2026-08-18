@@ -341,3 +341,15 @@ test("parseSchema infers Standard Schema output", () => {
   type Parsed = Awaited<ReturnType<typeof parseSchema<typeof schema>>>;
   expectTypeOf<Parsed>().toEqualTypeOf<StandardSchemaV1.InferOutput<typeof schema>>();
 });
+
+test("createTakibi policy helper keeps schema and context-only overloads", () => {
+  const takibi = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  });
+  const staff = takibi.policy(({ user }) => (user ? fullAccess : none));
+  const ownerOnly = takibi.policy(z.object({ ownerId: z.string() }), ({ user, doc }) =>
+    user?.id === doc?.ownerId ? fullAccess : none,
+  );
+  void staff;
+  void ownerOnly;
+});

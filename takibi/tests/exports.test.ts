@@ -5,6 +5,8 @@ import type {
   AccessContext,
   AccessGrant,
   AccessPermission,
+  AccessPolicy,
+  AccessPolicyFn,
   ActionGateContext,
   ClientOf,
   CollectionApi,
@@ -47,6 +49,8 @@ test("public annotation types use the collection/action vocabulary", () => {
     AccessContext: AccessContext<Ctx>;
     AccessGrant: AccessGrant;
     AccessPermission: AccessPermission;
+    AccessPolicy: AccessPolicy<Ctx>;
+    AccessPolicyFn: AccessPolicyFn<Ctx>;
     ActionGateContext: ActionGateContext<Ctx>;
     ClientOf: ClientOf<Definitions>;
     CollectionApi: CollectionApi<CollectionDefinition>;
@@ -108,7 +112,12 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "AnySchema"
     | "InferSchemaInput"
     | "InferSchemaOutput"
-    | "StandardSchemaV1";
+    | "StandardSchemaV1"
+    | "ConstrainedPolicy"
+    | "ContextPolicy"
+    | "InferPolicyDoc"
+    | "PolicyHelper"
+    | "ReusablePolicy";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -142,6 +151,19 @@ test("Standard Schema aliases are not public root types", () => {
   type _InferSchemaOutput = import("../src/index").InferSchemaOutput;
   // @ts-expect-error StandardSchemaV1 must not be re-exported from the public root
   type _StandardSchemaV1 = import("../src/index").StandardSchemaV1;
+});
+
+test("policy inference implementation types are not public root types", () => {
+  // @ts-expect-error ConstrainedPolicy must not remain on the public root
+  type _ConstrainedPolicy = import("../src/index").ConstrainedPolicy;
+  // @ts-expect-error ContextPolicy must not remain on the public root
+  type _ContextPolicy = import("../src/index").ContextPolicy;
+  // @ts-expect-error InferPolicyDoc must not remain on the public root
+  type _InferPolicyDoc = import("../src/index").InferPolicyDoc;
+  // @ts-expect-error PolicyHelper must not remain on the public root
+  type _PolicyHelper = import("../src/index").PolicyHelper;
+  // @ts-expect-error ReusablePolicy must not be added to the public root
+  type _ReusablePolicy = import("../src/index").ReusablePolicy;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {
