@@ -74,6 +74,8 @@ test("removed resource/storage aliases and internal assembly APIs are not public
   expectTypeOf(Takibi).not.toHaveProperty("createTypedStorage");
   expectTypeOf(Takibi).not.toHaveProperty("parseSchema");
   expectTypeOf(Takibi).not.toHaveProperty("ownedBy");
+  expectTypeOf(Takibi).not.toHaveProperty("SchemaValidationError");
+  expectTypeOf(Takibi).not.toHaveProperty("validationError");
 
   type PublicModule = typeof import("../src/index");
   type Removed =
@@ -129,7 +131,9 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ValidationIssue"
     | "DocumentId"
     | "DocumentMetadata"
-    | "WithMetadata";
+    | "WithMetadata"
+    | "SchemaValidationError"
+    | "validationError";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -227,6 +231,13 @@ test("document metadata helpers are not public root types", () => {
   type _DocumentMetadata = import("../src/index").DocumentMetadata;
   // @ts-expect-error WithMetadata must not remain on the public root
   type _WithMetadata = import("../src/index").WithMetadata;
+});
+
+test("SchemaValidationError is not a public root type or factory", () => {
+  // @ts-expect-error SchemaValidationError must not remain on the public root
+  type _SchemaValidationError = import("../src/index").SchemaValidationError;
+  // @ts-expect-error validationError must not be added to the public root
+  type _validationError = import("../src/index").validationError;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

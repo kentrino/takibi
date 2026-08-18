@@ -23,8 +23,6 @@ export {
   UnauthorizedError,
 } from "./errors";
 
-export { SchemaValidationError } from "./schema";
-
 export { allows, and, fullAccess, grant, none, or, read, write } from "./policy";
 export { queryImpliesEquality } from "./query";
 

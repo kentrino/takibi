@@ -254,6 +254,42 @@ test("action input is validated and client uses one-segment colon routes", async
   });
 });
 
+test("action input schema refinements become validation failures", async () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const RegisterInput = z
+    .object({ email: z.string() })
+    .refine((input) => !input.email.endsWith(".invalid"), {
+      message: "blocked domain",
+      path: ["email"],
+    });
+  const base = context.collections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { memory: true },
+  );
+  const register = base
+    .defineAction()
+    .input(RegisterInput)
+    .policy(fullAccess)
+    .handler(({ input }) => ({ email: input.email }));
+  const handler = base.actions({ register });
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const blocked = await client.register({ email: "user@example.invalid" });
+  expect(blocked).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+  if (!blocked.ok && blocked.error.kind === "validation") {
+    expect(blocked.error.issues.some((issue) => issue.message === "blocked domain")).toBe(true);
+  }
+
+  const ok = await client.register({ email: "user@example.com" });
+  expect(ok).toEqual({ ok: true, data: { email: "user@example.com" } });
+});
+
 test("client compiles list callbacks to normalized HTTP query AST", async () => {
   const { handler } = createActionApp();
   let calls = 0;

@@ -252,6 +252,10 @@ const exportAll = base
 const handler = base.actions({ exportAll });
 ```
 
+`.input(...)` takes a Standard Schema, including refinements. Input failures
+become `{ kind: "validation", code: "VALIDATION" }` with field `issues`. Throw a
+`TakibiError` subclass from the handler for operation failures.
+
 Every action has a mandatory gate policy. Normal `collection` / `collections`
 CRUD evaluates each collection's `accessPolicy`; `$collection` /
 `$collections` bypasses only that document policy and never bypasses the action
