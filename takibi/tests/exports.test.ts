@@ -27,8 +27,7 @@ import type {
 
 test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi.createClient).toBeFunction();
-  expectTypeOf(Takibi.fire).toHaveProperty("initialContext");
-  expectTypeOf(Takibi.initialContext).toBeFunction();
+  expectTypeOf(Takibi.createTakibi).toBeFunction();
   expectTypeOf(Takibi.allows).toBeFunction();
   expectTypeOf(Takibi.and).toBeFunction();
   expectTypeOf(Takibi.or).toBeFunction();
@@ -92,11 +91,15 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "OwnedByOptions"
     | "FireError"
     | "toFireFailure"
-    | "asFireResult";
+    | "asFireResult"
+    | "fire"
+    | "initialContext";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
 test("renamed Fire* public names are not exported", () => {
+  expectTypeOf(Takibi).not.toHaveProperty("fire");
+  expectTypeOf(Takibi).not.toHaveProperty("initialContext");
   expectTypeOf(Takibi).not.toHaveProperty("FireError");
   expectTypeOf(Takibi).not.toHaveProperty("toFireFailure");
   expectTypeOf(Takibi).not.toHaveProperty("asFireResult");

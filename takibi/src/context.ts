@@ -188,12 +188,11 @@ type CreateContextFn<TInitial> = <
 
 /**
  * Bind typed initial context (`handle(..., { context })` deps), then call the
- * returned `createContext` with `{ resolve, stub? }`. Execution context is
- * inferred from `resolve`'s return type.
+ * returned factory with `{ resolve, stub? }`. Execution context is inferred
+ * from `resolve`'s return type.
  *
  * @example
- * const createContext = fire.initialContext<Initial>()
- * const app = createContext({
+ * const takibi = createTakibi<Initial>()({
  *   resolve: async ({ request, context }): Promise<AppCtx> => {
  *     const user = await context.di.getSession(request)
  *     return { tenantId: "acme", user }
@@ -204,20 +203,12 @@ type CreateContextFn<TInitial> = <
  *   },
  * })
  */
-export function initialContext<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
+export function createTakibi<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
   return ((config) =>
     buildContext(
       config as ContextConfig<TakibiCtxConstraint, TInitial>,
     )) as CreateContextFn<TInitial>;
 }
-
-/**
- * Namespace entry for context setup. Use `fire.initialContext<Initial>()`
- * (or `fire.initialContext()` when initial deps are empty).
- */
-export const fire = {
-  initialContext,
-} as const;
 
 function buildContext<TInitial>(
   config: ContextConfig<TakibiCtxConstraint, TInitial>,
@@ -306,7 +297,7 @@ function buildContext<TInitial>(
           if (!resolveStub) {
             throw new TakibiError(
               "MISSING_STUB",
-              "Durable Object mode requires stub on fire.initialContext()({ stub }) — or use collections(..., { memory: true }) for tests",
+              "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
               500,
             );
           }
@@ -315,7 +306,7 @@ function buildContext<TInitial>(
           if (!doStub || typeof doStub.fetch !== "function") {
             throw new TakibiError(
               "MISSING_STUB",
-              "fire.initialContext()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
+              "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
               500,
             );
           }

@@ -8,7 +8,7 @@ The following policy lets an owner create, read, update, and delete notes while
 preventing owner reassignment. Administrators bypass the restriction.
 
 ```ts
-import { fire, fullAccess, grant, none, queryImpliesEquality } from "@takibi/takibi";
+import { createTakibi, fullAccess, grant, none, queryImpliesEquality } from "@takibi/takibi";
 import { z } from "zod";
 
 type User = {
@@ -21,7 +21,7 @@ const noteSchema = z.object({
   title: z.string(),
 });
 
-const createContext = fire.initialContext();
+const createContext = createTakibi();
 const context = createContext({
   resolve: (): { tenantId: string; user: User | null } => ({
     tenantId: "acme",

@@ -6,7 +6,7 @@ export type {
   InferHandlerCollections,
 } from "./client";
 
-export { fire, initialContext } from "./context";
+export { createTakibi } from "./context";
 export type {
   ContextConfig,
   ContextResolver,

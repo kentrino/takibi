@@ -4,7 +4,7 @@ import type { ActionDefinitions } from "../src/action";
 import { executeOperation } from "../src/executor";
 import {
   createClient,
-  fire,
+  createTakibi,
   fullAccess,
   grant,
   none,
@@ -44,7 +44,7 @@ function postPolicy({ user, doc, nextDoc }: AccessContext<AppCtx>): ReturnType<t
 }
 
 function createActionApp() {
-  const context = fire.initialContext()({ resolve: resolveTestContext });
+  const context = createTakibi()({ resolve: resolveTestContext });
   const staff = context.policy(({ user }) => (user ? fullAccess : none));
 
   const posts = context.defineCollection({
@@ -249,7 +249,7 @@ test("client compiles list callbacks to normalized HTTP query AST", async () => 
 });
 
 test("owner policy only grants list when the whole query implies the caller owner", async () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: resolveTestContext,
   });
   const Note = z.object({
@@ -374,7 +374,7 @@ test("gate policy is mandatory at execution and requires can use list grants", a
 });
 
 test("action gate keeps resolved context under ctx without claim collisions", async () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({
       tenantId: "tenant-a",
       user: { id: "u1" },
@@ -461,7 +461,7 @@ test("actions execute inside the generated Durable Object", async () => {
 
 test("Worker forwards only the action invocation and resolved context", async () => {
   let captured: unknown;
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({
       tenantId: "trusted",
       user: { id: "u1", role: "admin" as const },
@@ -502,7 +502,7 @@ test("Worker forwards only the action invocation and resolved context", async ()
 });
 
 test("action registration is atomic and validates collisions", async () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u", role: "admin" as const } }),
   });
   const base = context.collections(
@@ -554,7 +554,7 @@ test("action registration is atomic and validates collisions", async () => {
 });
 
 test("collection action definitions reject CRUD names and require defineCollection", () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: null }),
   });
   const invalid = context.defineCollection({
@@ -581,7 +581,7 @@ test("collection action definitions reject CRUD names and require defineCollecti
 });
 
 test("collection registration rejects hidden, symbol, and inherited entries", () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: null }),
   });
   const definition = { schema: Post, accessPolicy: fullAccess };
@@ -619,7 +619,7 @@ test("client reflection properties never become network endpoints", async () => 
 });
 
 test("non-JSON action output is rejected before the success envelope", async () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
   const base = context.collections(
@@ -642,7 +642,7 @@ test("non-JSON action output is rejected before the success envelope", async () 
 });
 
 test("custom serialization hooks are rejected from action output", async () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
   const base = context.collections(
@@ -699,7 +699,7 @@ test("client rejects non-JSON action input before fetch", async () => {
 });
 
 test("action output arrays reject ignored custom and accessor properties", async () => {
-  const context = fire.initialContext()({
+  const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
   const base = context.collections(
@@ -731,7 +731,7 @@ test("action output arrays reject ignored custom and accessor properties", async
 test("non-JSON resolved context is rejected equally before memory or DO dispatch", async () => {
   let stubCalls = 0;
   const create = (memory: boolean) => {
-    const context = fire.initialContext()({
+    const context = createTakibi()({
       resolve: () => ({
         tenantId: "tenant-a",
         user: { id: "u1" },

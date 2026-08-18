@@ -1,6 +1,6 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, fire, fullAccess, none } from "../src/index";
+import { createClient, createTakibi, fullAccess, none } from "../src/index";
 import type {
   AccessPermission,
   CollectionDefinition,
@@ -13,7 +13,7 @@ import type {
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
 
-const createContext = fire.initialContext();
+const createContext = createTakibi();
 
 test("collection schemas type CRUD clients without handler $collections", () => {
   const context = createContext({
@@ -290,6 +290,29 @@ test("policy context uses permission vocabulary", () => {
       },
     },
   });
+});
+
+test("createTakibi binds TInitial then infers execution context from resolve", () => {
+  type Initial = { token: string };
+  const takibi = createTakibi<Initial>()({
+    resolve: ({ context }) => {
+      expectTypeOf(context).toEqualTypeOf<Initial>();
+      return { tenantId: "acme" as const, user: { id: context.token } };
+    },
+  });
+  const posts = takibi.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+    actions: (defineAction) => ({
+      ping: defineAction()
+        .policy(fullAccess)
+        .handler(({ ctx }) => {
+          expectTypeOf(ctx.user).toEqualTypeOf<{ id: string }>();
+          return { ok: true as const };
+        }),
+    }),
+  });
+  void posts;
 });
 
 test("collection definition and inferred document use collection names", () => {

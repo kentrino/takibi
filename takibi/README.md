@@ -2,7 +2,7 @@
 
 Typed, Firebase-like collection store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
-The official public API is `fire`, `createClient`, policy helpers, and errors. Lower-level assembly pieces are unpublished.
+The official public API is `createTakibi`, `createClient`, policy helpers, and errors. Lower-level assembly pieces are unpublished.
 
 ## AuthN vs AuthZ
 
@@ -10,7 +10,7 @@ The official public API is `fire`, `createClient`, policy helpers, and errors. L
 **AuthZ** (what that identity may do to a collection) is owned by `@takibi/takibi`
 via `accessPolicy`.
 
-`fire.initialContext()({ resolve })` is the trust boundary. Inside `resolve` you must:
+`createTakibi()({ resolve })` is the trust boundary. Inside `resolve` you must:
 
 1. Verify a credential, session, or trusted gateway assertion and set `user`
 2. Decide the tenant for this request (from the identity claim and/or an
@@ -26,14 +26,14 @@ Do **not** trust client-declared identity or tenant headers (for example
 
 Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
 deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
-`fire.initialContext<Initial>()`, then call the returned `createContext` with
-`{ resolve, stub? }`. `TCtx` is inferred from `resolve`'s return (annotate with
-`Promise<AppCtx>` when you want a named / wider type). `stub` receives the same
-input plus `tenantId` and returns a Durable Object stub — no library-side `env` /
-`bindings` option. Empty initial uses `fire.initialContext()` (no type argument).
+`createTakibi<Initial>()`, then call the returned factory with `{ resolve, stub? }`.
+`TCtx` is inferred from `resolve`'s return (annotate with `Promise<AppCtx>` when
+you want a named / wider type). `stub` receives the same input plus `tenantId`
+and returns a Durable Object stub — no library-side `env` / `bindings` option.
+Empty initial uses `createTakibi()` (no type argument).
 
 ```ts
-import { UnauthorizedError, fire, fullAccess, grant, read } from "@takibi/takibi";
+import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "@takibi/takibi";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -44,8 +44,7 @@ type Initial = {
 };
 type AppCtx = { tenantId: string; user: User | null };
 
-const createContext = fire.initialContext<Initial>();
-const context = createContext({
+const takibi = createTakibi<Initial>()({
   resolve: async ({ request, context }): Promise<AppCtx> => {
     const user = await context.di.getSession(request);
     const requested = request.headers.get("x-tenant-id"); // optional hint only
@@ -65,7 +64,7 @@ const context = createContext({
 });
 
 const memberAccess = grant("create", "get", "list", "update", "delete");
-const handler = context.collections({
+const handler = takibi.collections({
   posts: {
     schema: z.object({
       title: z.string(),
@@ -401,7 +400,7 @@ const post = result.data;
 `get` / `update` / `delete` use the same `NOT_FOUND` failure when the document is missing.
 `set` remains upsert and succeeds for a new id.
 
-### Migrating to `fire.initialContext`
+### Migrating to `createTakibi`
 
 Removed: the `createContext` shortcut, function shorthand, `AuthBits`, `getTenantId`,
 `getUser`, `context`, and any default parsers for `x-user` / `x-tenant-id`.
@@ -418,8 +417,7 @@ createContext({
 });
 
 // After — one trust boundary for AuthN + tenant membership
-const createContext = fire.initialContext();
-createContext({
+createTakibi()({
   resolve: async ({ request }) => {
     const user = await authenticate(request);
     const tenantId = await authorizeTenant(request, user);
