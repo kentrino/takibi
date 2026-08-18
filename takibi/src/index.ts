@@ -7,16 +7,11 @@ export type {
 } from "./client";
 
 export { createTakibi } from "./context";
-export type {
-  CollectionsOptions,
-  TakibiHandler,
-  HandleOptions,
-  HandleResult,
-} from "./context";
+export type { CollectionsOptions, TakibiHandler, HandleOptions, HandleResult } from "./context";
 
 export {
-  BadRequestError,
   AlreadyExistsError,
+  BadRequestError,
   TakibiError,
   ForbiddenError,
   NotFoundError,
