@@ -1,4 +1,5 @@
-import { expectTypeOf, test } from "vite-plus/test";
+import { expect, expectTypeOf, test } from "vite-plus/test";
+import { readFileSync } from "node:fs";
 import * as Takibi from "../src/index";
 import type {
   AccessContext,
@@ -99,7 +100,11 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "r2"
     | "blob"
     | "forbidArray"
-    | "commentCount";
+    | "commentCount"
+    | "subscribe"
+    | "onSnapshot"
+    | "enableOffline"
+    | "firebase";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -122,4 +127,16 @@ test("renamed Fire* public names are not exported", () => {
   type _FireOperationFailure = import("../src/index").FireOperationFailure;
   // @ts-expect-error FireBrand must not remain on the public root
   type _FireBrand = import("../src/index").FireBrand;
+});
+
+test("public category copy names a typed multi-tenant collection store", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    description: string;
+  };
+  const firstParagraph = readme.split("\n\n")[1] ?? "";
+  expect(firstParagraph).toContain("Typed multi-tenant collection store on Cloudflare Durable Objects");
+  expect(firstParagraph).not.toContain("Firebase-like");
+  expect(pkg.description).toContain("Typed multi-tenant collection store on Cloudflare Durable Objects");
+  expect(pkg.description).not.toContain("Firebase-like");
 });

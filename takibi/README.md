@@ -1,6 +1,6 @@
 # @takibi/takibi
 
-Typed, Firebase-like collection store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
+Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
 The official public API is `createTakibi`, `createClient`, policy helpers, and errors. Lower-level assembly pieces are unpublished.
 
