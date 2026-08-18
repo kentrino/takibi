@@ -104,7 +104,11 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "subscribe"
     | "onSnapshot"
     | "enableOffline"
-    | "firebase";
+    | "firebase"
+    | "AnySchema"
+    | "InferSchemaInput"
+    | "InferSchemaOutput"
+    | "StandardSchemaV1";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -127,6 +131,17 @@ test("renamed Fire* public names are not exported", () => {
   type _FireOperationFailure = import("../src/index").FireOperationFailure;
   // @ts-expect-error FireBrand must not remain on the public root
   type _FireBrand = import("../src/index").FireBrand;
+});
+
+test("Standard Schema aliases are not public root types", () => {
+  // @ts-expect-error AnySchema must not remain on the public root
+  type _AnySchema = import("../src/index").AnySchema;
+  // @ts-expect-error InferSchemaInput must not remain on the public root
+  type _InferSchemaInput = import("../src/index").InferSchemaInput;
+  // @ts-expect-error InferSchemaOutput must not remain on the public root
+  type _InferSchemaOutput = import("../src/index").InferSchemaOutput;
+  // @ts-expect-error StandardSchemaV1 must not be re-exported from the public root
+  type _StandardSchemaV1 = import("../src/index").StandardSchemaV1;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

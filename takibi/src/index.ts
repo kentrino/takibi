@@ -31,7 +31,6 @@ export {
 } from "./errors";
 
 export { SchemaValidationError } from "./schema";
-export type { AnySchema, InferSchemaInput, InferSchemaOutput } from "./schema";
 
 export { allows, and, fullAccess, grant, none, or, read, write } from "./policy";
 export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc, PolicyHelper } from "./policy";

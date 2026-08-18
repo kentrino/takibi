@@ -1,6 +1,8 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient, createTakibi, fullAccess, none } from "../src/index";
+import { parseSchema } from "../src/schema";
 import type {
   AccessPermission,
   CollectionDefinition,
@@ -332,4 +334,10 @@ test("JsonValue includes arrays and DocumentId is any non-empty string at the ty
   const dotted: DocumentId = "post.1:item";
   void dotted;
   expectTypeOf<keyof StorageDriver>().toEqualTypeOf<"delete" | "get" | "list" | "put">();
+});
+
+test("parseSchema infers Standard Schema output", () => {
+  const schema = z.object({ title: z.string() });
+  type Parsed = Awaited<ReturnType<typeof parseSchema<typeof schema>>>;
+  expectTypeOf<Parsed>().toEqualTypeOf<StandardSchemaV1.InferOutput<typeof schema>>();
 });
