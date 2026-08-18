@@ -163,10 +163,11 @@ distinguish list from get.
 
 `context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, type `doc` / `nextDoc` inside the callback. Pass the collection schema or a pick of its fields. A pick-schema policy assigns to a collection iff those keys exist on the document (optional vs required does not matter). `and` / `or` infer that pick from their arguments.
 
-`and` intersects grants; `or` unions them (`context.and` / `context.or`, also exported as `and` / `or`). Identity rules and document rules compose:
+`and` intersects grants; `or` unions them. Import the root functions. Identity
+rules and document rules compose:
 
 ```ts
-import { fullAccess, none, read } from "@takibi/takibi";
+import { and, fullAccess, none, read } from "@takibi/takibi";
 
 const staffPolicy = context.policy(({ user }) => (user != null ? fullAccess : none));
 const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
@@ -176,7 +177,7 @@ const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
 const handler = context.collections({
   items: {
     schema: itemSchema,
-    accessPolicy: context.and(staffPolicy, isSeededData),
+    accessPolicy: and(staffPolicy, isSeededData),
   },
 });
 ```

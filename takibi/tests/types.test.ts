@@ -369,6 +369,8 @@ test("createTakibi policy helper keeps schema and context-only overloads", () =>
   );
   void staff;
   void ownerOnly;
+  expectTypeOf(takibi).not.toHaveProperty("and");
+  expectTypeOf(takibi).not.toHaveProperty("or");
 });
 
 test("list options can be projected from a public collection method", () => {

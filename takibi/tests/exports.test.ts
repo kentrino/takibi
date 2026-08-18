@@ -133,7 +133,8 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "DocumentMetadata"
     | "WithMetadata"
     | "SchemaValidationError"
-    | "validationError";
+    | "validationError"
+    | "BoundPolicyCombinators";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -238,6 +239,8 @@ test("SchemaValidationError is not a public root type or factory", () => {
   type _SchemaValidationError = import("../src/index").SchemaValidationError;
   // @ts-expect-error validationError must not be added to the public root
   type _validationError = import("../src/index").validationError;
+  // @ts-expect-error BoundPolicyCombinators must not be added to the public root
+  type _BoundPolicyCombinators = import("../src/index").BoundPolicyCombinators;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

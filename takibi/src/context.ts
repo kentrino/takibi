@@ -24,7 +24,7 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
-import { and, createPolicyHelper, or } from "./policy";
+import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
   decodeWireRequest,
@@ -157,8 +157,6 @@ type CreateContextBuilder<TCtx extends TakibiCtxConstraint, TInitial> = {
    * (`fullAccess` / `write` / `read` / `none` / `grant(...)`).
    */
   policy: PolicyHelper<TCtx>;
-  and: typeof and;
-  or: typeof or;
   defineCollection<
     TSchema extends StandardSchemaV1,
     const TActions extends ActionDefinitions = Record<never, never>,
@@ -217,8 +215,6 @@ function buildContext<TInitial>(
 
   return {
     policy: createPolicyHelper(),
-    and,
-    or,
     defineCollection: defineCollectionValue,
     collections(collections, options: CollectionsOptions = {}) {
       const registry = new ActionRegistry();
