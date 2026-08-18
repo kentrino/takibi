@@ -37,6 +37,15 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi.read).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi.write).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi.fullAccess).toEqualTypeOf<AccessGrant>();
+  expectTypeOf(Takibi.AlreadyExistsError).toBeFunction();
+});
+
+test("AlreadyExistsError is the ALREADY_EXISTS 409 class", () => {
+  const error = new Takibi.AlreadyExistsError();
+  expect(error.code).toBe("ALREADY_EXISTS");
+  expect(error.status).toBe(409);
+  expect(error.message).toBe("Already exists");
+  expect(error.name).toBe("AlreadyExistsError");
 });
 
 test("public annotation types use the collection/action vocabulary", () => {
@@ -76,6 +85,7 @@ test("removed resource/storage aliases and internal assembly APIs are not public
   expectTypeOf(Takibi).not.toHaveProperty("ownedBy");
   expectTypeOf(Takibi).not.toHaveProperty("SchemaValidationError");
   expectTypeOf(Takibi).not.toHaveProperty("validationError");
+  expectTypeOf(Takibi).not.toHaveProperty("ConflictError");
 
   type PublicModule = typeof import("../src/index");
   type Removed =
@@ -134,7 +144,8 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "WithMetadata"
     | "SchemaValidationError"
     | "validationError"
-    | "BoundPolicyCombinators";
+    | "BoundPolicyCombinators"
+    | "ConflictError";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -241,6 +252,8 @@ test("SchemaValidationError is not a public root type or factory", () => {
   type _validationError = import("../src/index").validationError;
   // @ts-expect-error BoundPolicyCombinators must not be added to the public root
   type _BoundPolicyCombinators = import("../src/index").BoundPolicyCombinators;
+  // @ts-expect-error ConflictError must not remain on the public root
+  type _ConflictError = import("../src/index").ConflictError;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

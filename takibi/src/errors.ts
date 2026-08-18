@@ -38,9 +38,9 @@ export class BadRequestError extends TakibiError {
   }
 }
 
-export class ConflictError extends TakibiError {
+export class AlreadyExistsError extends TakibiError {
   constructor(message = "Already exists") {
     super("ALREADY_EXISTS", message, 409);
-    this.name = "ConflictError";
+    this.name = "AlreadyExistsError";
   }
 }

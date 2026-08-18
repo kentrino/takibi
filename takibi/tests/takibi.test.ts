@@ -212,6 +212,22 @@ test("CRUD and collection/root actions roundtrip in memory mode", async () => {
   expect(coerced).toEqual({ ok: true, data: { value: 42 } });
 });
 
+test("duplicate add returns ALREADY_EXISTS as an operation failure", async () => {
+  const { handler } = createActionApp();
+  const client = clientFor(handler);
+  expect(await client.posts.add({ title: "first" }, { id: "p1" })).toMatchObject({ ok: true });
+  const duplicate = await client.posts.add({ title: "again" }, { id: "p1" });
+  expect(duplicate).toEqual({
+    ok: false,
+    error: {
+      kind: "operation",
+      code: "ALREADY_EXISTS",
+      message: "Document already exists: p1",
+      status: 409,
+    },
+  });
+});
+
 test("action input is validated and client uses one-segment colon routes", async () => {
   const { handler } = createActionApp();
   const calls: { method: string; url: string; body?: unknown }[] = [];

@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from "./errors";
+import { AlreadyExistsError, NotFoundError } from "./errors";
 import { compileListOptions } from "./query";
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
@@ -91,7 +91,7 @@ export async function commitAddDoc(
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const existing = await storage.get(collection, doc.id);
   if (existing) {
-    throw new ConflictError(`Document already exists: ${doc.id}`);
+    throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
   }
   await storage.put(collection, doc);
   return doc;

@@ -16,7 +16,7 @@ export type {
 
 export {
   BadRequestError,
-  ConflictError,
+  AlreadyExistsError,
   TakibiError,
   ForbiddenError,
   NotFoundError,
