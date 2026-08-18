@@ -369,3 +369,32 @@ test("createTakibi policy helper keeps schema and context-only overloads", () =>
   void staff;
   void ownerOnly;
 });
+
+test("list options can be projected from a public collection method", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const handler = context.collections(
+    {
+      posts: {
+        schema: z.object({ title: z.string(), published: z.boolean() }),
+        accessPolicy: fullAccess,
+      },
+    },
+    { memory: true },
+  );
+  const client = createClient<typeof handler>("http://fire.test");
+  type PostListOptions = NonNullable<Parameters<typeof client.posts.list>[0]>;
+  expectTypeOf<PostListOptions>().toHaveProperty("limit");
+  expectTypeOf<PostListOptions>().toHaveProperty("cursor");
+  expectTypeOf<PostListOptions>().toHaveProperty("where");
+  const checkWhere = (opts: PostListOptions) => {
+    void opts.where?.((query) => query.title.eq("hello"));
+    void opts.where?.((query) => query.published.eq(true));
+    void opts.where?.((query) => {
+      // @ts-expect-error unknown fields are not queryable
+      return query.missing.eq("value");
+    });
+  };
+  void checkWhere;
+});

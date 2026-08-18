@@ -19,7 +19,6 @@ import type {
   InferCollectionDoc,
   InferHandlerCollections,
   JsonValue,
-  ListOptions,
   QueryBuilder,
   QueryExpr,
   QueryOperator,
@@ -61,7 +60,6 @@ test("public annotation types use the collection/action vocabulary", () => {
     InferCollectionDoc: InferCollectionDoc<CollectionDefinition>;
     InferHandlerCollections: InferHandlerCollections<TakibiHandler>;
     JsonValue: JsonValue;
-    ListOptions: ListOptions;
     QueryBuilder: QueryBuilder<Record<string, string>>;
     QueryExpr: QueryExpr;
     QueryOperator: QueryOperator;
@@ -121,7 +119,10 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ContextResolver"
     | "ContextResolverInput"
     | "ContextStubResolver"
-    | "ContextStubResolverInput";
+    | "ContextStubResolverInput"
+    | "WithId"
+    | "CollectionOperation"
+    | "ListOptions";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -190,6 +191,15 @@ test("context config split types are not public root types", () => {
   type _ContextStubResolver = import("../src/index").ContextStubResolver;
   // @ts-expect-error ContextStubResolverInput must not remain on the public root
   type _ContextStubResolverInput = import("../src/index").ContextStubResolverInput;
+});
+
+test("collection internal types are not public root types", () => {
+  // @ts-expect-error WithId must not remain on the public root
+  type _WithId = import("../src/index").WithId;
+  // @ts-expect-error CollectionOperation must not remain on the public root
+  type _CollectionOperation = import("../src/index").CollectionOperation;
+  // @ts-expect-error ListOptions must not remain on the public root
+  type _ListOptions = import("../src/index").ListOptions;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {
