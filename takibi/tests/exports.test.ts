@@ -7,7 +7,6 @@ import type {
   AccessPermission,
   AccessPolicy,
   AccessPolicyFn,
-  ActionGateContext,
   ClientOf,
   CollectionApi,
   CollectionDefinition,
@@ -51,7 +50,6 @@ test("public annotation types use the collection/action vocabulary", () => {
     AccessPermission: AccessPermission;
     AccessPolicy: AccessPolicy<Ctx>;
     AccessPolicyFn: AccessPolicyFn<Ctx>;
-    ActionGateContext: ActionGateContext<Ctx>;
     ClientOf: ClientOf<Definitions>;
     CollectionApi: CollectionApi<CollectionDefinition>;
     CollectionDefinition: CollectionDefinition;
@@ -117,7 +115,10 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ContextPolicy"
     | "InferPolicyDoc"
     | "PolicyHelper"
-    | "ReusablePolicy";
+    | "ReusablePolicy"
+    | "ActionGateContext"
+    | "ActionGatePolicy"
+    | "PublicActionPolicy";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -164,6 +165,15 @@ test("policy inference implementation types are not public root types", () => {
   type _PolicyHelper = import("../src/index").PolicyHelper;
   // @ts-expect-error ReusablePolicy must not be added to the public root
   type _ReusablePolicy = import("../src/index").ReusablePolicy;
+});
+
+test("action gate types are not public root types", () => {
+  // @ts-expect-error ActionGateContext must not remain on the public root
+  type _ActionGateContext = import("../src/index").ActionGateContext;
+  // @ts-expect-error ActionGatePolicy must not remain on the public root
+  type _ActionGatePolicy = import("../src/index").ActionGatePolicy;
+  // @ts-expect-error PublicActionPolicy must not be added to the public root
+  type _PublicActionPolicy = import("../src/index").PublicActionPolicy;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

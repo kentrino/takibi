@@ -19,8 +19,6 @@ export type {
   HandleResult,
 } from "./context";
 
-export type { ActionGateContext, ActionGatePolicy } from "./action";
-
 export {
   BadRequestError,
   ConflictError,

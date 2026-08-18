@@ -200,6 +200,22 @@ test("action builder requires policy before handler", () => {
   builder.policy(fullAccess).handler(() => null);
 });
 
+test("action gate callbacks infer ctx, scope, invocation, and permission", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  });
+  const base = context.collections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+  base.defineAction().policy(({ ctx, scope, invocation, permission }) => {
+    expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
+    expectTypeOf(scope).toEqualTypeOf<{ kind: "collection"; name: string } | { kind: "root" }>();
+    expectTypeOf(invocation).toEqualTypeOf<{ kind: "action"; name: string }>();
+    expectTypeOf(permission).toEqualTypeOf<AccessPermission>();
+    return ctx.user ? fullAccess : none;
+  });
+});
+
 test("action and collection collisions are type errors", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
