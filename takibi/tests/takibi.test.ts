@@ -147,6 +147,47 @@ function createFakeDurableObjectState(storage: DurableObjectStorage): DurableObj
   } as unknown as DurableObjectState;
 }
 
+test("bounded array fields roundtrip through whole-document add, get, and update", async () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const handler = context.collections(
+    {
+      posts: {
+        schema: z.object({
+          title: z.string(),
+          comments: z.array(z.object({ body: z.string() })),
+        }),
+        accessPolicy: fullAccess,
+      },
+    },
+    { memory: true },
+  );
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const created = await client.posts.add(
+    { title: "first", comments: [{ body: "hi" }] },
+    { id: "p1" },
+  );
+  expect(created).toMatchObject({
+    ok: true,
+    data: { id: "p1", title: "first", comments: [{ body: "hi" }] },
+  });
+
+  const got = await client.posts.get("p1");
+  expect(got).toMatchObject({
+    ok: true,
+    data: { id: "p1", comments: [{ body: "hi" }] },
+  });
+
+  const updated = await client.posts.update("p1", { comments: [{ body: "edited" }] });
+  expect(updated).toMatchObject({
+    ok: true,
+    data: { id: "p1", title: "first", comments: [{ body: "edited" }] },
+  });
+});
+
 test("CRUD and collection/root actions roundtrip in memory mode", async () => {
   const { handler } = createActionApp();
   expect(handler).not.toHaveProperty("$collections");

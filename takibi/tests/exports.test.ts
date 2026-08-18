@@ -93,7 +93,13 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "toFireFailure"
     | "asFireResult"
     | "fire"
-    | "initialContext";
+    | "initialContext"
+    | "sql"
+    | "query"
+    | "r2"
+    | "blob"
+    | "forbidArray"
+    | "commentCount";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 

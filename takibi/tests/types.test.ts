@@ -6,9 +6,11 @@ import type {
   CollectionDefinition,
   CollectionsOptions,
   DocumentId,
+  JsonValue,
   TakibiResult,
   InferCollectionDoc,
 } from "../src/index";
+import type { StorageDriver } from "../src/types";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -321,4 +323,13 @@ test("collection definition and inferred document use collection names", () => {
   type Document = InferCollectionDoc<Definition>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<DocumentId>();
   expectTypeOf<Document["title"]>().toEqualTypeOf<string>();
+});
+
+test("JsonValue includes arrays and DocumentId is any non-empty string at the type level", () => {
+  expectTypeOf<string[]>().toExtend<JsonValue>();
+  expectTypeOf<JsonValue[]>().toExtend<JsonValue>();
+  expectTypeOf<DocumentId>().toEqualTypeOf<string>();
+  const dotted: DocumentId = "post.1:item";
+  void dotted;
+  expectTypeOf<keyof StorageDriver>().toEqualTypeOf<"delete" | "get" | "list" | "put">();
 });
