@@ -13,7 +13,6 @@ import type {
   CollectionsApi,
   CollectionsDef,
   CollectionsOptions,
-  ContextConfig,
   CreateClientOptions,
   TakibiHandler,
   TakibiResult,
@@ -56,7 +55,6 @@ test("public annotation types use the collection/action vocabulary", () => {
     CollectionsApi: CollectionsApi<Definitions>;
     CollectionsDef: CollectionsDef;
     CollectionsOptions: CollectionsOptions;
-    ContextConfig: ContextConfig<Ctx>;
     CreateClientOptions: CreateClientOptions;
     TakibiHandler: TakibiHandler;
     TakibiResult: TakibiResult<unknown>;
@@ -118,7 +116,12 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ReusablePolicy"
     | "ActionGateContext"
     | "ActionGatePolicy"
-    | "PublicActionPolicy";
+    | "PublicActionPolicy"
+    | "ContextConfig"
+    | "ContextResolver"
+    | "ContextResolverInput"
+    | "ContextStubResolver"
+    | "ContextStubResolverInput";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 });
 
@@ -174,6 +177,19 @@ test("action gate types are not public root types", () => {
   type _ActionGatePolicy = import("../src/index").ActionGatePolicy;
   // @ts-expect-error PublicActionPolicy must not be added to the public root
   type _PublicActionPolicy = import("../src/index").PublicActionPolicy;
+});
+
+test("context config split types are not public root types", () => {
+  // @ts-expect-error ContextConfig must not remain on the public root
+  type _ContextConfig = import("../src/index").ContextConfig;
+  // @ts-expect-error ContextResolver must not remain on the public root
+  type _ContextResolver = import("../src/index").ContextResolver;
+  // @ts-expect-error ContextResolverInput must not remain on the public root
+  type _ContextResolverInput = import("../src/index").ContextResolverInput;
+  // @ts-expect-error ContextStubResolver must not remain on the public root
+  type _ContextStubResolver = import("../src/index").ContextStubResolver;
+  // @ts-expect-error ContextStubResolverInput must not remain on the public root
+  type _ContextStubResolverInput = import("../src/index").ContextStubResolverInput;
 });
 
 test("public category copy names a typed multi-tenant collection store", () => {

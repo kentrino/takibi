@@ -8,11 +8,6 @@ export type {
 
 export { createTakibi } from "./context";
 export type {
-  ContextConfig,
-  ContextResolver,
-  ContextResolverInput,
-  ContextStubResolver,
-  ContextStubResolverInput,
   CollectionsOptions,
   TakibiHandler,
   HandleOptions,
