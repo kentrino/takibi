@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { FireError } from "./errors";
+import { TakibiError } from "./errors";
 import { isAccessGrant } from "./policy";
 import type { ContextPolicy } from "./policy";
 import type {
@@ -299,20 +299,20 @@ export class ActionRegistry {
     forbiddenNames: ReadonlySet<string>,
   ): void {
     if (typeof definitions !== "object" || definitions === null) {
-      throw new FireError("INVALID_ACTION", "Action definitions must be an object", 500);
+      throw new TakibiError("INVALID_ACTION", "Action definitions must be an object", 500);
     }
     const prototype = Object.getPrototypeOf(definitions);
     if (prototype !== Object.prototype && prototype !== null) {
-      throw new FireError("INVALID_ACTION", "Action definitions must be a plain object", 500);
+      throw new TakibiError("INVALID_ACTION", "Action definitions must be a plain object", 500);
     }
     const pending: RegisteredAction[] = [];
     for (const propertyKey of Reflect.ownKeys(definitions)) {
       if (typeof propertyKey !== "string") {
-        throw new FireError("INVALID_ACTION", "Action names must be strings", 500);
+        throw new TakibiError("INVALID_ACTION", "Action names must be strings", 500);
       }
       const descriptor = Object.getOwnPropertyDescriptor(definitions, propertyKey);
       if (!descriptor?.enumerable || !("value" in descriptor)) {
-        throw new FireError(
+        throw new TakibiError(
           "INVALID_ACTION",
           `Action definitions must be enumerable data properties: ${propertyKey}`,
           500,
@@ -323,14 +323,14 @@ export class ActionRegistry {
       const definition = descriptor.value as ActionDefinition<any, any, any, any>;
       assertPublicName(name, "action");
       if (forbiddenNames.has(name)) {
-        throw new FireError(
+        throw new TakibiError(
           "RESERVED_ACTION",
           `Action name conflicts with a reserved name: ${name}`,
           500,
         );
       }
       if (!isActionDefinition(definition) || definition.kind !== expectedKind) {
-        throw new FireError(
+        throw new TakibiError(
           "INVALID_ACTION",
           `Invalid ${expectedKind} action definition: ${name}`,
           500,
@@ -342,7 +342,7 @@ export class ActionRegistry {
         this.#actions.has(registryKey) ||
         pending.some((entry) => actionKey(entry.scope, entry.name) === registryKey)
       ) {
-        throw new FireError("DUPLICATE_ACTION", `Action is already registered: ${name}`, 500);
+        throw new TakibiError("DUPLICATE_ACTION", `Action is already registered: ${name}`, 500);
       }
       pending.push({ scope, name, definition });
     }
@@ -368,15 +368,15 @@ function assertActionContract(
   definition: ActionDefinition<any, any, any, any>,
 ): void {
   if (!ACCESS_PERMISSIONS.has(definition.permission)) {
-    throw new FireError("INVALID_ACTION", `Invalid action permission: ${name}`, 500);
+    throw new TakibiError("INVALID_ACTION", `Invalid action permission: ${name}`, 500);
   }
   if (typeof definition.policy !== "function" && !isAccessGrant(definition.policy)) {
-    throw new FireError("INVALID_ACTION", `Action policy is required: ${name}`, 500);
+    throw new TakibiError("INVALID_ACTION", `Action policy is required: ${name}`, 500);
   }
   if (isAccessGrant(definition.policy)) {
     for (const permission of definition.policy) {
       if (!ACCESS_PERMISSIONS.has(permission)) {
-        throw new FireError("INVALID_ACTION", `Invalid action policy grant: ${name}`, 500);
+        throw new TakibiError("INVALID_ACTION", `Invalid action policy grant: ${name}`, 500);
       }
     }
   }
@@ -386,20 +386,20 @@ function assertActionContract(
       definition.inputSchema === null ||
       typeof definition.inputSchema["~standard"]?.validate !== "function")
   ) {
-    throw new FireError("INVALID_ACTION", `Invalid action input schema: ${name}`, 500);
+    throw new TakibiError("INVALID_ACTION", `Invalid action input schema: ${name}`, 500);
   }
 }
 
 export function assertCollectionName(name: string): void {
   assertPublicName(name, "collection");
   if (name === "$" || name.includes(":")) {
-    throw new FireError("RESERVED_COLLECTION", `Invalid collection name: ${name}`, 500);
+    throw new TakibiError("RESERVED_COLLECTION", `Invalid collection name: ${name}`, 500);
   }
 }
 
 function assertPublicName(name: string, kind: "collection" | "action"): void {
   if (!NAME_PATTERN.test(name) || REFLECTION_NAMES.has(name)) {
-    throw new FireError(
+    throw new TakibiError(
       kind === "collection" ? "INVALID_COLLECTION" : "INVALID_ACTION",
       `Invalid ${kind} name: ${name}`,
       500,

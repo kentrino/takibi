@@ -16,7 +16,7 @@ import type {
   RootActionArgs,
 } from "./action";
 import { executeAction, type ActionInvocation } from "./action-executor";
-import { FireError, NotFoundError, UnauthorizedError } from "./errors";
+import { TakibiError, NotFoundError, UnauthorizedError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import {
   decodePublicHttp,
@@ -32,7 +32,7 @@ import {
   type WireRequest,
   type WireResponse,
 } from "./protocol";
-import { toFireFailure } from "./result";
+import { toTakibiFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { storageAdd } from "./typed-storage";
@@ -97,8 +97,8 @@ export type CollectionsOptions = {
 
 export type HandleOptions<TInitial> = {
   /**
-   * Path prefix for REST routes (e.g. `/api/fire` matches `/api/fire/posts`
-   * and `/api/fire/posts/{id}`, but not `/api/firehose`). Omit to read
+   * Path prefix for REST routes (e.g. `/api/takibi` matches `/api/takibi/posts`
+   * and `/api/takibi/posts/{id}`, but not `/api/takibihose`). Omit to read
    * collection / id from the whole pathname.
    */
   prefix?: string;
@@ -108,13 +108,13 @@ export type HandleResult =
   | { matched: true; response: Response }
   | { matched: false; response?: undefined };
 
-export type FireBrand<
+export type TakibiBrand<
   TCtx extends { tenantId: string; user: unknown },
   TCollections,
   TInitial = Record<string, never>,
   TRootActions extends ActionDefinitions = Record<never, never>,
 > = {
-  readonly "~fire": {
+  readonly "~takibi": {
     context: TCtx;
     initial: TInitial;
     collections: TCollections;
@@ -132,7 +132,7 @@ export type FireBrand<
         | InvalidPublicKeys<TActions>,
         never
       >,
-  ): FireHandler<TCtx, TCollections, TInitial, TRootActions & TActions>;
+  ): TakibiHandler<TCtx, TCollections, TInitial, TRootActions & TActions>;
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
    * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
@@ -140,17 +140,17 @@ export type FireBrand<
   handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
 };
 
-export type FireHandler<
+export type TakibiHandler<
   TCtx extends { tenantId: string; user: unknown } = { tenantId: string; user: unknown },
   TCollections = CollectionsDef<TCtx>,
   TInitial = Record<string, never>,
   TRootActions extends ActionDefinitions = Record<never, never>,
 > = Hono<{ Bindings: Record<string, unknown> }> &
-  FireBrand<TCtx, TCollections, TInitial, TRootActions>;
+  TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
 
-type FireCtxConstraint = { tenantId: string; user: unknown };
+type TakibiCtxConstraint = { tenantId: string; user: unknown };
 
-type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
+type CreateContextBuilder<TCtx extends TakibiCtxConstraint, TInitial> = {
   /**
    * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
    * for rules that only use execution context (`user`, …). Return a grant
@@ -175,11 +175,11 @@ type CreateContextBuilder<TCtx extends FireCtxConstraint, TInitial> = {
     ] extends [never]
       ? []
       : ["Collection names must be safe TypeScript identifiers"]
-  ): FireHandler<TCtx, TCollections, TInitial>;
+  ): TakibiHandler<TCtx, TCollections, TInitial>;
 };
 
 type CreateContextFn<TInitial> = <
-  R extends FireCtxConstraint | Promise<FireCtxConstraint>,
+  R extends TakibiCtxConstraint | Promise<TakibiCtxConstraint>,
 >(config: {
   resolve: (input: ContextResolverInput<TInitial>) => R;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
@@ -207,7 +207,7 @@ type CreateContextFn<TInitial> = <
 export function initialContext<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
   return ((config) =>
     buildContext(
-      config as ContextConfig<FireCtxConstraint, TInitial>,
+      config as ContextConfig<TakibiCtxConstraint, TInitial>,
     )) as CreateContextFn<TInitial>;
 }
 
@@ -220,8 +220,8 @@ export const fire = {
 } as const;
 
 function buildContext<TInitial>(
-  config: ContextConfig<FireCtxConstraint, TInitial>,
-): CreateContextBuilder<FireCtxConstraint, TInitial> {
+  config: ContextConfig<TakibiCtxConstraint, TInitial>,
+): CreateContextBuilder<TakibiCtxConstraint, TInitial> {
   const { resolve, stub: resolveStub } = config;
 
   return {
@@ -232,20 +232,20 @@ function buildContext<TInitial>(
     collections(collections, options: CollectionsOptions = {}) {
       const registry = new ActionRegistry();
       if (typeof collections !== "object" || collections === null) {
-        throw new FireError("INVALID_COLLECTION", "Collections must be an object", 500);
+        throw new TakibiError("INVALID_COLLECTION", "Collections must be an object", 500);
       }
       const prototype = Object.getPrototypeOf(collections);
       if (prototype !== Object.prototype && prototype !== null) {
-        throw new FireError("INVALID_COLLECTION", "Collections must be a plain object", 500);
+        throw new TakibiError("INVALID_COLLECTION", "Collections must be a plain object", 500);
       }
-      const collectionEntries: Array<[string, CollectionsDef<FireCtxConstraint>[string]]> = [];
+      const collectionEntries: Array<[string, CollectionsDef<TakibiCtxConstraint>[string]]> = [];
       for (const propertyKey of Reflect.ownKeys(collections)) {
         if (typeof propertyKey !== "string") {
-          throw new FireError("INVALID_COLLECTION", "Collection names must be strings", 500);
+          throw new TakibiError("INVALID_COLLECTION", "Collection names must be strings", 500);
         }
         const descriptor = Object.getOwnPropertyDescriptor(collections, propertyKey);
         if (!descriptor?.enumerable || !("value" in descriptor)) {
-          throw new FireError(
+          throw new TakibiError(
             "INVALID_COLLECTION",
             `Collections must be enumerable data properties: ${propertyKey}`,
             500,
@@ -253,7 +253,7 @@ function buildContext<TInitial>(
         }
         collectionEntries.push([
           propertyKey,
-          descriptor.value as CollectionsDef<FireCtxConstraint>[string],
+          descriptor.value as CollectionsDef<TakibiCtxConstraint>[string],
         ]);
       }
       const collectionNames = new Set(collectionEntries.map(([name]) => name));
@@ -263,7 +263,7 @@ function buildContext<TInitial>(
           Object.prototype.hasOwnProperty.call(definition, "actions") &&
           getCollectionActions(definition) === null
         ) {
-          throw new FireError(
+          throw new TakibiError(
             "INVALID_COLLECTION",
             `Collection actions require defineCollection(): ${name}`,
             500,
@@ -289,7 +289,7 @@ function buildContext<TInitial>(
         try {
           await memoryReady;
           const input = { request, context: initial as TInitial };
-          const ctx = (await resolve(input)) as FireCtxConstraint;
+          const ctx = (await resolve(input)) as TakibiCtxConstraint;
           if (!ctx.tenantId) {
             throw new UnauthorizedError("Missing tenantId");
           }
@@ -304,7 +304,7 @@ function buildContext<TInitial>(
           }
 
           if (!resolveStub) {
-            throw new FireError(
+            throw new TakibiError(
               "MISSING_STUB",
               "Durable Object mode requires stub on fire.initialContext()({ stub }) — or use collections(..., { memory: true }) for tests",
               500,
@@ -313,7 +313,7 @@ function buildContext<TInitial>(
 
           const doStub = await resolveStub({ ...input, tenantId: ctx.tenantId });
           if (!doStub || typeof doStub.fetch !== "function") {
-            throw new FireError(
+            throw new TakibiError(
               "MISSING_STUB",
               "fire.initialContext()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
               500,
@@ -323,7 +323,7 @@ function buildContext<TInitial>(
           const wire: WireRequest = { ...invocation, context: ctx };
 
           const res = await doStub.fetch(
-            new Request("https://fire.internal/", {
+            new Request("https://takibi.internal/", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify(wire),
@@ -379,26 +379,26 @@ function buildContext<TInitial>(
       const DurableObjectClass = createDurableObjectClass(collections, registry);
 
       const rootActions = Object.create(null) as ActionDefinitions;
-      const handler = app as FireHandler<FireCtxConstraint, typeof collections, TInitial>;
-      Object.defineProperty(handler, "~fire", {
+      const handler = app as TakibiHandler<TakibiCtxConstraint, typeof collections, TInitial>;
+      Object.defineProperty(handler, "~takibi", {
         value: {
-          context: null as unknown as FireCtxConstraint,
+          context: null as unknown as TakibiCtxConstraint,
           initial: null as unknown as TInitial,
           collections,
           actions: rootActions,
         },
         enumerable: false,
       });
-      handler.DurableObject = DurableObjectClass as FireHandler<
-        FireCtxConstraint,
+      handler.DurableObject = DurableObjectClass as TakibiHandler<
+        TakibiCtxConstraint,
         typeof collections,
         TInitial
       >["DurableObject"];
       handler.defineAction = () =>
         createActionBuilder<
-          FireCtxConstraint,
+          TakibiCtxConstraint,
           "root",
-          RootActionArgs<FireCtxConstraint, typeof collections>
+          RootActionArgs<TakibiCtxConstraint, typeof collections>
         >("root");
       handler.actions = ((definitions: ActionDefinitions) => {
         registry.registerRootActions(definitions, collectionNames);
@@ -427,7 +427,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
   collections: TCollections,
   registry: ActionRegistry,
 ) {
-  return class FireTenantObject implements DurableObject {
+  return class TakibiTenantObject implements DurableObject {
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
     readonly $collections: CollectionsApi<TCollections>;
@@ -503,8 +503,8 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
 }
 
 function toWireError(err: unknown): WireFailure {
-  if (err instanceof SchemaValidationError || err instanceof FireError) {
-    return { ok: false, error: toFireFailure(err) };
+  if (err instanceof SchemaValidationError || err instanceof TakibiError) {
+    return { ok: false, error: toTakibiFailure(err) };
   }
   return {
     ok: false,
@@ -518,7 +518,7 @@ function toWireError(err: unknown): WireFailure {
 }
 
 function statusOf(err: unknown): number {
-  if (err instanceof FireError) return err.status;
+  if (err instanceof TakibiError) return err.status;
   if (err instanceof SchemaValidationError) return 400;
   return 500;
 }
@@ -533,14 +533,14 @@ function assertSerializableContext(value: unknown, seen = new Set<object>()): vo
     return;
   }
   if (typeof value !== "object" || seen.has(value)) {
-    throw new FireError("INVALID_CONTEXT", "Resolved context must be JSON-safe", 500);
+    throw new TakibiError("INVALID_CONTEXT", "Resolved context must be JSON-safe", 500);
   }
   seen.add(value);
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
       if (!descriptor?.enumerable || !("value" in descriptor)) {
-        throw new FireError("INVALID_CONTEXT", "Resolved context arrays must contain data", 500);
+        throw new TakibiError("INVALID_CONTEXT", "Resolved context arrays must contain data", 500);
       }
       assertSerializableContext(descriptor.value, seen);
     }
@@ -551,7 +551,7 @@ function assertSerializableContext(value: unknown, seen = new Set<object>()): vo
         !/^(0|[1-9][0-9]*)$/.test(key) ||
         Number(key) >= value.length
       ) {
-        throw new FireError(
+        throw new TakibiError(
           "INVALID_CONTEXT",
           "Resolved context arrays must not have custom properties",
           500,
@@ -563,15 +563,15 @@ function assertSerializableContext(value: unknown, seen = new Set<object>()): vo
   }
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
-    throw new FireError("INVALID_CONTEXT", "Resolved context must use plain objects", 500);
+    throw new TakibiError("INVALID_CONTEXT", "Resolved context must use plain objects", 500);
   }
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key !== "string") {
-      throw new FireError("INVALID_CONTEXT", "Resolved context must not contain symbols", 500);
+      throw new TakibiError("INVALID_CONTEXT", "Resolved context must not contain symbols", 500);
     }
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor?.enumerable || !("value" in descriptor)) {
-      throw new FireError(
+      throw new TakibiError(
         "INVALID_CONTEXT",
         "Resolved context must contain only enumerable data properties",
         500,

@@ -1,5 +1,5 @@
 {
-  "name": "@takibi/fire",
+  "name": "@takibi/takibi",
   "version": "0.0.0",
   "private": true,
   "description": "Typed, Firebase-like resource store on Durable Objects with tenant ACL.",

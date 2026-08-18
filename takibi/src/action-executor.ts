@@ -1,5 +1,5 @@
 import { ActionRegistry, type ActionGateContext } from "./action";
-import { BadRequestError, FireError, ForbiddenError, NotFoundError } from "./errors";
+import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { allows, isAccessGrant, isContextPolicy } from "./policy";
 import { parseSchema } from "./schema";
@@ -38,7 +38,7 @@ export async function executeAction<TCtx extends { tenantId: string; user: unkno
       ? await definition.policy(ctx)
       : await definition.policy(gateContext);
   if (!isAccessGrant(grant)) {
-    throw new FireError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
+    throw new TakibiError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
   }
   if (!allows(grant, definition.permission)) {
     throw new ForbiddenError();
@@ -92,17 +92,17 @@ function assertJsonValue(value: unknown, seen = new Set<object>()): asserts valu
     return;
   }
   if (typeof value !== "object") {
-    throw new FireError("INVALID_ACTION_OUTPUT", "Action output must be JSON-safe", 500);
+    throw new TakibiError("INVALID_ACTION_OUTPUT", "Action output must be JSON-safe", 500);
   }
   if (seen.has(value)) {
-    throw new FireError("INVALID_ACTION_OUTPUT", "Action output must not be cyclic", 500);
+    throw new TakibiError("INVALID_ACTION_OUTPUT", "Action output must not be cyclic", 500);
   }
   seen.add(value);
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
       if (!descriptor?.enumerable || !("value" in descriptor)) {
-        throw new FireError(
+        throw new TakibiError(
           "INVALID_ACTION_OUTPUT",
           "Action output arrays must contain only data elements",
           500,
@@ -117,7 +117,7 @@ function assertJsonValue(value: unknown, seen = new Set<object>()): asserts valu
         !/^(0|[1-9][0-9]*)$/.test(key) ||
         Number(key) >= value.length
       ) {
-        throw new FireError(
+        throw new TakibiError(
           "INVALID_ACTION_OUTPUT",
           "Action output arrays must not have custom properties",
           500,
@@ -129,7 +129,7 @@ function assertJsonValue(value: unknown, seen = new Set<object>()): asserts valu
   }
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
-    throw new FireError(
+    throw new TakibiError(
       "INVALID_ACTION_OUTPUT",
       "Action output must contain only plain JSON objects",
       500,
@@ -137,7 +137,7 @@ function assertJsonValue(value: unknown, seen = new Set<object>()): asserts valu
   }
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key !== "string") {
-      throw new FireError(
+      throw new TakibiError(
         "INVALID_ACTION_OUTPUT",
         "Action output must not contain symbol properties",
         500,
@@ -145,7 +145,7 @@ function assertJsonValue(value: unknown, seen = new Set<object>()): asserts valu
     }
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor?.enumerable || !("value" in descriptor)) {
-      throw new FireError(
+      throw new TakibiError(
         "INVALID_ACTION_OUTPUT",
         "Action output must contain only enumerable data properties",
         500,

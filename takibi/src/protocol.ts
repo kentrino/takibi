@@ -2,7 +2,7 @@ import type { ActionInvocation } from "./action-executor";
 import { BadRequestError } from "./errors";
 import type { ExecuteRequest } from "./executor";
 import { normalizeQueryExpr } from "./query";
-import type { FireFailure } from "./types";
+import type { TakibiFailure } from "./types";
 import type { StorageListOptions } from "./types";
 
 type WireContext = {
@@ -18,7 +18,7 @@ export type WireRequest = CollectionWireRequest | ActionWireRequest;
 export type WireSuccess = { ok: true; data: unknown };
 export type WireFailure = {
   ok: false;
-  error: FireFailure;
+  error: TakibiFailure;
 };
 export type WireResponse = WireSuccess | WireFailure;
 

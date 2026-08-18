@@ -440,7 +440,7 @@ test("actions execute inside the generated Durable Object", async () => {
   await object.$collections.posts.add({ title: "inside" }, { id: "p1" });
 
   const response = await object.fetch(
-    new Request("https://fire.internal", {
+    new Request("https://takibi.internal", {
       method: "POST",
       body: JSON.stringify({
         kind: "action",

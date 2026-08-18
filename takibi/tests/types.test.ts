@@ -6,7 +6,7 @@ import type {
   CollectionDefinition,
   CollectionsOptions,
   DocumentId,
-  FireResult,
+  TakibiResult,
   InferCollectionDoc,
 } from "../src/index";
 
@@ -39,7 +39,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     published?: boolean;
   }>();
   expectTypeOf<Awaited<ReturnType<typeof client.posts.get>>>().toMatchTypeOf<
-    FireResult<{
+    TakibiResult<{
       id: string;
       title: string;
       published: boolean;
@@ -133,7 +133,7 @@ test("collection action input/output and scoped handler args are inferred", () =
 
   expectTypeOf(client.posts.transformed).parameter(0).toEqualTypeOf<string>();
   expectTypeOf(client.posts.transformed).returns.resolves.toEqualTypeOf<
-    FireResult<{ length: number }>
+    TakibiResult<{ length: number }>
   >();
   expectTypeOf(client.posts.coerced).parameter(0).toEqualTypeOf<unknown>();
   const checkCalls = () => {
@@ -171,7 +171,7 @@ test("root actions infer all collections and appear flat on the client", () => {
   const handler = base.actions({ exportAll });
   const client = createClient<typeof handler>("http://fire.test");
 
-  expectTypeOf(client.exportAll).returns.resolves.toEqualTypeOf<FireResult<{ count: number }>>();
+  expectTypeOf(client.exportAll).returns.resolves.toEqualTypeOf<TakibiResult<{ count: number }>>();
   expectTypeOf(client.posts).not.toHaveProperty("exportAll");
 });
 

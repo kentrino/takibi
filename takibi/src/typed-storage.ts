@@ -1,12 +1,12 @@
 import { ConflictError, NotFoundError } from "./errors";
 import { compileListOptions } from "./query";
-import { asFireResult } from "./result";
+import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
 import type {
   ClientCollectionsApi,
   CollectionDefinition,
   DocumentId,
-  FireResult,
+  TakibiResult,
   ListOptions,
   StorageDriver,
   WithMetadata,
@@ -189,9 +189,9 @@ export function createTypedStorage<TCollections extends Record<string, Collectio
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
     const def = collections[name]!;
     api[name] = {
-      add: (data, options) => asFireResult(() => storageAdd(def, driver, name, data, options)),
-      set: (id, data) => asFireResult(() => storageSet(def, driver, name, id, data)),
-      get: async (id): Promise<FireResult<WithMetadata<Record<string, unknown>>>> => {
+      add: (data, options) => asTakibiResult(() => storageAdd(def, driver, name, data, options)),
+      set: (id, data) => asTakibiResult(() => storageSet(def, driver, name, id, data)),
+      get: async (id): Promise<TakibiResult<WithMetadata<Record<string, unknown>>>> => {
         const doc = await driver.get(name, id);
         if (!doc) {
           return {
@@ -206,9 +206,10 @@ export function createTypedStorage<TCollections extends Record<string, Collectio
         }
         return { ok: true, data: doc };
       },
-      update: (id, data) => asFireResult(() => storageUpdate(def, driver, name, id, data)),
-      delete: (id) => asFireResult(() => storageDelete(driver, name, id)),
-      list: (opts?: ListOptions) => asFireResult(() => driver.list(name, compileListOptions(opts))),
+      update: (id, data) => asTakibiResult(() => storageUpdate(def, driver, name, id, data)),
+      delete: (id) => asTakibiResult(() => storageDelete(driver, name, id)),
+      list: (opts?: ListOptions) =>
+        asTakibiResult(() => driver.list(name, compileListOptions(opts))),
     } as ClientCollectionsApi<TCollections>[typeof name];
   }
   return api;

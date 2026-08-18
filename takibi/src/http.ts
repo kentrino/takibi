@@ -1,10 +1,10 @@
-import { BadRequestError, FireError, NotFoundError } from "./errors";
+import { BadRequestError, TakibiError, NotFoundError } from "./errors";
 import type { ActionInvocation } from "./action-executor";
 import type { ExecuteRequest } from "./executor";
 import { normalizeQueryExpr } from "./query";
 import type { StorageListOptions } from "./types";
 
-export class MethodNotAllowedError extends FireError {
+export class MethodNotAllowedError extends TakibiError {
   constructor(message = "Method not allowed") {
     super("METHOD_NOT_ALLOWED", message, 405);
     this.name = "MethodNotAllowedError";
@@ -17,8 +17,8 @@ export function normalizePathname(pathname: string): string {
 }
 
 /**
- * Prefix is a path-segment boundary: `/api/fire` matches `/api/fire/posts`
- * and `/api/fire/posts/{id}`, but not `/api/firehose`.
+ * Prefix is a path-segment boundary: `/api/takibi` matches `/api/takibi/posts`
+ * and `/api/takibi/posts/{id}`, but not `/api/takibihose`.
  */
 export function matchesPublicPrefix(pathname: string, prefix: string | undefined): boolean {
   if (prefix == null || prefix === "") return true;

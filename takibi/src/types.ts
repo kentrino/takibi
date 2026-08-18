@@ -140,7 +140,7 @@ export type ValidationIssue = {
   path?: readonly (string | number)[];
 };
 
-export type FireValidationFailure = {
+export type TakibiValidationFailure = {
   kind: "validation";
   code: "VALIDATION";
   message: string;
@@ -148,16 +148,16 @@ export type FireValidationFailure = {
   issues: readonly ValidationIssue[];
 };
 
-export type FireOperationFailure = {
+export type TakibiOperationFailure = {
   kind: "operation";
   code: string;
   message: string;
   status: number;
 };
 
-export type FireFailure = FireValidationFailure | FireOperationFailure;
+export type TakibiFailure = TakibiValidationFailure | TakibiOperationFailure;
 
-export type FireResult<T> = { ok: true; data: T } | { ok: false; error: FireFailure };
+export type TakibiResult<T> = { ok: true; data: T } | { ok: false; error: TakibiFailure };
 
 /** Throwing, server-side CRUD facade used by actions and trusted `$collections`. */
 export type CollectionApi<C> = {
@@ -184,16 +184,19 @@ export type ClientCollectionApi<C> = {
   add: (
     data: CollectionDataInput<C>,
     options?: { id?: DocumentId },
-  ) => Promise<FireResult<InferCollectionDoc<C>>>;
-  set: (id: DocumentId, data: CollectionDataInput<C>) => Promise<FireResult<InferCollectionDoc<C>>>;
-  get: (id: DocumentId) => Promise<FireResult<InferCollectionDoc<C>>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  set: (
+    id: DocumentId,
+    data: CollectionDataInput<C>,
+  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  get: (id: DocumentId) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   update: (
     id: DocumentId,
     data: Partial<CollectionDataInput<C>>,
-  ) => Promise<FireResult<InferCollectionDoc<C>>>;
-  delete: (id: DocumentId) => Promise<FireResult<{ id: DocumentId }>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  delete: (id: DocumentId) => Promise<TakibiResult<{ id: DocumentId }>>;
   list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<
-    FireResult<{
+    TakibiResult<{
       items: InferCollectionDoc<C>[];
       nextCursor?: string;
     }>

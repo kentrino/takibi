@@ -1,7 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { FireError } from "./errors";
+import { TakibiError } from "./errors";
 import { SchemaValidationError } from "./schema";
-import type { FireFailure, FireResult, ValidationIssue } from "./types";
+import type { TakibiFailure, TakibiResult, ValidationIssue } from "./types";
 
 /** Copy only JSON-safe message/path from Standard Schema issues. */
 export function normalizeValidationIssues(
@@ -26,7 +26,7 @@ export function normalizeValidationIssues(
   });
 }
 
-export function toFireFailure(err: SchemaValidationError | FireError): FireFailure {
+export function toTakibiFailure(err: SchemaValidationError | TakibiError): TakibiFailure {
   if (err instanceof SchemaValidationError) {
     return {
       kind: "validation",
@@ -44,12 +44,12 @@ export function toFireFailure(err: SchemaValidationError | FireError): FireFailu
   };
 }
 
-export async function asFireResult<T>(fn: () => Promise<T>): Promise<FireResult<T>> {
+export async function asTakibiResult<T>(fn: () => Promise<T>): Promise<TakibiResult<T>> {
   try {
     return { ok: true, data: await fn() };
   } catch (err) {
-    if (err instanceof SchemaValidationError || err instanceof FireError) {
-      return { ok: false, error: toFireFailure(err) };
+    if (err instanceof SchemaValidationError || err instanceof TakibiError) {
+      return { ok: false, error: toTakibiFailure(err) };
     }
     throw err;
   }

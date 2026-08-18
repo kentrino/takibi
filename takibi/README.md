@@ -1,4 +1,4 @@
-# @takibi/fire
+# @takibi/takibi
 
 Typed, Firebase-like collection store for Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
@@ -7,7 +7,7 @@ The official public API is `fire`, `createClient`, policy helpers, and errors. L
 ## AuthN vs AuthZ
 
 **AuthN** (who is calling, which tenant they may use) is owned by your application.
-**AuthZ** (what that identity may do to a collection) is owned by `@takibi/fire`
+**AuthZ** (what that identity may do to a collection) is owned by `@takibi/takibi`
 via `accessPolicy`.
 
 `fire.initialContext()({ resolve })` is the trust boundary. Inside `resolve` you must:
@@ -33,7 +33,7 @@ input plus `tenantId` and returns a Durable Object stub — no library-side `env
 `bindings` option. Empty initial uses `fire.initialContext()` (no type argument).
 
 ```ts
-import { UnauthorizedError, fire, fullAccess, grant, read } from "@takibi/fire";
+import { UnauthorizedError, fire, fullAccess, grant, read } from "@takibi/takibi";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -167,7 +167,7 @@ distinguish list from get.
 `and` intersects grants; `or` unions them (`context.and` / `context.or`, also exported as `and` / `or`). Identity rules and document rules compose:
 
 ```ts
-import { fullAccess, none, read } from "@takibi/fire";
+import { fullAccess, none, read } from "@takibi/takibi";
 
 const staffPolicy = context.policy(({ user }) => (user != null ? fullAccess : none));
 const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
@@ -196,7 +196,7 @@ policy must prove the whole expression, not merely find an owner leaf that
 could be bypassed by `or` or `not`:
 
 ```ts
-import { grant, none, queryImpliesEquality } from "@takibi/fire";
+import { grant, none, queryImpliesEquality } from "@takibi/takibi";
 
 accessPolicy({ user, operation, where }) {
   if (
@@ -256,7 +256,7 @@ const handler = base.actions({ exportAll });
 Every action has a mandatory gate policy. Normal `collection` / `collections`
 CRUD evaluates each collection's `accessPolicy`; `$collection` /
 `$collections` bypasses only that document policy and never bypasses the action
-gate. These server-side facades throw `FireError` on failure.
+gate. These server-side facades throw `TakibiError` on failure.
 
 The public client is flat:
 
@@ -297,7 +297,7 @@ the public HTTP response contract.
 Carry credentials your server trusts — not self-declared role or membership JSON.
 
 ```ts
-import { createClient } from "@takibi/fire";
+import { createClient } from "@takibi/takibi";
 import type { Handler } from "./server";
 
 const client = createClient<Handler>("https://localhost:3000/foo", {
@@ -329,7 +329,7 @@ if (!created.ok) {
 const post = created.data;
 ```
 
-All public client collection methods return `Promise<FireResult<T>>`.
+All public client collection methods return `Promise<TakibiResult<T>>`.
 Server-decided failures (`NOT_FOUND`, `FORBIDDEN`, `VALIDATION`, `ALREADY_EXISTS`, …)
 resolve as `{ ok: false, error }` — they do **not** reject.
 
@@ -382,7 +382,7 @@ const post = await client.posts.get(id); // null when missing
 try {
   await client.posts.update(id, patch);
 } catch (err) {
-  if (err instanceof FireError && err.code === "NOT_FOUND") {
+  if (err instanceof TakibiError && err.code === "NOT_FOUND") {
     /* ... */
   }
 }
@@ -478,7 +478,7 @@ Notes:
 - Bind one DO per tenant (`idFromName(tenantId)` from `resolve`).
 - Existing Legacy KV-backed namespaces **cannot** be converted in place to
   SQLite. Move data to a new SQLite-backed class / namespace separately.
-- Do not create new Legacy KV-backed classes for `@takibi/fire`.
+- Do not create new Legacy KV-backed classes for `@takibi/takibi`.
 
 ## Limits and layout
 

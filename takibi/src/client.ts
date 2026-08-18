@@ -1,27 +1,27 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { unsafeClientPropertyNames, type ActionDefinition } from "./action";
-import type { FireHandler } from "./context";
+import type { TakibiHandler } from "./context";
 import { isWireResponse, type WireResponse } from "./protocol";
 import { compileListOptions } from "./query";
 import { collectionActionsBrand } from "./types";
 import type {
   ClientCollectionApi,
   CollectionOperation,
-  FireResult,
+  TakibiResult,
   JsonValue,
   StorageListOptions,
 } from "./types";
 
 export type InferHandlerCollections<H> = H extends {
-  readonly "~fire": { collections: infer C };
+  readonly "~takibi": { collections: infer C };
 }
   ? C
-  : H extends FireHandler<infer _C, infer C>
+  : H extends TakibiHandler<infer _C, infer C>
     ? C
     : never;
 
 export type InferHandlerActions<H> = H extends {
-  readonly "~fire": { actions: infer A };
+  readonly "~takibi": { actions: infer A };
 }
   ? A
   : Record<never, never>;
@@ -55,9 +55,9 @@ type ActionClientMethod<TAction> =
   TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
     ? TSchema extends StandardSchemaV1
       ? undefined extends ActionInput<TAction>
-        ? (input?: ActionInput<TAction>) => Promise<FireResult<ActionOutput<TAction>>>
-        : (input: ActionInput<TAction>) => Promise<FireResult<ActionOutput<TAction>>>
-      : () => Promise<FireResult<ActionOutput<TAction>>>
+        ? (input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
+        : (input: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
+      : () => Promise<TakibiResult<ActionOutput<TAction>>>
     : never;
 
 type ActionsClient<TActions> = {
@@ -118,7 +118,7 @@ function createCollectionClient(
   const call = async <T>(
     operation: CollectionOperation,
     parts: { id?: string; input?: unknown; list?: StorageListOptions } = {},
-  ): Promise<FireResult<T>> => {
+  ): Promise<TakibiResult<T>> => {
     if (parts.id === "") {
       return {
         ok: false,
@@ -211,7 +211,7 @@ async function callEndpoint<T>(
     input?: unknown;
     query?: URLSearchParams;
   },
-): Promise<FireResult<T>> {
+): Promise<TakibiResult<T>> {
   const headers = new Headers(
     typeof options.headers === "function" ? await options.headers() : (options.headers ?? {}),
   );

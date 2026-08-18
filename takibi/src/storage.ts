@@ -38,8 +38,8 @@ export function createMemoryStorage(): StorageDriver {
 }
 
 export function createDurableObjectStorage(storage: DurableObjectStorage): StorageDriver {
-  const keyOf = (resource: string, id: string) => `fire:${resource}:${id}`;
-  const prefixOf = (resource: string) => `fire:${resource}:`;
+  const keyOf = (resource: string, id: string) => `takibi:${resource}:${id}`;
+  const prefixOf = (resource: string) => `takibi:${resource}:`;
 
   return {
     async get(resource, id) {

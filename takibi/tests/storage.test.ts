@@ -184,7 +184,7 @@ test("memory and DO filter before limit with query-bound cursors", async () => {
   ).rejects.toBeInstanceOf(BadRequestError);
 });
 
-test("DO get reads only fire:${resource}:${id}", async () => {
+test("DO get reads only takibi:${resource}:${id}", async () => {
   const fake = createFakeDurableObjectStorage();
   const durable = createDurableObjectStorage(fake);
   await durable.put("posts", meta({ id: "p1", title: "hi" }));
@@ -192,5 +192,6 @@ test("DO get reads only fire:${resource}:${id}", async () => {
   await fake.put("unrelated", meta({ id: "x", title: "nope" }));
 
   expect(await durable.get("posts", "p1")).toEqual(meta({ id: "p1", title: "hi" }));
+  expect(await durable.get("posts", "p2")).toBeNull();
   expect(await durable.get("posts", "missing")).toBeNull();
 });
