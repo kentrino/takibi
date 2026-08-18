@@ -42,10 +42,7 @@ export type {
   CollectionsDef,
   DocumentId,
   DocumentMetadata,
-  TakibiFailure,
-  TakibiOperationFailure,
   TakibiResult,
-  TakibiValidationFailure,
   InferCollectionDoc,
   InferCollectionInput,
   JsonValue,
@@ -54,6 +51,5 @@ export type {
   QueryField,
   QueryOperator,
   QueryScalar,
-  ValidationIssue,
   WithMetadata,
 } from "./types";
