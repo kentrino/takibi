@@ -10,9 +10,7 @@ import type {
   AccessPolicyFn,
   ClientOf,
   CollectionApi,
-  CollectionDefinition,
   CollectionsApi,
-  CollectionsDef,
   CollectionsOptions,
   CreateClientOptions,
   TakibiHandler,
@@ -63,7 +61,7 @@ test("AlreadyExistsError is the ALREADY_EXISTS 409 class", () => {
 
 test("public annotation types use the collection/action vocabulary", () => {
   type Ctx = { tenantId: string; user: unknown };
-  type Definitions = { posts: CollectionDefinition };
+  type Collections = InferHandlerCollections<TakibiHandler>;
   type PublicSurface = {
     AccessContext: AccessContext<Ctx>;
     AccessGrant: AccessGrant;
@@ -71,15 +69,13 @@ test("public annotation types use the collection/action vocabulary", () => {
     AccessPolicy: AccessPolicy<Ctx>;
     AccessPolicyFn: AccessPolicyFn<Ctx>;
     ClientOf: ClientOf<TakibiHandler>;
-    CollectionApi: CollectionApi<CollectionDefinition>;
-    CollectionDefinition: CollectionDefinition;
-    CollectionsApi: CollectionsApi<Definitions>;
-    CollectionsDef: CollectionsDef;
+    CollectionApi: CollectionApi<Collections[string]>;
+    CollectionsApi: CollectionsApi<Collections>;
     CollectionsOptions: CollectionsOptions;
     CreateClientOptions: CreateClientOptions;
     TakibiHandler: TakibiHandler;
     TakibiResult: TakibiResult<unknown>;
-    InferCollectionDoc: InferCollectionDoc<CollectionDefinition>;
+    InferCollectionDoc: InferCollectionDoc<Collections[string]>;
     InferHandlerCollections: InferHandlerCollections<TakibiHandler>;
     JsonValue: JsonValue;
     QueryBuilder: QueryBuilder<Record<string, string>>;
@@ -163,6 +159,9 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ClientFor"
     | "CtxConstraint"
     | "TakibiCtxConstraint"
+    | "CollectionDefinition"
+    | "CollectionsDef"
+    | "defineCollections"
     | "allows"
     | "GrantCatalog"
     | "GrantBuilder"
@@ -184,6 +183,12 @@ test("removed resource/storage aliases and internal assembly APIs are not public
   type _ClientShape = import("../src/index").ClientShape;
   // @ts-expect-error ClientFor must not be added to the public root
   type _ClientFor = import("../src/index").ClientFor;
+  // @ts-expect-error CollectionDefinition must not remain on the public root
+  type _CollectionDefinition = import("../src/index").CollectionDefinition;
+  // @ts-expect-error CollectionsDef must not remain on the public root
+  type _CollectionsDef = import("../src/index").CollectionsDef;
+  // @ts-expect-error defineCollections must not be added to the public root
+  type _defineCollections = import("../src/index").defineCollections;
 });
 
 test("renamed Fire* public names are not exported", () => {

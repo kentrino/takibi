@@ -7,12 +7,12 @@ import type {
   AccessContext,
   AccessPermission,
   ClientOf,
-  CollectionDefinition,
   CollectionsOptions,
   JsonValue,
   TakibiHandler,
   TakibiResult,
   InferCollectionDoc,
+  InferHandlerCollections,
 } from "../src/index";
 import type { StorageDriver } from "../src/types";
 
@@ -338,10 +338,20 @@ test("createTakibi binds TInitial then infers execution context from resolve", (
   void posts;
 });
 
-test("collection definition and inferred document use collection names", () => {
-  const schema = z.object({ title: z.string() });
-  type Definition = CollectionDefinition<typeof schema, AppCtx>;
-  type Document = InferCollectionDoc<Definition>;
+test("inferred document uses collection names from the handler", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const handler = context.collections(
+    {
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    },
+    { memory: true },
+  );
+  type Document = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
   expectTypeOf<Document["title"]>().toEqualTypeOf<string>();
 });
@@ -349,8 +359,19 @@ test("collection definition and inferred document use collection names", () => {
 test("JsonValue includes arrays and inferred document ids are unconstrained strings", () => {
   expectTypeOf<string[]>().toExtend<JsonValue>();
   expectTypeOf<JsonValue[]>().toExtend<JsonValue>();
-  const schema = z.object({ title: z.string() });
-  type Document = InferCollectionDoc<CollectionDefinition<typeof schema, AppCtx>>;
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const handler = context.collections(
+    {
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    },
+    { memory: true },
+  );
+  type Document = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
   const dotted: Document["id"] = "post.1:item";
   void dotted;
@@ -494,7 +515,7 @@ test("ClientOf matches createClient and rejects collection maps", () => {
     ReturnType<typeof createClient<TakibiHandler>>
   >();
 
-  type Definitions = { posts: CollectionDefinition };
+  type Definitions = InferHandlerCollections<typeof handler>;
   // @ts-expect-error collection maps are not a ClientOf type source
   type _FromMap = ClientOf<Definitions>;
 });
