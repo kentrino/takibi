@@ -1,7 +1,7 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { createClient, createTakibi, fullAccess, none } from "../src/index";
+import { and, createClient, createTakibi, fullAccess, none } from "../src/index";
 import { parseSchema } from "../src/schema";
 import type {
   AccessContext,
@@ -379,6 +379,61 @@ test("createTakibi policy helper keeps schema and context-only overloads", () =>
   void ownerOnly;
   expectTypeOf(takibi).not.toHaveProperty("and");
   expectTypeOf(takibi).not.toHaveProperty("or");
+});
+
+test("schema-bound policy requires pick keys on the collection document", () => {
+  const takibi = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  });
+  const staff = takibi.policy(({ user }) => (user ? fullAccess : none));
+  const seeded = takibi.policy(z.object({ isSeed: z.boolean() }), ({ doc }) =>
+    doc?.isSeed === true ? none : fullAccess,
+  );
+
+  takibi.collections({
+    items: {
+      schema: z.object({ name: z.string(), isSeed: z.boolean() }),
+      accessPolicy: and(staff, seeded),
+    },
+  });
+  takibi.collections({
+    items: {
+      schema: z.object({ name: z.string(), isSeed: z.boolean().optional() }),
+      accessPolicy: seeded,
+    },
+  });
+  takibi.defineCollection({
+    schema: z.object({ name: z.string(), isSeed: z.boolean() }),
+    accessPolicy: and(staff, seeded),
+  });
+
+  const checkMissingKeys = () => {
+    takibi.collections({
+      items: {
+        schema: z.object({ name: z.string() }),
+        // @ts-expect-error schema-bound policy keys must exist on the collection document
+        accessPolicy: seeded,
+      },
+    });
+    takibi.collections({
+      items: {
+        schema: z.object({ name: z.string() }),
+        // @ts-expect-error and() preserves the schema-bound key constraint
+        accessPolicy: and(staff, seeded),
+      },
+    });
+    takibi.defineCollection({
+      schema: z.object({ name: z.string() }),
+      // @ts-expect-error defineCollection also rejects missing pick keys
+      accessPolicy: seeded,
+    });
+    takibi.defineCollection({
+      schema: z.object({ name: z.string() }),
+      // @ts-expect-error defineCollection keeps the and() pick-schema constraint
+      accessPolicy: and(staff, seeded),
+    });
+  };
+  void checkMissingKeys;
 });
 
 test("AccessContext preserves application context keys without defining their vocabulary", () => {

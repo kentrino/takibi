@@ -143,6 +143,19 @@ export type TakibiHandler<
 > = Hono<{ Bindings: Record<string, unknown> }> &
   TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
 
+/**
+ * `CollectionsDef` uses `CollectionDefinition<any>`, which erases schema→policy
+ * checking. Re-bind each collection's `accessPolicy` to that collection's schema
+ * so pick-schema policies are rejected when required keys are missing.
+ */
+type CollectionsWithMatchingPolicies<TCollections, TCtx extends object> = {
+  [K in keyof TCollections]: TCollections[K] extends { schema: infer S extends StandardSchemaV1 }
+    ? Omit<TCollections[K], "accessPolicy"> & {
+        accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
+      }
+    : TCollections[K];
+};
+
 type CreateContextBuilder<TCtx extends object, TInitial> = {
   /**
    * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
@@ -159,7 +172,7 @@ type CreateContextBuilder<TCtx extends object, TInitial> = {
     readonly [collectionActionsBrand]: TActions;
   };
   collections<const TCollections extends CollectionsDef<TCtx>>(
-    collections: TCollections,
+    collections: TCollections & CollectionsWithMatchingPolicies<TCollections, TCtx>,
     options?: CollectionsOptions,
     ...invalidName: [
       Extract<keyof TCollections, ReservedPublicName> | InvalidPublicKeys<TCollections>,
