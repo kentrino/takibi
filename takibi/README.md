@@ -139,6 +139,52 @@ to the returned record creates that default on the next activation. Seed values
 are validated by the collection schema and bypass `accessPolicy`, like trusted
 `$collections` operations.
 
+### Lazy document migrations
+
+Use `migrations` when a collection schema changes incompatibly. Each step
+converts one stored document version to the next; a document is migrated on
+access before it reaches `accessPolicy`, action code, query filtering, or a
+write merge:
+
+```ts
+type SettingsV0 = { bookingUrl: string };
+
+const handler = context.collections({
+  settings: {
+    schema: z.object({
+      bookingUrl: z.string(),
+      reminders: z.boolean(),
+    }),
+    migrations: {
+      // Omit base for 0. The current version is base + steps.length.
+      base: 0,
+      steps: [
+        (data) => ({
+          ...(data as SettingsV0),
+          reminders: true,
+        }),
+      ],
+    },
+    accessPolicy: fullAccess,
+  },
+});
+```
+
+Documents written by the current definition carry a private library version
+marker. Existing documents without one are version `0`. The marker is not part
+of schema input or output, policies, client responses, or `where` queries.
+
+Treat `steps` as append-only. To retire old steps, remove them and raise `base`
+to the oldest version still accepted; accessing an older document then fails.
+A thrown step or current-schema validation failure leaves the original document
+and marker unchanged, so the next access retries the migration. Steps are
+synchronous and receive only unvalidated domain data—never `id`, timestamps, or
+the version marker.
+
+Migration is per-document and lazy. Takibi does not enumerate tenants, eagerly
+migrate a whole deployment, report global progress, provide rollback or backup
+tooling, or guarantee when inactive tenants finish migrating.
+
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
 
 | operation | `doc`                               | `nextDoc`                    |
@@ -460,10 +506,9 @@ Auto-generated document ids are monotonic ULIDs (26 Crockford Base32 characters)
 Caller-supplied ids are still accepted; creation-order lexicographic sort is
 guaranteed only for library-generated ULIDs.
 
-**Breaking change — document timestamps:** stored documents now require `createdAt` /
-`updatedAt`. Existing PoC namespaces / fixtures without those fields must be cleared and
-recreated. Environments that must keep data need a one-off migration that sets both fields
-to the migration time before deploy; this package does not ship a migration tool.
+Library-managed storage keys and index layouts are outside application document
+migrations. Changes to those formats still require a separate namespace or an
+application-managed one-off migration.
 
 ## Wrangler
 

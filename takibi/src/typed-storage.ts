@@ -2,6 +2,7 @@ import { AlreadyExistsError, NotFoundError } from "./errors";
 import { compileListOptions } from "./query";
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
+import { TAKIBI_VERSION_KEY } from "./types";
 import type {
   ClientCollectionsApi,
   CollectionDefinition,
@@ -13,7 +14,7 @@ import type {
 } from "./types";
 import { generateUlid } from "./ulid";
 
-const RESERVED_METADATA_KEYS = ["id", "createdAt", "updatedAt"] as const;
+const RESERVED_METADATA_KEYS = ["id", "createdAt", "updatedAt", TAKIBI_VERSION_KEY] as const;
 
 type Clock = () => Date;
 
@@ -65,7 +66,13 @@ function asDataObject(input: unknown): Record<string, unknown> {
 function domainDataFromExisting(
   existing: WithMetadata<Record<string, unknown>>,
 ): Record<string, unknown> {
-  const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...domain } = existing;
+  const {
+    id: _id,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    [TAKIBI_VERSION_KEY]: _version,
+    ...domain
+  } = existing;
   return domain;
 }
 

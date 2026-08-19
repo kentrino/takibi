@@ -8,6 +8,7 @@ import type {
   AccessContext,
   AccessPermission,
   ClientOf,
+  CollectionDataInput,
   CollectionsOptions,
   JsonValue,
   TakibiHandler,
@@ -132,6 +133,64 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     });
   };
   void checkListQueries;
+});
+
+test("collection migrations accept unknown intermediate data and constrain the final step", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const migrated = context.defineCollection({
+    schema: z.object({ title: z.string(), published: z.boolean() }),
+    accessPolicy: fullAccess,
+    migrations: {
+      base: 2,
+      steps: [
+        (data) => {
+          expectTypeOf(data).toEqualTypeOf<unknown>();
+          return { ...(data as { name: string }), title: (data as { name: string }).name };
+        },
+        (data) => {
+          expectTypeOf(data).toEqualTypeOf<unknown>();
+          return { ...(data as { title: string }), published: false };
+        },
+      ],
+    },
+  });
+  type MigratedInput = CollectionDataInput<typeof migrated>;
+  type MigratedDocument = InferCollectionDoc<typeof migrated>;
+  expectTypeOf<MigratedInput>().not.toHaveProperty("_takibiVersion");
+  expectTypeOf<MigratedDocument>().not.toHaveProperty("_takibiVersion");
+
+  context.defineCollection({
+    schema: z.object({ title: z.string(), published: z.boolean() }),
+    accessPolicy: fullAccess,
+    migrations: {
+      // @ts-expect-error the last step must return the current schema input
+      steps: [() => ({ title: "missing published" })],
+    },
+  });
+  context.collections({
+    invalid: {
+      schema: z.object({ title: z.string(), published: z.boolean() }),
+      accessPolicy: fullAccess,
+      migrations: {
+        // @ts-expect-error direct collection definitions constrain the final step too
+        steps: [() => ({ title: "missing published" })],
+      },
+    },
+  });
+
+  const checkMarkerPrivacy = () => {
+    const handler = context.collections({ migrated }, { memory: true });
+    const client = createClient<typeof handler>("http://fire.test");
+    // @ts-expect-error the internal marker is not accepted as document input
+    void client.migrated.add({ title: "x", published: true, _takibiVersion: 4 });
+    void client.migrated.list({
+      // @ts-expect-error the internal marker is not queryable
+      where: (query) => query._takibiVersion.eq(4),
+    });
+  };
+  void checkMarkerPrivacy;
 });
 
 test("collection action input/output and scoped handler args are inferred", () => {

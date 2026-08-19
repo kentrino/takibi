@@ -1,6 +1,13 @@
 import { BadRequestError } from "./errors";
 import { matchesQuery, normalizeQueryExpr } from "./query";
-import type { QueryExpr, StorageDriver, StorageListOptions, WithMetadata } from "./types";
+import type {
+  QueryExpr,
+  StorageDriver,
+  StorageListOptions,
+  StorageReadTransform,
+  StoredDocument,
+  WithMetadata,
+} from "./types";
 
 type ListCursorV2 = {
   v: 2;
@@ -13,13 +20,13 @@ const LIST_CHUNK_SIZE = 128;
 
 type ScanItem = {
   id: string;
-  document: WithMetadata<Record<string, unknown>>;
+  document: StoredDocument;
 };
 
 type ReadChunk = (startAfter: string | undefined, limit: number) => Promise<ScanItem[]>;
 
 export function createMemoryStorage(): StorageDriver {
-  const tables = new Map<string, Map<string, WithMetadata<Record<string, unknown>>>>();
+  const tables = new Map<string, Map<string, StoredDocument>>();
 
   const table = (resource: string) => {
     let t = tables.get(resource);
@@ -40,15 +47,20 @@ export function createMemoryStorage(): StorageDriver {
     async delete(resource, id) {
       return table(resource).delete(id);
     },
-    async list(resource, opts) {
+    async list(resource, opts, transform) {
       const items = [...table(resource).values()]
         .sort((a, b) => compareIds(a.id, b.id))
         .map((document) => ({ id: document.id, document }));
-      return paginate(resource, opts, async (startAfter, limit) => {
-        const start =
-          startAfter === undefined ? 0 : items.findIndex((item) => item.id > startAfter);
-        return start < 0 ? [] : items.slice(start, start + limit);
-      });
+      return paginate(
+        resource,
+        opts,
+        async (startAfter, limit) => {
+          const start =
+            startAfter === undefined ? 0 : items.findIndex((item) => item.id > startAfter);
+          return start < 0 ? [] : items.slice(start, start + limit);
+        },
+        transform,
+      );
     },
   };
 }
@@ -59,9 +71,7 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
 
   return {
     async get(resource, id) {
-      return (
-        (await storage.get<WithMetadata<Record<string, unknown>>>(keyOf(resource, id))) ?? null
-      );
+      return (await storage.get<StoredDocument>(keyOf(resource, id))) ?? null;
     },
     async put(resource, doc) {
       await storage.put(keyOf(resource, doc.id), doc);
@@ -69,19 +79,24 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
     async delete(resource, id) {
       return storage.delete(keyOf(resource, id));
     },
-    async list(resource, opts) {
+    async list(resource, opts, transform) {
       const prefix = prefixOf(resource);
-      return paginate(resource, opts, async (startAfter, limit) => {
-        const result = await storage.list<WithMetadata<Record<string, unknown>>>({
-          prefix,
-          limit,
-          ...(startAfter === undefined ? {} : { startAfter: keyOf(resource, startAfter) }),
-        });
-        return [...result].map(([key, document]) => ({
-          id: key.slice(prefix.length),
-          document,
-        }));
-      });
+      return paginate(
+        resource,
+        opts,
+        async (startAfter, limit) => {
+          const result = await storage.list<StoredDocument>({
+            prefix,
+            limit,
+            ...(startAfter === undefined ? {} : { startAfter: keyOf(resource, startAfter) }),
+          });
+          return [...result].map(([key, document]) => ({
+            id: key.slice(prefix.length),
+            document,
+          }));
+        },
+        transform,
+      );
     },
   };
 }
@@ -94,6 +109,7 @@ async function paginate(
   resource: string,
   opts: StorageListOptions | undefined,
   readChunk: ReadChunk,
+  transform?: StorageReadTransform,
 ): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }> {
   let where: QueryExpr | undefined;
   try {
@@ -117,12 +133,13 @@ async function paginate(
 
     for (const item of chunk) {
       startAfter = item.id;
-      if (where && !matchesQuery(item.document, where)) continue;
+      const document = transform ? await transform(item.document) : item.document;
+      if (where && !matchesQuery(document, where)) continue;
       if (page.length === limit) {
         const last = page.at(-1)!;
         return { items: page, nextCursor: encodeCursor(resource, where, last.id) };
       }
-      page.push(item.document);
+      page.push(document);
     }
 
     if (chunk.length < LIST_CHUNK_SIZE) break;

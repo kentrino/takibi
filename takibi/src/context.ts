@@ -32,6 +32,7 @@ import {
   type WireRequest,
   type WireResponse,
 } from "./protocol";
+import { assertCollectionMigrations, createMigratingStorage } from "./migrations";
 import { toTakibiFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
@@ -149,14 +150,15 @@ export type TakibiHandler<
   TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
 
 /**
- * `CollectionsDef` uses `CollectionDefinition<any>`, which erases schema→policy
- * checking. Re-bind each collection's `accessPolicy` to that collection's schema
- * so pick-schema policies are rejected when required keys are missing.
+ * `CollectionsDef` uses `CollectionDefinition<any>`, which erases schema-bound
+ * checks. Re-bind each collection's policy and migrations to that collection's
+ * schema.
  */
-type CollectionsWithMatchingPolicies<TCollections, TCtx extends object> = {
+type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
   [K in keyof TCollections]: TCollections[K] extends { schema: infer S extends StandardSchemaV1 }
-    ? Omit<TCollections[K], "accessPolicy"> & {
+    ? Omit<TCollections[K], "accessPolicy" | "migrations"> & {
         accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
+        migrations?: CollectionDefinition<S, TCtx>["migrations"];
       }
     : TCollections[K];
 };
@@ -177,7 +179,7 @@ type CreateContextBuilder<TCtx extends object, TInitial> = {
     readonly [collectionActionsBrand]: TActions;
   };
   collections<const TCollections extends CollectionsDef<TCtx>>(
-    collections: TCollections & CollectionsWithMatchingPolicies<TCollections, TCtx>,
+    collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
     options?: CollectionsOptions,
     ...invalidName: [
       Extract<keyof TCollections, ReservedPublicName> | InvalidPublicKeys<TCollections>,
@@ -250,6 +252,7 @@ function buildContext<TInitial>(
       const collectionNames = new Set(collectionEntries.map(([name]) => name));
       for (const [name, definition] of collectionEntries) {
         assertCollectionName(name);
+        assertCollectionMigrations(definition, name);
         if (
           Object.prototype.hasOwnProperty.call(definition, "actions") &&
           getCollectionActions(definition) === null
@@ -267,7 +270,9 @@ function buildContext<TInitial>(
 
       const app = new Hono<{ Bindings: Record<string, unknown> }>();
 
-      const memoryDriver = memory ? createMemoryStorage() : null;
+      const memoryDriver = memory
+        ? createMigratingStorage(collections, createMemoryStorage())
+        : null;
       const memoryReady = memoryDriver
         ? seedCollections(collections, memoryDriver)
         : Promise.resolve();
@@ -422,7 +427,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
 
     constructor(state: DurableObjectState, _env: unknown) {
       this.#state = state;
-      this.#driver = createDurableObjectStorage(state.storage);
+      this.#driver = createMigratingStorage(collections, createDurableObjectStorage(state.storage));
       this.#ready = state.blockConcurrencyWhile(() => seedCollections(collections, this.#driver));
       this.$collections = createTrustedCollections(
         collections,
@@ -485,9 +490,9 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       await ready;
       return driver.delete(resource, id);
     },
-    async list(resource, options) {
+    async list(resource, options, transform) {
       await ready;
-      return driver.list(resource, options);
+      return driver.list(resource, options, transform);
     },
   };
 }

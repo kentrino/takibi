@@ -6,6 +6,7 @@ import type {
   QueryScalar,
   StorageListOptions,
 } from "./types";
+import { TAKIBI_VERSION_KEY } from "./types";
 
 export const QUERY_MAX_NODES = 32;
 export const QUERY_MAX_DEPTH = 8;
@@ -130,6 +131,9 @@ export function normalizeQueryExpr(value: unknown): QueryExpr {
       assertExactKeys(input, ["field", "op", "value"]);
       if (typeof input.field !== "string" || input.field.length === 0) {
         throw new TypeError("Query field must be a non-empty string");
+      }
+      if (input.field === TAKIBI_VERSION_KEY) {
+        throw new TypeError(`${TAKIBI_VERSION_KEY} is reserved and cannot be queried`);
       }
       assertQueryValue(op as QueryOperator, input.value);
       normalized = Object.freeze({

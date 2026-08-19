@@ -9,6 +9,7 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export type DocumentId = string;
+export const TAKIBI_VERSION_KEY = "_takibiVersion" as const;
 
 export type DocumentMetadata = {
   id: DocumentId;
@@ -18,7 +19,26 @@ export type DocumentMetadata = {
 
 export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
 
-export type WithMetadata<T> = Omit<T, keyof DocumentMetadata> & DocumentMetadata;
+export type WithMetadata<T> = Omit<T, keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY> &
+  DocumentMetadata;
+
+/** @internal Persisted representation. The version marker never crosses the storage boundary. */
+export type StoredDocument = WithMetadata<Record<string, unknown>> & {
+  [TAKIBI_VERSION_KEY]?: unknown;
+};
+
+export type MigrationStep<TOutput = unknown> = (data: unknown) => TOutput;
+
+export type MigrationSteps<TCurrentInput> =
+  | readonly []
+  | readonly [...MigrationStep[], MigrationStep<TCurrentInput>];
+
+export type CollectionMigrations<TCurrentInput> = {
+  /** Oldest version accepted by this registry. Defaults to 0. */
+  base?: number;
+  /** Ordered, append-only transforms from `base` to the current schema version. */
+  steps: MigrationSteps<TCurrentInput>;
+};
 
 export type QueryScalar = string | number | boolean | null;
 
@@ -108,17 +128,30 @@ export type CollectionDefinition<
 > = {
   schema: TSchema;
   accessPolicy: AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>;
+  migrations?: CollectionMigrations<StandardSchemaV1.InferInput<TSchema>>;
   /**
    * Initial documents keyed by document ID. Seeds are create-only: existing
    * documents are never overwritten when a Durable Object is reactivated.
    */
   seed?: () =>
     | Readonly<
-        Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, keyof DocumentMetadata>>
+        Record<
+          DocumentId,
+          Omit<
+            StandardSchemaV1.InferInput<TSchema>,
+            keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY
+          >
+        >
       >
     | Promise<
         Readonly<
-          Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, keyof DocumentMetadata>>
+          Record<
+            DocumentId,
+            Omit<
+              StandardSchemaV1.InferInput<TSchema>,
+              keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY
+            >
+          >
         >
       >;
   /** @internal Carries collection action definitions for assembly and inference. */
@@ -141,7 +174,10 @@ export type InferCollectionInput<C> = C extends { schema: infer S extends Standa
   ? StandardSchemaV1.InferInput<S>
   : never;
 
-export type CollectionDataInput<C> = Omit<InferCollectionInput<C>, keyof DocumentMetadata>;
+export type CollectionDataInput<C> = Omit<
+  InferCollectionInput<C>,
+  keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY
+>;
 
 export type ValidationIssue = {
   message: string;
@@ -227,12 +263,17 @@ export type StorageListOptions = {
   where?: QueryExpr;
 };
 
+export type StorageReadTransform = (
+  document: StoredDocument,
+) => Promise<WithMetadata<Record<string, unknown>>>;
+
 export type StorageDriver = {
-  get(resource: string, id: string): Promise<WithMetadata<Record<string, unknown>> | null>;
-  put(resource: string, doc: WithMetadata<Record<string, unknown>>): Promise<void>;
+  get(resource: string, id: string): Promise<StoredDocument | null>;
+  put(resource: string, doc: StoredDocument): Promise<void>;
   delete(resource: string, id: string): Promise<boolean>;
   list(
     resource: string,
     opts?: StorageListOptions,
+    transform?: StorageReadTransform,
   ): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }>;
 };

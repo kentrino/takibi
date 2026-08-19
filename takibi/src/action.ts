@@ -220,6 +220,7 @@ export type CollectionDefinitionInput<
 > = {
   schema: TSchema;
   accessPolicy: CollectionDefinition<TSchema, TCtx>["accessPolicy"];
+  migrations?: CollectionDefinition<TSchema, TCtx>["migrations"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];
   actions?: (
     defineAction: () => ActionBuilder<
