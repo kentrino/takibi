@@ -495,6 +495,10 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       await ready;
       return driver.list(resource, options, plan);
     },
+    async transaction(callback) {
+      await ready;
+      return driver.transaction(callback);
+    },
   };
 }
 

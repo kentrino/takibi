@@ -357,6 +357,58 @@ test("root actions infer all collections and appear flat on the client", () => {
   expectTypeOf(client.posts).not.toHaveProperty("exportAll");
 });
 
+test("atomic actions preserve builder, handler, and client inference at every stage", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const Input = z.object({ title: z.string() });
+  const posts = context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+    actions: (defineAction) => ({
+      duplicate: defineAction()
+        .atomic()
+        .input(Input)
+        .requires("create")
+        .atomic()
+        .policy(fullAccess)
+        .atomic()
+        .handler(({ input, ctx, collection, $collection }) => {
+          expectTypeOf(input).toEqualTypeOf<{ title: string }>();
+          expectTypeOf(ctx).toEqualTypeOf<AppCtx>();
+          expectTypeOf(collection).toEqualTypeOf($collection);
+          return { title: input.title, ok: true as const };
+        }),
+    }),
+  });
+  const base = context.collections({ posts }, { memory: true });
+  const exportAll = base
+    .defineAction()
+    .input(Input)
+    .atomic()
+    .requires("list")
+    .atomic()
+    .policy(fullAccess)
+    .atomic()
+    .handler(({ input, ctx, collections, $collections }) => {
+      expectTypeOf(input).toEqualTypeOf<{ title: string }>();
+      expectTypeOf(ctx).toEqualTypeOf<AppCtx>();
+      expectTypeOf(collections).toEqualTypeOf($collections);
+      return { title: input.title, count: 0 };
+    });
+  const handler = base.actions({ exportAll });
+  const client = createClient<typeof handler>("http://fire.test");
+
+  expectTypeOf(client.exportAll).parameter(0).toEqualTypeOf<{ title: string }>();
+  expectTypeOf(client.exportAll).returns.resolves.toEqualTypeOf<
+    TakibiResult<{ title: string; count: number }>
+  >();
+  expectTypeOf(client.posts.duplicate).returns.resolves.toEqualTypeOf<
+    TakibiResult<{ title: string; ok: true }>
+  >();
+  expectTypeOf(client.exportAll).not.toHaveProperty("atomic");
+});
+
 test("action builder requires policy before handler", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
@@ -551,7 +603,9 @@ test("JsonValue includes arrays and inferred document ids are unconstrained stri
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
   const dotted: Document["id"] = "post.1:item";
   void dotted;
-  expectTypeOf<keyof StorageDriver>().toEqualTypeOf<"delete" | "get" | "list" | "put">();
+  expectTypeOf<keyof StorageDriver>().toEqualTypeOf<
+    "delete" | "get" | "list" | "put" | "transaction"
+  >();
 });
 
 test("parseSchema infers Standard Schema output", () => {

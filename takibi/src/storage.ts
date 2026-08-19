@@ -53,13 +53,33 @@ type DocumentRow = Record<string, SqlStorageValue> & {
 };
 
 export function createMemoryStorage(): StorageDriver {
-  const tables = new Map<string, Map<string, StoredDocument>>();
+  const state: MemoryState = { tables: new Map() };
+  let writeQueue = Promise.resolve();
+  const coordinate: WriteCoordinator = (operation) => {
+    const result = writeQueue.then(operation, operation);
+    writeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+  return createMemoryDriver(state, coordinate);
+}
+
+type MemoryState = {
+  tables: Map<string, Map<string, StoredDocument>>;
+};
+
+type WriteCoordinator = <T>(operation: () => T | Promise<T>) => Promise<T>;
+
+function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): StorageDriver {
+  const immediate: WriteCoordinator = async (operation) => operation();
 
   const table = (resource: string) => {
-    let t = tables.get(resource);
+    let t = state.tables.get(resource);
     if (!t) {
       t = new Map();
-      tables.set(resource, t);
+      state.tables.set(resource, t);
     }
     return t;
   };
@@ -69,10 +89,12 @@ export function createMemoryStorage(): StorageDriver {
       return table(resource).get(id) ?? null;
     },
     async put(resource, doc) {
-      table(resource).set(doc.id, structuredClone(doc));
+      await coordinate(() => {
+        table(resource).set(doc.id, structuredClone(doc));
+      });
     },
     async delete(resource, id) {
-      return table(resource).delete(id);
+      return coordinate(() => table(resource).delete(id));
     },
     async list(resource, opts, plan) {
       const prepared = prepareList(resource, opts);
@@ -89,13 +111,32 @@ export function createMemoryStorage(): StorageDriver {
         plan,
       );
     },
+    transaction(callback) {
+      return coordinate(async () => {
+        const scopedState: MemoryState = { tables: cloneMemoryTables(state.tables) };
+        const result = await callback(createMemoryDriver(scopedState, immediate));
+        state.tables = scopedState.tables;
+        return result;
+      });
+    },
   };
+}
+
+function cloneMemoryTables(
+  tables: Map<string, Map<string, StoredDocument>>,
+): Map<string, Map<string, StoredDocument>> {
+  return new Map(
+    [...tables].map(([resource, documents]) => [
+      resource,
+      new Map([...documents].map(([id, document]) => [id, structuredClone(document)])),
+    ]),
+  );
 }
 
 export function createDurableObjectStorage(storage: DurableObjectStorage): StorageDriver {
   initializeStorageLayout(storage);
 
-  return {
+  const driver: StorageDriver = {
     async get(resource, id) {
       const rows = storage.sql
         .exec<DocumentRow>(
@@ -144,7 +185,11 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
       const prepared = prepareList(resource, opts);
       return paginate(prepared, createSqlChunkReader(storage.sql, resource, prepared, plan), plan);
     },
+    transaction(callback) {
+      return storage.transaction(() => callback(driver));
+    },
   };
+  return driver;
 }
 
 function initializeStorageLayout(storage: DurableObjectStorage): void {

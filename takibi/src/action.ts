@@ -112,6 +112,7 @@ export type ActionDefinition<
   readonly kind: TKind;
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
+  readonly atomic: boolean;
   readonly policy: ActionGatePolicy<never>;
   readonly handler: (
     args: TBaseArgs & { input: ParsedInput<TSchema> },
@@ -126,6 +127,7 @@ export type RuntimeActionDefinition = {
   readonly kind: ActionKind;
   readonly inputSchema: MaybeSchema;
   readonly permission: AccessPermission;
+  readonly atomic: boolean;
   readonly policy: ActionGatePolicy<unknown>;
   readonly handler: (args: unknown) => unknown;
 };
@@ -152,6 +154,7 @@ export type ActionBuilder<
     schema: JsonInputSchema<TNextSchema>,
   ): ActionBuilder<TCtx, TKind, TBaseArgs, TNextSchema>;
   requires(permission: AccessPermission): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema>;
+  atomic(): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema>;
   policy: {
     (policy: AccessGrant | ContextPolicy<TCtx>): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
     (policy: ActionGatePolicyFn<TCtx>): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
@@ -166,12 +169,14 @@ export type ActionHandlerBuilder<
   handler<TOutput extends JsonValue | void>(
     handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
   ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs>;
+  atomic(): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
 };
 
 type BuilderState<TKind extends ActionKind, TSchema extends MaybeSchema> = {
   kind: TKind;
   inputSchema: TSchema;
   permission: AccessPermission;
+  atomic: boolean;
 };
 
 export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
@@ -180,21 +185,27 @@ export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
   const createHandlerBuilder = <TSchema extends MaybeSchema>(
     state: BuilderState<TKind, TSchema>,
     policy: AccessGrant | ContextPolicy<TCtx> | ActionGatePolicyFn<TCtx>,
-  ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema> => ({
-    handler<TOutput extends JsonValue | void>(
-      handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
-    ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> {
-      const definition: ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> = {
-        [actionDefinitionBrand]: true,
-        kind: state.kind,
-        inputSchema: state.inputSchema,
-        permission: state.permission,
-        policy,
-        handler,
-      };
-      return Object.freeze(definition);
-    },
-  });
+  ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema> => {
+    return {
+      atomic() {
+        return createHandlerBuilder({ ...state, atomic: true }, policy);
+      },
+      handler<TOutput extends JsonValue | void>(
+        handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
+      ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> {
+        const definition: ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> = {
+          [actionDefinitionBrand]: true,
+          kind: state.kind,
+          inputSchema: state.inputSchema,
+          permission: state.permission,
+          atomic: state.atomic,
+          policy,
+          handler,
+        };
+        return Object.freeze(definition);
+      },
+    };
+  };
 
   const build = <TSchema extends MaybeSchema>(
     state: BuilderState<TKind, TSchema>,
@@ -205,12 +216,15 @@ export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
     requires(permission) {
       return build({ ...state, permission });
     },
+    atomic() {
+      return build({ ...state, atomic: true });
+    },
     policy(policy) {
       return createHandlerBuilder(state, policy);
     },
   });
 
-  return build({ kind, inputSchema: undefined, permission: "invoke" });
+  return build({ kind, inputSchema: undefined, permission: "invoke", atomic: false });
 }
 
 export type CollectionDefinitionInput<
@@ -386,6 +400,9 @@ function assertActionContract(name: string, definition: AuthoredAction): void {
   if (!ACCESS_PERMISSIONS.has(definition.permission)) {
     throw new TakibiError("INVALID_ACTION", `Invalid action permission: ${name}`, 500);
   }
+  if (typeof definition.atomic !== "boolean") {
+    throw new TakibiError("INVALID_ACTION", `Invalid action atomic flag: ${name}`, 500);
+  }
   if (typeof definition.policy !== "function" && !isAccessGrant(definition.policy)) {
     throw new TakibiError("INVALID_ACTION", `Action policy is required: ${name}`, 500);
   }
@@ -412,6 +429,7 @@ function eraseForRegistry(name: string, definition: AuthoredAction): RuntimeActi
     kind: definition.kind,
     inputSchema: definition.inputSchema,
     permission: definition.permission,
+    atomic: definition.atomic,
     policy: definition.policy as RuntimeActionDefinition["policy"],
     handler: definition.handler as RuntimeActionDefinition["handler"],
   };

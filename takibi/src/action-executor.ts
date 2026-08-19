@@ -61,32 +61,36 @@ export async function executeAction<TCtx extends object>(
     input = undefined;
   }
 
-  const policyCollections = createPolicyCollections(collections, storage, ctx);
-  const trustedCollections = createTrustedCollections(collections, storage);
-  const args =
-    invocation.scope === "$"
-      ? {
-          input,
-          ctx,
-          collections: policyCollections,
-          $collections: trustedCollections,
-        }
-      : {
-          input,
-          ctx,
-          collection: policyCollections[invocation.scope],
-          $collection: trustedCollections[invocation.scope],
-        };
+  const runHandler = async (scopedStorage: StorageDriver): Promise<JsonValue> => {
+    const policyCollections = createPolicyCollections(collections, scopedStorage, ctx);
+    const trustedCollections = createTrustedCollections(collections, scopedStorage);
+    const args =
+      invocation.scope === "$"
+        ? {
+            input,
+            ctx,
+            collections: policyCollections,
+            $collections: trustedCollections,
+          }
+        : {
+            input,
+            ctx,
+            collection: policyCollections[invocation.scope],
+            $collection: trustedCollections[invocation.scope],
+          };
 
-  if (invocation.scope !== "$" && !("collection" in args && args.collection)) {
-    throw new NotFoundError(`Unknown collection: ${invocation.scope}`);
-  }
+    if (invocation.scope !== "$" && !("collection" in args && args.collection)) {
+      throw new NotFoundError(`Unknown collection: ${invocation.scope}`);
+    }
 
-  const output = await definition.handler(args);
-  if (output === undefined) return null;
-  assertJsonValue(output, {
-    subject: "Action output",
-    error: (message) => new TakibiError("INVALID_ACTION_OUTPUT", message, 500),
-  });
-  return output;
+    const output = await definition.handler(args);
+    if (output === undefined) return null;
+    assertJsonValue(output, {
+      subject: "Action output",
+      error: (message) => new TakibiError("INVALID_ACTION_OUTPUT", message, 500),
+    });
+    return output;
+  };
+
+  return definition.atomic ? storage.transaction(runHandler) : runHandler(storage);
 }

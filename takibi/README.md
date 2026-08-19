@@ -320,6 +320,36 @@ CRUD evaluates each collection's `accessPolicy`; `$collection` /
 `$collections` bypasses only that document policy and never bypasses the action
 gate. These server-side facades throw `TakibiError` on failure.
 
+Add `.atomic()` before `.handler()` when all Takibi collection storage
+operations in an action must commit or roll back together:
+
+```ts
+const placeOrder = base
+  .defineAction()
+  .input(placeOrderSchema)
+  .atomic()
+  .policy(staffPolicy)
+  .handler(async ({ input, $collections }) => {
+    const order = await $collections.orders.add(input.order);
+    await $collections.inventory.update(input.itemId, { stock: input.stock });
+    await $collections.events.add({ orderId: order.id });
+    return order;
+  });
+```
+
+The action gate and input validation run before the transaction. The handler,
+collection schema validation and storage operations, `void`-to-`null`
+normalization, and JSON output validation run inside it; they commit only when
+all succeed. Any thrown failure rolls back writes already completed by that
+atomic action. Actions without `.atomic()` keep the normal per-operation
+behavior, so an earlier write remains after a later failure.
+
+Atomic actions cover only operations performed through Takibi's
+`collection(s)` / `$collection(s)` facades. HTTP requests, email, queue
+publishes, and other external side effects cannot be rolled back, even when
+they occur inside an atomic handler. Split those effects into a separate action
+or use an application-level delivery pattern when they must be coordinated.
+
 The public client is flat:
 
 ```ts

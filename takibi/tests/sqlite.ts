@@ -38,7 +38,7 @@ export function createSqliteDurableObjectStorage(): DurableObjectStorage {
     },
   };
 
-  return {
+  const storage = {
     sql,
     transactionSync<T>(closure: () => T): T {
       database.exec("BEGIN");
@@ -51,5 +51,19 @@ export function createSqliteDurableObjectStorage(): DurableObjectStorage {
         throw error;
       }
     },
-  } as unknown as DurableObjectStorage;
+    async transaction<T>(
+      closure: (transaction: DurableObjectTransaction) => Promise<T>,
+    ): Promise<T> {
+      database.exec("BEGIN");
+      try {
+        const result = await closure(storage as unknown as DurableObjectTransaction);
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  return storage as unknown as DurableObjectStorage;
 }

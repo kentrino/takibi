@@ -402,6 +402,9 @@ test("list policy sees normalized where before storage access", async () => {
       listCalls += 1;
       return { items: [] };
     },
+    transaction(callback) {
+      return callback(storage);
+    },
   };
 
   await expect(
@@ -840,6 +843,7 @@ test("Worker forwards only the action invocation and resolved context", async ()
   });
   const ping = base
     .defineAction()
+    .atomic()
     .policy(fullAccess)
     .handler(() => ({ pong: true }));
   const handler = base.actions({ ping });

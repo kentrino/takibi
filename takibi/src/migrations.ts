@@ -61,6 +61,9 @@ export function createMigratingStorage(
         },
       });
     },
+    transaction(callback) {
+      return storage.transaction((scoped) => callback(createMigratingStorage(collections, scoped)));
+    },
   };
 }
 
