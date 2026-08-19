@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { unsafeClientPropertyNames, type ActionDefinition } from "./action";
+import { unsafeClientPropertyNames } from "./action";
 import type { TakibiHandler } from "./context";
 import { isWireResponse, type WireResponse } from "./protocol";
 import { compileListOptions } from "./query";
@@ -8,7 +8,6 @@ import type {
   ClientCollectionApi,
   CollectionOperation,
   TakibiResult,
-  JsonValue,
   StorageListOptions,
 } from "./types";
 
@@ -32,33 +31,34 @@ type InferCollectionActions<C> = C extends {
   ? A
   : Record<never, never>;
 
+type ActionSchema<TAction> = TAction extends {
+  readonly inputSchema: infer TSchema;
+}
+  ? TSchema
+  : never;
+
 type ActionInput<TAction> =
-  TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
+  ActionSchema<TAction> extends infer TSchema
     ? TSchema extends StandardSchemaV1
       ? StandardSchemaV1.InferInput<TSchema>
       : never
     : never;
 
-type ActionOutput<TAction> =
-  TAction extends ActionDefinition<
-    "collection" | "root",
-    StandardSchemaV1 | undefined,
-    infer TOutput,
-    never
-  >
-    ? TOutput extends void
-      ? null
-      : TOutput
-    : JsonValue;
+type NormalizeActionOutput<T> = T extends void ? null : T;
 
-type ActionClientMethod<TAction> =
-  TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
-    ? TSchema extends StandardSchemaV1
-      ? undefined extends ActionInput<TAction>
-        ? (input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
-        : (input: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
-      : () => Promise<TakibiResult<ActionOutput<TAction>>>
-    : never;
+type ActionOutput<TAction> = TAction extends {
+  readonly handler: (...args: infer _TArgs) => infer TResult;
+}
+  ? NormalizeActionOutput<Awaited<TResult>>
+  : never;
+
+type ActionClientMethod<TAction> = TAction extends { readonly inputSchema: infer TSchema }
+  ? TSchema extends StandardSchemaV1
+    ? undefined extends ActionInput<TAction>
+      ? (input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
+      : (input: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
+    : () => Promise<TakibiResult<ActionOutput<TAction>>>
+  : never;
 
 type ActionsClient<TActions> = {
   [K in keyof TActions]: ActionClientMethod<TActions[K]>;

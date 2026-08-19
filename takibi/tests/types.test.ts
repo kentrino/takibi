@@ -2,6 +2,7 @@ import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { and, createClient, createTakibi, fullAccess, none } from "../src/index";
+import type { ActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {
   AccessContext,
@@ -14,10 +15,42 @@ import type {
   InferCollectionDoc,
   InferHandlerCollections,
 } from "../src/index";
-import type { StorageDriver } from "../src/types";
+import { collectionActionsBrand, type StorageDriver } from "../src/types";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
+
+type LegacyActionInput<TAction> =
+  TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
+    ? TSchema extends StandardSchemaV1
+      ? StandardSchemaV1.InferInput<TSchema>
+      : never
+    : never;
+
+type LegacyActionOutput<TAction> =
+  TAction extends ActionDefinition<
+    "collection" | "root",
+    StandardSchemaV1 | undefined,
+    infer TOutput,
+    never
+  >
+    ? TOutput extends void
+      ? null
+      : TOutput
+    : JsonValue;
+
+type LegacyActionClientMethod<TAction> =
+  TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
+    ? TSchema extends StandardSchemaV1
+      ? undefined extends LegacyActionInput<TAction>
+        ? (input?: LegacyActionInput<TAction>) => Promise<TakibiResult<LegacyActionOutput<TAction>>>
+        : (input: LegacyActionInput<TAction>) => Promise<TakibiResult<LegacyActionOutput<TAction>>>
+      : () => Promise<TakibiResult<LegacyActionOutput<TAction>>>
+    : never;
+
+type LegacyActionsClient<TActions> = {
+  [K in keyof TActions]: LegacyActionClientMethod<TActions[K]>;
+};
 
 const createContext = createTakibi();
 
@@ -132,6 +165,12 @@ test("collection action input/output and scoped handler args are inferred", () =
           expectTypeOf(input).toEqualTypeOf<undefined>();
           return { ok: true };
         }),
+      promised: defineAction()
+        .policy(fullAccess)
+        .handler(() => Promise.resolve({ async: true as const })),
+      voidOutput: defineAction()
+        .policy(fullAccess)
+        .handler(() => undefined),
     }),
   });
   const handler = context.collections({ posts }, { memory: true });
@@ -142,6 +181,14 @@ test("collection action input/output and scoped handler args are inferred", () =
     TakibiResult<{ length: number }>
   >();
   expectTypeOf(client.posts.coerced).parameter(0).toEqualTypeOf<unknown>();
+  expectTypeOf(client.posts.promised).returns.resolves.toEqualTypeOf<
+    TakibiResult<{ async: true }>
+  >();
+  expectTypeOf(client.posts.voidOutput).returns.resolves.toEqualTypeOf<TakibiResult<null>>();
+  type CollectionActions = (typeof posts)[typeof collectionActionsBrand];
+  expectTypeOf<Pick<typeof client.posts, keyof CollectionActions>>().toEqualTypeOf<
+    LegacyActionsClient<CollectionActions>
+  >();
   const checkCalls = () => {
     void client.posts.optional();
     void client.posts.optional("value");
@@ -150,6 +197,26 @@ test("collection action input/output and scoped handler args are inferred", () =
     void client.posts.noInput("value");
   };
   void checkCalls;
+});
+
+test("ClientOf projects action methods from inputSchema and handler", () => {
+  const inputSchema = z.string().transform((value) => value.length);
+  type StructuralHandler = {
+    readonly "~takibi": {
+      readonly collections: {};
+      readonly actions: {
+        readonly inspect: {
+          readonly inputSchema: typeof inputSchema;
+          readonly handler: (args: { input: number }) => Promise<{ positive: boolean }>;
+        };
+      };
+    };
+  };
+
+  type StructuralClient = ClientOf<StructuralHandler>;
+  expectTypeOf<StructuralClient["inspect"]>().toEqualTypeOf<
+    (input: string) => Promise<TakibiResult<{ positive: boolean }>>
+  >();
 });
 
 test("root actions infer all collections and appear flat on the client", () => {
