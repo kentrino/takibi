@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi, fullAccess } from "../src/index";
+import { createTakibi, fullAccess, none } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import type { StorageTestObject } from "./worker";
 
@@ -29,21 +29,25 @@ const base = context.collections(
     orders,
     inventory: { schema: RecordSchema, accessPolicy: fullAccess },
     events: { schema: RecordSchema, accessPolicy: fullAccess },
+    blocked: { schema: RecordSchema, accessPolicy: none },
   },
   { memory: true },
 );
 const Input = z.object({
   prefix: z.string(),
-  failure: z.enum(["none", "second", "third", "storage", "handler"]),
+  failure: z.enum(["none", "second", "third", "storage", "handler", "policy"]),
 });
 const transact = base
   .defineAction()
   .input(Input)
   .atomic()
   .policy(fullAccess)
-  .handler(async ({ input, $collections }) => {
+  .handler(async ({ input, collections, $collections }) => {
     await $collections.orders.add({ value: "order" }, { id: `${input.prefix}-order` });
     if (input.failure === "handler") throw new Error("handler failed");
+    if (input.failure === "policy") {
+      await collections.blocked.add({ value: "blocked" }, { id: `${input.prefix}-blocked` });
+    }
     if (input.failure === "second") {
       await $collections.inventory.add({ value: "" }, { id: `${input.prefix}-inventory` });
     } else {
@@ -105,7 +109,7 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
   expect(await backend.list("inventory")).toContain(`${prefix}-success-inventory`);
   expect(await backend.list("events")).toContain(`${prefix}-success-event`);
 
-  for (const failure of ["second", "third", "storage", "handler"] as const) {
+  for (const failure of ["second", "third", "storage", "handler", "policy"] as const) {
     const failedPrefix = `${prefix}-${failure}`;
     await expect(
       backend.invoke("$", "transact", { prefix: failedPrefix, failure }),
@@ -141,6 +145,7 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
   });
   expect(await backend.list("orders")).not.toContain(`${effectPrefix}-order`);
   expect(externalEffects).toContain(effectPrefix);
+  expect(externalEffects.filter((effect) => effect === effectPrefix)).toHaveLength(1);
 }
 
 test("atomic actions have matching memory and actual SQLite-backed DO semantics", async () => {
