@@ -218,7 +218,7 @@ export type CollectionDefinitionInput<
   TCtx extends object,
   TActions,
 > = {
-  schema: TSchema;
+  schema: CollectionDefinition<TSchema, TCtx>["schema"];
   accessPolicy: CollectionDefinition<TSchema, TCtx>["accessPolicy"];
   migrations?: CollectionDefinition<TSchema, TCtx>["migrations"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];

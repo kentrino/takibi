@@ -135,6 +135,50 @@ test("collection schemas type CRUD clients without handler $collections", () => 
   void checkListQueries;
 });
 
+test("collection schemas require plain JSON object outputs", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+
+  context.defineCollection({
+    schema: z.object({
+      nested: z.object({ label: z.string() }),
+      values: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
+      optional: z.string().optional(),
+    }),
+    accessPolicy: fullAccess,
+  });
+
+  const checkInvalidSchemas = () => {
+    context.defineCollection({
+      // @ts-expect-error collection output must be an object
+      schema: z.string(),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error collection output must be an object, not an array
+      schema: z.array(z.string()),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error Date is not a JSON value
+      schema: z.object({ created: z.date() }),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error bigint is not a JSON value
+      schema: z.object({ count: z.bigint() }),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error a present undefined value is not a JSON value
+      schema: z.object({ missing: z.undefined() }),
+      accessPolicy: fullAccess,
+    });
+  };
+  void checkInvalidSchemas;
+});
+
 test("collection migrations accept unknown intermediate data and constrain the final step", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),

@@ -156,7 +156,8 @@ export type TakibiHandler<
  */
 type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
   [K in keyof TCollections]: TCollections[K] extends { schema: infer S extends StandardSchemaV1 }
-    ? Omit<TCollections[K], "accessPolicy" | "migrations"> & {
+    ? Omit<TCollections[K], "schema" | "accessPolicy" | "migrations"> & {
+        schema: CollectionDefinition<S, TCtx>["schema"];
         accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
         migrations?: CollectionDefinition<S, TCtx>["migrations"];
       }
@@ -490,9 +491,9 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       await ready;
       return driver.delete(resource, id);
     },
-    async list(resource, options, transform) {
+    async list(resource, options, plan) {
       await ready;
-      return driver.list(resource, options, transform);
+      return driver.list(resource, options, plan);
     },
   };
 }

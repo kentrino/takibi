@@ -3,6 +3,7 @@ import { BadRequestError } from "../src/errors";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
+import { createSqliteDurableObjectStorage } from "./sqlite";
 
 const TS = "2026-08-09T14:12:00.000Z";
 
@@ -25,46 +26,6 @@ function encodeCursor(cursor: Record<string, unknown>): string {
     .replace(/=+$/, "");
 }
 
-/** In-memory stand-in for DurableObjectStorage KV API used by createDurableObjectStorage. */
-function createFakeDurableObjectStorage(
-  onList?: (
-    options: { prefix?: string; limit?: number; startAfter?: string },
-    result: Map<string, WithMetadata<Record<string, unknown>>>,
-  ) => void,
-) {
-  const store = new Map<string, WithMetadata<Record<string, unknown>>>();
-
-  return {
-    async get<T>(key: string): Promise<T | undefined> {
-      return store.get(key) as T | undefined;
-    },
-    async put(key: string, value: WithMetadata<Record<string, unknown>>): Promise<void> {
-      store.set(key, structuredClone(value));
-    },
-    async delete(key: string): Promise<boolean> {
-      return store.delete(key);
-    },
-    async list<T>(options?: {
-      prefix?: string;
-      limit?: number;
-      startAfter?: string;
-    }): Promise<Map<string, T>> {
-      const prefix = options?.prefix ?? "";
-      const limit = options?.limit ?? Number.POSITIVE_INFINITY;
-      const startAfter = options?.startAfter;
-      const keys = [...store.keys()]
-        .filter((k) => k.startsWith(prefix))
-        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-        .filter((k) => (startAfter === undefined ? true : k > startAfter))
-        .slice(0, limit);
-      const out = new Map<string, T>();
-      for (const k of keys) out.set(k, structuredClone(store.get(k)) as T);
-      onList?.(options ?? {}, out as Map<string, WithMetadata<Record<string, unknown>>>);
-      return out;
-    },
-  } as unknown as DurableObjectStorage;
-}
-
 test("generateUlid produces valid 26-char Crockford Base32", () => {
   resetUlidStateForTests();
   const id = generateUlid();
@@ -81,9 +42,9 @@ test("monotonic ULID: same-ms generation order matches lexicographic order", () 
   expect(sorted).toEqual(ids);
 });
 
-test("memory and DO KV pagination agree on order, boundary, and nextCursor", async () => {
+test("memory and DO SQLite pagination agree on order, boundary, and nextCursor", async () => {
   const memory = createMemoryStorage();
-  const durable = createDurableObjectStorage(createFakeDurableObjectStorage());
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
 
   const docs = [
     meta({ id: "c", title: "C" }),
@@ -141,7 +102,7 @@ test("memory and DO KV pagination agree on order, boundary, and nextCursor", asy
 
 test("memory and DO filter before limit with query-bound cursors", async () => {
   const memory = createMemoryStorage();
-  const durable = createDurableObjectStorage(createFakeDurableObjectStorage());
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
   const docs = [
     meta({ id: "a", ownerId: "u2", score: 30 }),
     meta({ id: "b", ownerId: "u1", score: 10 }),
@@ -190,16 +151,8 @@ test("memory and DO filter before limit with query-bound cursors", async () => {
   ).rejects.toBeInstanceOf(BadRequestError);
 });
 
-test("DO list reads bounded chunks and stops after finding the next match", async () => {
-  const listCalls: {
-    options: { prefix?: string; limit?: number; startAfter?: string };
-    resultSize: number;
-  }[] = [];
-  const durable = createDurableObjectStorage(
-    createFakeDurableObjectStorage((options, result) => {
-      listCalls.push({ options, resultSize: result.size });
-    }),
-  );
+test("DO SQLite list finds sparse matches across internal chunks", async () => {
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
 
   for (let index = 0; index < 300; index += 1) {
     const id = index.toString().padStart(3, "0");
@@ -213,30 +166,14 @@ test("DO list reads bounded chunks and stops after finding the next match", asyn
 
   expect(page.items.map((document) => document.id)).toEqual(["000"]);
   expect(page.nextCursor).toBeDefined();
-  expect(listCalls).toEqual([
-    {
-      options: { prefix: "takibi:posts:", limit: 128 },
-      resultSize: 128,
-    },
-    {
-      options: {
-        prefix: "takibi:posts:",
-        limit: 128,
-        startAfter: "takibi:posts:127",
-      },
-      resultSize: 128,
-    },
-  ]);
 });
 
-test("DO get reads only takibi:${resource}:${id}", async () => {
-  const fake = createFakeDurableObjectStorage();
-  const durable = createDurableObjectStorage(fake);
+test("DO SQLite get isolates collections sharing the same id", async () => {
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
   await durable.put("posts", meta({ id: "p1", title: "hi" }));
-  await fake.put("fire:posts:p2", meta({ id: "p2", title: "other" }));
-  await fake.put("unrelated", meta({ id: "x", title: "nope" }));
+  await durable.put("comments", meta({ id: "p1", title: "other" }));
 
   expect(await durable.get("posts", "p1")).toEqual(meta({ id: "p1", title: "hi" }));
-  expect(await durable.get("posts", "p2")).toBeNull();
+  expect(await durable.get("comments", "p1")).toEqual(meta({ id: "p1", title: "other" }));
   expect(await durable.get("posts", "missing")).toBeNull();
 });

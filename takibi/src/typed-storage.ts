@@ -1,4 +1,5 @@
-import { AlreadyExistsError, NotFoundError } from "./errors";
+import { AlreadyExistsError, NotFoundError, TakibiError } from "./errors";
+import { assertJsonObject } from "./json";
 import { compileListOptions } from "./query";
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
@@ -51,6 +52,13 @@ function assertNoParsedMetadata(parsed: Record<string, unknown>): void {
   }
 }
 
+function assertDocumentOutput(value: unknown): asserts value is Record<string, unknown> {
+  assertJsonObject(value, {
+    subject: "Collection document",
+    error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),
+  });
+}
+
 function resolveDocumentId(id: unknown): DocumentId {
   if (id === undefined) return generateUlid();
   if (typeof id !== "string" || id.length === 0) {
@@ -83,7 +91,8 @@ export async function prepareAddDoc(
   options?: { id?: DocumentId },
 ): Promise<WithMetadata<Record<string, unknown>>> {
   assertNoReservedMetadataInData(input);
-  const parsed = (await parseSchema(def.schema, input ?? {})) as Record<string, unknown>;
+  const parsed = await parseSchema(def.schema, input ?? {});
+  assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const id = resolveDocumentId(options?.id);
   const now = nowIso();
@@ -112,7 +121,8 @@ export async function prepareSetDoc(
   existing: WithMetadata<Record<string, unknown>> | null,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   assertNoReservedMetadataInData(input);
-  const parsed = (await parseSchema(def.schema, asDataObject(input))) as Record<string, unknown>;
+  const parsed = await parseSchema(def.schema, asDataObject(input));
+  assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const now = nowIso();
   const createdAt = existing?.createdAt ?? now;
@@ -131,7 +141,8 @@ export async function prepareUpdateDoc(
     ...domainDataFromExisting(existing),
     ...asDataObject(input),
   };
-  const parsed = (await parseSchema(def.schema, merged)) as Record<string, unknown>;
+  const parsed = await parseSchema(def.schema, merged);
+  assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const now = nowIso();
   return { ...parsed, id, createdAt: existing.createdAt, updatedAt: now };

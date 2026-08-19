@@ -402,6 +402,14 @@ Document `id` is not part of the collection schema. Pass domain fields only in `
 use `add(data, { id })` when you need a caller-chosen id. `add` fails with
 `ALREADY_EXISTS` (409) if that id already exists — use `set(id, data)` to upsert.
 
+Collection schema outputs must be plain JSON objects. Nested plain objects, arrays,
+strings, finite numbers, booleans, `null`, and absent optional fields round-trip
+without conversion. `undefined`, non-finite numbers, `bigint`, symbols, accessors,
+cycles, sparse/custom arrays, and objects such as `Date` are rejected before the
+storage write with `INVALID_DOCUMENT`. Schemas whose output type is visibly not a
+JSON object are rejected by `defineCollection`; transforms with an `unknown` output
+are checked at runtime.
+
 Every saved document also carries server-managed `createdAt` / `updatedAt` (UTC ISO 8601
 via `Date.prototype.toISOString()`, e.g. `2026-08-09T14:12:00.000Z`). Do not define those
 fields in the collection schema and do not send them from the client — both input own
@@ -429,12 +437,13 @@ Top-level scalar fields support `eq`; string and number fields also support
 Results are always ordered by document id, and filtering happens before
 `cursor` and `limit`.
 
-The initial memory and Durable Object implementations have no field indexes:
-each query reads and filters the whole collection inside the trusted server.
-This is a linear scan, but non-matching documents are never included in the
-HTTP response. Treat `nextCursor` as opaque and reuse it only with the same
-collection and structurally identical query; do not inspect, modify, or guess
-cursor values.
+The memory implementation evaluates the AST in JavaScript. The Durable Object
+implementation compiles it to a parameterized SQLite predicate and performs a final
+JavaScript check to preserve the same missing / null / type and string-ordering
+semantics. There are no secondary field indexes yet, so SQLite may still scan the
+collection, but non-matching current-version rows are not deserialized into JavaScript.
+Treat `nextCursor` as opaque and reuse it only with the same collection and
+structurally identical query; do not inspect, modify, or guess cursor values.
 
 ### Migrating from the previous throw / null API
 
@@ -497,18 +506,22 @@ Inside the DO (trusted / admin path, `accessPolicy` bypassed):
 const post = await this.$collections.posts.add({ title: "Hi", body: "..." });
 ```
 
-Documents are stored with the Durable Object Storage KV API
-(`get` / `put` / `delete` / `list`) under internal collection-prefixed keys.
-One document is one entry. The library does **not** use `state.storage.sql` or
-manage application SQL schemas / migrations.
+Documents are stored with `state.storage.sql` in one library-managed
+`takibi_documents` table shared by all collections in the Durable Object. Domain
+fields are JSON text; collection, id, timestamps, and document schema version are
+separate columns. Takibi does not create a table or columns from each application
+schema, and applications do not manage or query this internal table.
 
 Auto-generated document ids are monotonic ULIDs (26 Crockford Base32 characters).
 Caller-supplied ids are still accepted; creation-order lexicographic sort is
 guaranteed only for library-generated ULIDs.
 
-Library-managed storage keys and index layouts are outside application document
-migrations. Changes to those formats still require a separate namespace or an
-application-managed one-off migration.
+Takibi versions its internal SQL layout in `takibi_metadata` and migrates known
+layout versions synchronously during activation. A newer unknown layout fails closed.
+This internal layout migration is separate from collection `migrations`: layout
+migrations change Takibi's tables, while collection migrations lazily transform one
+domain document after it is read. Takibi does not read or create document KV entries
+and does not migrate legacy `takibi:{collection}:{id}` entries.
 
 ## Wrangler
 
@@ -544,10 +557,10 @@ Notes:
 
 ## Limits and layout
 
-| Backend                                     | Per-entry size         |
-| ------------------------------------------- | ---------------------- |
-| SQLite-backed DO (required for new classes) | key + value ≤ **2 MB** |
-| Legacy KV-backed DO                         | value ≤ **128 KiB**    |
+| Backend                                | Per-row size |
+| -------------------------------------- | ------------ |
+| SQLite-backed DO (required for Takibi) | **2 MB**     |
+| Legacy KV-backed DO                    | unsupported  |
 
 - `get` / `update` / `list` always read or write the **whole** document value.
   There is no field projection or partial array read.
@@ -557,6 +570,5 @@ Notes:
 - `list` returns full documents in id order and supports typed `where`,
   `limit`, and an opaque query-bound `cursor`. It does not offer `orderBy`,
   offset, or projection.
-- `where` is currently an unindexed server-side linear scan. Non-matching
-  documents remain inside the trusted storage boundary and are not returned to
-  the client.
+- `where` is currently unindexed. SQLite evaluates its predicate and only candidate
+  rows cross into JavaScript; adding field indexes remains a future optimization.

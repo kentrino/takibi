@@ -1,6 +1,7 @@
 import { ActionRegistry, type ActionGateContext } from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
+import { assertJsonValue } from "./json";
 import { allows, isAccessGrant, isContextPolicy } from "./policy";
 import { parseSchema } from "./schema";
 import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
@@ -83,80 +84,9 @@ export async function executeAction<TCtx extends object>(
 
   const output = await definition.handler(args);
   if (output === undefined) return null;
-  assertJsonValue(output);
+  assertJsonValue(output, {
+    subject: "Action output",
+    error: (message) => new TakibiError("INVALID_ACTION_OUTPUT", message, 500),
+  });
   return output;
-}
-
-function assertJsonValue(value: unknown, seen = new Set<object>()): asserts value is JsonValue {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  ) {
-    return;
-  }
-  if (typeof value !== "object") {
-    throw new TakibiError("INVALID_ACTION_OUTPUT", "Action output must be JSON-safe", 500);
-  }
-  if (seen.has(value)) {
-    throw new TakibiError("INVALID_ACTION_OUTPUT", "Action output must not be cyclic", 500);
-  }
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (!descriptor?.enumerable || !("value" in descriptor)) {
-        throw new TakibiError(
-          "INVALID_ACTION_OUTPUT",
-          "Action output arrays must contain only data elements",
-          500,
-        );
-      }
-      assertJsonValue(descriptor.value, seen);
-    }
-    for (const key of Reflect.ownKeys(value)) {
-      if (key === "length") continue;
-      if (
-        typeof key !== "string" ||
-        !/^(0|[1-9][0-9]*)$/.test(key) ||
-        Number(key) >= value.length
-      ) {
-        throw new TakibiError(
-          "INVALID_ACTION_OUTPUT",
-          "Action output arrays must not have custom properties",
-          500,
-        );
-      }
-    }
-    seen.delete(value);
-    return;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new TakibiError(
-      "INVALID_ACTION_OUTPUT",
-      "Action output must contain only plain JSON objects",
-      500,
-    );
-  }
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== "string") {
-      throw new TakibiError(
-        "INVALID_ACTION_OUTPUT",
-        "Action output must not contain symbol properties",
-        500,
-      );
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor?.enumerable || !("value" in descriptor)) {
-      throw new TakibiError(
-        "INVALID_ACTION_OUTPUT",
-        "Action output must contain only enumerable data properties",
-        500,
-      );
-    }
-    assertJsonValue(descriptor.value, seen);
-  }
-  seen.delete(value);
 }

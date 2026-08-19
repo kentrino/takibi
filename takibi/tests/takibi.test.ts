@@ -13,6 +13,7 @@ import {
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
+import { createSqliteDurableObjectStorage } from "./sqlite";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -109,33 +110,6 @@ function clientFor(
     headers: () => headers(user),
     fetch: (input, init) => handler.request(input, init),
   });
-}
-
-function createFakeDurableObjectStorage(): DurableObjectStorage {
-  const values = new Map<string, unknown>();
-  return {
-    async get<T>(key: string): Promise<T | undefined> {
-      return values.get(key) as T | undefined;
-    },
-    async put(key: string, value: unknown): Promise<void> {
-      values.set(key, structuredClone(value));
-    },
-    async delete(key: string): Promise<boolean> {
-      return values.delete(key);
-    },
-    async list<T>(options?: {
-      prefix?: string;
-      limit?: number;
-      startAfter?: string;
-    }): Promise<Map<string, T>> {
-      const entries = [...values.entries()]
-        .filter(([key]) => key.startsWith(options?.prefix ?? ""))
-        .filter(([key]) => (options?.startAfter ? key > options.startAfter : true))
-        .sort(([left], [right]) => left.localeCompare(right));
-      const limited = options?.limit === undefined ? entries : entries.slice(0, options.limit);
-      return new Map(limited) as Map<string, T>;
-    },
-  } as unknown as DurableObjectStorage;
 }
 
 function createFakeDurableObjectState(
@@ -574,7 +548,7 @@ test("actions execute inside the generated Durable Object", async () => {
   const { base, handler } = createActionApp();
   expect(base).toBe(handler);
   const object = new base.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
   await object.$collections.posts.add({ title: "inside" }, { id: "p1" });
@@ -606,7 +580,7 @@ test("named Durable Object fetch accepts a matching tenantId", async () => {
     posts: { schema: Post, accessPolicy: fullAccess },
   });
   const object = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage(), { name: "tenant-a" }),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
   );
 
@@ -632,7 +606,7 @@ test("named Durable Object fetch accepts a matching tenantId", async () => {
 
 test("named Durable Object fetch rejects a tenant mismatch before storage", async () => {
   let reads = 0;
-  const storage = createFakeDurableObjectStorage();
+  const storage = createSqliteDurableObjectStorage();
   const watched = {
     ...storage,
     async get(key: string) {
@@ -682,7 +656,7 @@ test("named Durable Object fetch rejects an empty tenantId", async () => {
     posts: { schema: Post, accessPolicy: fullAccess },
   });
   const object = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage(), { name: "tenant-a" }),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
   );
 
@@ -712,11 +686,11 @@ test("unnamed Durable Object fetch skips the tenant name check", async () => {
     posts: { schema: Post, accessPolicy: fullAccess },
   });
   const unnamed = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
   const emptyName = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage(), { name: "" }),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "" }),
     {},
   );
 
@@ -752,7 +726,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     posts: { schema: Post, accessPolicy: fullAccess },
   });
   object = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
 
@@ -802,7 +776,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
     posts: { schema: Post, accessPolicy: fullAccess },
   });
   object = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
 
@@ -912,7 +886,7 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
     },
   });
   object = new handler.DurableObject(
-    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
   const client = createClient<typeof handler>("http://fire.test", {

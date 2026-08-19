@@ -5,6 +5,7 @@ import { createMigratingStorage } from "../src/migrations";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
 import type { AccessContext } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
+import { createSqliteDurableObjectStorage } from "./sqlite";
 
 const CREATED_AT = "2026-08-01T00:00:00.000Z";
 const UPDATED_AT = "2026-08-02T00:00:00.000Z";
@@ -18,40 +19,16 @@ type StoredDocument = Record<string, unknown> & {
 };
 
 function createInspectableDurableObjectStorage() {
-  const values = new Map<string, StoredDocument>();
-
-  const storage = {
-    async get<T>(key: string): Promise<T | undefined> {
-      return structuredClone(values.get(key)) as T | undefined;
-    },
-    async put(key: string, value: StoredDocument): Promise<void> {
-      values.set(key, structuredClone(value));
-    },
-    async delete(key: string): Promise<boolean> {
-      return values.delete(key);
-    },
-    async list<T>(options?: {
-      prefix?: string;
-      limit?: number;
-      startAfter?: string;
-    }): Promise<Map<string, T>> {
-      const entries = [...values.entries()]
-        .filter(([key]) => key.startsWith(options?.prefix ?? ""))
-        .filter(([key]) => (options?.startAfter === undefined ? true : key > options.startAfter))
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-      const limited = options?.limit === undefined ? entries : entries.slice(0, options.limit);
-      return new Map(limited.map(([key, value]) => [key, structuredClone(value) as T]));
-    },
-  } as unknown as DurableObjectStorage;
+  const storage = createSqliteDurableObjectStorage();
+  const driver = createDurableObjectStorage(storage);
 
   return {
     storage,
-    seed(collection: string, document: StoredDocument): void {
-      values.set(`takibi:${collection}:${document.id}`, structuredClone(document));
+    async seed(collection: string, document: StoredDocument): Promise<void> {
+      await driver.put(collection, document);
     },
-    read(collection: string, id: string): StoredDocument | undefined {
-      const value = values.get(`takibi:${collection}:${id}`);
-      return value === undefined ? undefined : structuredClone(value);
+    async read(collection: string, id: string): Promise<StoredDocument | undefined> {
+      return (await driver.get(collection, id)) ?? undefined;
     },
   };
 }
@@ -113,7 +90,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
     },
   });
   const backing = createInspectableDurableObjectStorage();
-  backing.seed("settings", legacy("default", { name: "Clinic" }));
+  await backing.seed("settings", legacy("default", { name: "Clinic" }));
   const object = new handler.DurableObject(createState(backing.storage), {});
 
   const first = await invoke(object, {
@@ -146,7 +123,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
     },
   ]);
   expect(stepInputs).toEqual([{ name: "Clinic" }, { name: "Clinic", label: "Clinic" }]);
-  expect(backing.read("settings", "default")).toEqual({
+  expect(await backing.read("settings", "default")).toEqual({
     id: "default",
     label: "Clinic",
     enabled: true,
@@ -181,8 +158,8 @@ test("list migrates each scanned document before current-schema filtering", asyn
     },
   });
   const backing = createInspectableDurableObjectStorage();
-  backing.seed("posts", legacy("a", { title: "MATCH", visible: true }));
-  backing.seed("posts", legacy("b", { title: "OTHER", visible: false }));
+  await backing.seed("posts", legacy("a", { title: "MATCH", visible: true }));
+  await backing.seed("posts", legacy("b", { title: "OTHER", visible: false }));
   const object = new handler.DurableObject(createState(backing.storage), {});
 
   const result = await invoke(object, {
@@ -196,8 +173,8 @@ test("list migrates each scanned document before current-schema filtering", asyn
     status: 200,
     body: { ok: true, data: { items: [{ id: "a", slug: "match", published: true }] } },
   });
-  expect(backing.read("posts", "a")).toMatchObject({ slug: "match", _takibiVersion: 1 });
-  expect(backing.read("posts", "b")).toMatchObject({ slug: "other", _takibiVersion: 1 });
+  expect(await backing.read("posts", "a")).toMatchObject({ slug: "match", _takibiVersion: 1 });
+  expect(await backing.read("posts", "b")).toMatchObject({ slug: "other", _takibiVersion: 1 });
 });
 
 test("get, set, update, and delete policies only see migrated existing documents", async () => {
@@ -222,7 +199,7 @@ test("get, set, update, and delete policies only see migrated existing documents
       },
     });
     const backing = createInspectableDurableObjectStorage();
-    backing.seed("posts", legacy("p1", { title: "old" }));
+    await backing.seed("posts", legacy("p1", { title: "old" }));
     const object = new handler.DurableObject(createState(backing.storage), {});
     const input =
       operation === "set"
@@ -287,7 +264,7 @@ test("migration throw, validation failure, and versions below base leave storage
     });
     const backing = createInspectableDurableObjectStorage();
     const original = legacy(`c${index}`, { count: 1 });
-    backing.seed("counters", original);
+    await backing.seed("counters", original);
     const object = new handler.DurableObject(createState(backing.storage), {});
 
     const result = await invoke(object, {
@@ -298,7 +275,7 @@ test("migration throw, validation failure, and versions below base leave storage
     });
 
     expect(result.body).toMatchObject({ ok: false });
-    expect(backing.read("counters", `c${index}`)).toEqual(original);
+    expect(await backing.read("counters", `c${index}`)).toEqual(original);
   }
 });
 
@@ -323,7 +300,7 @@ test("new writes persist the current marker but reject marker input and marker q
   });
   expect(add).toMatchObject({ status: 200, body: { ok: true, data: { title: "new" } } });
   expect(add.body).not.toHaveProperty("data._takibiVersion");
-  expect(backing.read("posts", "p1")).toMatchObject({ title: "new", _takibiVersion: 3 });
+  expect(await backing.read("posts", "p1")).toMatchObject({ title: "new", _takibiVersion: 3 });
 
   const reservedInput = await invoke(object, {
     kind: "collection",
@@ -336,7 +313,7 @@ test("new writes persist the current marker but reject marker input and marker q
     status: 400,
     body: { ok: false, error: { kind: "validation", code: "VALIDATION" } },
   });
-  expect(backing.read("posts", "p2")).toBeUndefined();
+  expect(await backing.read("posts", "p2")).toBeUndefined();
 
   const reservedQuery = await invoke(object, {
     kind: "collection",

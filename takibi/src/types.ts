@@ -8,6 +8,21 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+export type JsonObject = { [key: string]: JsonValue };
+
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+type JsonDocumentSchema<TSchema extends StandardSchemaV1> =
+  IsAny<TSchema> extends true
+    ? TSchema
+    : IsAny<StandardSchemaV1.InferOutput<TSchema>> extends true
+      ? TSchema
+      : unknown extends StandardSchemaV1.InferOutput<TSchema>
+        ? TSchema
+        : StandardSchemaV1.InferOutput<TSchema> extends JsonObject
+          ? TSchema
+          : never;
+
 export type DocumentId = string;
 export const TAKIBI_VERSION_KEY = "_takibiVersion" as const;
 
@@ -120,13 +135,13 @@ export type AccessPolicy<TCtx extends object, TDoc = WithMetadata<Record<string,
 export const collectionActionsBrand: unique symbol = Symbol("fire.collectionActions");
 
 export type CollectionDefinition<
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TSchema extends StandardSchemaV1 = any,
   // Default `any` keeps collection maps assignable regardless of concrete context.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional for assignability
   TCtx extends object = any,
-  TActions = never,
+  TActions = unknown,
 > = {
-  schema: TSchema;
+  schema: JsonDocumentSchema<TSchema>;
   accessPolicy: AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>;
   migrations?: CollectionMigrations<StandardSchemaV1.InferInput<TSchema>>;
   /**
@@ -267,6 +282,11 @@ export type StorageReadTransform = (
   document: StoredDocument,
 ) => Promise<WithMetadata<Record<string, unknown>>>;
 
+export type StorageListPlan = {
+  currentVersion: number;
+  transform: StorageReadTransform;
+};
+
 export type StorageDriver = {
   get(resource: string, id: string): Promise<StoredDocument | null>;
   put(resource: string, doc: StoredDocument): Promise<void>;
@@ -274,6 +294,6 @@ export type StorageDriver = {
   list(
     resource: string,
     opts?: StorageListOptions,
-    transform?: StorageReadTransform,
+    plan?: StorageListPlan,
   ): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }>;
 };

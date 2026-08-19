@@ -1,4 +1,5 @@
 import { TakibiError } from "./errors";
+import { assertJsonObject } from "./json";
 import { parseSchema, SchemaValidationError } from "./schema";
 import {
   TAKIBI_VERSION_KEY,
@@ -50,11 +51,14 @@ export function createMigratingStorage(
     delete(collection, id) {
       return storage.delete(collection, id);
     },
-    list(collection, options, transform) {
+    list(collection, options, plan) {
       const definition = definitionFor(collection);
-      return storage.list(collection, options, async (stored) => {
-        const migrated = await migrateDocument(definition, storage, collection, stored);
-        return transform ? transform(migrated) : migrated;
+      return storage.list(collection, options, {
+        currentVersion: currentVersion(definition),
+        transform: async (stored) => {
+          const migrated = await migrateDocument(definition, storage, collection, stored);
+          return plan ? plan.transform(migrated) : migrated;
+        },
       });
     },
   };
@@ -104,7 +108,11 @@ async function migrateDocument(
     }
   }
 
-  const parsed = (await parseSchema(definition.schema, data)) as Record<string, unknown>;
+  const parsed = await parseSchema(definition.schema, data);
+  assertJsonObject(parsed, {
+    subject: "Collection document",
+    error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),
+  });
   assertNoReservedOutput(parsed);
   const migrated: StoredDocument = {
     ...parsed,
