@@ -167,7 +167,13 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "GrantBuilder"
     | "grantV2"
     | "permissionsOf"
-    | "isAccessGrant";
+    | "isAccessGrant"
+    | "internalTracerKey"
+    | "registerGlobalTracer"
+    | "createRecordingTracer"
+    | "TakibiTracer"
+    | "TakibiSpan"
+    | "failNextStorageWrite";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 
   // @ts-expect-error allows must not remain on the public root

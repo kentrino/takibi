@@ -98,6 +98,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
   expectTypeOf(durableHandler).not.toHaveProperty("$collections");
   expectTypeOf(handler).not.toHaveProperty("storage");
   expectTypeOf<CollectionsOptions>().toHaveProperty("memory");
+  expectTypeOf<CollectionsOptions>().not.toHaveProperty("tracer");
 
   type DurableInstance = InstanceType<typeof handler.DurableObject>;
   expectTypeOf<DurableInstance>().toHaveProperty("$collections");
