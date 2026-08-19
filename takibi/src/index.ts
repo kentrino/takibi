@@ -18,7 +18,7 @@ export {
   UnauthorizedError,
 } from "./errors";
 
-export { allows, and, fullAccess, grant, none, or, read, write } from "./policy";
+export { and, fullAccess, grant, none, or, read, write } from "./policy";
 export { queryImpliesEquality } from "./query";
 
 export type {

@@ -668,7 +668,7 @@ test("action registration is atomic and validates collisions", async () => {
   ).toThrow(/Invalid action permission/);
   expect(() =>
     register({
-      badPolicy: { ...valid, policy: new Set(["admin"]) } as never,
+      badPolicy: { ...valid, policy: grant("admin" as never) } as never,
     }),
   ).toThrow(/Invalid action policy grant/);
   expect(() =>

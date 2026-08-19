@@ -145,15 +145,16 @@ Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying a
 
 ### Grants: `fullAccess` / `write` / `read` / `none` / `grant(...)`
 
-`accessPolicy` returns an **`AccessGrant`** — the set of permissions the subject may perform on this collection / document — not a yes/no for the current request. The executor allows the call when the grant contains `permission` (`create` / `get` / `list` / `update` / `delete`).
+`accessPolicy` returns an **`AccessGrant`** — an opaque value for the permissions the subject may perform on this collection / document — not a yes/no for the current request. Build a grant with `grant(...)` or a predefined grant (`fullAccess` / `write` / `read` / `none`) and return it from the policy. The executor allows the call when that grant includes the required `permission` (`create` / `get` / `list` / `update` / `delete`).
 
-| helper                   | permissions                               |
-| ------------------------ | ----------------------------------------- |
-| `fullAccess`             | create, get, list, update, delete, invoke |
-| `write`                  | create, update, delete                    |
-| `read`                   | get, list                                 |
-| `none`                   | (empty)                                   |
-| `grant("create", "get")` | the permissions you list                  |
+| helper                            | permissions                               |
+| --------------------------------- | ----------------------------------------- |
+| `fullAccess`                      | create, get, list, update, delete, invoke |
+| `write`                           | create, update, delete                    |
+| `read`                            | get, list                                 |
+| `none`                            | (empty)                                   |
+| `grant("create", "get")`          | the permissions you list                  |
+| `grant((g) => [g.create, g.get])` | the same grant, via catalog properties    |
 
 A constant grant is valid (`accessPolicy: write`). Combine `or(read, write)` for
 CRUD without action invocation, and use `fullAccess` when `invoke` is also

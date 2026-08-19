@@ -58,8 +58,12 @@ export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | 
 
 export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
 
-/** Permission set a policy grants. */
-export type AccessGrant = ReadonlySet<AccessPermission>;
+declare const accessGrantBrand: unique symbol;
+
+/** Opaque grant a policy returns. Build with `grant(...)` or a predefined grant. */
+export type AccessGrant = {
+  readonly [accessGrantBrand]: true;
+};
 
 export type AccessContext<
   TCtx extends object,

@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { TakibiError } from "./errors";
-import { isAccessGrant } from "./policy";
+import { isAccessGrant, permissionsOf } from "./policy";
 import type { ContextPolicy } from "./policy";
 import type {
   AccessGrant,
@@ -378,7 +378,7 @@ function assertActionContract(
     throw new TakibiError("INVALID_ACTION", `Action policy is required: ${name}`, 500);
   }
   if (isAccessGrant(definition.policy)) {
-    for (const permission of definition.policy) {
+    for (const permission of permissionsOf(definition.policy)) {
       if (!ACCESS_PERMISSIONS.has(permission)) {
         throw new TakibiError("INVALID_ACTION", `Invalid action policy grant: ${name}`, 500);
       }

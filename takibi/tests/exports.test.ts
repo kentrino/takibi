@@ -29,7 +29,10 @@ import type {
 test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi.createClient).toBeFunction();
   expectTypeOf(Takibi.createTakibi).toBeFunction();
-  expectTypeOf(Takibi.allows).toBeFunction();
+  expectTypeOf(Takibi).not.toHaveProperty("allows");
+  expectTypeOf(Takibi).not.toHaveProperty("GrantCatalog");
+  expectTypeOf(Takibi).not.toHaveProperty("GrantBuilder");
+  expectTypeOf(Takibi).not.toHaveProperty("grantV2");
   expectTypeOf(Takibi.and).toBeFunction();
   expectTypeOf(Takibi.or).toBeFunction();
   expectTypeOf(Takibi.grant).toBeFunction();
@@ -39,6 +42,15 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi.write).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi.fullAccess).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi).toHaveProperty("AlreadyExistsError");
+  expectTypeOf<AccessGrant>().not.toHaveProperty("has");
+  expectTypeOf<AccessGrant>().not.toHaveProperty("size");
+  expectTypeOf<AccessGrant>().not.toMatchTypeOf<ReadonlySet<AccessPermission>>();
+  {
+    const grantValue: AccessGrant = Takibi.none;
+    // @ts-expect-error opaque grant is not a ReadonlySet
+    const _set: ReadonlySet<AccessPermission> = grantValue;
+    void _set;
+  }
 });
 
 test("AlreadyExistsError is the ALREADY_EXISTS 409 class", () => {
@@ -150,8 +162,23 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "ClientShape"
     | "ClientFor"
     | "CtxConstraint"
-    | "TakibiCtxConstraint";
+    | "TakibiCtxConstraint"
+    | "allows"
+    | "GrantCatalog"
+    | "GrantBuilder"
+    | "grantV2"
+    | "permissionsOf"
+    | "isAccessGrant";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
+
+  // @ts-expect-error allows must not remain on the public root
+  type _allows = import("../src/index").allows;
+  // @ts-expect-error GrantCatalog must not be added to the public root
+  type _GrantCatalog = import("../src/index").GrantCatalog;
+  // @ts-expect-error GrantBuilder must not be added to the public root
+  type _GrantBuilder = import("../src/index").GrantBuilder;
+  // @ts-expect-error grantV2 must not be added to the public root
+  type _grantV2 = import("../src/index").grantV2;
 
   // @ts-expect-error ClientShape must not be added to the public root
   type _ClientShape = import("../src/index").ClientShape;

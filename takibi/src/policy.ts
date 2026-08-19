@@ -53,13 +53,38 @@ const ALL_PERMISSIONS = [
   "invoke",
 ] as const satisfies readonly AccessPermission[];
 
-function freezeGrant(permissions: readonly AccessPermission[]): AccessGrant {
-  return Object.freeze(new Set(permissions));
+type GrantCatalog = { readonly [K in AccessPermission]: K };
+
+const GRANT_CATALOG: GrantCatalog = Object.freeze({
+  create: "create",
+  get: "get",
+  list: "list",
+  update: "update",
+  delete: "delete",
+  invoke: "invoke",
+});
+
+const grantPermissions = new WeakMap<object, ReadonlySet<AccessPermission>>();
+
+function createGrant(permissions: readonly AccessPermission[]): AccessGrant {
+  const value = Object.freeze({}) as AccessGrant;
+  grantPermissions.set(value, new Set(permissions));
+  return value;
 }
 
-/** Build a grant from explicit permissions. */
-export function grant(...permissions: AccessPermission[]): AccessGrant {
-  return freezeGrant(permissions);
+export function permissionsOf(decision: AccessGrant): ReadonlySet<AccessPermission> {
+  return grantPermissions.get(decision) ?? new Set();
+}
+
+/** Build a grant from explicit permissions or a catalog callback. */
+export function grant(...permissions: AccessPermission[]): AccessGrant;
+export function grant(select: (catalog: GrantCatalog) => readonly AccessPermission[]): AccessGrant;
+export function grant(
+  first?: AccessPermission | ((catalog: GrantCatalog) => readonly AccessPermission[]),
+  ...rest: AccessPermission[]
+): AccessGrant {
+  if (typeof first === "function") return createGrant(first(GRANT_CATALOG));
+  return createGrant(first === undefined ? rest : [first, ...rest]);
 }
 
 export const none: AccessGrant = grant();
@@ -68,11 +93,11 @@ export const write: AccessGrant = grant(...WRITE_PERMISSIONS);
 export const fullAccess: AccessGrant = grant(...ALL_PERMISSIONS);
 
 export function isAccessGrant(value: unknown): value is AccessGrant {
-  return value instanceof Set;
+  return typeof value === "object" && value !== null && grantPermissions.has(value);
 }
 
 export function allows(decision: AccessGrant, permission: AccessPermission): boolean {
-  return decision.has(permission);
+  return permissionsOf(decision).has(permission);
 }
 
 export async function evaluateAccessPolicy<TCtx extends object, TDoc>(
@@ -84,20 +109,22 @@ export async function evaluateAccessPolicy<TCtx extends object, TDoc>(
 }
 
 function intersect(left: AccessGrant, right: AccessGrant): AccessGrant {
-  const out = new Set<AccessPermission>();
-  for (const permission of left) {
-    if (right.has(permission)) out.add(permission);
-  }
-  return out;
+  const rightSet = permissionsOf(right);
+  return createGrant([...permissionsOf(left)].filter((permission) => rightSet.has(permission)));
 }
 
 function union(left: AccessGrant, right: AccessGrant): AccessGrant {
-  return new Set<AccessPermission>([...left, ...right]);
+  return createGrant([...permissionsOf(left), ...permissionsOf(right)]);
+}
+
+function isEmpty(decision: AccessGrant): boolean {
+  return permissionsOf(decision).size === 0;
 }
 
 function isFullAccess(decision: AccessGrant): boolean {
+  const granted = permissionsOf(decision);
   for (const permission of ALL_PERMISSIONS) {
-    if (!decision.has(permission)) return false;
+    if (!granted.has(permission)) return false;
   }
   return true;
 }
@@ -115,7 +142,7 @@ export function and<TCtx extends object, TDoc>(
     for (const policy of policies) {
       const next = await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>);
       acc = acc ? intersect(acc, next) : next;
-      if (acc.size === 0) return none;
+      if (isEmpty(acc)) return none;
     }
     return acc ?? none;
   }) as ConstrainedPolicy<TCtx, TDoc>;
