@@ -12,13 +12,18 @@ export type InferPolicyDoc<TSchema extends StandardSchemaV1> = WithMetadata<
   StandardSchemaV1.InferOutput<TSchema>
 >;
 
+export const constrainedPolicyBrand: unique symbol = Symbol("fire.constrainedPolicy");
+
 /**
  * Schema-bound policy. Assigns to a collection when every pick-schema key exists
  * on the collection document — optional vs required does not matter.
  */
-export type ConstrainedPolicy<TCtx extends object, TPick> = <TDoc>(
-  ctx: AccessContext<TCtx, keyof TPick extends keyof TDoc ? TDoc : never>,
-) => AccessGrant | Promise<AccessGrant>;
+export type ConstrainedPolicy<TCtx extends object, TPick> = {
+  <TDoc>(
+    ctx: AccessContext<TCtx, keyof TPick extends keyof TDoc ? TDoc : never>,
+  ): AccessGrant | Promise<AccessGrant>;
+  readonly [constrainedPolicyBrand]: true;
+};
 
 type CombinablePolicy<TCtx extends object, TDoc> =
   | AccessPolicy<TCtx, TDoc>
@@ -36,6 +41,23 @@ export function isContextPolicy(value: unknown): value is ContextPolicy<unknown>
     typeof value === "function" &&
     (value as Partial<ContextPolicy<unknown>>)[contextPolicyBrand] === true
   );
+}
+
+export function isConstrainedPolicy(value: unknown): value is ConstrainedPolicy<object, unknown> {
+  return (
+    typeof value === "function" &&
+    (value as Partial<ConstrainedPolicy<object, unknown>>)[constrainedPolicyBrand] === true
+  );
+}
+
+function brandConstrainedPolicy<TCtx extends object, TPick>(
+  policy: AccessPolicyFn<TCtx, TPick>,
+): ConstrainedPolicy<TCtx, TPick> {
+  Object.defineProperty(policy, constrainedPolicyBrand, {
+    value: true,
+    enumerable: false,
+  });
+  return policy as ConstrainedPolicy<TCtx, TPick>;
 }
 
 const WRITE_PERMISSIONS = [
@@ -137,7 +159,7 @@ function isFullAccess(decision: AccessGrant): boolean {
 export function and<TCtx extends object, TDoc>(
   ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc> {
-  return (async (ctx) => {
+  return brandConstrainedPolicy(async (ctx) => {
     let acc: AccessGrant | undefined;
     for (const policy of policies) {
       const next = await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>);
@@ -145,7 +167,7 @@ export function and<TCtx extends object, TDoc>(
       if (isEmpty(acc)) return none;
     }
     return acc ?? none;
-  }) as ConstrainedPolicy<TCtx, TDoc>;
+  });
 }
 
 /**
@@ -155,14 +177,14 @@ export function and<TCtx extends object, TDoc>(
 export function or<TCtx extends object, TDoc>(
   ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc> {
-  return (async (ctx) => {
+  return brandConstrainedPolicy(async (ctx) => {
     let acc: AccessGrant = none;
     for (const policy of policies) {
       acc = union(acc, await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>));
       if (isFullAccess(acc)) return fullAccess;
     }
     return acc;
-  }) as ConstrainedPolicy<TCtx, TDoc>;
+  });
 }
 
 export type PolicyHelper<TCtx extends object> = {
@@ -183,17 +205,22 @@ export type PolicyHelper<TCtx extends object> = {
 };
 
 /**
- * Type-safe `accessPolicy` helper. Runtime is identity — inference is the
- * contract. Use the schema overload so document fields are checked; omit the
- * schema when the rule only looks at application context. Return a grant
- * (`fullAccess` / `write` / `read` / `none` / `grant(...)`), not a boolean.
+ * Type-safe `accessPolicy` helper. Runtime brands the returned function so
+ * schema-bound policies stay distinct from context-only gates. Use the schema
+ * overload so document fields are checked; omit the schema when the rule only
+ * looks at application context. Return a grant (`fullAccess` / `write` /
+ * `read` / `none` / `grant(...)`), not a boolean.
  */
 export function createPolicyHelper<TCtx extends object>(): PolicyHelper<TCtx> {
   function policy(
     schemaOrPolicy: StandardSchemaV1 | AccessPolicy<TCtx, unknown> | ContextPolicyFn<TCtx>,
     maybePolicy?: AccessPolicy<TCtx, unknown>,
   ): AccessPolicy<TCtx, unknown> | ContextPolicy<TCtx> {
-    if (maybePolicy) return maybePolicy;
+    if (maybePolicy) {
+      return isAccessGrant(maybePolicy)
+        ? maybePolicy
+        : brandConstrainedPolicy(maybePolicy as AccessPolicyFn<TCtx, unknown>);
+    }
     if (isAccessGrant(schemaOrPolicy)) return schemaOrPolicy;
     const contextPolicy = schemaOrPolicy as ContextPolicy<TCtx>;
     Object.defineProperty(contextPolicy, contextPolicyBrand, {

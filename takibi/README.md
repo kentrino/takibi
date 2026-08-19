@@ -316,7 +316,10 @@ const handler = base.actions({ exportAll });
 become `{ kind: "validation", code: "VALIDATION" }` with field `issues`. Throw a
 `TakibiError` subclass from the handler for operation failures.
 
-Every action has a mandatory gate policy. Normal `collection` / `collections`
+Every action has a mandatory gate policy. The gate accepts a constant grant,
+a context-only `context.policy(({ user }) => ...)`, or a function of
+`ActionGateContext`; schema-bound policies (`context.policy(schema, fn)`) are
+for collection `accessPolicy` only. Normal `collection` / `collections`
 CRUD evaluates each collection's `accessPolicy`; `$collection` /
 `$collections` bypasses only that document policy and never bypasses the action
 gate. These server-side facades throw `TakibiError` on failure.

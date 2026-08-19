@@ -563,6 +563,49 @@ test("action gate callbacks infer ctx, scope, invocation, and permission", () =>
   });
 });
 
+test("action gates reject schema-bound policies and accept context-only ones", () => {
+  const takibi = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  });
+  const staff = takibi.policy(({ user }) => (user ? fullAccess : none));
+  const ownerOnly = takibi.policy(z.object({ ownerId: z.string() }), ({ user, doc }) =>
+    user?.id === doc?.ownerId ? fullAccess : none,
+  );
+  const posts = takibi.defineCollection({
+    schema: z.object({ title: z.string(), ownerId: z.string() }),
+    accessPolicy: staff,
+    actions: (defineAction) => ({
+      ping: defineAction()
+        .policy(staff)
+        .handler(() => null),
+    }),
+  });
+  const base = takibi.collections({ posts });
+  base
+    .defineAction()
+    .policy(staff)
+    .handler(() => null);
+
+  const checkSchemaBoundGates = () => {
+    takibi.defineCollection({
+      schema: z.object({ title: z.string(), ownerId: z.string() }),
+      accessPolicy: ownerOnly,
+      actions: (defineAction) => ({
+        ping: defineAction()
+          // @ts-expect-error schema-bound policy is not an action gate
+          .policy(ownerOnly)
+          .handler(() => null),
+      }),
+    });
+    base
+      .defineAction()
+      // @ts-expect-error and() of a schema-bound policy is not an action gate
+      .policy(and(staff, ownerOnly))
+      .handler(() => null);
+  };
+  void checkSchemaBoundGates;
+});
+
 test("action and collection collisions are type errors", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
