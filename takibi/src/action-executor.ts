@@ -86,7 +86,7 @@ export async function executeAction<TCtx extends object>(
       throw new NotFoundError(`Unknown collection: ${invocation.scope}`);
     }
 
-    const output = await withSpan("takibi.action", () => definition.handler(args));
+    const output = await withSpan("takibi.action", async () => definition.handler(args));
     if (output === undefined) return null;
     assertJsonValue(output, {
       subject: "Action output",
