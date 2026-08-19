@@ -12,7 +12,7 @@ export type ActionInvocation = {
   input?: unknown;
 };
 
-export async function executeAction<TCtx extends { tenantId: string; user: unknown }>(
+export async function executeAction<TCtx extends object>(
   registry: ActionRegistry,
   collections: CollectionsDef<TCtx>,
   storage: StorageDriver,

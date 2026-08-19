@@ -12,15 +12,16 @@ via `accessPolicy`.
 
 `createTakibi()({ resolve })` is the trust boundary. Inside `resolve` you must:
 
-1. Verify a credential, session, or trusted gateway assertion and set `user`
-2. Decide the tenant for this request (from the identity claim and/or an
+1. Verify a credential, session, or trusted gateway assertion
+2. Decide the storage partition for this request (from the identity claim and/or an
    application-approved selector)
-3. Confirm the user may use that tenant, then return `{ tenantId, user, ... }`
+3. Confirm the caller may use that partition, then return your application context
 
 Do **not** trust client-declared identity or tenant headers (for example
-`x-user` / `x-tenant-id`). The library never parses those. Anonymous apps return
-`user: null` explicitly from `resolve`. Public tenant selection is also a
-`resolve` decision — empty `tenantId` is rejected with 401.
+`x-user` / `x-tenant-id`). The library never parses those and does not reserve
+`tenantId`, `user`, or any other execution-context key. Throw
+`UnauthorizedError` from `resolve` when authentication or partition selection
+fails.
 
 ## Server
 
@@ -28,8 +29,9 @@ Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framewor
 deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
 `createTakibi<Initial>()`, then call the returned factory with `{ resolve, stub? }`.
 `TCtx` is inferred from `resolve`'s return (annotate with `Promise<AppCtx>` when
-you want a named / wider type). `stub` receives the same input plus `tenantId`
-and returns a Durable Object stub — no library-side `env` / `bindings` option.
+you want a named / wider type). `stub` receives the same input plus the complete
+application-owned context as `resolved` and returns a Durable Object stub — no
+library-side `env` / `bindings` option.
 Empty initial uses `createTakibi()` (no type argument).
 
 ```ts
@@ -37,29 +39,29 @@ import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "@takib
 import { Hono } from "hono";
 import { z } from "zod";
 
-type User = { id: string; role: "admin" | "member"; tenantIds: string[] };
+type User = { id: string; role: "admin" | "member"; clinicIds: string[] };
 type Initial = {
   di: { getSession(request: Request): Promise<User | null> };
   env: { TENANT_STORE: DurableObjectNamespace };
 };
-type AppCtx = { tenantId: string; user: User | null };
+type AppCtx = { clinicId: string; principal: User | null };
 
 const takibi = createTakibi<Initial>()({
   resolve: async ({ request, context }): Promise<AppCtx> => {
     const user = await context.di.getSession(request);
-    const requested = request.headers.get("x-tenant-id"); // optional hint only
-    const tenantId =
-      (user && requested && user.tenantIds.includes(requested) ? requested : null) ??
-      user?.tenantIds[0] ??
+    const requested = request.headers.get("x-clinic-id"); // optional hint only
+    const clinicId =
+      (user && requested && user.clinicIds.includes(requested) ? requested : null) ??
+      user?.clinicIds[0] ??
       null;
-    if (!tenantId) {
+    if (!clinicId) {
       throw new UnauthorizedError("Unknown tenant");
     }
-    return { tenantId, user };
+    return { clinicId, principal: user };
   },
-  stub: ({ context, tenantId }) => {
+  stub: ({ context, resolved }) => {
     const ns = context.env.TENANT_STORE;
-    return ns.get(ns.idFromName(tenantId));
+    return ns.get(ns.idFromName(resolved.clinicId));
   },
 });
 
@@ -70,9 +72,9 @@ const handler = takibi.collections({
       title: z.string(),
       body: z.string(),
     }),
-    accessPolicy({ user }) {
-      if (user?.role === "admin") return fullAccess;
-      if (user != null) return memberAccess;
+    accessPolicy({ principal }) {
+      if (principal?.role === "admin") return fullAccess;
+      if (principal != null) return memberAccess;
       return read;
     },
   },
@@ -210,9 +212,9 @@ accessPolicy({ user, operation, where }) {
 }
 ```
 
-Prefer throwing `UnauthorizedError` (or returning only after membership checks) from
-`resolve` when AuthN / tenant membership fails. The library also rejects an empty
-`tenantId` after `resolve` returns.
+Throw `UnauthorizedError` (or return only after membership checks) from `resolve`
+when AuthN or storage-partition authorization fails. Takibi validates that the
+resolved context is a JSON-safe object but does not interpret its keys.
 
 ### Actions
 
@@ -421,12 +423,12 @@ createContext({
   context: ({ tenantId, user }) => ({ tenantId, user }),
 });
 
-// After — one trust boundary for AuthN + tenant membership
+// After — one trust boundary for AuthN + partition membership
 createTakibi()({
   resolve: async ({ request }) => {
     const user = await authenticate(request);
-    const tenantId = await authorizeTenant(request, user);
-    return { tenantId, user };
+    const clinicId = await authorizeClinic(request, user);
+    return { clinicId, principal: user };
   },
 });
 ```
@@ -478,7 +480,8 @@ projects.
 
 Notes:
 
-- Bind one DO per tenant (`idFromName(tenantId)` from `resolve`).
+- Bind one DO per application partition (for example,
+  `idFromName(resolved.clinicId)` inside `stub`).
 - Existing Legacy KV-backed namespaces **cannot** be converted in place to
   SQLite. Move data to a new SQLite-backed class / namespace separately.
 - Do not create new Legacy KV-backed classes for `@takibi/takibi`.

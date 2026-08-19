@@ -198,7 +198,7 @@ export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
 
 export type CollectionDefinitionInput<
   TSchema extends StandardSchemaV1,
-  TCtx extends { tenantId: string; user: unknown },
+  TCtx extends object,
   TActions,
 > = {
   schema: TSchema;
@@ -218,7 +218,7 @@ export type CollectionDefinitionInput<
 };
 
 export function defineCollection<
-  TCtx extends { tenantId: string; user: unknown },
+  TCtx extends object,
   TSchema extends StandardSchemaV1,
   const TActions extends ActionDefinitions = Record<never, never>,
 >(

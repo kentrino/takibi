@@ -381,15 +381,41 @@ test("createTakibi policy helper keeps schema and context-only overloads", () =>
   expectTypeOf(takibi).not.toHaveProperty("or");
 });
 
-test("AccessContext inherits user and tenantId from TCtx", () => {
+test("AccessContext preserves application context keys without defining their vocabulary", () => {
   expectTypeOf<AccessContext<AppCtx>["user"]>().toEqualTypeOf<AppCtx["user"]>();
   expectTypeOf<AccessContext<AppCtx>["tenantId"]>().toEqualTypeOf<AppCtx["tenantId"]>();
-  // @ts-expect-error AccessContext requires tenantId and user
-  type _MissingBoth = AccessContext<{ foo: string }>;
-  // @ts-expect-error AccessContext requires user
-  type _MissingUser = AccessContext<{ tenantId: string }>;
-  // @ts-expect-error AccessContext requires tenantId
-  type _MissingTenantId = AccessContext<{ user: unknown }>;
+  expectTypeOf<AccessContext<{ foo: string }>["foo"]>().toEqualTypeOf<string>();
+});
+
+test("execution context keys are application-owned across resolve, stub, and policy", () => {
+  type Initial = { namespace: DurableObjectNamespace };
+  type ClinicContext = {
+    clinic: { slug: string };
+    actor: { id: string };
+  };
+  const takibi = createTakibi<Initial>()({
+    resolve: ({ context }): ClinicContext => {
+      expectTypeOf(context.namespace).toEqualTypeOf<DurableObjectNamespace>();
+      return { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
+    },
+    stub: ({ context, resolved }) => {
+      expectTypeOf(context).toEqualTypeOf<Initial>();
+      expectTypeOf(resolved).toEqualTypeOf<ClinicContext>();
+      return context.namespace.get(context.namespace.idFromName(resolved.clinic.slug));
+    },
+  });
+  takibi.collections({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy({ clinic, actor }) {
+        expectTypeOf(clinic).toEqualTypeOf<{ slug: string }>();
+        expectTypeOf(actor).toEqualTypeOf<{ id: string }>();
+        return fullAccess;
+      },
+    },
+  });
+  expectTypeOf<AccessContext<ClinicContext>["clinic"]>().toEqualTypeOf<ClinicContext["clinic"]>();
+  expectTypeOf<AccessContext<ClinicContext>["actor"]>().toEqualTypeOf<ClinicContext["actor"]>();
 });
 
 test("ClientOf matches createClient and rejects collection maps", () => {
@@ -436,13 +462,13 @@ test("list options can be projected from a public collection method", () => {
   expectTypeOf<PostListOptions>().toHaveProperty("limit");
   expectTypeOf<PostListOptions>().toHaveProperty("cursor");
   expectTypeOf<PostListOptions>().toHaveProperty("where");
-  const checkWhere = (opts: PostListOptions) => {
-    void opts.where?.((query) => query.title.eq("hello"));
-    void opts.where?.((query) => query.published.eq(true));
-    void opts.where?.((query) => {
-      // @ts-expect-error unknown fields are not queryable
-      return query.missing.eq("value");
-    });
+  const byTitle: NonNullable<PostListOptions["where"]> = (query) => query.title.eq("hello");
+  const byPublished: NonNullable<PostListOptions["where"]> = (query) => query.published.eq(true);
+  const byMissing: NonNullable<PostListOptions["where"]> = (query) => {
+    // @ts-expect-error unknown fields are not queryable
+    return query.missing.eq("value");
   };
-  void checkWhere;
+  void byTitle;
+  void byPublished;
+  void byMissing;
 });

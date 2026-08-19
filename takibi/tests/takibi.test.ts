@@ -594,6 +594,49 @@ test("Worker forwards only the action invocation and resolved context", async ()
   });
 });
 
+test("resolved context routes to a Durable Object and authorizes without tenantId or user", async () => {
+  type ClinicContext = {
+    clinic: { slug: string };
+    actor: { id: string };
+  };
+  let routedContext: ClinicContext | undefined;
+  let object: DurableObject;
+  const context = createTakibi()({
+    resolve: ({ request }): ClinicContext => ({
+      clinic: { slug: request.headers.get("x-clinic") ?? "missing" },
+      actor: { id: request.headers.get("x-actor") ?? "anonymous" },
+    }),
+    stub: ({ resolved }) => {
+      routedContext = resolved;
+      return object as unknown as DurableObjectStub;
+    },
+  });
+  const handler = context.collections({
+    posts: {
+      schema: Post,
+      accessPolicy: ({ clinic, actor }) =>
+        clinic.slug === "clinic-a" && actor.id === "u1" ? fullAccess : none,
+    },
+  });
+  object = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    {},
+  );
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers: { "x-clinic": "clinic-a", "x-actor": "u1" },
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  await expect(client.posts.add({ title: "routed" }, { id: "p1" })).resolves.toMatchObject({
+    ok: true,
+    data: { id: "p1", title: "routed" },
+  });
+  expect(routedContext).toEqual({
+    clinic: { slug: "clinic-a" },
+    actor: { id: "u1" },
+  });
+});
+
 test("action registration is atomic and validates collisions", async () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u", role: "admin" as const } }),

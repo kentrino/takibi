@@ -77,7 +77,7 @@ async function assertAccess(
   throw new ForbiddenError();
 }
 
-export async function executeOperation<TCtx extends { tenantId: string; user: unknown }>(
+export async function executeOperation<TCtx extends object>(
   collections: CollectionsDef<TCtx>,
   storage: StorageDriver,
   ctx: TCtx,
@@ -184,7 +184,7 @@ export async function executeOperation<TCtx extends { tenantId: string; user: un
 }
 
 export function createPolicyCollections<
-  TCtx extends { tenantId: string; user: unknown },
+  TCtx extends object,
   TCollections extends CollectionsDef<TCtx>,
 >(collections: TCollections, storage: StorageDriver, ctx: TCtx): CollectionsApi<TCollections> {
   const api = Object.create(null) as CollectionsApi<TCollections>;

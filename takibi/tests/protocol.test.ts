@@ -2,7 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
 import { decodeWireRequest } from "../src/protocol";
 
-const context = { tenantId: "tenant-a", user: { id: "u1" } };
+const context = { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
 
 test("decodeWireRequest accepts exact CRUD and action requests", () => {
   expect(
@@ -67,15 +67,25 @@ test("decodeWireRequest enforces CRUD/action XOR and exact routing fields", () =
   ).toThrow(/Invalid CRUD id/);
 });
 
-test("decodeWireRequest requires trusted context shape", () => {
-  expect(() =>
+test("decodeWireRequest accepts application-owned context keys and requires an object", () => {
+  expect(
     decodeWireRequest({
       kind: "action",
       scope: "$",
       name: "exportAll",
-      context: { tenantId: "tenant-a" },
+      context: { arbitrary: true },
     }),
-  ).toThrow(/Invalid wire context/);
+  ).toMatchObject({ context: { arbitrary: true } });
+  for (const invalid of [null, [], "clinic-a"]) {
+    expect(() =>
+      decodeWireRequest({
+        kind: "action",
+        scope: "$",
+        name: "exportAll",
+        context: invalid,
+      }),
+    ).toThrow(/Invalid wire context/);
+  }
 });
 
 test("decodeWireRequest normalizes list queries and rejects malformed AST", () => {

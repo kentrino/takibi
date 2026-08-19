@@ -5,11 +5,7 @@ import { normalizeQueryExpr } from "./query";
 import type { TakibiFailure } from "./types";
 import type { StorageListOptions } from "./types";
 
-type WireContext = {
-  tenantId: string;
-  user: unknown;
-  [key: string]: unknown;
-};
+type WireContext = Record<string, unknown>;
 
 export type CollectionWireRequest = ExecuteRequest & { context: WireContext };
 export type ActionWireRequest = ActionInvocation & { context: WireContext };
@@ -76,13 +72,7 @@ export function decodeWireRequest(body: unknown): WireRequest {
 }
 
 function assertContext(value: unknown): asserts value is WireContext {
-  if (
-    !isRecord(value) ||
-    typeof value.tenantId !== "string" ||
-    !Object.prototype.hasOwnProperty.call(value, "user")
-  ) {
-    throw new Error("Invalid wire context");
-  }
+  if (!isRecord(value)) throw new Error("Invalid wire context");
 }
 
 function normalizeList(value: unknown): StorageListOptions | undefined {

@@ -16,7 +16,7 @@ import type {
   RootActionArgs,
 } from "./action";
 import { executeAction, type ActionInvocation } from "./action-executor";
-import { TakibiError, NotFoundError, UnauthorizedError } from "./errors";
+import { TakibiError, NotFoundError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import {
   decodePublicHttp,
@@ -40,13 +40,14 @@ import { collectionActionsBrand } from "./types";
 import type { CollectionDefinition, CollectionsApi, CollectionsDef, StorageDriver } from "./types";
 
 /**
- * Application-owned trust boundary: verify credentials, authorize tenant
- * membership, and return a complete context. The library treats the result as
- * trusted Worker-side values and never overlays request body / client headers.
+ * Application-owned trust boundary: verify credentials, authorize the selected
+ * storage partition, and return a complete context. The library treats the
+ * result as trusted Worker-side values and never overlays request body / client
+ * headers.
  *
  * Mirrors oRPC's initial vs execution context:
  * - input `context` (`TInitial`) — supplied at `handler.handle(..., { context })`
- * - returned `TCtx` — used by `accessPolicy` (`tenantId`, `user`, …)
+ * - returned `TCtx` — forwarded unchanged to policies, actions, and `stub.resolved`
  *
  * @see https://orpc.dev/docs/context
  */
@@ -55,36 +56,30 @@ export type ContextResolverInput<TInitial = Record<string, never>> = {
   context: TInitial;
 };
 
-export type ContextResolver<TCtx, TInitial = Record<string, never>> = (
+export type ContextResolver<TCtx extends object, TInitial = Record<string, never>> = (
   input: ContextResolverInput<TInitial>,
 ) => TCtx | Promise<TCtx>;
 
 /**
  * Resolve a Durable Object **stub** for this request (after `resolve`).
- * `tenantId` is taken from the resolved execution context (`Pick<TCtx, "tenantId">`).
+ * `resolved` is the complete application-owned execution context.
  *
  * @example
- * stub: ({ context, tenantId }) => {
+ * stub: ({ context, resolved }) => {
  *   const ns = context.env.TENANT_STORE;
- *   return ns.get(ns.idFromName(tenantId));
+ *   return ns.get(ns.idFromName(resolved.clinic.slug));
  * }
  */
 export type ContextStubResolverInput<
-  TCtx extends { tenantId: string; user: unknown },
+  TCtx extends object,
   TInitial = Record<string, never>,
-> = ContextResolverInput<TInitial> & Pick<TCtx, "tenantId">;
+> = ContextResolverInput<TInitial> & { resolved: TCtx };
 
-export type ContextStubResolver<
-  TCtx extends { tenantId: string; user: unknown },
-  TInitial = Record<string, never>,
-> = (
+export type ContextStubResolver<TCtx extends object, TInitial = Record<string, never>> = (
   input: ContextStubResolverInput<TCtx, TInitial>,
 ) => DurableObjectStub | Promise<DurableObjectStub>;
 
-export type ContextConfig<
-  TCtx extends { tenantId: string; user: unknown },
-  TInitial = Record<string, never>,
-> = {
+export type ContextConfig<TCtx extends object, TInitial = Record<string, never>> = {
   resolve: ContextResolver<TCtx, TInitial>;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
   stub?: ContextStubResolver<TCtx, TInitial>;
@@ -109,7 +104,7 @@ export type HandleResult =
   | { matched: false; response?: undefined };
 
 export type TakibiBrand<
-  TCtx extends { tenantId: string; user: unknown },
+  TCtx extends object,
   TCollections,
   TInitial = Record<string, never>,
   TRootActions extends ActionDefinitions = Record<never, never>,
@@ -141,19 +136,17 @@ export type TakibiBrand<
 };
 
 export type TakibiHandler<
-  TCtx extends { tenantId: string; user: unknown } = { tenantId: string; user: unknown },
+  TCtx extends object = Record<string, unknown>,
   TCollections = CollectionsDef<TCtx>,
   TInitial = Record<string, never>,
   TRootActions extends ActionDefinitions = Record<never, never>,
 > = Hono<{ Bindings: Record<string, unknown> }> &
   TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
 
-type TakibiCtxConstraint = { tenantId: string; user: unknown };
-
-type CreateContextBuilder<TCtx extends TakibiCtxConstraint, TInitial> = {
+type CreateContextBuilder<TCtx extends object, TInitial> = {
   /**
    * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
-   * for rules that only use execution context (`user`, …). Return a grant
+   * for rules that only use application context. Return a grant
    * (`fullAccess` / `write` / `read` / `none` / `grant(...)`).
    */
   policy: PolicyHelper<TCtx>;
@@ -176,9 +169,7 @@ type CreateContextBuilder<TCtx extends TakibiCtxConstraint, TInitial> = {
   ): TakibiHandler<TCtx, TCollections, TInitial>;
 };
 
-type CreateContextFn<TInitial> = <
-  R extends TakibiCtxConstraint | Promise<TakibiCtxConstraint>,
->(config: {
+type CreateContextFn<TInitial> = <R extends object | Promise<object>>(config: {
   resolve: (input: ContextResolverInput<TInitial>) => R;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
   stub?: ContextStubResolver<Awaited<R>, TInitial>;
@@ -192,25 +183,23 @@ type CreateContextFn<TInitial> = <
  * @example
  * const takibi = createTakibi<Initial>()({
  *   resolve: async ({ request, context }): Promise<AppCtx> => {
- *     const user = await context.di.getSession(request)
- *     return { tenantId: "acme", user }
+ *     const principal = await context.di.getSession(request)
+ *     return { clinic: { slug: "acme" }, principal }
  *   },
- *   stub: ({ context, tenantId }) => {
+ *   stub: ({ context, resolved }) => {
  *     const ns = context.env.TENANT_STORE
- *     return ns.get(ns.idFromName(tenantId))
+ *     return ns.get(ns.idFromName(resolved.clinic.slug))
  *   },
  * })
  */
 export function createTakibi<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
   return ((config) =>
-    buildContext(
-      config as ContextConfig<TakibiCtxConstraint, TInitial>,
-    )) as CreateContextFn<TInitial>;
+    buildContext(config as ContextConfig<object, TInitial>)) as CreateContextFn<TInitial>;
 }
 
 function buildContext<TInitial>(
-  config: ContextConfig<TakibiCtxConstraint, TInitial>,
-): CreateContextBuilder<TakibiCtxConstraint, TInitial> {
+  config: ContextConfig<object, TInitial>,
+): CreateContextBuilder<object, TInitial> {
   const { resolve, stub: resolveStub } = config;
 
   return {
@@ -225,7 +214,7 @@ function buildContext<TInitial>(
       if (prototype !== Object.prototype && prototype !== null) {
         throw new TakibiError("INVALID_COLLECTION", "Collections must be a plain object", 500);
       }
-      const collectionEntries: Array<[string, CollectionsDef<TakibiCtxConstraint>[string]]> = [];
+      const collectionEntries: Array<[string, CollectionsDef<object>[string]]> = [];
       for (const propertyKey of Reflect.ownKeys(collections)) {
         if (typeof propertyKey !== "string") {
           throw new TakibiError("INVALID_COLLECTION", "Collection names must be strings", 500);
@@ -238,10 +227,7 @@ function buildContext<TInitial>(
             500,
           );
         }
-        collectionEntries.push([
-          propertyKey,
-          descriptor.value as CollectionsDef<TakibiCtxConstraint>[string],
-        ]);
+        collectionEntries.push([propertyKey, descriptor.value as CollectionsDef<object>[string]]);
       }
       const collectionNames = new Set(collectionEntries.map(([name]) => name));
       for (const [name, definition] of collectionEntries) {
@@ -276,10 +262,7 @@ function buildContext<TInitial>(
         try {
           await memoryReady;
           const input = { request, context: initial as TInitial };
-          const ctx = (await resolve(input)) as TakibiCtxConstraint;
-          if (!ctx.tenantId) {
-            throw new UnauthorizedError("Missing tenantId");
-          }
+          const ctx = await resolve(input);
           assertSerializableContext(ctx);
 
           if (memoryDriver) {
@@ -298,7 +281,7 @@ function buildContext<TInitial>(
             );
           }
 
-          const doStub = await resolveStub({ ...input, tenantId: ctx.tenantId });
+          const doStub = await resolveStub({ ...input, resolved: ctx });
           if (!doStub || typeof doStub.fetch !== "function") {
             throw new TakibiError(
               "MISSING_STUB",
@@ -307,7 +290,10 @@ function buildContext<TInitial>(
             );
           }
 
-          const wire: WireRequest = { ...invocation, context: ctx };
+          const wire: WireRequest = {
+            ...invocation,
+            context: ctx,
+          };
 
           const res = await doStub.fetch(
             new Request("https://takibi.internal/", {
@@ -366,10 +352,10 @@ function buildContext<TInitial>(
       const DurableObjectClass = createDurableObjectClass(collections, registry);
 
       const rootActions = Object.create(null) as ActionDefinitions;
-      const handler = app as TakibiHandler<TakibiCtxConstraint, typeof collections, TInitial>;
+      const handler = app as TakibiHandler<object, typeof collections, TInitial>;
       Object.defineProperty(handler, "~takibi", {
         value: {
-          context: null as unknown as TakibiCtxConstraint,
+          context: null as unknown as object,
           initial: null as unknown as TInitial,
           collections,
           actions: rootActions,
@@ -377,16 +363,12 @@ function buildContext<TInitial>(
         enumerable: false,
       });
       handler.DurableObject = DurableObjectClass as TakibiHandler<
-        TakibiCtxConstraint,
+        object,
         typeof collections,
         TInitial
       >["DurableObject"];
       handler.defineAction = () =>
-        createActionBuilder<
-          TakibiCtxConstraint,
-          "root",
-          RootActionArgs<TakibiCtxConstraint, typeof collections>
-        >("root");
+        createActionBuilder<object, "root", RootActionArgs<object, typeof collections>>("root");
       handler.actions = ((definitions: ActionDefinitions) => {
         registry.registerRootActions(definitions, collectionNames);
         return handler;
@@ -433,7 +415,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
         await this.#ready;
         const body = decodeWireRequest(await request.json());
         const { context, ...invocation } = body;
-        const ctx = context as { tenantId: string; user: unknown };
+        const ctx = context;
         const data =
           invocation.kind === "action"
             ? await executeAction(
@@ -510,7 +492,14 @@ function statusOf(err: unknown): number {
   return 500;
 }
 
-function assertSerializableContext(value: unknown, seen = new Set<object>()): void {
+function assertSerializableContext(value: unknown): asserts value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TakibiError("INVALID_CONTEXT", "Resolved context must be a plain object", 500);
+  }
+  assertSerializableValue(value, new Set<object>());
+}
+
+function assertSerializableValue(value: unknown, seen: Set<object>): void {
   if (
     value === null ||
     typeof value === "string" ||
@@ -529,7 +518,7 @@ function assertSerializableContext(value: unknown, seen = new Set<object>()): vo
       if (!descriptor?.enumerable || !("value" in descriptor)) {
         throw new TakibiError("INVALID_CONTEXT", "Resolved context arrays must contain data", 500);
       }
-      assertSerializableContext(descriptor.value, seen);
+      assertSerializableValue(descriptor.value, seen);
     }
     for (const key of Reflect.ownKeys(value)) {
       if (key === "length") continue;
@@ -564,7 +553,7 @@ function assertSerializableContext(value: unknown, seen = new Set<object>()): vo
         500,
       );
     }
-    assertSerializableContext(descriptor.value, seen);
+    assertSerializableValue(descriptor.value, seen);
   }
   seen.delete(value);
 }
