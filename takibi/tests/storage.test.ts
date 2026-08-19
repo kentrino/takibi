@@ -26,7 +26,12 @@ function encodeCursor(cursor: Record<string, unknown>): string {
 }
 
 /** In-memory stand-in for DurableObjectStorage KV API used by createDurableObjectStorage. */
-function createFakeDurableObjectStorage() {
+function createFakeDurableObjectStorage(
+  onList?: (
+    options: { prefix?: string; limit?: number; startAfter?: string },
+    result: Map<string, WithMetadata<Record<string, unknown>>>,
+  ) => void,
+) {
   const store = new Map<string, WithMetadata<Record<string, unknown>>>();
 
   return {
@@ -54,6 +59,7 @@ function createFakeDurableObjectStorage() {
         .slice(0, limit);
       const out = new Map<string, T>();
       for (const k of keys) out.set(k, structuredClone(store.get(k)) as T);
+      onList?.(options ?? {}, out as Map<string, WithMetadata<Record<string, unknown>>>);
       return out;
     },
   } as unknown as DurableObjectStorage;
@@ -182,6 +188,45 @@ test("memory and DO filter before limit with query-bound cursors", async () => {
       cursor: firstMemory.nextCursor,
     }),
   ).rejects.toBeInstanceOf(BadRequestError);
+});
+
+test("DO list reads bounded chunks and stops after finding the next match", async () => {
+  const listCalls: {
+    options: { prefix?: string; limit?: number; startAfter?: string };
+    resultSize: number;
+  }[] = [];
+  const durable = createDurableObjectStorage(
+    createFakeDurableObjectStorage((options, result) => {
+      listCalls.push({ options, resultSize: result.size });
+    }),
+  );
+
+  for (let index = 0; index < 300; index += 1) {
+    const id = index.toString().padStart(3, "0");
+    await durable.put("posts", meta({ id, selected: index === 0 || index === 128 }));
+  }
+
+  const page = await durable.list("posts", {
+    limit: 1,
+    where: { field: "selected", op: "eq", value: true },
+  });
+
+  expect(page.items.map((document) => document.id)).toEqual(["000"]);
+  expect(page.nextCursor).toBeDefined();
+  expect(listCalls).toEqual([
+    {
+      options: { prefix: "takibi:posts:", limit: 128 },
+      resultSize: 128,
+    },
+    {
+      options: {
+        prefix: "takibi:posts:",
+        limit: 128,
+        startAfter: "takibi:posts:127",
+      },
+      resultSize: 128,
+    },
+  ]);
 });
 
 test("DO get reads only takibi:${resource}:${id}", async () => {

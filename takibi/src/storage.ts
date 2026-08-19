@@ -9,6 +9,15 @@ type ListCursorV2 = {
   id: string;
 };
 
+const LIST_CHUNK_SIZE = 128;
+
+type ScanItem = {
+  id: string;
+  document: WithMetadata<Record<string, unknown>>;
+};
+
+type ReadChunk = (startAfter: string | undefined, limit: number) => Promise<ScanItem[]>;
+
 export function createMemoryStorage(): StorageDriver {
   const tables = new Map<string, Map<string, WithMetadata<Record<string, unknown>>>>();
 
@@ -32,7 +41,14 @@ export function createMemoryStorage(): StorageDriver {
       return table(resource).delete(id);
     },
     async list(resource, opts) {
-      return paginate(resource, [...table(resource).values()], opts);
+      const items = [...table(resource).values()]
+        .sort((a, b) => compareIds(a.id, b.id))
+        .map((document) => ({ id: document.id, document }));
+      return paginate(resource, opts, async (startAfter, limit) => {
+        const start =
+          startAfter === undefined ? 0 : items.findIndex((item) => item.id > startAfter);
+        return start < 0 ? [] : items.slice(start, start + limit);
+      });
     },
   };
 }
@@ -55,23 +71,30 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
     },
     async list(resource, opts) {
       const prefix = prefixOf(resource);
-      const result = await storage.list<WithMetadata<Record<string, unknown>>>({
-        prefix,
+      return paginate(resource, opts, async (startAfter, limit) => {
+        const result = await storage.list<WithMetadata<Record<string, unknown>>>({
+          prefix,
+          limit,
+          ...(startAfter === undefined ? {} : { startAfter: keyOf(resource, startAfter) }),
+        });
+        return [...result].map(([key, document]) => ({
+          id: key.slice(prefix.length),
+          document,
+        }));
       });
-      return paginate(resource, [...result.values()], opts);
     },
   };
 }
 
 /**
  * Shared unindexed query and pagination semantics. Filtering happens before the
- * cursor and limit, and both drivers return the same id-ordered pages.
+ * limit, and only the current scan chunk and return page remain live.
  */
-function paginate(
+async function paginate(
   resource: string,
-  items: WithMetadata<Record<string, unknown>>[],
-  opts?: StorageListOptions,
-): { items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string } {
+  opts: StorageListOptions | undefined,
+  readChunk: ReadChunk,
+): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }> {
   let where: QueryExpr | undefined;
   try {
     where = opts?.where === undefined ? undefined : normalizeQueryExpr(opts.where);
@@ -84,18 +107,32 @@ function paginate(
     throw new BadRequestError("Cursor does not match this collection and query");
   }
 
-  const sorted = items
-    .filter((document) => (where ? matchesQuery(document, where) : true))
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-  const start = cursor ? sorted.findIndex((document) => document.id > cursor.id) : 0;
-  if (start < 0) return { items: [] };
-  const page = sorted.slice(start, start + limit);
-  const next = sorted[start + limit];
-  const last = page.at(-1);
-  return next && last
-    ? { items: page, nextCursor: encodeCursor(resource, where, last.id) }
-    : { items: page };
+  const page: WithMetadata<Record<string, unknown>>[] = [];
+  let startAfter = cursor?.id;
+
+  while (true) {
+    const chunk = await readChunk(startAfter, LIST_CHUNK_SIZE);
+    if (chunk.length === 0) break;
+
+    for (const item of chunk) {
+      startAfter = item.id;
+      if (where && !matchesQuery(item.document, where)) continue;
+      if (page.length === limit) {
+        const last = page.at(-1)!;
+        return { items: page, nextCursor: encodeCursor(resource, where, last.id) };
+      }
+      page.push(item.document);
+    }
+
+    if (chunk.length < LIST_CHUNK_SIZE) break;
+  }
+
+  return { items: page };
+}
+
+function compareIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | undefined): boolean {
