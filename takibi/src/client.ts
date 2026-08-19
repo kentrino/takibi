@@ -64,10 +64,18 @@ type ActionsClient<TActions> = {
   [K in keyof TActions]: ActionClientMethod<TActions[K]>;
 };
 
-export type ClientOf<TCollections, TRootActions = Record<never, never>> = {
+type TakibiHandlerCarrier = {
+  readonly "~takibi": { collections: unknown };
+};
+
+type ClientFromMaps<TCollections, TRootActions = Record<never, never>> = {
   [K in keyof TCollections]: ClientCollectionApi<TCollections[K]> &
     ActionsClient<InferCollectionActions<TCollections[K]>>;
 } & ActionsClient<TRootActions>;
+
+export type ClientOf<H extends TakibiHandlerCarrier> = H extends infer Concrete
+  ? ClientFromMaps<InferHandlerCollections<Concrete>, InferHandlerActions<Concrete>>
+  : never;
 
 export type CreateClientOptions = {
   /** Static headers or a getter (e.g. attach tenant / auth tokens). */
@@ -75,10 +83,10 @@ export type CreateClientOptions = {
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
 };
 
-export function createClient<H>(
+export function createClient<H extends TakibiHandlerCarrier>(
   baseUrl: string,
   options: CreateClientOptions = {},
-): ClientOf<InferHandlerCollections<H>, InferHandlerActions<H>> {
+): ClientOf<H> {
   const members = new Map<string, unknown>();
   const client = new Proxy(Object.create(null) as object, {
     get(_target, name: string | symbol) {
@@ -91,7 +99,7 @@ export function createClient<H>(
       return member;
     },
   });
-  return client as ClientOf<InferHandlerCollections<H>, InferHandlerActions<H>>;
+  return client as ClientOf<H>;
 }
 
 function createRootMember(baseUrl: string, name: string, options: CreateClientOptions): unknown {

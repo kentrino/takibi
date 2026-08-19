@@ -5,9 +5,11 @@ import { createClient, createTakibi, fullAccess, none } from "../src/index";
 import { parseSchema } from "../src/schema";
 import type {
   AccessPermission,
+  ClientOf,
   CollectionDefinition,
   CollectionsOptions,
   JsonValue,
+  TakibiHandler,
   TakibiResult,
   InferCollectionDoc,
 } from "../src/index";
@@ -371,6 +373,32 @@ test("createTakibi policy helper keeps schema and context-only overloads", () =>
   void ownerOnly;
   expectTypeOf(takibi).not.toHaveProperty("and");
   expectTypeOf(takibi).not.toHaveProperty("or");
+});
+
+test("ClientOf matches createClient and rejects collection maps", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const handler = context.collections(
+    {
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    },
+    { memory: true },
+  );
+
+  type FromAlias = ClientOf<typeof handler>;
+  type FromFactory = ReturnType<typeof createClient<typeof handler>>;
+  expectTypeOf<FromAlias>().toEqualTypeOf<FromFactory>();
+  expectTypeOf<ClientOf<TakibiHandler>>().toEqualTypeOf<
+    ReturnType<typeof createClient<TakibiHandler>>
+  >();
+
+  type Definitions = { posts: CollectionDefinition };
+  // @ts-expect-error collection maps are not a ClientOf type source
+  type _FromMap = ClientOf<Definitions>;
 });
 
 test("list options can be projected from a public collection method", () => {

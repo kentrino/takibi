@@ -58,7 +58,7 @@ test("public annotation types use the collection/action vocabulary", () => {
     AccessPermission: AccessPermission;
     AccessPolicy: AccessPolicy<Ctx>;
     AccessPolicyFn: AccessPolicyFn<Ctx>;
-    ClientOf: ClientOf<Definitions>;
+    ClientOf: ClientOf<TakibiHandler>;
     CollectionApi: CollectionApi<CollectionDefinition>;
     CollectionDefinition: CollectionDefinition;
     CollectionsApi: CollectionsApi<Definitions>;
@@ -146,8 +146,15 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "SchemaValidationError"
     | "validationError"
     | "BoundPolicyCombinators"
-    | "ConflictError";
+    | "ConflictError"
+    | "ClientShape"
+    | "ClientFor";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
+
+  // @ts-expect-error ClientShape must not be added to the public root
+  type _ClientShape = import("../src/index").ClientShape;
+  // @ts-expect-error ClientFor must not be added to the public root
+  type _ClientFor = import("../src/index").ClientFor;
 });
 
 test("renamed Fire* public names are not exported", () => {
