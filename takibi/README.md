@@ -520,13 +520,11 @@ Takibi versions its internal SQL layout in `takibi_metadata` and migrates known
 layout versions synchronously during activation. A newer unknown layout fails closed.
 This internal layout migration is separate from collection `migrations`: layout
 migrations change Takibi's tables, while collection migrations lazily transform one
-domain document after it is read. Takibi does not read or create document KV entries
-and does not migrate legacy `takibi:{collection}:{id}` entries.
+domain document after it is read.
 
 ## Wrangler
 
-Register a **new** Durable Object class with SQLite storage. Backend choice is
-fixed when the class namespace is created.
+Register a Durable Object class with SQLite storage:
 
 ```jsonc
 {
@@ -542,25 +540,15 @@ fixed when the class namespace is created.
 }
 ```
 
-Legacy Workers that still use the `migrations` array can create a SQLite-backed
-class with `new_sqlite_classes` instead of `exports`. Prefer `exports` for new
-projects.
-
 Notes:
 
 - Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
   The object name is that `tenantId`; prefixed names are not supported.
   `fetch` on the class is stub-only — do not route public HTTP to it.
-- Existing Legacy KV-backed namespaces **cannot** be converted in place to
-  SQLite. Move data to a new SQLite-backed class / namespace separately.
-- Do not create new Legacy KV-backed classes for `@takibi/takibi`.
 
 ## Limits and layout
 
-| Backend                                | Per-row size |
-| -------------------------------------- | ------------ |
-| SQLite-backed DO (required for Takibi) | **2 MB**     |
-| Legacy KV-backed DO                    | unsupported  |
+- Each stored document is limited to **2 MB**.
 
 - `get` / `update` / `list` always read or write the **whole** document value.
   There is no field projection or partial array read.
