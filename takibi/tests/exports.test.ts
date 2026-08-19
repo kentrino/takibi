@@ -148,7 +148,9 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "BoundPolicyCombinators"
     | "ConflictError"
     | "ClientShape"
-    | "ClientFor";
+    | "ClientFor"
+    | "CtxConstraint"
+    | "TakibiCtxConstraint";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 
   // @ts-expect-error ClientShape must not be added to the public root
@@ -200,6 +202,10 @@ test("policy inference implementation types are not public root types", () => {
   type _PolicyHelper = import("../src/index").PolicyHelper;
   // @ts-expect-error ReusablePolicy must not be added to the public root
   type _ReusablePolicy = import("../src/index").ReusablePolicy;
+  // @ts-expect-error CtxConstraint must not be added to the public root
+  type _CtxConstraint = import("../src/index").CtxConstraint;
+  // @ts-expect-error TakibiCtxConstraint must not be added to the public root
+  type _TakibiCtxConstraint = import("../src/index").TakibiCtxConstraint;
 });
 
 test("action gate types are not public root types", () => {

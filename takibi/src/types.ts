@@ -61,9 +61,12 @@ export type AccessPermission = "create" | "get" | "list" | "update" | "delete" |
 /** Permission set a policy grants. */
 export type AccessGrant = ReadonlySet<AccessPermission>;
 
-export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = TCtx & {
-  tenantId: string;
-  user: unknown;
+type CtxConstraint = { tenantId: string; user: unknown };
+
+export type AccessContext<
+  TCtx extends CtxConstraint,
+  TDoc = WithMetadata<Record<string, unknown>>,
+> = TCtx & {
   collection: string;
   operation: "add" | "set" | "get" | "update" | "delete" | "list";
   permission: Exclude<AccessPermission, "invoke">;
@@ -80,17 +83,19 @@ export type AccessContext<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = 
  * collection / document. Prefer not switching on `permission` — the executor
  * collates the grant against the required permission.
  */
-export type AccessPolicyFn<TCtx, TDoc = WithMetadata<Record<string, unknown>>> = (
-  ctx: AccessContext<TCtx, TDoc>,
-) => AccessGrant | Promise<AccessGrant>;
+export type AccessPolicyFn<
+  TCtx extends CtxConstraint,
+  TDoc = WithMetadata<Record<string, unknown>>,
+> = (ctx: AccessContext<TCtx, TDoc>) => AccessGrant | Promise<AccessGrant>;
 
 /**
  * `accessPolicy` value: a function, or a constant grant
  * (`fullAccess`, `write`, `read`, `none`).
  */
-export type AccessPolicy<TCtx, TDoc = WithMetadata<Record<string, unknown>>> =
-  | AccessGrant
-  | AccessPolicyFn<TCtx, TDoc>;
+export type AccessPolicy<
+  TCtx extends CtxConstraint,
+  TDoc = WithMetadata<Record<string, unknown>>,
+> = AccessGrant | AccessPolicyFn<TCtx, TDoc>;
 
 export const collectionActionsBrand: unique symbol = Symbol("fire.collectionActions");
 
@@ -98,7 +103,7 @@ export type CollectionDefinition<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   // Default `any` keeps collection maps assignable regardless of concrete context.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional for assignability
-  TCtx = any,
+  TCtx extends CtxConstraint = any,
   TActions = never,
 > = {
   schema: TSchema;
@@ -120,7 +125,10 @@ export type CollectionDefinition<
   readonly [collectionActionsBrand]?: TActions;
 };
 
-export type CollectionsDef<TCtx = any> = {
+export type CollectionsDef<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous collection map
+  TCtx extends CtxConstraint = any,
+> = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous collection map
   [key: string]: CollectionDefinition<any, TCtx, any>;
 };

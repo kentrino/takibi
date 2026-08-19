@@ -16,11 +16,13 @@ export type InferPolicyDoc<TSchema extends StandardSchemaV1> = WithMetadata<
  * Schema-bound policy. Assigns to a collection when every pick-schema key exists
  * on the collection document — optional vs required does not matter.
  */
-export type ConstrainedPolicy<TCtx, TPick> = <TDoc>(
+export type ConstrainedPolicy<TCtx extends { tenantId: string; user: unknown }, TPick> = <TDoc>(
   ctx: AccessContext<TCtx, keyof TPick extends keyof TDoc ? TDoc : never>,
 ) => AccessGrant | Promise<AccessGrant>;
 
-type CombinablePolicy<TCtx, TDoc> = AccessPolicy<TCtx, TDoc> | ConstrainedPolicy<TCtx, TDoc>;
+type CombinablePolicy<TCtx extends { tenantId: string; user: unknown }, TDoc> =
+  | AccessPolicy<TCtx, TDoc>
+  | ConstrainedPolicy<TCtx, TDoc>;
 
 export const contextPolicyBrand: unique symbol = Symbol("fire.contextPolicy");
 type ContextPolicyFn<TCtx> = (ctx: TCtx) => AccessGrant | Promise<AccessGrant>;
@@ -73,7 +75,7 @@ export function allows(decision: AccessGrant, permission: AccessPermission): boo
   return decision.has(permission);
 }
 
-export async function evaluateAccessPolicy<TCtx, TDoc>(
+export async function evaluateAccessPolicy<TCtx extends { tenantId: string; user: unknown }, TDoc>(
   policy: CombinablePolicy<TCtx, TDoc>,
   ctx: AccessContext<TCtx, TDoc>,
 ): Promise<AccessGrant> {
@@ -105,7 +107,7 @@ function isFullAccess(decision: AccessGrant): boolean {
  * arguments: schema-bound policies keep their pick, schema-less ones do not
  * widen it away.
  */
-export function and<TCtx, TDoc>(
+export function and<TCtx extends { tenantId: string; user: unknown }, TDoc>(
   ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc> {
   return (async (ctx) => {
@@ -123,7 +125,7 @@ export function and<TCtx, TDoc>(
  * Combine policies with OR (grant union). `TDoc` is inferred from the
  * arguments the same way as `and`.
  */
-export function or<TCtx, TDoc>(
+export function or<TCtx extends { tenantId: string; user: unknown }, TDoc>(
   ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc> {
   return (async (ctx) => {
@@ -136,7 +138,7 @@ export function or<TCtx, TDoc>(
   }) as ConstrainedPolicy<TCtx, TDoc>;
 }
 
-export type PolicyHelper<TCtx> = {
+export type PolicyHelper<TCtx extends { tenantId: string; user: unknown }> = {
   /**
    * Bind `doc` / `nextDoc` in the callback to a collection schema (or a pick of
    * its fields). The returned policy assigns to a collection iff those keys
@@ -159,7 +161,9 @@ export type PolicyHelper<TCtx> = {
  * schema when the rule only looks at `user`. Return a grant (`fullAccess` /
  * `write` / `read` / `none` / `grant(...)`), not a boolean.
  */
-export function createPolicyHelper<TCtx>(): PolicyHelper<TCtx> {
+export function createPolicyHelper<
+  TCtx extends { tenantId: string; user: unknown },
+>(): PolicyHelper<TCtx> {
   function policy(
     schemaOrPolicy: StandardSchemaV1 | AccessPolicy<TCtx, unknown> | ContextPolicyFn<TCtx>,
     maybePolicy?: AccessPolicy<TCtx, unknown>,

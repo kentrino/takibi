@@ -4,6 +4,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient, createTakibi, fullAccess, none } from "../src/index";
 import { parseSchema } from "../src/schema";
 import type {
+  AccessContext,
   AccessPermission,
   ClientOf,
   CollectionDefinition,
@@ -304,9 +305,10 @@ test("policy context uses permission vocabulary", () => {
   context.collections({
     posts: {
       schema: z.object({ title: z.string() }),
-      accessPolicy({ permission, collection }) {
+      accessPolicy({ permission, collection, user }) {
         expectTypeOf(permission).toEqualTypeOf<Exclude<AccessPermission, "invoke">>();
         expectTypeOf(collection).toEqualTypeOf<string>();
+        expectTypeOf(user).toEqualTypeOf<User | null>();
         return none;
       },
     },
@@ -365,14 +367,29 @@ test("createTakibi policy helper keeps schema and context-only overloads", () =>
   const takibi = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
   });
-  const staff = takibi.policy(({ user }) => (user ? fullAccess : none));
-  const ownerOnly = takibi.policy(z.object({ ownerId: z.string() }), ({ user, doc }) =>
-    user?.id === doc?.ownerId ? fullAccess : none,
-  );
+  const staff = takibi.policy(({ user }) => {
+    expectTypeOf(user).toEqualTypeOf<User | null>();
+    return user ? fullAccess : none;
+  });
+  const ownerOnly = takibi.policy(z.object({ ownerId: z.string() }), ({ user, doc }) => {
+    expectTypeOf(user).toEqualTypeOf<User | null>();
+    return user?.id === doc?.ownerId ? fullAccess : none;
+  });
   void staff;
   void ownerOnly;
   expectTypeOf(takibi).not.toHaveProperty("and");
   expectTypeOf(takibi).not.toHaveProperty("or");
+});
+
+test("AccessContext inherits user and tenantId from TCtx", () => {
+  expectTypeOf<AccessContext<AppCtx>["user"]>().toEqualTypeOf<AppCtx["user"]>();
+  expectTypeOf<AccessContext<AppCtx>["tenantId"]>().toEqualTypeOf<AppCtx["tenantId"]>();
+  // @ts-expect-error AccessContext requires tenantId and user
+  type _MissingBoth = AccessContext<{ foo: string }>;
+  // @ts-expect-error AccessContext requires user
+  type _MissingUser = AccessContext<{ tenantId: string }>;
+  // @ts-expect-error AccessContext requires tenantId
+  type _MissingTenantId = AccessContext<{ user: unknown }>;
 });
 
 test("ClientOf matches createClient and rejects collection maps", () => {

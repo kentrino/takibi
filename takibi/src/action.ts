@@ -196,7 +196,11 @@ export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
   return build({ kind, permission: "invoke" });
 }
 
-export type CollectionDefinitionInput<TSchema extends StandardSchemaV1, TCtx, TActions> = {
+export type CollectionDefinitionInput<
+  TSchema extends StandardSchemaV1,
+  TCtx extends { tenantId: string; user: unknown },
+  TActions,
+> = {
   schema: TSchema;
   accessPolicy: CollectionDefinition<TSchema, TCtx>["accessPolicy"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];
@@ -214,7 +218,7 @@ export type CollectionDefinitionInput<TSchema extends StandardSchemaV1, TCtx, TA
 };
 
 export function defineCollection<
-  TCtx,
+  TCtx extends { tenantId: string; user: unknown },
   TSchema extends StandardSchemaV1,
   const TActions extends ActionDefinitions = Record<never, never>,
 >(
