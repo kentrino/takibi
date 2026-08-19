@@ -309,6 +309,122 @@ test("collection action input/output and scoped handler args are inferred", () =
   void checkCalls;
 });
 
+test("mixed collections() maps keep defineCollection action brands per entry", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const notes = {
+    schema: z.object({ body: z.string() }),
+    accessPolicy: fullAccess,
+  };
+  const posts = context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+    actions: (defineAction) => ({
+      duplicate: defineAction()
+        .policy(fullAccess)
+        .handler(({ $collection }) => $collection.add({ title: "copy" })),
+    }),
+  });
+  const handler = context.collections({ notes, posts }, { memory: true });
+  const postsOnly = context.collections({ posts }, { memory: true });
+  const client = createClient<typeof handler>("http://fire.test");
+  const postsOnlyClient = createClient<typeof postsOnly>("http://fire.test");
+
+  expectTypeOf(client.posts.duplicate).toEqualTypeOf(postsOnlyClient.posts.duplicate);
+  expectTypeOf(client.notes).not.toHaveProperty("duplicate");
+  expectTypeOf(client.notes.add).parameter(0).toEqualTypeOf<{ body: string }>();
+  expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{ title: string }>();
+});
+
+test("homogeneous collections() maps keep existing client inference", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const plainNotes = {
+    schema: z.object({ body: z.string() }),
+    accessPolicy: fullAccess,
+  };
+  const plainPosts = {
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+  };
+  const brandedNotes = context.defineCollection({
+    schema: z.object({ body: z.string() }),
+    accessPolicy: fullAccess,
+  });
+  const brandedPosts = context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+    actions: (defineAction) => ({
+      duplicate: defineAction()
+        .policy(fullAccess)
+        .handler(({ $collection }) => $collection.add({ title: "copy" })),
+    }),
+  });
+
+  const allPlain = context.collections({ notes: plainNotes, posts: plainPosts }, { memory: true });
+  const allBranded = context.collections(
+    { notes: brandedNotes, posts: brandedPosts },
+    { memory: true },
+  );
+  const plainClientFromHandler = createClient<typeof allPlain>("http://fire.test");
+  const brandedClient = createClient<typeof allBranded>("http://fire.test");
+
+  const postsOnly = context.collections({ posts: brandedPosts }, { memory: true });
+  const postsOnlyClient = createClient<typeof postsOnly>("http://fire.test");
+
+  expectTypeOf(plainClientFromHandler.notes.add).parameter(0).toEqualTypeOf<{ body: string }>();
+  expectTypeOf(plainClientFromHandler.posts.add).parameter(0).toEqualTypeOf<{ title: string }>();
+  expectTypeOf(plainClientFromHandler.notes).not.toHaveProperty("duplicate");
+  expectTypeOf(plainClientFromHandler.posts).not.toHaveProperty("duplicate");
+  expectTypeOf(brandedClient.notes.add).parameter(0).toEqualTypeOf<{ body: string }>();
+  expectTypeOf(brandedClient.posts.duplicate).toEqualTypeOf(postsOnlyClient.posts.duplicate);
+  expectTypeOf(brandedClient.notes).not.toHaveProperty("duplicate");
+});
+
+test("mixed collections() maps keep schema-bound policy and migration checks", () => {
+  const takibi = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  });
+  const seeded = takibi.policy(z.object({ isSeed: z.boolean() }), ({ doc }) =>
+    doc?.isSeed === true ? none : fullAccess,
+  );
+  const notes = {
+    schema: z.object({ body: z.string() }),
+    accessPolicy: fullAccess,
+  };
+  const items = takibi.defineCollection({
+    schema: z.object({ name: z.string(), isSeed: z.boolean() }),
+    accessPolicy: seeded,
+  });
+
+  takibi.collections({ notes, items });
+  takibi.collections({
+    notes,
+    invalid: {
+      schema: z.object({ title: z.string(), published: z.boolean() }),
+      accessPolicy: fullAccess,
+      migrations: {
+        // @ts-expect-error mixed maps still constrain the final migration step
+        steps: [() => ({ title: "missing published" })],
+      },
+    },
+  });
+
+  const checkMissingKeys = () => {
+    takibi.collections({
+      notes,
+      items: {
+        schema: z.object({ name: z.string() }),
+        // @ts-expect-error mixed maps still require schema-bound policy keys
+        accessPolicy: seeded,
+      },
+    });
+  };
+  void checkMissingKeys;
+});
+
 test("ClientOf projects action methods from inputSchema and handler", () => {
   const inputSchema = z.string().transform((value) => value.length);
   type StructuralHandler = {

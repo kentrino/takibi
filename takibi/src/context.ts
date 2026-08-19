@@ -164,6 +164,29 @@ export type TakibiHandler<
   TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
 
 /**
+ * Per-key public constraint. Depends on each entry's own type so `const`
+ * inference is not forced to a shared `CollectionDefinition<any>`. The action
+ * brand is omitted so `defineCollection()` brands stay on those entries only.
+ */
+type PublicCollectionConstraint<C, TCtx extends object> = C extends {
+  schema: infer S extends StandardSchemaV1;
+}
+  ? {
+      schema: CollectionDefinition<S, TCtx>["schema"];
+      accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
+      migrations?: CollectionDefinition<S, TCtx>["migrations"];
+      seed?: CollectionDefinition<S, TCtx>["seed"];
+    }
+  : {
+      schema: StandardSchemaV1;
+      accessPolicy: CollectionDefinition<StandardSchemaV1, TCtx>["accessPolicy"];
+    };
+
+type PublicCollectionsMap<TCollections, TCtx extends object> = {
+  [K in keyof TCollections]: PublicCollectionConstraint<TCollections[K], TCtx>;
+};
+
+/**
  * `CollectionsDef` uses `CollectionDefinition<any>`, which erases schema-bound
  * checks. Re-bind each collection's policy and migrations to that collection's
  * schema.
@@ -193,7 +216,7 @@ type CreateContextBuilder<TCtx extends object, TInitial> = {
   ): CollectionDefinition<TSchema, TCtx, TActions> & {
     readonly [collectionActionsBrand]: TActions;
   };
-  collections<const TCollections extends CollectionsDef<TCtx>>(
+  collections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
     collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
     options?: InternalCollectionsOptions,
     ...invalidName: [
