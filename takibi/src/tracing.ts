@@ -16,6 +16,7 @@ export type RecordedSpan = {
   status: "ok" | "error";
   errorName?: string;
   ended: boolean;
+  endCount: number;
 };
 
 export type TakibiSpan = {
@@ -52,6 +53,10 @@ export function resolveTracer(options: object | undefined): TakibiTracer | undef
 
 export function bindTracer<T>(tracer: TakibiTracer, fn: () => T): T {
   return tracingStore.run({ tracer }, fn);
+}
+
+export function activeSpanContext(): SpanContext | undefined {
+  return tracingStore.getStore()?.span;
 }
 
 export function injectTraceparent(headers: Headers): void {
@@ -141,6 +146,7 @@ export function createRecordingTracer(): {
         ...(parent ? { parentSpanId: parent.spanId } : {}),
         status: "ok",
         ended: false,
+        endCount: 0,
       };
       spans.push(recorded);
       return {
@@ -151,6 +157,7 @@ export function createRecordingTracer(): {
         },
         end() {
           recorded.ended = true;
+          recorded.endCount += 1;
         },
       };
     },

@@ -15,11 +15,12 @@ import { createSqliteDurableObjectStorage } from "./sqlite";
 import type { WireResponse } from "../src/protocol";
 
 /**
- * Discovery 0043 results (re-reconcile concern 0021 with pre-1.0-capability-development):
- * - B (global register) and C (internal tracer option) both produce the same parent/child spans.
- * - A (no adapter) produces no internal spans.
- * - Discard conditions: none matched. Failures are identified without application `traceId`,
- *   without lifecycle hooks, and with tracing disabled requiring no OTel package.
+ * Discovery 0043/0044 results (re-reconcile concern 0021 with pre-1.0-capability-development):
+ * - B (global-only) maintains Worker → DO → executor → storage parentage and shared traceId.
+ * - C (internal tracer option) still matches B. A (no adapter) produces no internal spans.
+ * - `takibi.resolve` is limited to resolve(); wire/executor start after it ends.
+ * - `@takibi/takibi/otel` adapts a real provider; root import stays OTel-free.
+ * - Discard conditions: none matched. No public CollectionsOptions.tracer or lifecycle hook.
  */
 const Post = z.object({ title: z.string().min(1) });
 
@@ -50,6 +51,17 @@ function spanNamed(spans: RecordedSpan[], name: string): RecordedSpan {
   const found = spans.find((span) => span.name === name);
   expect(found, `missing span ${name}`).toBeDefined();
   return found!;
+}
+
+function createDeferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 test("A baseline records no internal spans", async () => {
@@ -115,13 +127,169 @@ test("B global registration matches C span names without collections options", a
   );
 });
 
+test("B global-only records Worker-DO-executor-storage parentage", async () => {
+  const recording = createRecordingTracer();
+  registerGlobalTracer(recording.tracer);
+  const context = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a" }),
+    stub: () =>
+      ({
+        fetch: (request: Request) => object.fetch(request),
+      }) as unknown as DurableObjectStub,
+  });
+  const handler = context.collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+    {},
+  );
+  const added = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "hello" }),
+  });
+  expect(added.status).toBe(200);
+
+  const resolve = spanNamed(recording.spans, "takibi.resolve");
+  const wire = child(recording.spans, resolve, "takibi.wire");
+  const executor = child(recording.spans, wire, "takibi.executor");
+  expect(spanNamed(recording.spans, "takibi.storage").parentSpanId).toBe(executor.spanId);
+  expect(new Set(recording.spans.map((span) => span.traceId)).size).toBe(1);
+  expect(recording.spans.every((span) => span.ended && span.endCount === 1)).toBe(true);
+});
+
+test("takibi.resolve ends before wire and executor start", async () => {
+  const recording = createRecordingTracer();
+  registerGlobalTracer(recording.tracer);
+  const holdResolve = createDeferred();
+  const enteredResolve = createDeferred();
+  const enteredWire = createDeferred();
+  let resolveEndedBeforeWire = false;
+  const handler = createTakibi()({
+    resolve: async () => {
+      enteredResolve.resolve();
+      await holdResolve.promise;
+      return { tenantId: "tenant-a" };
+    },
+    stub: () =>
+      ({
+        fetch: (request: Request) => {
+          resolveEndedBeforeWire = spanNamed(recording.spans, "takibi.resolve").ended;
+          enteredWire.resolve();
+          return object.fetch(request);
+        },
+      }) as unknown as DurableObjectStub,
+  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+    {},
+  );
+
+  const responsePromise = handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "hello" }),
+  });
+  await enteredResolve.promise;
+  expect(recording.spans.map((span) => span.name)).toEqual(["takibi.resolve"]);
+  expect(spanNamed(recording.spans, "takibi.resolve").ended).toBe(false);
+  holdResolve.resolve();
+  await enteredWire.promise;
+  expect(resolveEndedBeforeWire).toBe(true);
+  expect(spanNamed(recording.spans, "takibi.resolve").ended).toBe(true);
+  expect((await responsePromise).status).toBe(200);
+  const resolve = spanNamed(recording.spans, "takibi.resolve");
+  const wire = child(recording.spans, resolve, "takibi.wire");
+  expect(child(recording.spans, wire, "takibi.executor").ended).toBe(true);
+});
+
+test("DO path injected failures mark the innermost span and end every span once", async () => {
+  const cases = [
+    {
+      name: "takibi.policy",
+      collections: { posts: { schema: Post, accessPolicy: none } },
+      path: "http://fire.test/posts",
+      init: {
+        method: "POST" as const,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "n" }),
+      },
+    },
+    {
+      name: "takibi.schema",
+      path: "http://fire.test/posts",
+      init: {
+        method: "POST" as const,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "" }),
+      },
+    },
+    {
+      name: "takibi.storage",
+      failStorage: true,
+      path: "http://fire.test/posts",
+      init: {
+        method: "POST" as const,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "n" }),
+      },
+    },
+    {
+      name: "takibi.action",
+      action: true,
+      path: "http://fire.test/$:boom",
+      init: { method: "POST" as const },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const recording = createRecordingTracer();
+    registerGlobalTracer(recording.tracer);
+    const builder = createTakibi()({
+      resolve: () => ({ tenantId: "tenant-a" }),
+      stub: () =>
+        ({
+          fetch: (request: Request) => object.fetch(request),
+        }) as unknown as DurableObjectStub,
+    });
+    const base = builder.collections(
+      testCase.collections ?? { posts: { schema: Post, accessPolicy: fullAccess } },
+    );
+    const handler = testCase.action
+      ? base.actions({
+          boom: base
+            .defineAction()
+            .policy(fullAccess)
+            .handler(() => {
+              throw new Error("action-failed");
+            }),
+        })
+      : base;
+    const object = new handler.DurableObject(
+      createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+      {},
+    );
+    if (testCase.failStorage) failNextStorageWrite();
+    const response = await handler.request(testCase.path, testCase.init);
+    const body = (await response.json()) as WireResponse;
+    expect(body.ok, testCase.name).toBe(false);
+    const failed =
+      recording.spans.find((span) => span.name === testCase.name && span.status === "error") ??
+      recording.spans.find((span) => span.name === testCase.name);
+    expect(failed, testCase.name).toMatchObject({ status: "error", ended: true, endCount: 1 });
+    expect(
+      recording.spans.every((span) => span.ended && span.endCount === 1),
+      `${testCase.name} left an open or double-ended span`,
+    ).toBe(true);
+  }
+});
+
 test("injected failures record error on the failed interval and still end", async () => {
   const cases = [
     {
       name: "takibi.resolve",
       context: () =>
         createTakibi()({
-          resolve: () => {
+          resolve: (): { tenantId: string } => {
             throw new Error("resolve-failed");
           },
         }),
@@ -296,10 +464,14 @@ test("tracing presence does not change collections, handler, or client inference
 test("OTel and tracing helpers stay off the public root", () => {
   const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+    peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+    exports?: Record<string, string>;
   };
   expect(JSON.stringify(pkg.dependencies ?? {})).not.toMatch(/opentelemetry/);
-  expect(JSON.stringify(pkg.devDependencies ?? {})).not.toMatch(/opentelemetry/);
+  expect(pkg.peerDependencies?.["@opentelemetry/api"]).toBeDefined();
+  expect(pkg.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).toBe(true);
+  expect(pkg.exports?.["./otel"]).toBe("./src/otel.ts");
 
   type PublicModule = typeof import("../src/index");
   type Hidden =
@@ -307,7 +479,8 @@ test("OTel and tracing helpers stay off the public root", () => {
     | "registerGlobalTracer"
     | "createRecordingTracer"
     | "TakibiTracer"
-    | "TakibiSpan";
+    | "TakibiSpan"
+    | "TakibiInstrumentation";
   expectTypeOf<Extract<Hidden, keyof PublicModule>>().toBeNever();
   expectTypeOf(import("../src/index")).not.toHaveProperty("internalTracerKey");
 });

@@ -37,6 +37,7 @@ import { toTakibiFailure } from "./result";
 import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import {
+  activeSpanContext,
   bindTracer,
   extractSpanContext,
   injectTraceparent,
@@ -44,6 +45,7 @@ import {
   resolveTracer,
   tracedStorage,
   withSpan,
+  type SpanContext,
   type TakibiTracer,
 } from "./tracing";
 import { storageAdd } from "./typed-storage";
@@ -305,7 +307,6 @@ function buildContext<TInitial>(
         if (definitions) registry.registerCollectionActions(name, definitions);
       }
       const memory = options.memory ?? false;
-      const tracer = resolveTracer(options);
 
       const app = new Hono<{ Bindings: Record<string, unknown> }>();
 
@@ -322,46 +323,56 @@ function buildContext<TInitial>(
         invocation: PublicRequest,
       ): Promise<Response> => {
         const execute = async (): Promise<Response> => {
+          const tracer = resolveTracer(options);
           try {
-            return await withSpan("takibi.resolve", async () => {
-              await memoryReady;
-              const input = { request, context: initial as TInitial };
-              const ctx = await resolve(input);
-              assertSerializableContext(ctx);
+            await memoryReady;
+            const input = { request, context: initial as TInitial };
+            let resolveSpan: SpanContext | undefined;
+            const ctx = await withSpan("takibi.resolve", async () => {
+              resolveSpan = activeSpanContext();
+              const resolved = await resolve(input);
+              assertSerializableContext(resolved);
+              return resolved;
+            });
 
-              if (memoryDriver) {
-                const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
-                const data = await withSpan("takibi.executor", () =>
+            if (memoryDriver) {
+              const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
+              const data = await withSpan(
+                "takibi.executor",
+                () =>
                   invocation.kind === "action"
                     ? executeAction(registry, collections, driver, ctx, invocation)
                     : executeOperation(collections, driver, ctx, invocation),
-                );
-                return Response.json({ ok: true, data } satisfies WireResponse);
-              }
+                resolveSpan,
+              );
+              return Response.json({ ok: true, data } satisfies WireResponse);
+            }
 
-              if (!resolveStub) {
-                throw new TakibiError(
-                  "MISSING_STUB",
-                  "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
-                  500,
-                );
-              }
+            if (!resolveStub) {
+              throw new TakibiError(
+                "MISSING_STUB",
+                "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
+                500,
+              );
+            }
 
-              const doStub = await resolveStub({ ...input, resolved: ctx });
-              if (!doStub || typeof doStub.fetch !== "function") {
-                throw new TakibiError(
-                  "MISSING_STUB",
-                  "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
-                  500,
-                );
-              }
+            const doStub = await resolveStub({ ...input, resolved: ctx });
+            if (!doStub || typeof doStub.fetch !== "function") {
+              throw new TakibiError(
+                "MISSING_STUB",
+                "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
+                500,
+              );
+            }
 
-              const wire: WireRequest = {
-                ...invocation,
-                context: ctx,
-              };
+            const wire: WireRequest = {
+              ...invocation,
+              context: ctx,
+            };
 
-              const res = await withSpan("takibi.wire", async () => {
+            const res = await withSpan(
+              "takibi.wire",
+              async () => {
                 const headers = new Headers({ "content-type": "application/json" });
                 injectTraceparent(headers);
                 return doStub.fetch(
@@ -371,14 +382,16 @@ function buildContext<TInitial>(
                     body: JSON.stringify(wire),
                   }),
                 );
-              });
-              const json = (await res.json()) as WireResponse;
-              return Response.json(json, { status: json.ok ? 200 : json.error.status });
-            });
+              },
+              resolveSpan,
+            );
+            const json = (await res.json()) as WireResponse;
+            return Response.json(json, { status: json.ok ? 200 : json.error.status });
           } catch (err) {
             return Response.json(toWireError(err), { status: statusOf(err) });
           }
         };
+        const tracer = resolveTracer(options);
         return tracer ? bindTracer(tracer, execute) : execute();
       };
 
@@ -422,7 +435,7 @@ function buildContext<TInitial>(
         return c.newResponse(response.body, response);
       });
 
-      const DurableObjectClass = createDurableObjectClass(collections, registry, tracer);
+      const DurableObjectClass = createDurableObjectClass(collections, registry, options);
 
       const rootActions = Object.create(null) as ActionDefinitions;
       const handler = app as TakibiHandler<object, typeof collections, TInitial>;
@@ -468,7 +481,7 @@ function buildContext<TInitial>(
 function createDurableObjectClass<TCollections extends CollectionsDef>(
   collections: TCollections,
   registry: ActionRegistry,
-  tracer: TakibiTracer | undefined,
+  options: InternalCollectionsOptions,
 ) {
   return class TakibiTenantObject implements DurableObject {
     readonly #state: DurableObjectState;
@@ -487,6 +500,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
     }
 
     async fetch(request: Request): Promise<Response> {
+      const tracer = resolveTracer(options);
       const execute = async (): Promise<Response> => {
         try {
           const body = decodeWireRequest(await request.json());
