@@ -447,39 +447,6 @@ test("gate policy is mandatory at execution and requires can use list grants", a
   });
 });
 
-test("schema-bound policy is rejected as an action gate instead of FORBIDDEN", async () => {
-  const context = createTakibi()({ resolve: resolveTestContext });
-  let policyCalls = 0;
-  const schemaBound = context.policy(Post, ({ user }) => {
-    policyCalls += 1;
-    return user ? fullAccess : none;
-  });
-  const posts = context.defineCollection({
-    schema: Post,
-    accessPolicy: schemaBound,
-    actions: (defineAction) => ({
-      ping: defineAction()
-        .policy(schemaBound as never)
-        .handler(() => ({ pong: true })),
-    }),
-  });
-  const handler = context.collections({ posts }, { memory: true });
-  const client = createClient<typeof handler>("http://fire.test", {
-    headers,
-    fetch: (input, init) => handler.request(input, init),
-  });
-
-  expect(await client.posts.ping()).toMatchObject({
-    ok: false,
-    error: {
-      code: "INVALID_POLICY",
-      status: 500,
-      message: expect.stringMatching(/accessPolicy/),
-    },
-  });
-  expect(policyCalls).toBe(0);
-});
-
 test("action gate keeps resolved context under ctx without claim collisions", async () => {
   const context = createTakibi()({
     resolve: () => ({

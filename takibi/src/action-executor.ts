@@ -2,7 +2,7 @@ import { ActionRegistry, type ActionGateContext } from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
-import { allows, isAccessGrant, isConstrainedPolicy, isContextPolicy } from "./policy";
+import { allows, isAccessGrant, isContextPolicy } from "./policy";
 import { parseSchema } from "./schema";
 import { withSpan } from "./tracing";
 import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
@@ -40,13 +40,6 @@ export async function executeAction<TCtx extends object>(
     permission: definition.permission,
   };
   await withSpan("takibi.policy", async () => {
-    if (isConstrainedPolicy(definition.policy)) {
-      throw new TakibiError(
-        "INVALID_POLICY",
-        "Schema-bound policy cannot be used as an action gate; it is for collection accessPolicy only",
-        500,
-      );
-    }
     const grant = isAccessGrant(definition.policy)
       ? definition.policy
       : isContextPolicy(definition.policy)
