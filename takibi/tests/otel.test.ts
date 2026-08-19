@@ -102,3 +102,15 @@ test("root source does not import OTel packages", () => {
   expect(contextSource).not.toMatch(/opentelemetry|from "\.\/otel"/);
   expect(packConfig).toContain('otel: "src/otel.ts"');
 });
+
+test("README documents ./otel enable and waitUntil flush", () => {
+  const readme = readFileSync(join(import.meta.dirname, "../README.md"), "utf8");
+  expect(readme).toContain('from "@takibi/takibi/otel"');
+  expect(readme).toContain("TakibiInstrumentation");
+  expect(readme).toContain("createOtelTakibiTracer");
+  expect(readme).toContain("instrumentation.enable()");
+  expect(readme).toContain("waitUntil(createOtelTakibiTracer().forceFlush())");
+  expect(readme).not.toContain("registerGlobalTracer");
+  expect(readme).not.toContain("internalTracerKey");
+  expect(readme).not.toContain("CollectionsOptions.tracer");
+});

@@ -2,7 +2,8 @@
 
 Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
-The official public API is `createTakibi`, `createClient`, policy helpers, and errors. Lower-level assembly pieces are unpublished.
+The official public API is `createTakibi`, `createClient`, policy helpers, errors,
+and optional `@takibi/takibi/otel`. Lower-level assembly pieces are unpublished.
 
 ## AuthN vs AuthZ
 
@@ -575,6 +576,36 @@ Notes:
 - Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
   The object name is that `tenantId`; prefixed names are not supported.
   `fetch` on the class is stub-only — do not route public HTTP to it.
+
+## Observability
+
+Enable OpenTelemetry spans from `@takibi/takibi/otel` at module scope. The
+root package does not depend on `@opentelemetry/api`; install it when you import
+`./otel`. Register your tracer provider before `enable()`. Flush stays
+application-owned.
+
+`enable()` instruments `resolve`, Worker → Durable Object wire, executor, policy,
+schema, storage, and actions. Do not pass a tracer into `collections()`, and do
+not add lifecycle hooks. Call `enable()` once per isolate before handling
+requests.
+
+```ts
+import { createOtelTakibiTracer, TakibiInstrumentation } from "@takibi/takibi/otel";
+
+const instrumentation = new TakibiInstrumentation();
+instrumentation.enable();
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const response = await app.fetch(request, env, ctx);
+    ctx.waitUntil(createOtelTakibiTracer().forceFlush());
+    return response;
+  },
+};
+```
+
+Use `enable()` / `disable()` directly. Do not wrap takibi in
+`registerInstrumentations()`.
 
 ## Limits and layout
 
