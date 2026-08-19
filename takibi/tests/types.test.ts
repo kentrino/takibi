@@ -2,7 +2,7 @@ import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { and, createClient, createTakibi, fullAccess, none } from "../src/index";
-import type { ActionDefinition } from "../src/action";
+import type { ActionDefinition, RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {
   AccessContext,
@@ -53,6 +53,12 @@ type LegacyActionsClient<TActions> = {
 };
 
 const createContext = createTakibi();
+
+test("registered actions use the unknown-based runtime definition", () => {
+  expectTypeOf<RegisteredAction["definition"]>().toEqualTypeOf<RuntimeActionDefinition>();
+  expectTypeOf<Parameters<RuntimeActionDefinition["handler"]>[0]>().toEqualTypeOf<unknown>();
+  expectTypeOf<Awaited<ReturnType<RuntimeActionDefinition["handler"]>>>().toEqualTypeOf<unknown>();
+});
 
 test("collection schemas type CRUD clients without handler $collections", () => {
   const context = createContext({

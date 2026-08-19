@@ -81,7 +81,7 @@ export async function executeAction<TCtx extends object>(
     throw new NotFoundError(`Unknown collection: ${invocation.scope}`);
   }
 
-  const output = await definition.handler(args as never);
+  const output = await definition.handler(args);
   if (output === undefined) return null;
   assertJsonValue(output);
   return output;

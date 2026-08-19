@@ -112,14 +112,23 @@ export type ActionDefinition<
   readonly kind: TKind;
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
-  readonly policy: ActionGatePolicy<unknown>;
+  readonly policy: ActionGatePolicy<never>;
   readonly handler: (
     args: TBaseArgs & { input: ParsedInput<TSchema> },
   ) => TOutput | Promise<TOutput>;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous action maps
-export type ActionDefinitions = Record<string, ActionDefinition<any, any, any, any>>;
+type AuthoredAction = ActionDefinition<ActionKind, MaybeSchema, JsonValue | void, never>;
+
+export type ActionDefinitions = Record<string, AuthoredAction>;
+
+export type RuntimeActionDefinition = {
+  readonly kind: ActionKind;
+  readonly inputSchema: MaybeSchema;
+  readonly permission: AccessPermission;
+  readonly policy: ActionGatePolicy<unknown>;
+  readonly handler: (args: unknown) => unknown;
+};
 
 export type CollectionActionArgs<TCtx, TCollection> = {
   ctx: TCtx;
@@ -159,41 +168,49 @@ export type ActionHandlerBuilder<
   ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs>;
 };
 
-type BuilderState = {
-  kind: ActionKind;
-  inputSchema?: StandardSchemaV1;
+type BuilderState<TKind extends ActionKind, TSchema extends MaybeSchema> = {
+  kind: TKind;
+  inputSchema: TSchema;
   permission: AccessPermission;
 };
 
 export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
   kind: TKind,
 ): ActionBuilder<TCtx, TKind, TBaseArgs> {
+  const createHandlerBuilder = <TSchema extends MaybeSchema>(
+    state: BuilderState<TKind, TSchema>,
+    policy: AccessGrant | ContextPolicy<TCtx> | ActionGatePolicyFn<TCtx>,
+  ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema> => ({
+    handler<TOutput extends JsonValue | void>(
+      handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
+    ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> {
+      const definition: ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> = {
+        [actionDefinitionBrand]: true,
+        kind: state.kind,
+        inputSchema: state.inputSchema,
+        permission: state.permission,
+        policy,
+        handler,
+      };
+      return Object.freeze(definition);
+    },
+  });
+
   const build = <TSchema extends MaybeSchema>(
-    state: BuilderState,
+    state: BuilderState<TKind, TSchema>,
   ): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema> => ({
-    input(schema) {
-      return build({ ...state, inputSchema: schema }) as never;
+    input<TNextSchema extends StandardSchemaV1>(schema: JsonInputSchema<TNextSchema>) {
+      return build<TNextSchema>({ ...state, inputSchema: schema });
     },
     requires(permission) {
       return build({ ...state, permission });
     },
     policy(policy) {
-      return {
-        handler(handler) {
-          return Object.freeze({
-            [actionDefinitionBrand]: true,
-            kind: state.kind,
-            inputSchema: state.inputSchema,
-            permission: state.permission,
-            policy,
-            handler,
-          }) as never;
-        },
-      };
+      return createHandlerBuilder(state, policy);
     },
   });
 
-  return build({ kind, permission: "invoke" });
+  return build({ kind, inputSchema: undefined, permission: "invoke" });
 }
 
 export type CollectionDefinitionInput<
@@ -254,8 +271,7 @@ export function getCollectionActions(definition: CollectionDefinition): ActionDe
 export type RegisteredAction = {
   scope: string;
   name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- registry stores every action shape
-  definition: ActionDefinition<any, any, any, any>;
+  definition: RuntimeActionDefinition;
 };
 
 const CRUD_NAMES = new Set(["add", "set", "get", "list", "update", "delete"]);
@@ -323,8 +339,7 @@ export class ActionRegistry {
         );
       }
       const name = propertyKey;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated below
-      const definition = descriptor.value as ActionDefinition<any, any, any, any>;
+      const definition: unknown = descriptor.value;
       assertPublicName(name, "action");
       if (forbiddenNames.has(name)) {
         throw new TakibiError(
@@ -340,7 +355,7 @@ export class ActionRegistry {
           500,
         );
       }
-      assertActionContract(name, definition);
+      const runtimeDefinition = eraseForRegistry(name, definition);
       const registryKey = actionKey(scope, name);
       if (
         this.#actions.has(registryKey) ||
@@ -348,7 +363,7 @@ export class ActionRegistry {
       ) {
         throw new TakibiError("DUPLICATE_ACTION", `Action is already registered: ${name}`, 500);
       }
-      pending.push({ scope, name, definition });
+      pending.push({ scope, name, definition: runtimeDefinition });
     }
 
     for (const entry of pending) {
@@ -366,11 +381,7 @@ const ACCESS_PERMISSIONS = new Set<AccessPermission>([
   "invoke",
 ]);
 
-function assertActionContract(
-  name: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated runtime definition
-  definition: ActionDefinition<any, any, any, any>,
-): void {
+function assertActionContract(name: string, definition: AuthoredAction): void {
   if (!ACCESS_PERMISSIONS.has(definition.permission)) {
     throw new TakibiError("INVALID_ACTION", `Invalid action permission: ${name}`, 500);
   }
@@ -394,6 +405,17 @@ function assertActionContract(
   }
 }
 
+function eraseForRegistry(name: string, definition: AuthoredAction): RuntimeActionDefinition {
+  assertActionContract(name, definition);
+  return {
+    kind: definition.kind,
+    inputSchema: definition.inputSchema,
+    permission: definition.permission,
+    policy: definition.policy as RuntimeActionDefinition["policy"],
+    handler: definition.handler as RuntimeActionDefinition["handler"],
+  };
+}
+
 export function assertCollectionName(name: string): void {
   assertPublicName(name, "collection");
   if (name === "$" || name.includes(":")) {
@@ -411,10 +433,7 @@ function assertPublicName(name: string, kind: "collection" | "action"): void {
   }
 }
 
-function isActionDefinition(
-  value: unknown,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime brand check narrows all shapes
-): value is ActionDefinition<any, any, any, any> {
+function isActionDefinition(value: unknown): value is AuthoredAction {
   return (
     typeof value === "object" &&
     value !== null &&
