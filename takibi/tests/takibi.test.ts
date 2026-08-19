@@ -552,6 +552,109 @@ test("actions execute inside the generated Durable Object", async () => {
   });
 });
 
+test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () => {
+  let object: DurableObject;
+  const context = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+    stub: () => object as unknown as DurableObjectStub,
+  });
+  const handler = context.collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  object = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    {},
+  );
+
+  const badRequest = { ok: false, error: { kind: "operation", code: "BAD_REQUEST", status: 400 } };
+  const envelopes = [
+    null,
+    { kind: "rpc", context: {} },
+    { kind: "collection", collection: "posts", operation: "patch", id: "p1", context: {} },
+    { kind: "collection", collection: "posts", operation: "get", context: {} },
+    {
+      kind: "collection",
+      collection: "posts",
+      operation: "get",
+      id: "p1",
+      extra: true,
+      context: {},
+    },
+  ];
+
+  for (const body of envelopes) {
+    const doResponse = await object.fetch(
+      new Request("https://takibi.internal", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(doResponse.status).toBe(400);
+    await expect(doResponse.json()).resolves.toMatchObject(badRequest);
+
+    const workerResponse = await handler.request("http://fire.test/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(workerResponse.status).toBe(400);
+    await expect(workerResponse.json()).resolves.toMatchObject(badRequest);
+  }
+});
+
+test("unknown collection and action names stay NOT_FOUND after decode", async () => {
+  let object: DurableObject;
+  const context = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+    stub: () => object as unknown as DurableObjectStub,
+  });
+  const handler = context.collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  object = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    {},
+  );
+
+  const notFound = { ok: false, error: { kind: "operation", code: "NOT_FOUND", status: 404 } };
+  const doCollection = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "collection",
+        collection: "ghosts",
+        operation: "get",
+        id: "g1",
+        context: { tenantId: "tenant-a", user: { id: "u1", role: "member" } },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(doCollection.status).toBe(404);
+  await expect(doCollection.json()).resolves.toMatchObject(notFound);
+
+  const workerCollection = await handler.request("http://fire.test/ghosts/g1");
+  expect(workerCollection.status).toBe(404);
+  await expect(workerCollection.json()).resolves.toMatchObject(notFound);
+
+  const doAction = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "action",
+        scope: "$",
+        name: "haunt",
+        context: { tenantId: "tenant-a", user: { id: "u1", role: "member" } },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(doAction.status).toBe(404);
+  await expect(doAction.json()).resolves.toMatchObject(notFound);
+
+  const workerAction = await handler.request("http://fire.test/$:haunt", { method: "POST" });
+  expect(workerAction.status).toBe(404);
+  await expect(workerAction.json()).resolves.toMatchObject(notFound);
+});
+
 test("Worker forwards only the action invocation and resolved context", async () => {
   let captured: unknown;
   const context = createTakibi()({

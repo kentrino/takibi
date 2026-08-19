@@ -4,6 +4,26 @@ import { decodeWireRequest } from "../src/protocol";
 
 const context = { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
 
+test("decodeWireRequest does not resolve collection or action names", () => {
+  expect(
+    decodeWireRequest({
+      kind: "collection",
+      collection: "ghosts",
+      operation: "get",
+      id: "g1",
+      context,
+    }),
+  ).toMatchObject({ collection: "ghosts", operation: "get", id: "g1" });
+  expect(
+    decodeWireRequest({
+      kind: "action",
+      scope: "ghosts",
+      name: "haunt",
+      context,
+    }),
+  ).toMatchObject({ scope: "ghosts", name: "haunt" });
+});
+
 test("decodeWireRequest accepts exact CRUD and action requests", () => {
   expect(
     decodeWireRequest({
@@ -37,34 +57,63 @@ test("decodeWireRequest accepts exact CRUD and action requests", () => {
   });
 });
 
-test("decodeWireRequest enforces CRUD/action XOR and exact routing fields", () => {
-  expect(() =>
-    decodeWireRequest({
+test("decodeWireRequest rejects invalid envelopes as BadRequestError", () => {
+  const rejects = (body: unknown, message: RegExp) => {
+    expect(() => decodeWireRequest(body)).toThrow(BadRequestError);
+    expect(() => decodeWireRequest(body)).toThrow(message);
+  };
+
+  for (const body of [null, [], "get", 1]) {
+    rejects(body, /Invalid wire request/);
+  }
+  rejects({ kind: "rpc", context }, /Invalid wire request kind/);
+  rejects(
+    { kind: "collection", collection: "posts", operation: "patch", id: "p1", context },
+    /Invalid CRUD operation/,
+  );
+  rejects(
+    { kind: "collection", collection: "posts", operation: "get", context },
+    /Invalid CRUD id/,
+  );
+  rejects(
+    { kind: "collection", collection: "posts", operation: "get", id: 1, context },
+    /Invalid CRUD id/,
+  );
+  rejects(
+    { kind: "collection", collection: "posts", operation: "add", context },
+    /Invalid CRUD wire request/,
+  );
+  rejects(
+    {
       kind: "action",
       scope: "$",
       name: "exportAll",
       collection: "posts",
       context,
-    }),
-  ).toThrow(/Unexpected wire field/);
-  expect(() =>
-    decodeWireRequest({
+    },
+    /Unexpected wire field/,
+  );
+  rejects(
+    {
       kind: "collection",
       collection: "posts",
       operation: "get",
       id: "p1",
       name: "publish",
       context,
-    }),
-  ).toThrow(/Unexpected wire field/);
-  expect(() =>
-    decodeWireRequest({
+    },
+    /Unexpected wire field/,
+  );
+  rejects(
+    {
       kind: "collection",
       collection: "posts",
-      operation: "get",
+      operation: "list",
+      list: { limit: "10" },
       context,
-    }),
-  ).toThrow(/Invalid CRUD id/);
+    },
+    /Invalid list limit/,
+  );
 });
 
 test("decodeWireRequest accepts application-owned context keys and requires an object", () => {
@@ -77,6 +126,14 @@ test("decodeWireRequest accepts application-owned context keys and requires an o
     }),
   ).toMatchObject({ context: { arbitrary: true } });
   for (const invalid of [null, [], "clinic-a"]) {
+    expect(() =>
+      decodeWireRequest({
+        kind: "action",
+        scope: "$",
+        name: "exportAll",
+        context: invalid,
+      }),
+    ).toThrow(BadRequestError);
     expect(() =>
       decodeWireRequest({
         kind: "action",

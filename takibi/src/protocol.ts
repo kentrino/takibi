@@ -22,40 +22,50 @@ export function encodeWireRequest(req: WireRequest): string {
   return JSON.stringify(req);
 }
 
+/**
+ * Decode an internal wire body. Envelope checks (kind, CRUD operation
+ * whitelist, required / exact fields, `context` object, list options) happen
+ * here and fail as `BadRequestError`. Unknown collection or action names are
+ * not resolved — they pass through and the executor reports `NOT_FOUND`.
+ *
+ * Collection `input` values are validated by the collection schema, not here.
+ */
 export function decodeWireRequest(body: unknown): WireRequest {
-  if (!isRecord(body)) throw new Error("Invalid wire request");
+  if (!isRecord(body)) throw new BadRequestError("Invalid wire request");
   const r = body as Record<string, unknown>;
   assertContext(r.context);
 
   if (r.kind === "action") {
     assertExactKeys(r, ["kind", "scope", "name", "input", "context"]);
     if (typeof r.scope !== "string" || typeof r.name !== "string") {
-      throw new Error("Invalid action wire request");
+      throw new BadRequestError("Invalid action wire request");
     }
     return r as ActionWireRequest;
   }
 
-  if (r.kind !== "collection") throw new Error("Invalid wire request kind");
+  if (r.kind !== "collection") throw new BadRequestError("Invalid wire request kind");
   if (typeof r.collection !== "string" || typeof r.operation !== "string") {
-    throw new Error("Invalid CRUD wire request");
+    throw new BadRequestError("Invalid CRUD wire request");
   }
   switch (r.operation) {
     case "add":
       assertExactKeys(r, ["kind", "collection", "operation", "id", "input", "context"]);
-      if (!("input" in r)) throw new Error("Invalid CRUD wire request");
-      if (r.id !== undefined && typeof r.id !== "string") throw new Error("Invalid CRUD id");
+      if (!("input" in r)) throw new BadRequestError("Invalid CRUD wire request");
+      if (r.id !== undefined && typeof r.id !== "string") {
+        throw new BadRequestError("Invalid CRUD id");
+      }
       break;
     case "set":
     case "update":
       assertExactKeys(r, ["kind", "collection", "operation", "id", "input", "context"]);
       if (typeof r.id !== "string" || !("input" in r)) {
-        throw new Error("Invalid CRUD wire request");
+        throw new BadRequestError("Invalid CRUD wire request");
       }
       break;
     case "get":
     case "delete":
       assertExactKeys(r, ["kind", "collection", "operation", "id", "context"]);
-      if (typeof r.id !== "string") throw new Error("Invalid CRUD id");
+      if (typeof r.id !== "string") throw new BadRequestError("Invalid CRUD id");
       break;
     case "list":
       try {
@@ -66,24 +76,24 @@ export function decodeWireRequest(body: unknown): WireRequest {
       }
       break;
     default:
-      throw new Error("Invalid CRUD operation");
+      throw new BadRequestError("Invalid CRUD operation");
   }
   return r as CollectionWireRequest;
 }
 
 function assertContext(value: unknown): asserts value is WireContext {
-  if (!isRecord(value)) throw new Error("Invalid wire context");
+  if (!isRecord(value)) throw new BadRequestError("Invalid wire context");
 }
 
 function normalizeList(value: unknown): StorageListOptions | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value)) throw new Error("Invalid list options");
+  if (!isRecord(value)) throw new BadRequestError("Invalid list options");
   assertExactKeys(value, ["limit", "cursor", "where"]);
   if (value.limit !== undefined && typeof value.limit !== "number") {
-    throw new Error("Invalid list limit");
+    throw new BadRequestError("Invalid list limit");
   }
   if (value.cursor !== undefined && typeof value.cursor !== "string") {
-    throw new Error("Invalid list cursor");
+    throw new BadRequestError("Invalid list cursor");
   }
   return {
     ...(value.limit !== undefined ? { limit: value.limit } : {}),
@@ -95,7 +105,7 @@ function normalizeList(value: unknown): StorageListOptions | undefined {
 function assertExactKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
   const allowedKeys = new Set(allowed);
   for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) throw new Error(`Unexpected wire field: ${key}`);
+    if (!allowedKeys.has(key)) throw new BadRequestError(`Unexpected wire field: ${key}`);
   }
 }
 

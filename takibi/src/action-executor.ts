@@ -12,6 +12,11 @@ export type ActionInvocation = {
   input?: unknown;
 };
 
+/**
+ * Run a registered action. The envelope must already be a valid
+ * `ActionInvocation` from `decodeWireRequest` (or an equivalent trusted
+ * constructor). This function does not re-check wire shape.
+ */
 export async function executeAction<TCtx extends object>(
   registry: ActionRegistry,
   collections: CollectionsDef<TCtx>,

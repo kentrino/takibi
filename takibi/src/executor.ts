@@ -77,6 +77,11 @@ async function assertAccess(
   throw new ForbiddenError();
 }
 
+/**
+ * Run a collection operation. The envelope must already be a valid
+ * `ExecuteRequest` from `decodeWireRequest` (or an equivalent trusted
+ * constructor). This function does not re-check wire shape.
+ */
 export async function executeOperation<TCtx extends object>(
   collections: CollectionsDef<TCtx>,
   storage: StorageDriver,
