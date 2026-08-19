@@ -316,10 +316,15 @@ const handler = base.actions({ exportAll });
 become `{ kind: "validation", code: "VALIDATION" }` with field `issues`. Throw a
 `TakibiError` subclass from the handler for operation failures.
 
-Every action has a mandatory gate policy. Normal `collection` / `collections`
-CRUD evaluates each collection's `accessPolicy`; `$collection` /
-`$collections` bypasses only that document policy and never bypasses the action
-gate. These server-side facades throw `TakibiError` on failure.
+Every action has a mandatory gate policy. Collection `defineAction().policy()`
+accepts the same schema-bound policy as that collection's `accessPolicy`; the
+gate evaluates it without a target `doc` (the same shape as `list` / `add`).
+Root actions have no collection schema, so they still take a grant, a
+context-only policy, or an `ActionGateContext` callback. Normal
+`collection` / `collections` CRUD evaluates each collection's `accessPolicy`;
+`$collection` / `$collections` bypasses only that document policy and never
+bypasses the action gate. These server-side facades throw `TakibiError` on
+failure.
 
 Add `.atomic()` before `.handler()` when all Takibi collection storage
 operations in an action must commit or roll back together:

@@ -1,13 +1,14 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { TakibiError } from "./errors";
 import { isAccessGrant, permissionsOf } from "./policy";
-import type { ContextPolicy } from "./policy";
+import type { ConstrainedPolicy, ContextPolicy } from "./policy";
 import type {
   AccessGrant,
   AccessPermission,
   CollectionApi,
   CollectionDefinition,
   CollectionsApi,
+  InferCollectionDoc,
   JsonValue,
 } from "./types";
 import { collectionActionsBrand } from "./types";
@@ -25,7 +26,11 @@ type ActionGatePolicyFn<TCtx> = (
   ctx: ActionGateContext<TCtx>,
 ) => AccessGrant | Promise<AccessGrant>;
 
-export type ActionGatePolicy<TCtx> = AccessGrant | ContextPolicy<TCtx> | ActionGatePolicyFn<TCtx>;
+export type ActionGatePolicy<TCtx, TDoc = never> =
+  | AccessGrant
+  | ContextPolicy<TCtx>
+  | ConstrainedPolicy<TCtx extends object ? TCtx : object, TDoc>
+  | ActionGatePolicyFn<TCtx>;
 
 type ActionKind = "collection" | "root";
 type MaybeSchema = StandardSchemaV1 | undefined;
@@ -113,7 +118,7 @@ export type ActionDefinition<
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
-  readonly policy: ActionGatePolicy<never>;
+  readonly policy: ActionGatePolicy<unknown, unknown>;
   readonly handler: (
     args: TBaseArgs & { input: ParsedInput<TSchema> },
   ) => TOutput | Promise<TOutput>;
@@ -128,7 +133,7 @@ export type RuntimeActionDefinition = {
   readonly inputSchema: MaybeSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
-  readonly policy: ActionGatePolicy<unknown>;
+  readonly policy: ActionGatePolicy<unknown, unknown>;
   readonly handler: (args: unknown) => unknown;
 };
 
@@ -149,14 +154,18 @@ export type ActionBuilder<
   TKind extends ActionKind,
   TBaseArgs,
   TSchema extends MaybeSchema = undefined,
+  TDoc = never,
 > = {
   input<TNextSchema extends StandardSchemaV1>(
     schema: JsonInputSchema<TNextSchema>,
-  ): ActionBuilder<TCtx, TKind, TBaseArgs, TNextSchema>;
-  requires(permission: AccessPermission): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema>;
-  atomic(): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema>;
+  ): ActionBuilder<TCtx, TKind, TBaseArgs, TNextSchema, TDoc>;
+  requires(permission: AccessPermission): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema, TDoc>;
+  atomic(): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema, TDoc>;
   policy: {
     (policy: AccessGrant | ContextPolicy<TCtx>): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
+    (
+      policy: ConstrainedPolicy<TCtx extends object ? TCtx : object, TDoc>,
+    ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
     (policy: ActionGatePolicyFn<TCtx>): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
   };
 };
@@ -179,12 +188,12 @@ type BuilderState<TKind extends ActionKind, TSchema extends MaybeSchema> = {
   atomic: boolean;
 };
 
-export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
+export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs, TDoc = never>(
   kind: TKind,
-): ActionBuilder<TCtx, TKind, TBaseArgs> {
+): ActionBuilder<TCtx, TKind, TBaseArgs, undefined, TDoc> {
   const createHandlerBuilder = <TSchema extends MaybeSchema>(
     state: BuilderState<TKind, TSchema>,
-    policy: AccessGrant | ContextPolicy<TCtx> | ActionGatePolicyFn<TCtx>,
+    policy: ActionGatePolicy<TCtx, TDoc>,
   ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema> => {
     return {
       atomic() {
@@ -209,7 +218,7 @@ export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs>(
 
   const build = <TSchema extends MaybeSchema>(
     state: BuilderState<TKind, TSchema>,
-  ): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema> => ({
+  ): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema, TDoc> => ({
     input<TNextSchema extends StandardSchemaV1>(schema: JsonInputSchema<TNextSchema>) {
       return build<TNextSchema>({ ...state, inputSchema: schema });
     },
@@ -240,7 +249,9 @@ export type CollectionDefinitionInput<
     defineAction: () => ActionBuilder<
       TCtx,
       "collection",
-      CollectionActionArgs<TCtx, CollectionDefinition<TSchema, TCtx>>
+      CollectionActionArgs<TCtx, CollectionDefinition<TSchema, TCtx>>,
+      undefined,
+      InferCollectionDoc<CollectionDefinition<TSchema, TCtx>>
     >,
   ) => TActions &
     Record<
@@ -264,7 +275,8 @@ export function defineCollection<
         createActionBuilder<
           TCtx,
           "collection",
-          CollectionActionArgs<TCtx, CollectionDefinition<TSchema, TCtx>>
+          CollectionActionArgs<TCtx, CollectionDefinition<TSchema, TCtx>>,
+          InferCollectionDoc<CollectionDefinition<TSchema, TCtx>>
         >("collection"),
       )
     : (Object.create(null) as TActions);

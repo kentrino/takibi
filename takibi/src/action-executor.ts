@@ -2,7 +2,13 @@ import { ActionRegistry, type ActionGateContext } from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
-import { allows, isAccessGrant, isContextPolicy } from "./policy";
+import {
+  allows,
+  evaluateAccessPolicy,
+  isAccessGrant,
+  isConstrainedPolicy,
+  isContextPolicy,
+} from "./policy";
 import { parseSchema } from "./schema";
 import { withSpan } from "./tracing";
 import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
@@ -44,7 +50,14 @@ export async function executeAction<TCtx extends object>(
       ? definition.policy
       : isContextPolicy(definition.policy)
         ? await definition.policy(ctx)
-        : await definition.policy(gateContext);
+        : isConstrainedPolicy(definition.policy)
+          ? await evaluateAccessPolicy(definition.policy, {
+              ...ctx,
+              collection: invocation.scope,
+              operation: "list",
+              permission: "list",
+            })
+          : await definition.policy(gateContext);
     if (!isAccessGrant(grant)) {
       throw new TakibiError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
     }

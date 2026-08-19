@@ -190,6 +190,35 @@ test("CRUD and collection/root actions roundtrip in memory mode", async () => {
   expect(coerced).toEqual({ ok: true, data: { value: 42 } });
 });
 
+test("collection actions reuse a schema-bound accessPolicy as the gate", async () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const directory = context.policy(Post, ({ user }) => (user ? fullAccess : none));
+  const posts = context.defineCollection({
+    schema: Post,
+    accessPolicy: directory,
+    actions: (defineAction) => ({
+      ping: defineAction()
+        .policy(directory)
+        .handler(() => ({ pong: true })),
+    }),
+  });
+  const handler = context.collections({ posts }, { memory: true });
+  const allowed = createClient<typeof handler>("http://fire.test", {
+    headers: () => headers({ id: "u1", role: "member" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  expect(await allowed.posts.ping()).toEqual({ ok: true, data: { pong: true } });
+
+  const denied = createClient<typeof handler>("http://fire.test", {
+    headers: () => headers(null),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  expect(await denied.posts.ping()).toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN", status: 403 },
+  });
+});
+
 test("duplicate add returns ALREADY_EXISTS as an operation failure", async () => {
   const { handler } = createActionApp();
   const client = clientFor(handler);

@@ -804,6 +804,56 @@ test("schema-bound policy requires pick keys on the collection document", () => 
   void checkMissingKeys;
 });
 
+test("collection actions accept the collection schema-bound policy as a gate", () => {
+  const takibi = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
+  });
+  const staff = takibi.policy(({ user }) => (user ? fullAccess : none));
+  const seeded = takibi.policy(z.object({ isSeed: z.boolean() }), ({ doc }) =>
+    doc?.isSeed === true ? none : fullAccess,
+  );
+  const itemSchema = z.object({ name: z.string(), isSeed: z.boolean() });
+
+  takibi.defineCollection({
+    schema: itemSchema,
+    accessPolicy: and(staff, seeded),
+    actions: (defineAction) => ({
+      duplicate: defineAction()
+        .policy(seeded)
+        .handler(() => null),
+      publish: defineAction()
+        .policy(and(staff, seeded))
+        .handler(() => null),
+    }),
+  });
+
+  const base = takibi.collections({
+    items: { schema: itemSchema, accessPolicy: seeded },
+  });
+  const checkRootRejectsSchemaBound = () => {
+    base
+      .defineAction()
+      // @ts-expect-error root actions have no collection schema to bind
+      .policy(seeded)
+      .handler(() => null);
+  };
+  void checkRootRejectsSchemaBound;
+
+  const checkActionPickKeys = () => {
+    takibi.defineCollection({
+      schema: z.object({ name: z.string() }),
+      accessPolicy: fullAccess,
+      actions: (defineAction) => ({
+        ping: defineAction()
+          // @ts-expect-error schema-bound policy keys must exist on the collection document
+          .policy(seeded)
+          .handler(() => null),
+      }),
+    });
+  };
+  void checkActionPickKeys;
+});
+
 test("AccessContext preserves application context keys without defining their vocabulary", () => {
   expectTypeOf<AccessContext<AppCtx>["user"]>().toEqualTypeOf<AppCtx["user"]>();
   expectTypeOf<AccessContext<AppCtx>["tenantId"]>().toEqualTypeOf<AppCtx["tenantId"]>();
