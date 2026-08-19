@@ -505,6 +505,49 @@ test("action gate keeps resolved context under ctx without claim collisions", as
   });
 });
 
+test("set policy denial conceals existence for new and existing ids", async () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const handler = context.collections(
+    { posts: { schema: Post, accessPolicy: ({ user }) => (user ? fullAccess : none) } },
+    { memory: true },
+  );
+  const admin = createClient<typeof handler>("http://fire.test", {
+    headers: () => headers({ id: "admin", role: "admin" }),
+    fetch: (input, init) => handler.request(input, init),
+  });
+  const guest = createClient<typeof handler>("http://fire.test", {
+    headers: () => headers(null),
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  expect(await admin.posts.add({ title: "kept" }, { id: "exists" })).toMatchObject({
+    ok: true,
+    data: { id: "exists", title: "kept" },
+  });
+
+  expect(await guest.posts.set("exists", { title: "changed" })).toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND", status: 404 },
+  });
+  expect(await guest.posts.set("missing", { title: "created" })).toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND", status: 404 },
+  });
+  expect(await guest.posts.add({ title: "add" })).toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN", status: 403 },
+  });
+
+  expect(await admin.posts.get("exists")).toMatchObject({
+    ok: true,
+    data: { id: "exists", title: "kept" },
+  });
+  expect(await admin.posts.get("missing")).toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND", status: 404 },
+  });
+});
+
 test("normal action CRUD enforces accessPolicy and $collection bypass is local", async () => {
   const { handler } = createActionApp();
   const admin = clientFor(handler, { id: "admin", role: "admin" });

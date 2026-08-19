@@ -59,8 +59,9 @@ function resolvePermission(
 
 /**
  * Map accessPolicy denial to the public error code.
- * Document-level denials (existing get / update / delete / set) become NOT_FOUND
- * so IDs are not leaked. Create / new set / list denials stay FORBIDDEN.
+ * Document-level denials (get / update / delete / set) become NOT_FOUND so
+ * IDs are not leaked. Create / list denials stay FORBIDDEN. `set` conceals
+ * whether the document already existed.
  */
 async function assertAccess(
   def: CollectionDefinition,
@@ -118,10 +119,7 @@ export async function executeOperation<TCtx extends object>(
         ...(existing ? { doc: existing } : {}),
         nextDoc,
       };
-      await assertAccess(def, accessCtx, {
-        conceal: existing != null,
-        id: req.id,
-      });
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
       await storage.put(req.collection, nextDoc);
       return nextDoc;
     }

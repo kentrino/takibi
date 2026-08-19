@@ -150,7 +150,7 @@ are validated by the collection schema and bypass `accessPolicy`, like trusted
 | delete    | saved value                         | —                            |
 | set       | saved value if present, else absent | validated replace candidate  |
 
-Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying an **existing** document (get / update / delete / existing set) also returns `NOT_FOUND` so IDs are not leaked. Denying create / new set / list returns `FORBIDDEN`.
+Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying get / update / delete / **set** also returns `NOT_FOUND` so IDs are not leaked — `set` uses the same code for a new id and an existing id. Denying create (`add`) / list returns `FORBIDDEN`.
 
 ### Grants: `fullAccess` / `write` / `read` / `none` / `grant(...)`
 
