@@ -23,6 +23,15 @@ Do **not** trust client-declared identity or tenant headers (for example
 `UnauthorizedError` from `resolve` when authentication or partition selection
 fails.
 
+Identity is whatever `resolve` returns. The Durable Object does not re-resolve
+or re-verify the caller. Its `fetch` is only for the same Worker's `stub`
+call; do not expose that class on a public route.
+
+Named objects must use `idFromName(resolved.tenantId)` with that exact string
+(no prefix). `fetch` compares `state.id.name` to `context.tenantId` and
+rejects a mismatch with `ForbiddenError` (403). Objects created without a
+name (`idFromString` and similar) skip that check.
+
 ## Server
 
 Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
@@ -44,24 +53,24 @@ type Initial = {
   di: { getSession(request: Request): Promise<User | null> };
   env: { TENANT_STORE: DurableObjectNamespace };
 };
-type AppCtx = { clinicId: string; principal: User | null };
+type AppCtx = { tenantId: string; principal: User | null };
 
 const takibi = createTakibi<Initial>()({
   resolve: async ({ request, context }): Promise<AppCtx> => {
     const user = await context.di.getSession(request);
     const requested = request.headers.get("x-clinic-id"); // optional hint only
-    const clinicId =
+    const tenantId =
       (user && requested && user.clinicIds.includes(requested) ? requested : null) ??
       user?.clinicIds[0] ??
       null;
-    if (!clinicId) {
+    if (!tenantId) {
       throw new UnauthorizedError("Unknown tenant");
     }
-    return { clinicId, principal: user };
+    return { tenantId, principal: user };
   },
   stub: ({ context, resolved }) => {
     const ns = context.env.TENANT_STORE;
-    return ns.get(ns.idFromName(resolved.clinicId));
+    return ns.get(ns.idFromName(resolved.tenantId));
   },
 });
 
@@ -428,8 +437,8 @@ createContext({
 createTakibi()({
   resolve: async ({ request }) => {
     const user = await authenticate(request);
-    const clinicId = await authorizeClinic(request, user);
-    return { clinicId, principal: user };
+    const tenantId = await authorizeClinic(request, user);
+    return { tenantId, principal: user };
   },
 });
 ```
@@ -481,8 +490,9 @@ projects.
 
 Notes:
 
-- Bind one DO per application partition (for example,
-  `idFromName(resolved.clinicId)` inside `stub`).
+- Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
+  The object name is that `tenantId`; prefixed names are not supported.
+  `fetch` on the class is stub-only — do not route public HTTP to it.
 - Existing Legacy KV-backed namespaces **cannot** be converted in place to
   SQLite. Move data to a new SQLite-backed class / namespace separately.
 - Do not create new Legacy KV-backed classes for `@takibi/takibi`.

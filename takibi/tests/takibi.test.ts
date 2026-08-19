@@ -138,9 +138,13 @@ function createFakeDurableObjectStorage(): DurableObjectStorage {
   } as unknown as DurableObjectStorage;
 }
 
-function createFakeDurableObjectState(storage: DurableObjectStorage): DurableObjectState {
+function createFakeDurableObjectState(
+  storage: DurableObjectStorage,
+  id: { name?: string } = {},
+): DurableObjectState {
   return {
     storage,
+    id,
     blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
       return callback();
     },
@@ -550,6 +554,149 @@ test("actions execute inside the generated Durable Object", async () => {
     ok: true,
     data: { by: "admin", titles: ["inside"] },
   });
+});
+
+test("named Durable Object fetch accepts a matching tenantId", async () => {
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+  }).collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage(), { name: "tenant-a" }),
+    {},
+  );
+
+  const response = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "collection",
+        collection: "posts",
+        operation: "add",
+        id: "p1",
+        input: { title: "ok" },
+        context: { tenantId: "tenant-a", user: { id: "u1", role: "member" } },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({
+    ok: true,
+    data: { id: "p1", title: "ok" },
+  });
+});
+
+test("named Durable Object fetch rejects a tenant mismatch before storage", async () => {
+  let reads = 0;
+  const storage = createFakeDurableObjectStorage();
+  const watched = {
+    ...storage,
+    async get(key: string) {
+      reads += 1;
+      return storage.get(key);
+    },
+    async list(options?: { prefix?: string; limit?: number; startAfter?: string }) {
+      reads += 1;
+      return storage.list(options);
+    },
+  } as DurableObjectStorage;
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+  }).collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(watched, { name: "tenant-a" }),
+    {},
+  );
+
+  const response = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "collection",
+        collection: "posts",
+        operation: "add",
+        id: "p1",
+        input: { title: "cross-tenant" },
+        context: { tenantId: "tenant-b", user: { id: "u1", role: "member" } },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(response.status).toBe(403);
+  await expect(response.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN", status: 403, message: "Tenant mismatch" },
+  });
+  expect(reads).toBe(0);
+});
+
+test("named Durable Object fetch rejects an empty tenantId", async () => {
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+  }).collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage(), { name: "tenant-a" }),
+    {},
+  );
+
+  const response = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "collection",
+        collection: "posts",
+        operation: "get",
+        id: "p1",
+        context: { tenantId: "", user: { id: "u1", role: "member" } },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(response.status).toBe(403);
+  await expect(response.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN", status: 403 },
+  });
+});
+
+test("unnamed Durable Object fetch skips the tenant name check", async () => {
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+  }).collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const unnamed = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage()),
+    {},
+  );
+  const emptyName = new handler.DurableObject(
+    createFakeDurableObjectState(createFakeDurableObjectStorage(), { name: "" }),
+    {},
+  );
+
+  for (const object of [unnamed, emptyName]) {
+    const response = await object.fetch(
+      new Request("https://takibi.internal", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "collection",
+          collection: "posts",
+          operation: "add",
+          id: "p1",
+          input: { title: "skipped" },
+          context: { tenantId: "other", user: { id: "u1", role: "member" } },
+        } satisfies WireRequest),
+      }),
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      data: { id: "p1", title: "skipped" },
+    });
+  }
 });
 
 test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () => {

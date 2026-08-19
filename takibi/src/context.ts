@@ -16,7 +16,7 @@ import type {
   RootActionArgs,
 } from "./action";
 import { executeAction, type ActionInvocation } from "./action-executor";
-import { TakibiError, NotFoundError } from "./errors";
+import { ForbiddenError, TakibiError, NotFoundError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import {
   decodePublicHttp,
@@ -64,10 +64,15 @@ export type ContextResolver<TCtx extends object, TInitial = Record<string, never
  * Resolve a Durable Object **stub** for this request (after `resolve`).
  * `resolved` is the complete application-owned execution context.
  *
+ * Name the object with `idFromName(resolved.tenantId)` — the same string as
+ * `tenantId`, with no prefix. `fetch` on the generated class is for this stub
+ * only; do not route public HTTP to it. Identity stays whatever `resolve`
+ * returned; the Durable Object does not re-verify the caller.
+ *
  * @example
  * stub: ({ context, resolved }) => {
  *   const ns = context.env.TENANT_STORE;
- *   return ns.get(ns.idFromName(resolved.clinic.slug));
+ *   return ns.get(ns.idFromName(resolved.tenantId));
  * }
  */
 export type ContextStubResolverInput<
@@ -197,11 +202,11 @@ type CreateContextFn<TInitial> = <R extends object | Promise<object>>(config: {
  * const takibi = createTakibi<Initial>()({
  *   resolve: async ({ request, context }): Promise<AppCtx> => {
  *     const principal = await context.di.getSession(request)
- *     return { clinic: { slug: "acme" }, principal }
+ *     return { tenantId: "acme", principal }
  *   },
  *   stub: ({ context, resolved }) => {
  *     const ns = context.env.TENANT_STORE
- *     return ns.get(ns.idFromName(resolved.clinic.slug))
+ *     return ns.get(ns.idFromName(resolved.tenantId))
  *   },
  * })
  */
@@ -410,11 +415,13 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
   registry: ActionRegistry,
 ) {
   return class TakibiTenantObject implements DurableObject {
+    readonly #state: DurableObjectState;
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
     readonly $collections: CollectionsApi<TCollections>;
 
     constructor(state: DurableObjectState, _env: unknown) {
+      this.#state = state;
       this.#driver = createDurableObjectStorage(state.storage);
       this.#ready = state.blockConcurrencyWhile(() => seedCollections(collections, this.#driver));
       this.$collections = createTrustedCollections(
@@ -425,9 +432,10 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
 
     async fetch(request: Request): Promise<Response> {
       try {
-        await this.#ready;
         const body = decodeWireRequest(await request.json());
         const { context, ...invocation } = body;
+        assertTenantMatchesDurableObjectName(this.#state.id.name, context);
+        await this.#ready;
         const ctx = context;
         const data =
           invocation.kind === "action"
@@ -482,6 +490,15 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       return driver.list(resource, options);
     },
   };
+}
+
+function assertTenantMatchesDurableObjectName(
+  name: string | undefined,
+  context: Record<string, unknown>,
+): void {
+  if (typeof name === "string" && name.length > 0 && name !== context.tenantId) {
+    throw new ForbiddenError("Tenant mismatch");
+  }
 }
 
 function toWireError(err: unknown): WireFailure {
