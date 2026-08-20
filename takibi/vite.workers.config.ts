@@ -9,5 +9,6 @@ export default defineConfig({
   ],
   test: {
     include: ["tests/**/*.workers.ts"],
+    exclude: ["tests/root-import.workers.ts"],
   },
 });

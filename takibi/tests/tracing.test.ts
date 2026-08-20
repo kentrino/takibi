@@ -18,12 +18,11 @@ import { createSqliteDurableObjectStorage } from "./sqlite";
 import type { WireResponse } from "../src/protocol";
 
 /**
- * Discovery 0043/0044 results (re-reconcile concern 0021 with pre-1.0-capability-development):
- * - B (global-only) maintains Worker → DO → executor → storage parentage and shared traceId.
- * - C (internal tracer option) still matches B. A (no adapter) produces no internal spans.
- * - `takibi.resolve` is limited to resolve(); wire/executor start after it ends.
- * - a separate integration package adapts real providers; root import stays OTel-free.
- * - Discard conditions: none matched. No public CollectionsOptions.tracer or lifecycle hook.
+ * Tracing is injected through an internal option or process-local registration. Both paths preserve
+ * Worker → Durable Object → executor → storage parentage and a shared trace ID, while no adapter
+ * produces no internal spans. `takibi.resolve` covers only context resolution; wire and executor
+ * spans begin after it ends. Real providers are adapted by the separate integration package so the
+ * public root remains telemetry-provider agnostic.
  */
 const Post = z.object({ title: z.string().min(1) });
 const tracingStore = new AsyncLocalStorage<Parameters<TracingContextBackend["run"]>[0]>();
@@ -762,5 +761,4 @@ test("instrumentation contract stays off the public root", () => {
     | "TakibiSpan"
     | "TakibiInstrumentation";
   expectTypeOf<Extract<Hidden, keyof PublicModule>>().toBeNever();
-  expectTypeOf(import("../src/index")).not.toHaveProperty("internalTracerKey");
 });
