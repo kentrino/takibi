@@ -2,17 +2,25 @@ import { expect, expectTypeOf, test } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  AlwaysOnSampler,
   BasicTracerProvider,
   InMemorySpanExporter,
+  ParentBasedSampler,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { context, propagation, trace } from "@opentelemetry/api";
+import { context, propagation, trace, TraceFlags } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
 import { createTakibi, fullAccess } from "../src/index";
 import { TakibiInstrumentation, createOtelTakibiTracer } from "../src/otel";
-import { registerGlobalTracer } from "../src/tracing";
+import {
+  bindTracer,
+  extractSpanContext,
+  injectTraceparent,
+  registerGlobalTracer,
+  withSpan,
+} from "../src/tracing";
 import { createSqliteDurableObjectStorage } from "./sqlite";
 
 const Post = z.object({ title: z.string().min(1) });
@@ -30,9 +38,10 @@ function createFakeDurableObjectState(
   } as unknown as DurableObjectState;
 }
 
-test("./otel registers a real provider without changing root inference", async () => {
+test("./otel preserves sampling and tracestate without changing root inference", async () => {
   const exporter = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({
+    sampler: new ParentBasedSampler({ root: new AlwaysOnSampler() }),
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
   trace.setGlobalTracerProvider(provider);
@@ -89,6 +98,60 @@ test("./otel registers a real provider without changing root inference", async (
   expect(exported.map((span) => span.name)).toEqual(
     expect.arrayContaining(["takibi.resolve", "takibi.wire", "takibi.executor", "takibi.storage"]),
   );
+
+  const tracer = createOtelTakibiTracer();
+  const crossBoundary = async (parent: {
+    traceId: string;
+    spanId: string;
+    traceFlags: number;
+    traceState: string;
+    isRemote: boolean;
+  }): Promise<Headers> => {
+    const headers = new Headers();
+    await bindTracer(tracer, () =>
+      withSpan(
+        "takibi.worker",
+        async () => {
+          injectTraceparent(headers);
+        },
+        parent,
+      ),
+    );
+    const extracted = bindTracer(tracer, () => extractSpanContext(headers));
+    expect(extracted).toMatchObject({
+      traceFlags: parent.traceFlags,
+      traceState: parent.traceState,
+      isRemote: true,
+    });
+    await bindTracer(tracer, () => withSpan("takibi.do", async () => {}, extracted));
+    return headers;
+  };
+
+  const sampledHeaders = await crossBoundary({
+    traceId: "11111111111111111111111111111111",
+    spanId: "2222222222222222",
+    traceFlags: TraceFlags.SAMPLED,
+    traceState: "vendor=sampled",
+    isRemote: true,
+  });
+  expect(sampledHeaders.get("traceparent")).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  expect(sampledHeaders.get("tracestate")).toBe("vendor=sampled");
+  expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual(
+    expect.arrayContaining(["takibi.worker", "takibi.do"]),
+  );
+
+  exporter.reset();
+  const unsampledHeaders = await crossBoundary({
+    traceId: "33333333333333333333333333333333",
+    spanId: "4444444444444444",
+    traceFlags: TraceFlags.NONE,
+    traceState: "vendor=unsampled",
+    isRemote: true,
+  });
+  expect(unsampledHeaders.get("traceparent")).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-00$/);
+  expect(unsampledHeaders.get("tracestate")).toBe("vendor=unsampled");
+  await createOtelTakibiTracer().forceFlush();
+  expect(exporter.getFinishedSpans()).toEqual([]);
 
   instrumentation.disable();
   await provider.shutdown();

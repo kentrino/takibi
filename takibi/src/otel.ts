@@ -1,10 +1,31 @@
 import {
   context as otelContext,
+  createTraceState,
+  propagation,
+  ROOT_CONTEXT,
   SpanStatusCode,
   trace,
+  type SpanContext as OtelSpanContext,
+  type TextMapGetter,
+  type TextMapSetter,
   type TracerProvider,
 } from "@opentelemetry/api";
 import { registerGlobalTracer, type SpanContext, type TakibiTracer } from "./tracing";
+
+const headersSetter: TextMapSetter<Headers> = {
+  set(carrier, key, value) {
+    carrier.set(key, value);
+  },
+};
+
+const headersGetter: TextMapGetter<Headers> = {
+  get(carrier, key) {
+    return carrier.get(key) ?? undefined;
+  },
+  keys(carrier) {
+    return [...carrier.keys()];
+  },
+};
 
 export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
   const tracer = trace.getTracer(name);
@@ -16,7 +37,7 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
       const span = tracer.startSpan(spanName, undefined, parentContext);
       const context = span.spanContext();
       return {
-        context: { traceId: context.traceId, spanId: context.spanId },
+        context: fromOtelSpanContext(context),
         recordError(err) {
           const error = err instanceof Error ? err : new Error(String(err));
           span.recordException(error);
@@ -26,6 +47,15 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
           span.end();
         },
       };
+    },
+    inject(headers, span) {
+      const context = trace.setSpanContext(ROOT_CONTEXT, toOtelSpanContext(span));
+      propagation.inject(context, headers, headersSetter);
+    },
+    extract(headers) {
+      const context = propagation.extract(ROOT_CONTEXT, headers, headersGetter);
+      const span = trace.getSpanContext(context);
+      return span ? fromOtelSpanContext(span) : undefined;
     },
     async forceFlush() {
       const provider = unwrapTracerProvider(trace.getTracerProvider());
@@ -46,15 +76,24 @@ export class TakibiInstrumentation {
   }
 }
 
-function toOtelSpanContext(parent: SpanContext): {
-  traceId: string;
-  spanId: string;
-  traceFlags: number;
-} {
+function toOtelSpanContext(parent: SpanContext): OtelSpanContext {
   return {
     traceId: parent.traceId,
     spanId: parent.spanId,
-    traceFlags: 1,
+    traceFlags: parent.traceFlags,
+    ...(parent.traceState ? { traceState: createTraceState(parent.traceState) } : {}),
+    ...(parent.isRemote === undefined ? {} : { isRemote: parent.isRemote }),
+  };
+}
+
+function fromOtelSpanContext(context: OtelSpanContext): SpanContext {
+  const traceState = context.traceState?.serialize();
+  return {
+    traceId: context.traceId,
+    spanId: context.spanId,
+    traceFlags: context.traceFlags,
+    ...(traceState ? { traceState } : {}),
+    ...(context.isRemote === undefined ? {} : { isRemote: context.isRemote }),
   };
 }
 

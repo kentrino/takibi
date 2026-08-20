@@ -6,12 +6,16 @@ export const internalTracerKey: unique symbol = Symbol.for("takibi.internalTrace
 export type SpanContext = {
   traceId: string;
   spanId: string;
+  traceFlags: number;
+  traceState?: string;
+  isRemote?: boolean;
 };
 
 export type RecordedSpan = {
   name: string;
   traceId: string;
   spanId: string;
+  traceFlags: number;
   parentSpanId?: string;
   status: "ok" | "error";
   errorName?: string;
@@ -27,6 +31,8 @@ export type TakibiSpan = {
 
 export type TakibiTracer = {
   startSpan(name: string, parent?: SpanContext): TakibiSpan;
+  inject(headers: Headers, span: SpanContext): void;
+  extract(headers: Headers): SpanContext | undefined;
   forceFlush(): Promise<void>;
 };
 
@@ -60,21 +66,35 @@ export function activeSpanContext(): SpanContext | undefined {
 }
 
 export function injectTraceparent(headers: Headers): void {
-  const span = tracingStore.getStore()?.span;
-  if (!span) return;
-  headers.set("traceparent", formatTraceparent(span));
+  const store = tracingStore.getStore();
+  if (!store?.span) return;
+  store.tracer.inject(headers, store.span);
 }
 
 export function extractSpanContext(headers: Headers): SpanContext | undefined {
+  const tracer = tracingStore.getStore()?.tracer;
+  if (!tracer) return undefined;
+  return tracer.extract(headers);
+}
+
+function extractW3cSpanContext(headers: Headers): SpanContext | undefined {
   const value = headers.get("traceparent");
   if (!value) return undefined;
-  const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/.exec(value);
+  const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(value);
   if (!match) return undefined;
-  return { traceId: match[1]!, spanId: match[2]! };
+  const traceState = headers.get("tracestate") ?? undefined;
+  return {
+    traceId: match[1]!,
+    spanId: match[2]!,
+    traceFlags: Number.parseInt(match[3]!, 16),
+    ...(traceState ? { traceState } : {}),
+    isRemote: true,
+  };
 }
 
 export function formatTraceparent(span: SpanContext): string {
-  return `00-${span.traceId}-${span.spanId}-01`;
+  const traceFlags = (span.traceFlags & 0xff).toString(16).padStart(2, "0");
+  return `00-${span.traceId}-${span.spanId}-${traceFlags}`;
 }
 
 export async function withSpan<T>(
@@ -138,11 +158,14 @@ export function createRecordingTracer(): {
       const context: SpanContext = {
         traceId: parent?.traceId ?? randomHex(16),
         spanId: randomHex(8),
+        traceFlags: parent?.traceFlags ?? 1,
+        ...(parent?.traceState ? { traceState: parent.traceState } : {}),
       };
       const recorded: RecordedSpan = {
         name,
         traceId: context.traceId,
         spanId: context.spanId,
+        traceFlags: context.traceFlags,
         ...(parent ? { parentSpanId: parent.spanId } : {}),
         status: "ok",
         ended: false,
@@ -161,6 +184,11 @@ export function createRecordingTracer(): {
         },
       };
     },
+    inject(headers, span) {
+      headers.set("traceparent", formatTraceparent(span));
+      if (span.traceState) headers.set("tracestate", span.traceState);
+    },
+    extract: extractW3cSpanContext,
     async forceFlush() {
       state.didFlush = true;
     },
