@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Typed multi-tenant collection store on Cloudflare Durable Objects.",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
