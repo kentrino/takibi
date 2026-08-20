@@ -622,12 +622,53 @@ Notes:
 
 ## Observability
 
-Install `@takibi/takibi-opentelemetry` to enable OpenTelemetry spans for
-`resolve`, Worker → Durable Object wire, executor, policy, schema, storage, and
-actions. The integration package owns its OpenTelemetry peer dependency,
-runtime adapter, setup documentation, and tests; the core package has no
-OpenTelemetry dependency. See that package's README for provider, context
-manager, and flushing setup.
+Logging and tracing are separate signals. Both are off by default. Configure a
+logger on `createTakibi()`, `collections()`, or `.with()`; the more local setting
+wins field by field:
+
+```ts
+import { createPrettyConsoleLogger, createTakibi } from "@takibi/takibi";
+
+const takibi = createTakibi()({
+  resolve,
+  stub,
+  logger: createPrettyConsoleLogger(),
+  logLevel: "debug",
+});
+
+const production = takibi.collections(definitions, { logLevel: "info" });
+const silent = takibi.collections(definitions, { logger: false });
+const captured = production.with({ memory: true, logger: testLogger });
+```
+
+`logger: true` sends the `LogEvent` object directly to the matching
+`console.debug` / `info` / `warn` / `error` method so platform structured fields
+are preserved. Supplying only `logLevel` enables the same structured console
+logger. The default level for an enabled logger is `info`;
+`debug < info < warn < error`. `createPrettyConsoleLogger()` is a dependency-free
+single-line formatter for local development, not a production structured logger
+or an OpenTelemetry exporter. ANSI colors are off unless `{ colors: true }` is
+explicitly passed, and it does not add a timestamp. Logger failures are ignored
+and never change a request result.
+
+Takibi logs request boundaries and failures at `info` / `error`, and emits
+`debug` timing events for resolve, Worker → Durable Object wire, executor,
+policy, schema, storage, and actions. Events can contain only operation
+metadata: collection, operation, document ID, duration, error code/status, and
+the normalized list query AST. They never contain documents, action input or
+output, resolved context, request/response bodies or headers, cookies,
+credentials, stubs, or bindings. A query comparison value can still be a name,
+phone number, or other personal data. Restrict access to debug logs and retain
+them only briefly.
+
+Install `@takibi/takibi-opentelemetry` to enable OpenTelemetry spans and,
+optionally, map permitted `LogEvent` values to OpenTelemetry Logs. The
+integration package owns its OpenTelemetry peer dependencies, adapters, setup
+documentation, and tests; the core package has no OpenTelemetry dependency.
+Export logs and traces to the same observability backend when you need native
+trace-log correlation. `logger: true` writes structured console output only; it
+does not export OpenTelemetry logs. See the integration package README for
+providers, context management, correlation, and Workers flushing.
 
 Takibi core owns span semantics as well as span placement. `takibi.wire` is a
 client span, a Durable Object `takibi.executor` is a server span, and local

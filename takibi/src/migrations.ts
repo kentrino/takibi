@@ -1,5 +1,6 @@
 import { TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
+import type { InternalLogger } from "./logging";
 import { documentRevision } from "./revision";
 import { parseSchema, SchemaValidationError } from "./schema";
 import {
@@ -32,6 +33,7 @@ export function assertCollectionMigrations(
 export function createMigratingStorage(
   collections: CollectionsDef,
   storage: StorageDriver,
+  logger?: InternalLogger,
 ): StorageDriver {
   const definitionFor = (collection: string): CollectionDefinition => {
     const definition = collections[collection];
@@ -45,7 +47,7 @@ export function createMigratingStorage(
     async get(collection, id) {
       const stored = await storage.get(collection, id);
       if (!stored) return null;
-      return migrateDocument(definitionFor(collection), storage, collection, stored);
+      return migrateDocument(definitionFor(collection), storage, collection, stored, logger);
     },
     async put(collection, document) {
       const definition = definitionFor(collection);
@@ -59,13 +61,15 @@ export function createMigratingStorage(
       return storage.list(collection, options, {
         currentVersion: currentVersion(definition),
         transform: async (stored) => {
-          const migrated = await migrateDocument(definition, storage, collection, stored);
+          const migrated = await migrateDocument(definition, storage, collection, stored, logger);
           return plan ? plan.transform(migrated) : migrated;
         },
       });
     },
     transaction(callback) {
-      return storage.transaction((scoped) => callback(createMigratingStorage(collections, scoped)));
+      return storage.transaction((scoped) =>
+        callback(createMigratingStorage(collections, scoped, logger)),
+      );
     },
   };
 }
@@ -75,6 +79,7 @@ async function migrateDocument(
   storage: StorageDriver,
   collection: string,
   stored: StoredDocument,
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const migrations = definition.migrations;
   const base = migrations?.base ?? 0;
@@ -114,7 +119,7 @@ async function migrateDocument(
     }
   }
 
-  const parsed = await parseSchema(definition.schema, data);
+  const parsed = await parseSchema(definition.schema, data, logger);
   assertJsonObject(parsed, {
     subject: "Collection document",
     error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),

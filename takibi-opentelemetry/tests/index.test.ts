@@ -247,6 +247,7 @@ test("runtime boundary contains only the OTel API and Takibi instrumentation", (
   expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
   expect(Object.keys(pkg.peerDependencies ?? {}).sort()).toEqual([
     "@opentelemetry/api",
+    "@opentelemetry/api-logs",
     "@takibi/takibi",
   ]);
   expect(runtimeImports).toEqual(["@opentelemetry/api", "@takibi/takibi/instrumentation"]);

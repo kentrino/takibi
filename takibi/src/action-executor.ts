@@ -2,6 +2,7 @@ import { ActionRegistry, type ActionGateContext } from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
+import { withLoggedSpan, type InternalLogger } from "./logging";
 import { actionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import {
   allows,
@@ -11,7 +12,6 @@ import {
   isContextPolicy,
 } from "./policy";
 import { parseSchema } from "./schema";
-import { withSpan } from "./tracing";
 import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
 
 export type ActionInvocation = {
@@ -32,6 +32,7 @@ export async function executeAction<TCtx extends object>(
   storage: StorageDriver,
   ctx: TCtx,
   invocation: ActionInvocation,
+  logger?: InternalLogger,
 ): Promise<JsonValue> {
   const registered = registry.get(invocation.scope, invocation.name);
   if (!registered) {
@@ -47,8 +48,14 @@ export async function executeAction<TCtx extends object>(
     permission: definition.permission,
   };
   const spanAttributes = actionSpanAttributes(invocation.name, invocation.scope);
-  await withSpan(
+  await withLoggedSpan(
+    logger,
     { name: TAKIBI_SPAN.policy, kind: "internal", attributes: spanAttributes },
+    {
+      event: "takibi.policy",
+      ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
+      operation: invocation.name,
+    },
     async () => {
       const grant = isAccessGrant(definition.policy)
         ? definition.policy
@@ -74,7 +81,11 @@ export async function executeAction<TCtx extends object>(
   const hasInput = Object.prototype.hasOwnProperty.call(invocation, "input");
   let input: unknown;
   if (definition.inputSchema) {
-    input = await parseSchema(definition.inputSchema, hasInput ? invocation.input : undefined);
+    input = await parseSchema(
+      definition.inputSchema,
+      hasInput ? invocation.input : undefined,
+      logger,
+    );
   } else {
     if (hasInput) {
       throw new BadRequestError(`Action does not accept input: ${invocation.name}`);
@@ -83,8 +94,8 @@ export async function executeAction<TCtx extends object>(
   }
 
   const runHandler = async (scopedStorage: StorageDriver): Promise<JsonValue> => {
-    const policyCollections = createPolicyCollections(collections, scopedStorage, ctx);
-    const trustedCollections = createTrustedCollections(collections, scopedStorage);
+    const policyCollections = createPolicyCollections(collections, scopedStorage, ctx, logger);
+    const trustedCollections = createTrustedCollections(collections, scopedStorage, logger);
     const args =
       invocation.scope === "$"
         ? {
@@ -104,8 +115,14 @@ export async function executeAction<TCtx extends object>(
       throw new NotFoundError(`Unknown collection: ${invocation.scope}`);
     }
 
-    const output = await withSpan(
+    const output = await withLoggedSpan(
+      logger,
       { name: TAKIBI_SPAN.action, kind: "internal", attributes: spanAttributes },
+      {
+        event: "takibi.action",
+        ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
+        operation: invocation.name,
+      },
       async () => definition.handler(args),
     );
     if (output === undefined) return null;

@@ -24,6 +24,14 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
+import {
+  emitFailure,
+  loggedStorage,
+  resolveLogging,
+  withLoggedSpan,
+  type InternalLogger,
+  type LoggingOptions,
+} from "./logging";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
@@ -46,7 +54,6 @@ import {
   internalTracerKey,
   resolveTracer,
   tracedStorage,
-  withSpan,
   type SpanContext,
   type TakibiTracer,
 } from "./tracing";
@@ -109,9 +116,9 @@ export type ContextConfig<TCtx extends object, TInitial = Record<string, never>>
   resolve: ContextResolver<TCtx, TInitial>;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
   stub?: ContextStubResolver<TCtx, TInitial>;
-};
+} & LoggingOptions;
 
-export type CollectionsOptions = {
+export type CollectionsOptions = LoggingOptions & {
   /** In-memory mode for tests / demos (skips Durable Object). */
   memory?: boolean;
 };
@@ -167,10 +174,12 @@ export type TakibiBrand<
    * Fork a handler for tests: same collections / actions, new memory store,
    * optional `resolve` override. The original handler is unchanged.
    */
-  with(options: {
-    memory: true;
-    resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
-  }): TakibiHandler<TCtx, TCollections, TInitial, TRootActions>;
+  with(
+    options: LoggingOptions & {
+      memory: true;
+      resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
+    },
+  ): TakibiHandler<TCtx, TCollections, TInitial, TRootActions>;
 };
 
 export type TakibiHandler<
@@ -249,6 +258,8 @@ type CreateContextFn<TInitial> = <R extends object | Promise<object>>(config: {
   resolve: (input: ContextResolverInput<TInitial>) => R;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
   stub?: ContextStubResolver<Awaited<R>, TInitial>;
+  logger?: LoggingOptions["logger"];
+  logLevel?: LoggingOptions["logLevel"];
 }) => CreateContextBuilder<Awaited<R>, TInitial>;
 
 /**
@@ -277,6 +288,7 @@ function buildContext<TInitial>(
   config: ContextConfig<object, TInitial>,
 ): CreateContextBuilder<object, TInitial> {
   const { resolve, stub: resolveStub } = config;
+  const defaults = mergeLoggingOptions({}, config);
 
   return {
     policy: createPolicyHelper(),
@@ -328,7 +340,7 @@ function buildContext<TInitial>(
         collectionNames,
         resolve,
         resolveStub,
-        options,
+        options: { ...defaults, ...options },
       });
     },
   };
@@ -345,9 +357,17 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   const { collections, registry, collectionNames, resolve, resolveStub, options } = args;
   const memory = options.memory ?? false;
   const app = new Hono<{ Bindings: Record<string, unknown> }>();
+  const logger = resolveLogging(options);
 
-  const memoryDriver = memory ? createMigratingStorage(collections, createMemoryStorage()) : null;
-  const memoryReady = memoryDriver ? seedCollections(collections, memoryDriver) : Promise.resolve();
+  const memoryDriver = memory
+    ? applyStorageLogging(
+        createMigratingStorage(collections, createMemoryStorage(), logger),
+        logger,
+      )
+    : null;
+  const memoryReady = memoryDriver
+    ? seedCollections(collections, memoryDriver, logger)
+    : Promise.resolve();
 
   const run = async (
     request: Request,
@@ -360,25 +380,32 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         await memoryReady;
         const input = { request, context: initial as TInitial };
         let resolveSpan: SpanContext | undefined;
-        const ctx = await withSpan({ name: TAKIBI_SPAN.resolve, kind: "internal" }, async () => {
-          resolveSpan = activeSpanContext();
-          const resolved = await resolve(input);
-          assertSerializableContext(resolved);
-          return resolved;
-        });
+        const ctx = await withLoggedSpan(
+          logger,
+          { name: TAKIBI_SPAN.resolve, kind: "internal" },
+          { event: "takibi.resolve" },
+          async () => {
+            resolveSpan = activeSpanContext();
+            const resolved = await resolve(input);
+            assertSerializableContext(resolved);
+            return resolved;
+          },
+        );
 
         if (memoryDriver) {
           const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
-          const data = await withSpan(
+          const data = await withLoggedSpan(
+            logger,
             {
               name: TAKIBI_SPAN.executor,
               kind: "internal",
               attributes: invocationSpanAttributes(invocation),
             },
+            { event: "takibi.executor", ...debugInvocationFields(invocation) },
             () =>
               invocation.kind === "action"
-                ? executeAction(registry, collections, driver, ctx, invocation)
-                : executeOperation(collections, driver, ctx, invocation),
+                ? executeAction(registry, collections, driver, ctx, invocation, logger)
+                : executeOperation(collections, driver, ctx, invocation, logger),
             resolveSpan,
           );
           return Response.json({ ok: true, data } satisfies WireResponse);
@@ -406,12 +433,14 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
           context: ctx,
         };
 
-        const json = await withSpan(
+        const json = await withLoggedSpan(
+          logger,
           {
             name: TAKIBI_SPAN.wire,
             kind: "client",
             attributes: invocationSpanAttributes(invocation),
           },
+          { event: "takibi.wire", ...debugInvocationFields(invocation) },
           async () => {
             const headers = new Headers({ "content-type": "application/json" });
             injectTraceparent(headers);
@@ -436,7 +465,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         );
         return Response.json(json, { status: json.ok ? 200 : json.error.status });
       } catch (err) {
-        return Response.json(toWireError(err), { status: statusOf(err) });
+        return errorResponse(err, logger, invocation);
       }
     };
     return tracer ? bindTracer(tracer, execute) : execute();
@@ -447,18 +476,35 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     initial: unknown,
     decode: () => Promise<PublicRequest>,
   ): Promise<Response> => {
+    let invocation: PublicRequest | undefined;
     try {
-      const op = await decode();
-      return await run(request, initial, op);
+      invocation = await decode();
+      const startedAt = performance.now();
+      logger?.emit({
+        level: "info",
+        event: "takibi.request",
+        message: "started",
+        ...invocationFields(invocation),
+      });
+      const response = await run(request, initial, invocation);
+      logger?.emit({
+        level: "info",
+        event: "takibi.request",
+        message: "completed",
+        ...invocationFields(invocation),
+        durationMs: performance.now() - startedAt,
+        status: response.status,
+      });
+      return response;
     } catch (err) {
-      return Response.json(toWireError(err), { status: statusOf(err) });
+      return errorResponse(err, logger, invocation);
     }
   };
 
   const mountPublicRoute = (path: string, extra = false) => {
     app.all(path, async (c) => {
       const response = extra
-        ? Response.json(toWireError(new NotFoundError()), { status: 404 })
+        ? errorResponse(new NotFoundError(), logger)
         : await serveDecoded(c.req.raw, {}, () =>
             decodePublicRoute(
               c.req.method,
@@ -482,7 +528,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     return c.newResponse(response.body, response);
   });
 
-  const DurableObjectClass = createDurableObjectClass(collections, registry, options);
+  const DurableObjectClass = createDurableObjectClass(collections, registry, options, logger);
 
   const rootActions = Object.create(null) as ActionDefinitions;
   const handler = app as TakibiHandler<object, TCollections, TInitial>;
@@ -520,13 +566,18 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     );
     return { matched: true, response };
   };
-  handler.with = ((withOptions: { memory: true; resolve?: ContextResolver<object, TInitial> }) =>
+  handler.with = ((
+    withOptions: LoggingOptions & {
+      memory: true;
+      resolve?: ContextResolver<object, TInitial>;
+    },
+  ) =>
     assembleHandler({
       collections,
       registry: registry.clone(),
       collectionNames,
       resolve: withOptions.resolve ?? resolve,
-      options: { ...options, memory: true },
+      options: { ...mergeLoggingOptions(options, withOptions), memory: true },
     })) as typeof handler.with;
   return handler;
 }
@@ -535,6 +586,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
   collections: TCollections,
   registry: ActionRegistry,
   options: InternalCollectionsOptions,
+  logger: InternalLogger | undefined,
 ) {
   return class TakibiTenantObject implements DurableObject {
     readonly #state: DurableObjectState;
@@ -544,42 +596,59 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
 
     constructor(state: DurableObjectState, _env: unknown) {
       this.#state = state;
-      this.#driver = createMigratingStorage(collections, createDurableObjectStorage(state.storage));
-      this.#ready = state.blockConcurrencyWhile(() => seedCollections(collections, this.#driver));
+      this.#driver = applyStorageLogging(
+        createMigratingStorage(collections, createDurableObjectStorage(state.storage), logger),
+        logger,
+      );
+      this.#ready = state.blockConcurrencyWhile(() =>
+        seedCollections(collections, this.#driver, logger),
+      );
       this.$collections = createTrustedCollections(
         collections,
         afterInitialization(this.#driver, this.#ready),
+        logger,
       );
     }
 
     async fetch(request: Request): Promise<Response> {
       const tracer = resolveTracer(options);
       const execute = async (): Promise<Response> => {
+        let invocation: PublicRequest | undefined;
         try {
           const body = decodeWireRequest(await request.json());
-          const { context, ...invocation } = body;
+          const { context, ...decodedInvocation } = body;
+          invocation = decodedInvocation;
           assertTenantMatchesDurableObjectName(this.#state.id.name, context);
           await this.#ready;
           const ctx = context;
           const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
           const extracted = extractTraceContext(request.headers);
           const executeWithSpan = () =>
-            withSpan(
+            withLoggedSpan(
+              logger,
               {
                 name: TAKIBI_SPAN.executor,
                 kind: "server",
-                attributes: invocationSpanAttributes(invocation),
+                attributes: invocationSpanAttributes(decodedInvocation),
               },
+              { event: "takibi.executor", ...debugInvocationFields(decodedInvocation) },
               () =>
-                invocation.kind === "action"
+                decodedInvocation.kind === "action"
                   ? executeAction(
                       registry,
                       collections,
                       driver,
                       ctx,
-                      invocation as ActionInvocation,
+                      decodedInvocation as ActionInvocation,
+                      logger,
                     )
-                  : executeOperation(collections, driver, ctx, invocation as ExecuteRequest),
+                  : executeOperation(
+                      collections,
+                      driver,
+                      ctx,
+                      decodedInvocation as ExecuteRequest,
+                      logger,
+                    ),
               extracted?.span,
             );
           const data = await (extracted
@@ -587,8 +656,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
             : executeWithSpan());
           return Response.json({ ok: true, data } satisfies WireResponse);
         } catch (err) {
-          const wire = toWireError(err);
-          return Response.json(wire, { status: wire.error.status });
+          return errorResponse(err, logger, invocation);
         }
       };
       return tracer ? bindTracer(tracer, execute) : execute();
@@ -599,6 +667,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
 async function seedCollections(
   collections: Record<string, CollectionDefinition>,
   driver: StorageDriver,
+  logger?: InternalLogger,
 ): Promise<void> {
   for (const [collection, definition] of Object.entries(collections)) {
     if (!definition.seed) continue;
@@ -606,7 +675,7 @@ async function seedCollections(
     const documents = await definition.seed();
     for (const [id, data] of Object.entries(documents)) {
       if (await driver.get(collection, id)) continue;
-      await storageAdd(definition, driver, collection, data, { id });
+      await storageAdd(definition, driver, collection, data, { id }, logger);
     }
   }
 }
@@ -643,6 +712,62 @@ function assertTenantMatchesDurableObjectName(
   if (typeof name === "string" && name.length > 0 && name !== context.tenantId) {
     throw new ForbiddenError("Tenant mismatch");
   }
+}
+
+function applyStorageLogging(
+  driver: StorageDriver,
+  logger: InternalLogger | undefined,
+): StorageDriver {
+  return logger ? loggedStorage(driver, logger) : driver;
+}
+
+function mergeLoggingOptions(base: LoggingOptions, override: LoggingOptions): LoggingOptions {
+  const merged = { ...base };
+  if (Object.prototype.hasOwnProperty.call(override, "logger")) {
+    merged.logger = override.logger;
+  }
+  if (Object.prototype.hasOwnProperty.call(override, "logLevel")) {
+    merged.logLevel = override.logLevel;
+  }
+  return merged;
+}
+
+function invocationFields(invocation: PublicRequest): {
+  collection?: string;
+  operation: string;
+  documentId?: string;
+} {
+  return invocation.kind === "action"
+    ? {
+        ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
+        operation: invocation.name,
+      }
+    : {
+        collection: invocation.collection,
+        operation: invocation.operation,
+        ...(invocation.id === undefined ? {} : { documentId: invocation.id }),
+      };
+}
+
+function debugInvocationFields(invocation: PublicRequest): ReturnType<typeof invocationFields> & {
+  query?: NonNullable<ExecuteRequest["list"]>["where"];
+} {
+  return {
+    ...invocationFields(invocation),
+    ...(invocation.kind === "collection" && invocation.list?.where !== undefined
+      ? { query: invocation.list.where }
+      : {}),
+  };
+}
+
+function errorResponse(
+  error: unknown,
+  logger: InternalLogger | undefined,
+  invocation?: PublicRequest,
+): Response {
+  const wire = toWireError(error);
+  emitFailure(logger, wire.error, invocation === undefined ? {} : invocationFields(invocation));
+  return Response.json(wire, { status: statusOf(error) });
 }
 
 function toWireError(err: unknown): WireFailure {
