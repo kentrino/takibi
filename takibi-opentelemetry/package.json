@@ -1,13 +1,43 @@
 {
   "name": "@takibi/takibi-opentelemetry",
   "version": "0.0.0",
-  "private": true,
   "description": "OpenTelemetry integration for @takibi/takibi.",
+  "keywords": [
+    "cloudflare",
+    "opentelemetry",
+    "takibi",
+    "tracing"
+  ],
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/takibi-opentelemetry",
+  "bugs": {
+    "url": "https://github.com/kentrino/takibi/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentrino/takibi.git",
+    "directory": "packages/takibi-opentelemetry"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",
@@ -32,5 +62,8 @@
   "peerDependencies": {
     "@opentelemetry/api": "^1.9.0",
     "@takibi/takibi": "workspace:^"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }
