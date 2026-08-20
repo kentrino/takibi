@@ -33,7 +33,6 @@ export type TakibiTracer = {
   startSpan(name: string, parent?: SpanContext): TakibiSpan;
   inject(headers: Headers, span: SpanContext): void;
   extract(headers: Headers): SpanContext | undefined;
-  forceFlush(): Promise<void>;
 };
 
 type TracingStore = {
@@ -161,11 +160,8 @@ export function tracedStorage(driver: StorageDriver): StorageDriver {
 export function createRecordingTracer(): {
   tracer: TakibiTracer;
   spans: RecordedSpan[];
-  didFlush: boolean;
-  forceFlush(): Promise<void>;
 } {
   const spans: RecordedSpan[] = [];
-  const state = { didFlush: false };
   const tracer: TakibiTracer = {
     startSpan(name, parent) {
       const context: SpanContext = {
@@ -203,18 +199,8 @@ export function createRecordingTracer(): {
       if (span.traceState) headers.set("tracestate", span.traceState);
     },
     extract: extractW3cSpanContext,
-    async forceFlush() {
-      state.didFlush = true;
-    },
   };
-  return {
-    tracer,
-    spans,
-    get didFlush() {
-      return state.didFlush;
-    },
-    forceFlush: () => tracer.forceFlush(),
-  };
+  return { tracer, spans };
 }
 
 function randomHex(bytes: number): string {

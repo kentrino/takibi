@@ -9,7 +9,6 @@ import {
   type SpanContext as OtelSpanContext,
   type TextMapGetter,
   type TextMapSetter,
-  type TracerProvider,
 } from "@opentelemetry/api";
 import {
   registerGlobalTracer,
@@ -79,12 +78,6 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
       const span = trace.getSpanContext(context);
       return span ? fromOtelSpanContext(span) : undefined;
     },
-    async forceFlush() {
-      const provider = unwrapTracerProvider(trace.getTracerProvider());
-      if (typeof provider.forceFlush === "function") {
-        await provider.forceFlush();
-      }
-    },
   };
 }
 
@@ -119,13 +112,4 @@ function fromOtelSpanContext(context: OtelSpanContext): SpanContext {
     ...(traceState ? { traceState } : {}),
     ...(context.isRemote === undefined ? {} : { isRemote: context.isRemote }),
   };
-}
-
-function unwrapTracerProvider(provider: TracerProvider): TracerProvider & {
-  forceFlush?: () => Promise<void>;
-} {
-  if ("getDelegate" in provider && typeof provider.getDelegate === "function") {
-    return provider.getDelegate() as TracerProvider & { forceFlush?: () => Promise<void> };
-  }
-  return provider;
 }

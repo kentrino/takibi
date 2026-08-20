@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { expect, test } from "vite-plus/test";
 import { createTakibi, fullAccess } from "@takibi/takibi";
 import { z } from "zod";
-import { flushAndReadSpans, type ExportedSpan } from "./worker";
+import { flushOwnedProviderAndReadSpans, type FlushedSpans } from "./worker";
 
 test("integration propagates OTel spans through a real Durable Object namespace", async () => {
   const handler = createTakibi()({
@@ -22,15 +22,21 @@ test("integration propagates OTel spans through a real Durable Object namespace"
   });
   expect(response.status).toBe(200);
 
-  const workerSpans = await flushAndReadSpans();
+  const workerFlush = await flushOwnedProviderAndReadSpans("worker");
+  expect(workerFlush.owner).toBe("worker");
+  expect(workerFlush.flushCount).toBe(1);
+  const workerSpans = workerFlush.spans;
   expect(workerSpans.map(({ name }) => name)).toEqual(
     expect.arrayContaining(["takibi.resolve", "takibi.wire"]),
   );
 
   const object = env.TAKIBI_TRACING_TEST.getByName("tenant-a");
-  const objectSpans = await (
+  const objectFlush = await (
     await object.fetch(new Request("https://takibi.test/__test/exported-spans"))
-  ).json<ExportedSpan[]>();
+  ).json<FlushedSpans>();
+  expect(objectFlush.owner).toBe("durable-object");
+  expect(objectFlush.flushCount).toBeGreaterThanOrEqual(1);
+  const objectSpans = objectFlush.spans;
   expect(objectSpans.map(({ name }) => name)).toEqual(
     expect.arrayContaining(["takibi.executor", "takibi.storage"]),
   );

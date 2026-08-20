@@ -87,6 +87,7 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
   expect(response.status).toBe(200);
 
   const tracer = createOtelTakibiTracer();
+  expectTypeOf(tracer).not.toHaveProperty("forceFlush");
   const parent = {
     traceId: "11111111111111111111111111111111",
     spanId: "2222222222222222",
@@ -124,7 +125,7 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
   expect(unsampledHeaders.get("tracestate")).toBe("vendor=unsampled");
   unsampled.end();
 
-  await tracer.forceFlush();
+  await provider.forceFlush();
   expect(exporter.getFinishedSpans().map(({ name }) => name)).toEqual(
     expect.arrayContaining(["takibi.resolve", "takibi.storage", "takibi.integration", "nested"]),
   );
@@ -137,9 +138,12 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
 
 test("package README documents setup and isolate-local flushing", () => {
   const readme = readFileSync(join(import.meta.dirname, "../README.md"), "utf8");
+  const source = readFileSync(join(import.meta.dirname, "../src/index.ts"), "utf8");
   expect(readme).toContain('from "@takibi/takibi-opentelemetry"');
   expect(readme).toContain("TakibiInstrumentation");
   expect(readme).toContain("createOtelTakibiTracer");
-  expect(readme).toContain("waitUntil(createOtelTakibiTracer().forceFlush())");
-  expect(readme).toContain("only the provider in the calling Worker isolate");
+  expect(readme).toContain("waitUntil(provider.forceFlush())");
+  expect(readme).toContain("only the provider owned by the calling");
+  expect(source).not.toMatch(/forceFlush|getDelegate|TracerProvider/);
+  expect(source).not.toMatch(/@opentelemetry\/sdk|SpanProcessor|SpanExporter/);
 });

@@ -80,6 +80,10 @@ function createDeferred<T = void>(): {
 
 test("A baseline records no internal spans", async () => {
   const recording = createRecordingTracer();
+  expectTypeOf(recording.tracer).not.toHaveProperty("forceFlush");
+  expectTypeOf(recording).not.toHaveProperty("forceFlush");
+  expect(recording.tracer).not.toHaveProperty("forceFlush");
+  expect(recording).not.toHaveProperty("forceFlush");
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
   }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });

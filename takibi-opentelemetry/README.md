@@ -14,7 +14,8 @@ policy, schema, storage, and actions. It does not change the public types of
 collections, handlers, or clients.
 
 ```ts
-import { createOtelTakibiTracer, TakibiInstrumentation } from "@takibi/takibi-opentelemetry";
+import { TakibiInstrumentation } from "@takibi/takibi-opentelemetry";
+import { provider } from "./telemetry.server";
 
 const instrumentation = new TakibiInstrumentation();
 instrumentation.enable();
@@ -22,21 +23,26 @@ instrumentation.enable();
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const response = await app.fetch(request, env, ctx);
-    ctx.waitUntil(createOtelTakibiTracer().forceFlush());
+    ctx.waitUntil(provider.forceFlush());
     return response;
   },
 };
 ```
+
+The application must retain the SDK provider it configured. The
+`createOtelTakibiTracer()` adapter binds tracing APIs only; it does not discover
+or flush a provider.
 
 The core `@takibi/takibi` import does not require `nodejs_als`,
 `nodejs_compat`, or a minimum compatibility date. This integration delegates
 async context to the OpenTelemetry context manager you register; apply that
 context manager's runtime compatibility requirements separately.
 
-`forceFlush()` affects only the provider in the calling Worker isolate. A
-Durable Object runs in a separate isolate with its own provider, so this
-`waitUntil` does not flush spans buffered there. Configure and enable tracing in
-every isolate that emits spans.
+Calling `provider.forceFlush()` affects only the provider owned by the calling
+Worker isolate. A Durable Object runs in a separate isolate with its own
+provider, so this `waitUntil` does not flush spans buffered there. Configure,
+retain, flush, and enable tracing independently in every isolate that emits
+spans.
 
 Takibi ends Durable Object spans when their work completes, then leaves export
 to the registered processor and exporter. It does not guarantee export before a
