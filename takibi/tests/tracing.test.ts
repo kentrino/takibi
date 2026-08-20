@@ -23,7 +23,7 @@ import type { WireResponse } from "../src/protocol";
  * - B (global-only) maintains Worker → DO → executor → storage parentage and shared traceId.
  * - C (internal tracer option) still matches B. A (no adapter) produces no internal spans.
  * - `takibi.resolve` is limited to resolve(); wire/executor start after it ends.
- * - `@takibi/takibi/otel` adapts a real provider; root import stays OTel-free.
+ * - a separate integration package adapts real providers; root import stays OTel-free.
  * - Discard conditions: none matched. No public CollectionsOptions.tracer or lifecycle hook.
  */
 const Post = z.object({ title: z.string().min(1) });
@@ -611,17 +611,15 @@ test("tracing presence does not change collections, handler, or client inference
   );
 });
 
-test("OTel and tracing helpers stay off the public root", () => {
+test("instrumentation contract stays off the public root", () => {
   const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
     peerDependencies?: Record<string, string>;
-    peerDependenciesMeta?: Record<string, { optional?: boolean }>;
     exports?: Record<string, string>;
   };
   expect(JSON.stringify(pkg.dependencies ?? {})).not.toMatch(/opentelemetry/);
-  expect(pkg.peerDependencies?.["@opentelemetry/api"]).toBeDefined();
-  expect(pkg.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).toBe(true);
-  expect(pkg.exports?.["./otel"]).toBe("./src/otel.ts");
+  expect(JSON.stringify(pkg.peerDependencies ?? {})).not.toMatch(/opentelemetry/);
+  expect(pkg.exports?.["./instrumentation"]).toBe("./src/instrumentation.ts");
 
   type PublicModule = typeof import("../src/index");
   type Hidden =

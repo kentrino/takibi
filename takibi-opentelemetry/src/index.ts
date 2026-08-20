@@ -17,7 +17,7 @@ import {
   type SpanContext,
   type TakibiTracer,
   type TracingContextBackend,
-} from "./tracing";
+} from "@takibi/takibi/instrumentation";
 
 const tracingStoreKey = createContextKey("takibi.tracing-store");
 const otelContextBackend: TracingContextBackend = {

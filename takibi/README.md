@@ -3,8 +3,9 @@
 Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
 The official public API is `createTakibi`, policy helpers, and errors on
-`@takibi/takibi`, `createClient` on `@takibi/takibi/client`, and optional
-`@takibi/takibi/otel`. Lower-level assembly pieces are unpublished.
+`@takibi/takibi` and `createClient` on `@takibi/takibi/client`.
+OpenTelemetry support is distributed separately as
+`@takibi/takibi-opentelemetry`.
 
 ## AuthN vs AuthZ
 
@@ -611,22 +612,16 @@ Notes:
   The object name is that `tenantId`; prefixed names are not supported.
   `fetch` on the class is stub-only — do not route public HTTP to it.
 - The root `@takibi/takibi` import does not require `nodejs_als`,
-  `nodejs_compat`, or a minimum compatibility date. The opt-in `./otel` entry
-  delegates async context to the OpenTelemetry context manager you register;
-  apply that context manager's runtime compatibility requirements separately.
+  `nodejs_compat`, or a minimum compatibility date.
 
 ## Observability
 
-Enable OpenTelemetry spans from `@takibi/takibi/otel` at module scope. The
-root package does not depend on `@opentelemetry/api`; install it when you import
-`./otel`. Register your tracer provider and an OpenTelemetry context manager
-before `enable()` so instrumentation started inside Takibi spans inherits their
-active context. Flush stays application-owned.
-
-`enable()` instruments `resolve`, Worker → Durable Object wire, executor, policy,
-schema, storage, and actions. Do not pass a tracer into `collections()`, and do
-not add lifecycle hooks. Call `enable()` once per isolate before handling
-requests.
+Install `@takibi/takibi-opentelemetry` to enable OpenTelemetry spans for
+`resolve`, Worker → Durable Object wire, executor, policy, schema, storage, and
+actions. The integration package owns its OpenTelemetry peer dependency,
+runtime adapter, setup documentation, and tests; the core package has no
+OpenTelemetry dependency. See that package's README for provider, context
+manager, and flushing setup.
 
 `takibi.wire` is a transport span. It covers the Durable Object fetch, full
 response-body read, JSON decoding, and wire-envelope validation. Fetch or body
@@ -635,38 +630,6 @@ envelope, including one received with a non-2xx status, is a successfully
 received remote-operation result and leaves the wire span successful; the
 Durable Object's executor, policy, schema, storage, or action span records that
 operation failure.
-
-```ts
-import { createOtelTakibiTracer, TakibiInstrumentation } from "@takibi/takibi/otel";
-
-const instrumentation = new TakibiInstrumentation();
-instrumentation.enable();
-
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const response = await app.fetch(request, env, ctx);
-    ctx.waitUntil(createOtelTakibiTracer().forceFlush());
-    return response;
-  },
-};
-```
-
-`forceFlush()` affects only the provider in the calling Worker isolate. A
-Durable Object runs in a separate isolate with its own provider, so this
-`waitUntil` does not flush spans buffered there. Configure and enable tracing in
-every isolate that emits spans.
-
-Takibi ends Durable Object spans when their work completes, then leaves export
-to the registered processor and exporter. It does not guarantee export before a
-Durable Object response completes. In particular, `BatchSpanProcessor` exports
-on its configured schedule while the isolate remains alive; deployment, runtime
-shutdown, or a crash can discard buffered spans. Takibi does not install a
-Durable Object shutdown hook or offer request-scoped delivery. Choose processor,
-exporter, and scheduling settings according to that best-effort delivery
-semantic.
-
-Use `enable()` / `disable()` directly. Do not wrap takibi in
-`registerInstrumentations()`.
 
 ## Limits and layout
 

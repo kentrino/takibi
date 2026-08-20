@@ -2,11 +2,6 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   pack: {
-    entry: {
-      index: "src/index.ts",
-      client: "src/client-entry.ts",
-      instrumentation: "src/instrumentation.ts",
-    },
     dts: {
       tsgo: true,
     },

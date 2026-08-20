@@ -32,7 +32,7 @@ const forbiddenClientModules = [
   "schema.ts",
   "executor.ts",
   "storage.ts",
-  "otel.ts",
+  "instrumentation.ts",
 ] as const;
 
 function stripComments(source: string): string {
