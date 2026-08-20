@@ -624,6 +624,14 @@ schema, storage, and actions. Do not pass a tracer into `collections()`, and do
 not add lifecycle hooks. Call `enable()` once per isolate before handling
 requests.
 
+`takibi.wire` is a transport span. It covers the Durable Object fetch, full
+response-body read, JSON decoding, and wire-envelope validation. Fetch or body
+failures and malformed responses mark it as an error. A valid `{ ok: false }`
+envelope, including one received with a non-2xx status, is a successfully
+received remote-operation result and leaves the wire span successful; the
+Durable Object's executor, policy, schema, storage, or action span records that
+operation failure.
+
 ```ts
 import { createOtelTakibiTracer, TakibiInstrumentation } from "@takibi/takibi/otel";
 

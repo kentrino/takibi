@@ -397,6 +397,142 @@ test("injected failures record error on the failed interval and still end", asyn
   }
 });
 
+test("wire span covers response consumption and validates the transport envelope", async () => {
+  const cases = [
+    {
+      name: "malformed JSON",
+      response: () => new Response("{", { headers: { "content-type": "application/json" } }),
+    },
+    {
+      name: "rejected body",
+      response: () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("body-failed"));
+            },
+          }),
+        ),
+    },
+    {
+      name: "malformed envelope",
+      response: () => Response.json({ unexpected: true }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    const recording = createRecordingTracer();
+    const handler = createTakibi()({
+      resolve: () => ({ tenantId: "t" }),
+      stub: () =>
+        ({
+          fetch: async () => testCase.response(),
+        }) as unknown as DurableObjectStub,
+    }).collections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { [internalTracerKey]: recording.tracer },
+    );
+
+    const response = await handler.request("http://fire.test/posts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "n" }),
+    });
+    expect(response.status, testCase.name).toBe(500);
+    expect(spanNamed(recording.spans, "takibi.wire"), testCase.name).toMatchObject({
+      status: "error",
+      ended: true,
+      endCount: 1,
+    });
+  }
+});
+
+test("wire span stays open through a delayed body", async () => {
+  const recording = createRecordingTracer();
+  const releaseBody = createDeferred();
+  const bodyStarted = createDeferred();
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "t" }),
+    stub: () =>
+      ({
+        fetch: async () =>
+          new Response(
+            new ReadableStream({
+              async start(controller) {
+                bodyStarted.resolve();
+                await releaseBody.promise;
+                controller.enqueue(
+                  new TextEncoder().encode(JSON.stringify({ ok: true, data: { id: "p1" } })),
+                );
+                controller.close();
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      }) as unknown as DurableObjectStub,
+  }).collections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { [internalTracerKey]: recording.tracer },
+  );
+
+  const responsePromise = handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "n" }),
+  });
+  await bodyStarted.promise;
+  expect(spanNamed(recording.spans, "takibi.wire").ended).toBe(false);
+  releaseBody.resolve();
+  expect((await responsePromise).status).toBe(200);
+  expect(spanNamed(recording.spans, "takibi.wire")).toMatchObject({
+    status: "ok",
+    ended: true,
+    endCount: 1,
+  });
+});
+
+test("wire span treats a valid non-2xx failure envelope as a received remote result", async () => {
+  const recording = createRecordingTracer();
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "t" }),
+    stub: () =>
+      ({
+        fetch: async () =>
+          Response.json(
+            {
+              ok: false,
+              error: {
+                kind: "operation",
+                code: "FORBIDDEN",
+                message: "Forbidden",
+                status: 403,
+              },
+            } satisfies WireResponse,
+            { status: 403 },
+          ),
+      }) as unknown as DurableObjectStub,
+  }).collections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { [internalTracerKey]: recording.tracer },
+  );
+
+  const response = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "n" }),
+  });
+  expect(response.status).toBe(403);
+  await expect(response.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN" },
+  });
+  expect(spanNamed(recording.spans, "takibi.wire")).toMatchObject({
+    status: "ok",
+    ended: true,
+    endCount: 1,
+  });
+});
+
 test("wire error conversion still identifies the failed interval", async () => {
   const recording = createRecordingTracer();
   const handler = createTakibi()({ resolve: () => ({ tenantId: "t" }) }).collections(

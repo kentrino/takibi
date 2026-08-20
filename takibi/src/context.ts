@@ -28,6 +28,7 @@ import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
   decodeWireRequest,
+  isWireResponse,
   type WireFailure,
   type WireRequest,
   type WireResponse,
@@ -400,22 +401,26 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
           context: ctx,
         };
 
-        const res = await withSpan(
+        const json = await withSpan(
           "takibi.wire",
           async () => {
             const headers = new Headers({ "content-type": "application/json" });
             injectTraceparent(headers);
-            return doStub.fetch(
+            const res = await doStub.fetch(
               new Request("https://takibi.internal/", {
                 method: "POST",
                 headers,
                 body: JSON.stringify(wire),
               }),
             );
+            const body: unknown = await res.json();
+            if (!isWireResponse(body)) {
+              throw new Error("Invalid response from Durable Object");
+            }
+            return body;
           },
           resolveSpan,
         );
-        const json = (await res.json()) as WireResponse;
         return Response.json(json, { status: json.ok ? 200 : json.error.status });
       } catch (err) {
         return Response.json(toWireError(err), { status: statusOf(err) });
