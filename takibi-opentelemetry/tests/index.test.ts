@@ -149,6 +149,9 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
   );
   expect(finished.map(({ name }) => name)).not.toContain("takibi.unsampled");
   const integration = finished.find(({ name }) => name === "takibi.integration");
+  const nested = finished.find(({ name }) => name === "nested");
+  expect(nested?.spanContext().traceId).toBe(integration?.spanContext().traceId);
+  expect(nested?.parentSpanContext?.spanId).toBe(integration?.spanContext().spanId);
   expect(integration).toMatchObject({
     kind: SpanKind.CLIENT,
     attributes: {
