@@ -68,23 +68,26 @@ export function createRecordingTracer(): {
       headers.set("traceparent", formatTraceparent(span));
       if (span.traceState) headers.set("tracestate", span.traceState);
     },
-    extract: extractW3cSpanContext,
+    extract: extractW3cTraceContext,
   };
   return { tracer, spans };
 }
 
-function extractW3cSpanContext(headers: Headers): SpanContext | undefined {
+function extractW3cTraceContext(headers: Headers): ReturnType<TakibiTracer["extract"]> {
   const value = headers.get("traceparent");
   if (!value) return undefined;
   const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(value);
   if (!match) return undefined;
   const traceState = headers.get("tracestate") ?? undefined;
   return {
-    traceId: match[1]!,
-    spanId: match[2]!,
-    traceFlags: Number.parseInt(match[3]!, 16),
-    ...(traceState ? { traceState } : {}),
-    isRemote: true,
+    span: {
+      traceId: match[1]!,
+      spanId: match[2]!,
+      traceFlags: Number.parseInt(match[3]!, 16),
+      ...(traceState ? { traceState } : {}),
+      isRemote: true,
+    },
+    runWithActiveContext: (fn) => fn(),
   };
 }
 

@@ -41,7 +41,7 @@ import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import {
   activeSpanContext,
   bindTracer,
-  extractSpanContext,
+  extractTraceContext,
   injectTraceparent,
   internalTracerKey,
   resolveTracer,
@@ -562,19 +562,29 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
           await this.#ready;
           const ctx = context;
           const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-          const parent = extractSpanContext(request.headers);
-          const data = await withSpan(
-            {
-              name: TAKIBI_SPAN.executor,
-              kind: "server",
-              attributes: invocationSpanAttributes(invocation),
-            },
-            () =>
-              invocation.kind === "action"
-                ? executeAction(registry, collections, driver, ctx, invocation as ActionInvocation)
-                : executeOperation(collections, driver, ctx, invocation as ExecuteRequest),
-            parent,
-          );
+          const extracted = extractTraceContext(request.headers);
+          const executeWithSpan = () =>
+            withSpan(
+              {
+                name: TAKIBI_SPAN.executor,
+                kind: "server",
+                attributes: invocationSpanAttributes(invocation),
+              },
+              () =>
+                invocation.kind === "action"
+                  ? executeAction(
+                      registry,
+                      collections,
+                      driver,
+                      ctx,
+                      invocation as ActionInvocation,
+                    )
+                  : executeOperation(collections, driver, ctx, invocation as ExecuteRequest),
+              extracted?.span,
+            );
+          const data = await (extracted
+            ? extracted.runWithActiveContext(executeWithSpan)
+            : executeWithSpan());
           return Response.json({ ok: true, data } satisfies WireResponse);
         } catch (err) {
           const wire = toWireError(err);

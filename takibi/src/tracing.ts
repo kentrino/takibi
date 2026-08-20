@@ -42,10 +42,15 @@ export type TakibiSpan = {
   end(): void;
 };
 
+export type ExtractedTraceContext = {
+  readonly span?: SpanContext;
+  runWithActiveContext<T>(fn: () => T): T;
+};
+
 export type TakibiTracer = {
   startSpan(spec: SpanSpec, parent?: SpanContext): TakibiSpan;
   inject(headers: Headers, span: SpanContext): void;
-  extract(headers: Headers): SpanContext | undefined;
+  extract(headers: Headers): ExtractedTraceContext | undefined;
 };
 
 type TracingStore = {
@@ -92,7 +97,7 @@ export function injectTraceparent(headers: Headers): void {
   store.tracer.inject(headers, store.span);
 }
 
-export function extractSpanContext(headers: Headers): SpanContext | undefined {
+export function extractTraceContext(headers: Headers): ExtractedTraceContext | undefined {
   const tracer = contextBackend?.getStore()?.tracer;
   if (!tracer) return undefined;
   return tracer.extract(headers);
