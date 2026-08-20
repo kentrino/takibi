@@ -3,7 +3,7 @@ import { SpanKind } from "@opentelemetry/api";
 import { expect, test } from "vite-plus/test";
 import { createTakibi, fullAccess } from "@takibi/takibi";
 import { z } from "zod";
-import { flushOwnedProviderAndReadSpans, type FlushedSpans } from "./worker";
+import { flushProviderAndReadSpans } from "./worker";
 
 test("integration propagates OTel spans through a real Durable Object namespace", async () => {
   const handler = createTakibi()({
@@ -23,28 +23,16 @@ test("integration propagates OTel spans through a real Durable Object namespace"
   });
   expect(response.status).toBe(200);
 
-  const workerFlush = await flushOwnedProviderAndReadSpans("worker");
-  expect(workerFlush.owner).toBe("worker");
-  expect(workerFlush.flushCount).toBe(1);
-  const workerSpans = workerFlush.spans;
-  expect(workerSpans.map(({ name }) => name)).toEqual(
-    expect.arrayContaining(["takibi.resolve", "takibi.wire"]),
+  // This pool loads the test and its Durable Object from one worker module graph, so it verifies
+  // cross-namespace propagation and parentage, not production isolate-local provider ownership.
+  const spans = await flushProviderAndReadSpans();
+  expect(spans.map(({ name }) => name)).toEqual(
+    expect.arrayContaining(["takibi.resolve", "takibi.wire", "takibi.executor", "takibi.storage"]),
   );
 
-  const object = env.TAKIBI_TRACING_TEST.getByName("tenant-a");
-  const objectFlush = await (
-    await object.fetch(new Request("https://takibi.test/__test/exported-spans"))
-  ).json<FlushedSpans>();
-  expect(objectFlush.owner).toBe("durable-object");
-  expect(objectFlush.flushCount).toBeGreaterThanOrEqual(1);
-  const objectSpans = objectFlush.spans;
-  expect(objectSpans.map(({ name }) => name)).toEqual(
-    expect.arrayContaining(["takibi.executor", "takibi.storage"]),
-  );
-
-  const wire = workerSpans.find(({ name }) => name === "takibi.wire");
-  const executor = objectSpans.find(({ name }) => name === "takibi.executor");
-  const storage = objectSpans.find(
+  const wire = spans.find(({ name }) => name === "takibi.wire");
+  const executor = spans.find(({ name }) => name === "takibi.executor");
+  const storage = spans.find(
     ({ name, attributes }) =>
       name === "takibi.storage" && attributes["takibi.storage.operation"] === "put",
   );

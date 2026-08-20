@@ -55,39 +55,25 @@ export type ExportedSpan = {
   parentSpanId?: string;
 };
 
-export type FlushedSpans = {
-  owner: "worker" | "durable-object";
-  flushCount: number;
-  spans: ExportedSpan[];
-};
-
 const exporter = new InMemorySpanExporter();
 const provider = new BasicTracerProvider({
   spanProcessors: [new SimpleSpanProcessor(exporter)],
 });
-let flushCount = 0;
 trace.setGlobalTracerProvider(provider);
 propagation.setGlobalPropagator(new W3CTraceContextPropagator());
 context.setGlobalContextManager(new AsyncLocalContextManager());
 new TakibiInstrumentation().enable();
 
-export async function flushOwnedProviderAndReadSpans(
-  owner: FlushedSpans["owner"],
-): Promise<FlushedSpans> {
+export async function flushProviderAndReadSpans(): Promise<ExportedSpan[]> {
   await provider.forceFlush();
-  flushCount += 1;
-  return {
-    owner,
-    flushCount,
-    spans: exporter.getFinishedSpans().map((span) => ({
-      name: span.name,
-      kind: span.kind,
-      attributes: span.attributes,
-      traceId: span.spanContext().traceId,
-      spanId: span.spanContext().spanId,
-      ...(span.parentSpanContext ? { parentSpanId: span.parentSpanContext.spanId } : {}),
-    })),
-  };
+  return exporter.getFinishedSpans().map((span) => ({
+    name: span.name,
+    kind: span.kind,
+    attributes: span.attributes,
+    traceId: span.spanContext().traceId,
+    spanId: span.spanContext().spanId,
+    ...(span.parentSpanContext ? { parentSpanId: span.parentSpanContext.spanId } : {}),
+  }));
 }
 
 const tracingHandler = createTakibi()({
@@ -99,14 +85,7 @@ const tracingHandler = createTakibi()({
   },
 });
 
-export class TracingTestObject extends tracingHandler.DurableObject {
-  override async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname === "/__test/exported-spans") {
-      return Response.json(await flushOwnedProviderAndReadSpans("durable-object"));
-    }
-    return super.fetch(request);
-  }
-}
+export class TracingTestObject extends tracingHandler.DurableObject {}
 
 declare global {
   namespace Cloudflare {
