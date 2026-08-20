@@ -158,6 +158,24 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
   expect(attributes).not.toContain("content-type");
 });
 
+test("global tracing registration uses a shared symbol-backed config", () => {
+  const recording = createRecordingTracer();
+  registerGlobalTracer(recording.tracer);
+
+  const config = (globalThis as Record<symbol, unknown>)[Symbol.for("takibi.tracingConfig")];
+  expect(config).toMatchObject({
+    tracer: recording.tracer,
+    contextBackend: expect.any(Object),
+  });
+
+  registerGlobalTracer(undefined);
+  expect((globalThis as Record<symbol, unknown>)[Symbol.for("takibi.tracingConfig")]).toMatchObject(
+    {
+      contextBackend: expect.any(Object),
+    },
+  );
+});
+
 test("B global registration matches C span names without collections options", async () => {
   const recording = createRecordingTracer();
   registerGlobalTracer(recording.tracer);

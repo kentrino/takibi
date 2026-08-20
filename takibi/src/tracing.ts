@@ -63,15 +63,32 @@ export type TracingContextBackend = {
   run<T>(store: TracingStore, fn: () => T): T;
 };
 
-let globalTracer: TakibiTracer | undefined;
-let contextBackend: TracingContextBackend | undefined;
+type TracingConfig = {
+  tracer?: TakibiTracer;
+  contextBackend?: TracingContextBackend;
+};
+
+const TRACING_CONFIG_SYMBOL = Symbol.for("takibi.tracingConfig");
+
+function getTracingConfig(): TracingConfig {
+  return (
+    ((globalThis as Record<symbol, unknown>)[TRACING_CONFIG_SYMBOL] as TracingConfig | undefined) ??
+    {}
+  );
+}
+
+function updateTracingConfig(update: Partial<TracingConfig>): void {
+  const config = { ...getTracingConfig(), ...update };
+  (globalThis as Record<symbol, unknown>)[TRACING_CONFIG_SYMBOL] =
+    config.tracer || config.contextBackend ? config : undefined;
+}
 
 export function registerGlobalTracer(tracer: TakibiTracer | undefined): void {
-  globalTracer = tracer;
+  updateTracingConfig({ tracer });
 }
 
 export function registerTracingContextBackend(backend: TracingContextBackend | undefined): void {
-  contextBackend = backend;
+  updateTracingConfig({ contextBackend: backend });
 }
 
 export function resolveTracer(options: object | undefined): TakibiTracer | undefined {
@@ -79,26 +96,26 @@ export function resolveTracer(options: object | undefined): TakibiTracer | undef
     options != null && internalTracerKey in options
       ? (options as { [internalTracerKey]?: TakibiTracer })[internalTracerKey]
       : undefined;
-  return injected ?? globalTracer;
+  return injected ?? getTracingConfig().tracer;
 }
 
 export function bindTracer<T>(tracer: TakibiTracer, fn: () => T): T {
-  const backend = contextBackend;
+  const backend = getTracingConfig().contextBackend;
   return backend ? backend.run({ tracer }, fn) : fn();
 }
 
 export function activeSpanContext(): SpanContext | undefined {
-  return contextBackend?.getStore()?.span;
+  return getTracingConfig().contextBackend?.getStore()?.span;
 }
 
 export function injectTraceparent(headers: Headers): void {
-  const store = contextBackend?.getStore();
+  const store = getTracingConfig().contextBackend?.getStore();
   if (!store?.span) return;
   store.tracer.inject(headers, store.span);
 }
 
 export function extractTraceContext(headers: Headers): ExtractedTraceContext | undefined {
-  const tracer = contextBackend?.getStore()?.tracer;
+  const tracer = getTracingConfig().contextBackend?.getStore()?.tracer;
   if (!tracer) return undefined;
   return tracer.extract(headers);
 }
@@ -121,7 +138,7 @@ export async function withSpan<T>(
   fn: () => Promise<T>,
   parentOverride?: SpanContext,
 ): Promise<T> {
-  const backend = contextBackend;
+  const backend = getTracingConfig().contextBackend;
   if (!backend) return fn();
   const store = backend.getStore();
   if (!store) return fn();
