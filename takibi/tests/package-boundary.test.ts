@@ -36,6 +36,7 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
     },
   });
   expect(JSON.stringify(core.dependencies ?? {})).not.toMatch(/opentelemetry/);
+  expect(JSON.stringify(core.devDependencies ?? {})).not.toMatch(/opentelemetry/);
   expect(JSON.stringify(core.peerDependencies ?? {})).not.toMatch(/opentelemetry/);
 
   expect(integration.name).toBe("@takibi/takibi-opentelemetry");
