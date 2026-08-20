@@ -1,4 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -8,7 +9,15 @@ import {
   ParentBasedSampler,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { context, propagation, trace, TraceFlags } from "@opentelemetry/api";
+import {
+  context,
+  propagation,
+  ROOT_CONTEXT,
+  trace,
+  TraceFlags,
+  type Context,
+  type ContextManager,
+} from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
@@ -24,6 +33,36 @@ import {
 import { createSqliteDurableObjectStorage } from "./sqlite";
 
 const Post = z.object({ title: z.string().min(1) });
+
+class AsyncLocalContextManager implements ContextManager {
+  readonly #storage = new AsyncLocalStorage<Context>();
+
+  active(): Context {
+    return this.#storage.getStore() ?? ROOT_CONTEXT;
+  }
+
+  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
+    activeContext: Context,
+    fn: F,
+    thisArg?: ThisParameterType<F>,
+    ...args: A
+  ): ReturnType<F> {
+    return this.#storage.run(activeContext, () => fn.call(thisArg, ...args));
+  }
+
+  bind<T>(_context: Context, target: T): T {
+    return target;
+  }
+
+  enable(): this {
+    return this;
+  }
+
+  disable(): this {
+    this.#storage.disable();
+    return this;
+  }
+}
 
 function createFakeDurableObjectState(
   storage: DurableObjectStorage,
@@ -46,6 +85,7 @@ test("./otel preserves sampling and tracestate without changing root inference",
   });
   trace.setGlobalTracerProvider(provider);
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  context.setGlobalContextManager(new AsyncLocalContextManager());
 
   const instrumentation = new TakibiInstrumentation();
   instrumentation.enable();
@@ -100,6 +140,19 @@ test("./otel preserves sampling and tracestate without changing root inference",
   );
 
   const tracer = createOtelTakibiTracer();
+  await bindTracer(tracer, () =>
+    withSpan("takibi.action", async () => {
+      const nested = trace.getTracer("third-party").startSpan("nested");
+      nested.end();
+    }),
+  );
+  await tracer.forceFlush();
+  const actionSpan = exporter.getFinishedSpans().find((span) => span.name === "takibi.action");
+  const nestedSpan = exporter.getFinishedSpans().find((span) => span.name === "nested");
+  expect(actionSpan).toBeDefined();
+  expect(nestedSpan?.spanContext().traceId).toBe(actionSpan?.spanContext().traceId);
+  expect(nestedSpan?.parentSpanContext?.spanId).toBe(actionSpan?.spanContext().spanId);
+
   const crossBoundary = async (parent: {
     traceId: string;
     spanId: string;
@@ -155,6 +208,7 @@ test("./otel preserves sampling and tracestate without changing root inference",
 
   instrumentation.disable();
   await provider.shutdown();
+  context.disable();
   registerGlobalTracer(undefined);
 });
 
@@ -174,6 +228,7 @@ test("README documents ./otel enable and waitUntil flush", () => {
   expect(readme).toContain("createOtelTakibiTracer");
   expect(readme).toContain("instrumentation.enable()");
   expect(readme).toContain("waitUntil(createOtelTakibiTracer().forceFlush())");
+  expect(readme).toContain("context manager");
   expect(readme).not.toContain("registerGlobalTracer");
   expect(readme).not.toContain("internalTracerKey");
   expect(readme).not.toContain("CollectionsOptions.tracer");

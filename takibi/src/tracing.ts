@@ -25,6 +25,7 @@ export type RecordedSpan = {
 
 export type TakibiSpan = {
   readonly context: SpanContext;
+  runWithActiveContext<T>(fn: () => T): T;
   recordError(err: unknown): void;
   end(): void;
 };
@@ -106,17 +107,19 @@ export async function withSpan<T>(
   if (!store) return fn();
   const parent = parentOverride ?? store.span;
   const span = store.tracer.startSpan(name, parent);
-  return tracingStore.run({ tracer: store.tracer, span: span.context }, async () => {
-    try {
-      const value = await fn();
-      span.end();
-      return value;
-    } catch (err) {
-      span.recordError(err);
-      span.end();
-      throw err;
-    }
-  });
+  return span.runWithActiveContext(() =>
+    tracingStore.run({ tracer: store.tracer, span: span.context }, async () => {
+      try {
+        const value = await fn();
+        span.end();
+        return value;
+      } catch (err) {
+        span.recordError(err);
+        span.end();
+        throw err;
+      }
+    }),
+  );
 }
 
 let failNextWrite = false;
@@ -174,6 +177,7 @@ export function createRecordingTracer(): {
       spans.push(recorded);
       return {
         context,
+        runWithActiveContext: (fn) => fn(),
         recordError(err) {
           recorded.status = "error";
           recorded.errorName = err instanceof Error ? err.name : "Error";

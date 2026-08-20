@@ -38,6 +38,9 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
       const context = span.spanContext();
       return {
         context: fromOtelSpanContext(context),
+        runWithActiveContext(fn) {
+          return otelContext.with(trace.setSpan(parentContext, span), fn);
+        },
         recordError(err) {
           const error = err instanceof Error ? err : new Error(String(err));
           span.recordException(error);

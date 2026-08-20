@@ -615,8 +615,9 @@ Notes:
 
 Enable OpenTelemetry spans from `@takibi/takibi/otel` at module scope. The
 root package does not depend on `@opentelemetry/api`; install it when you import
-`./otel`. Register your tracer provider before `enable()`. Flush stays
-application-owned.
+`./otel`. Register your tracer provider and an OpenTelemetry context manager
+before `enable()` so instrumentation started inside Takibi spans inherits their
+active context. Flush stays application-owned.
 
 `enable()` instruments `resolve`, Worker → Durable Object wire, executor, policy,
 schema, storage, and actions. Do not pass a tracer into `collections()`, and do
