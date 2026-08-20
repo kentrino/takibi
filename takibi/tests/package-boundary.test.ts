@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
+import { TAKIBI_ATTR, TAKIBI_SPAN } from "../src/instrumentation";
 
 type PackageManifest = {
   name: string;
@@ -50,4 +51,9 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
   expect(integration.peerDependencies?.["@takibi/takibi"]).toBe("workspace:^");
   expect(integration.peerDependencies?.["@opentelemetry/api"]).toBe("^1.9.0");
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).not.toBe(true);
+});
+
+test("instrumentation exports the stable Takibi telemetry vocabulary", () => {
+  expect(TAKIBI_SPAN.wire).toBe("takibi.wire");
+  expect(TAKIBI_ATTR.collection.name).toBe("takibi.collection.name");
 });

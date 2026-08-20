@@ -36,6 +36,10 @@ core. This package maps them directly to the OpenTelemetry API:
 - Thrown values are normalized and assigned error status by core rather than by
   this adapter.
 
+Use the typed `TAKIBI_SPAN` and `TAKIBI_ATTR` constants from
+`@takibi/takibi/instrumentation` when dashboards or exporters need these
+stable names.
+
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
 import {

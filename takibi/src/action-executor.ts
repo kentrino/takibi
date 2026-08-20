@@ -2,7 +2,7 @@ import { ActionRegistry, type ActionGateContext } from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
-import { actionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
+import { actionSpanAttributes, TAKIBI_SPAN } from "./span-vocabulary";
 import {
   allows,
   evaluateAccessPolicy,

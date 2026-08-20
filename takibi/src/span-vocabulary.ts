@@ -1,3 +1,5 @@
+import type { SpanAttributes } from "./tracing";
+
 type AttributeKeyTree<T, Prefix extends string> = {
   readonly [Key in keyof T]: T[Key] extends object
     ? AttributeKeyTree<T[Key], `${Prefix}.${Key & string}`>
@@ -37,8 +39,6 @@ export const TAKIBI_SPAN = {
   storage: "takibi.storage",
   wire: "takibi.wire",
 } as const;
-
-type SpanAttributes = Readonly<Record<string, string | number | boolean>>;
 
 export function actionSpanAttributes(name: string, scope: string): SpanAttributes {
   return {

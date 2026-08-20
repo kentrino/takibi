@@ -12,3 +12,4 @@ export {
   type TakibiTracer,
   type TracingContextBackend,
 } from "./tracing";
+export { TAKIBI_ATTR, TAKIBI_SPAN } from "./span-vocabulary";

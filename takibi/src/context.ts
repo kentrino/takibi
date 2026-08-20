@@ -24,7 +24,7 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
-import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
+import { invocationSpanAttributes, TAKIBI_SPAN } from "./span-vocabulary";
 import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
