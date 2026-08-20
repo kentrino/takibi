@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { expect, test } from "vite-plus/test";
@@ -49,6 +50,13 @@ class AsyncLocalContextManager implements ContextManager {
   }
 }
 
+type ExportedSpan = {
+  name: string;
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+};
+
 test("global-only Workers runtime records spans and flushes through waitUntil", async () => {
   expect(import.meta.url.includes("opentelemetry")).toBe(false);
   context.setGlobalContextManager(new AsyncLocalContextManager());
@@ -79,7 +87,7 @@ test("global-only Workers runtime records spans and flushes through waitUntil", 
   context.disable();
 });
 
-test("real OTel provider exports spans after waitUntil flush", async () => {
+test("real OTel provider propagates spans through an actual Durable Object namespace", async () => {
   const exporter = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({
     spanProcessors: [new SimpleSpanProcessor(exporter)],
@@ -92,10 +100,10 @@ test("real OTel provider exports spans after waitUntil flush", async () => {
 
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
-  }).collections(
-    { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-    { memory: true },
-  );
+    stub: ({ resolved }) => env.TAKIBI_TRACING_TEST.getByName(resolved.tenantId),
+  }).collections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
   const response = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -106,9 +114,26 @@ test("real OTel provider exports spans after waitUntil flush", async () => {
   const executionContext = createExecutionContext();
   executionContext.waitUntil(createOtelTakibiTracer().forceFlush());
   await waitOnExecutionContext(executionContext);
-  expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual(
-    expect.arrayContaining(["takibi.resolve", "takibi.executor", "takibi.storage"]),
+  const workerSpans = exporter.getFinishedSpans();
+  expect(workerSpans.map((span) => span.name)).toEqual(
+    expect.arrayContaining(["takibi.resolve", "takibi.wire"]),
   );
+
+  const object = env.TAKIBI_TRACING_TEST.getByName("t");
+  const objectSpans = await (
+    await object.fetch(new Request("https://takibi.test/__test/exported-spans"))
+  ).json<ExportedSpan[]>();
+  expect(objectSpans.map((span) => span.name)).toEqual(
+    expect.arrayContaining(["takibi.executor", "takibi.storage"]),
+  );
+
+  const wire = workerSpans.find((span) => span.name === "takibi.wire");
+  const executor = objectSpans.find((span) => span.name === "takibi.executor");
+  const storage = objectSpans.find((span) => span.name === "takibi.storage");
+  expect(executor?.traceId).toBe(wire?.spanContext().traceId);
+  expect(executor?.parentSpanId).toBe(wire?.spanContext().spanId);
+  expect(storage?.traceId).toBe(executor?.traceId);
+  expect(storage?.parentSpanId).toBe(executor?.spanId);
 
   instrumentation.disable();
   await provider.shutdown();
