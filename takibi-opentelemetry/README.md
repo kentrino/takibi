@@ -2,7 +2,10 @@
 
 OpenTelemetry integration for `@takibi/takibi`. The core package has no
 OpenTelemetry runtime or peer dependency; install this package with
-`@opentelemetry/api` only in applications that enable tracing.
+`@opentelemetry/api` only in applications that enable tracing. Treat
+`@takibi/takibi` as a peer of the same version the application imports.
+A second copy of the core package isolates the tracer registry, so
+`enable()` succeeds and spans stay silent.
 
 Register your tracer provider and an OpenTelemetry context manager before
 `enable()` so instrumentation started inside Takibi spans inherits their active
