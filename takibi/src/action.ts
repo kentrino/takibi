@@ -118,7 +118,7 @@ export type ActionDefinition<
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
-  readonly policy: ActionGatePolicy<unknown, unknown>;
+  readonly policy: ActionGatePolicy<never, never>;
   readonly handler: (
     args: TBaseArgs & { input: ParsedInput<TSchema> },
   ) => TOutput | Promise<TOutput>;
