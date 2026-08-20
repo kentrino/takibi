@@ -10,6 +10,7 @@ import {
   isContextPolicy,
 } from "./policy";
 import { parseSchema } from "./schema";
+import { withSpan } from "./tracing";
 import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
 
 export type ActionInvocation = {
@@ -44,24 +45,26 @@ export async function executeAction<TCtx extends object>(
     invocation: { kind: "action", name: invocation.name },
     permission: definition.permission,
   };
-  const grant = isAccessGrant(definition.policy)
-    ? definition.policy
-    : isContextPolicy(definition.policy)
-      ? await definition.policy(ctx)
-      : isConstrainedPolicy(definition.policy)
-        ? await evaluateAccessPolicy(definition.policy, {
-            ...ctx,
-            collection: invocation.scope,
-            operation: "list",
-            permission: "list",
-          })
-        : await definition.policy(gateContext);
-  if (!isAccessGrant(grant)) {
-    throw new TakibiError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
-  }
-  if (!allows(grant, definition.permission)) {
-    throw new ForbiddenError();
-  }
+  await withSpan("takibi.policy", async () => {
+    const grant = isAccessGrant(definition.policy)
+      ? definition.policy
+      : isContextPolicy(definition.policy)
+        ? await definition.policy(ctx)
+        : isConstrainedPolicy(definition.policy)
+          ? await evaluateAccessPolicy(definition.policy, {
+              ...ctx,
+              collection: invocation.scope,
+              operation: "list",
+              permission: "list",
+            })
+          : await definition.policy(gateContext);
+    if (!isAccessGrant(grant)) {
+      throw new TakibiError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
+    }
+    if (!allows(grant, definition.permission)) {
+      throw new ForbiddenError();
+    }
+  });
 
   const hasInput = Object.prototype.hasOwnProperty.call(invocation, "input");
   let input: unknown;
@@ -96,7 +99,7 @@ export async function executeAction<TCtx extends object>(
       throw new NotFoundError(`Unknown collection: ${invocation.scope}`);
     }
 
-    const output = await definition.handler(args);
+    const output = await withSpan("takibi.action", async () => definition.handler(args));
     if (output === undefined) return null;
     assertJsonValue(output, {
       subject: "Action output",

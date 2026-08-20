@@ -5,6 +5,7 @@ export default defineConfig({
     entry: {
       index: "src/index.ts",
       client: "src/client-entry.ts",
+      otel: "src/otel.ts",
     },
     dts: {
       tsgo: true,

@@ -1,4 +1,5 @@
 import { ForbiddenError, NotFoundError } from "./errors";
+import { withSpan } from "./tracing";
 import { allows, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
 import {
@@ -70,12 +71,14 @@ async function assertAccess(
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
 ): Promise<void> {
-  const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
-  if (allows(granted, accessCtx.permission)) return;
-  if (options.conceal) {
-    throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
-  }
-  throw new ForbiddenError();
+  await withSpan("takibi.policy", async () => {
+    const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
+    if (allows(granted, accessCtx.permission)) return;
+    if (options.conceal) {
+      throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
+    }
+    throw new ForbiddenError();
+  });
 }
 
 /**

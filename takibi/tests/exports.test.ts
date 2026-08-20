@@ -26,7 +26,14 @@ import type {
 } from "../src/index";
 
 const srcDir = join(import.meta.dirname, "../src");
-const forbiddenClientModules = ["context.ts", "schema.ts", "executor.ts", "storage.ts"] as const;
+const forbiddenClientModules = [
+  "tracing.ts",
+  "context.ts",
+  "schema.ts",
+  "executor.ts",
+  "storage.ts",
+  "otel.ts",
+] as const;
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -211,7 +218,15 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "GrantBuilder"
     | "grantV2"
     | "permissionsOf"
-    | "isAccessGrant";
+    | "isAccessGrant"
+    | "internalTracerKey"
+    | "registerGlobalTracer"
+    | "createRecordingTracer"
+    | "TakibiTracer"
+    | "TakibiSpan"
+    | "TakibiInstrumentation"
+    | "createOtelTakibiTracer"
+    | "failNextStorageWrite";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 
   // @ts-expect-error allows must not remain on the public root
@@ -396,4 +411,12 @@ test("the browser entry static import graph stays off Worker modules", () => {
   }
   expect(files.has("node:async_hooks")).toBe(false);
   expect(files.has("cloudflare:workers")).toBe(false);
+});
+
+test("tracing uses a static AsyncLocalStorage import", () => {
+  const source = readFileSync(join(srcDir, "tracing.ts"), "utf8");
+  expect(source).toContain('import { AsyncLocalStorage } from "node:async_hooks"');
+  expect(source).not.toContain("document");
+  expect(source).not.toContain("createFallbackAls");
+  expect(source).not.toContain('["node", "async_hooks"].join(":")');
 });
