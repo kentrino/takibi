@@ -6,15 +6,14 @@ import { join } from "node:path";
 import { createClient } from "@takibi/takibi/client";
 import { createTakibi, fullAccess, none } from "../src/index";
 import {
-  createRecordingTracer,
-  failNextStorageWrite,
   formatTraceparent,
   internalTracerKey,
   registerGlobalTracer,
   registerTracingContextBackend,
-  type RecordedSpan,
   type TracingContextBackend,
 } from "../src/tracing";
+import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
+import { createRecordingTracer, type RecordedSpan } from "./helpers/recording-tracer";
 import { createSqliteDurableObjectStorage } from "./sqlite";
 import type { WireResponse } from "../src/protocol";
 
@@ -314,10 +313,14 @@ test("DO path injected failures mark the innermost span and end every span once"
         })
       : base;
     const object = new handler.DurableObject(
-      createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+      createFakeDurableObjectState(
+        testCase.failStorage
+          ? createFailingDocumentWriteStorage()
+          : createSqliteDurableObjectStorage(),
+        { name: "tenant-a" },
+      ),
       {},
     );
-    if (testCase.failStorage) failNextStorageWrite();
     const response = await handler.request(testCase.path, testCase.init);
     const body = (await response.json()) as WireResponse;
     expect(body.ok, testCase.name).toBe(false);
@@ -407,7 +410,6 @@ test("injected failures record error on the failed interval and still end", asyn
     },
     {
       name: "takibi.storage",
-      context: () => createTakibi()({ resolve: () => ({ tenantId: "t" }) }),
       failStorage: true,
       path: "http://fire.test/posts",
       init: {
@@ -427,11 +429,19 @@ test("injected failures record error on the failed interval and still end", asyn
 
   for (const testCase of cases) {
     const recording = createRecordingTracer();
-    const builder = testCase.context();
+    const durable = testCase.failStorage
+      ? { fetch: (request: Request) => object.fetch(request) }
+      : undefined;
+    const builder = testCase.failStorage
+      ? createTakibi()({
+          resolve: () => ({ tenantId: "t" }),
+          stub: () => durable as unknown as DurableObjectStub,
+        })
+      : testCase.context();
     const base = builder.collections(
       testCase.collections ?? { posts: { schema: Post, accessPolicy: fullAccess } },
       {
-        ...(testCase.name === "takibi.wire" ? {} : { memory: true }),
+        ...(testCase.name === "takibi.wire" || testCase.failStorage ? {} : { memory: true }),
         [internalTracerKey]: recording.tracer,
       },
     );
@@ -445,7 +455,12 @@ test("injected failures record error on the failed interval and still end", asyn
             }),
         })
       : base;
-    if (testCase.failStorage) failNextStorageWrite();
+    const object = testCase.failStorage
+      ? new handler.DurableObject(
+          createFakeDurableObjectState(createFailingDocumentWriteStorage(), { name: "t" }),
+          {},
+        )
+      : undefined;
     const response = await handler.request(testCase.path, testCase.init);
     const body = (await response.json()) as WireResponse;
     expect(body.ok, testCase.name).toBe(false);
