@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   context,
+  diag,
+  DiagLogLevel,
   propagation,
   ROOT_CONTEXT,
   SpanKind,
@@ -176,6 +178,34 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
   instrumentation.disable();
   await provider.shutdown();
   context.disable();
+});
+
+test("enable warns once when context is not propagating", () => {
+  const warnings: string[] = [];
+  diag.setLogger(
+    {
+      verbose() {},
+      debug() {},
+      info() {},
+      warn(message) {
+        warnings.push(message);
+      },
+      error() {},
+    },
+    DiagLogLevel.ALL,
+  );
+  const instrumentation = new TakibiInstrumentation();
+  context.setGlobalContextManager(new AsyncLocalContextManager());
+  instrumentation.enable();
+  expect(warnings).toEqual([]);
+  instrumentation.disable();
+  context.disable();
+
+  instrumentation.enable();
+  instrumentation.enable();
+  expect(warnings).toEqual([expect.stringContaining("context is not propagating")]);
+  instrumentation.disable();
+  diag.disable();
 });
 
 test("package README documents setup and isolate-local flushing", () => {
