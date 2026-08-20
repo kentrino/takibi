@@ -495,6 +495,7 @@ test("wire span covers response consumption and validates the transport envelope
     {
       name: "malformed envelope",
       response: () => Response.json({ unexpected: true }),
+      expectedCode: "INVALID_DO_RESPONSE",
     },
   ];
 
@@ -517,6 +518,12 @@ test("wire span covers response consumption and validates the transport envelope
       body: JSON.stringify({ title: "n" }),
     });
     expect(response.status, testCase.name).toBe(500);
+    if (testCase.expectedCode) {
+      await expect(response.clone().json(), testCase.name).resolves.toMatchObject({
+        ok: false,
+        error: { code: testCase.expectedCode },
+      });
+    }
     expect(spanNamed(recording.spans, "takibi.wire"), testCase.name).toMatchObject({
       status: "error",
       ended: true,

@@ -354,8 +354,8 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     initial: unknown,
     invocation: PublicRequest,
   ): Promise<Response> => {
+    const tracer = resolveTracer(options);
     const execute = async (): Promise<Response> => {
-      const tracer = resolveTracer(options);
       try {
         await memoryReady;
         const input = { request, context: initial as TInitial };
@@ -424,7 +424,11 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
             );
             const body: unknown = await res.json();
             if (!isWireResponse(body)) {
-              throw new Error("Invalid response from Durable Object");
+              throw new TakibiError(
+                "INVALID_DO_RESPONSE",
+                "Invalid response from Durable Object",
+                500,
+              );
             }
             return body;
           },
@@ -435,7 +439,6 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         return Response.json(toWireError(err), { status: statusOf(err) });
       }
     };
-    const tracer = resolveTracer(options);
     return tracer ? bindTracer(tracer, execute) : execute();
   };
 
