@@ -1,20 +1,21 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "takibi-storage-tests",
+  "name": "takibi-opentelemetry-tests",
   "main": "./tests/worker.ts",
   "compatibility_date": "2026-08-18",
+  "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
     "bindings": [
       {
-        "name": "TAKIBI_STORAGE_TEST",
-        "class_name": "StorageTestObject",
+        "name": "TAKIBI_TRACING_TEST",
+        "class_name": "TracingTestObject",
       },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["StorageTestObject"],
+      "new_sqlite_classes": ["TracingTestObject"],
     },
   ],
 }

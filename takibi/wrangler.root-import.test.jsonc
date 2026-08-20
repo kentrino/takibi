@@ -1,0 +1,6 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "takibi-root-import-tests",
+  "main": "./tests/worker.ts",
+  "compatibility_date": "2026-08-03",
+}

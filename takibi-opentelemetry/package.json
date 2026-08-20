@@ -1,14 +1,14 @@
 {
-  "name": "@takibi/takibi",
+  "name": "@takibi/takibi-opentelemetry",
   "version": "0.0.0",
-  "description": "Typed multi-tenant collection store on Cloudflare Durable Objects.",
+  "description": "OpenTelemetry integration for @takibi/takibi.",
   "keywords": [
     "cloudflare",
-    "durable-objects",
-    "multi-tenant",
-    "typescript"
+    "opentelemetry",
+    "takibi",
+    "tracing"
   ],
-  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi",
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi-opentelemetry",
   "bugs": {
     "url": "https://github.com/diaree/takibi/issues"
   },
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/diaree/takibi.git",
-    "directory": "packages/takibi"
+    "directory": "packages/takibi-opentelemetry"
   },
   "files": [
     "dist",
@@ -27,8 +27,6 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./client": "./src/client-entry.ts",
-    "./instrumentation": "./src/instrumentation.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -37,14 +35,6 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs"
       },
-      "./client": {
-        "types": "./dist/client.d.mts",
-        "import": "./dist/client.mjs"
-      },
-      "./instrumentation": {
-        "types": "./dist/instrumentation.d.mts",
-        "import": "./dist/instrumentation.mjs"
-      },
       "./package.json": "./package.json"
     },
     "access": "public"
@@ -52,23 +42,26 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "test": "vp test && vp run test:workers && vp run test:root-compat",
+    "test": "vp test && vp run test:workers",
     "test:workers": "vp test --config vite.workers.config.ts",
-    "test:root-compat": "vp test --config vite.root-import.workers.config.ts",
     "check": "vp check"
-  },
-  "dependencies": {
-    "@standard-schema/spec": "catalog:",
-    "hono": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "^4.20250803.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/core": "^2.2.0",
+    "@opentelemetry/sdk-trace-base": "^2.2.0",
     "@types/node": "catalog:",
+    "@takibi/takibi": "workspace:*",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@takibi/takibi": "workspace:^"
   },
   "engines": {
     "node": ">=22.18.0"
