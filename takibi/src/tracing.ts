@@ -1,3 +1,4 @@
+import { TAKIBI_ATTR } from "./otel-span";
 import type { StorageDriver } from "./types";
 
 export const internalTracerKey: unique symbol = Symbol.for("takibi.internalTracer");
@@ -188,7 +189,7 @@ export function tracedStorage(driver: StorageDriver): StorageDriver {
           name: "takibi.storage",
           kind: "internal",
           attributes: {
-            "takibi.storage.operation": "transaction",
+            [TAKIBI_ATTR.storage.operation]: "transaction",
           },
         },
         () => next.transaction((scoped) => callback(wrap(scoped))),
@@ -202,9 +203,9 @@ function storageSpanSpec(operation: string, collection: string, id?: string): Sp
     name: "takibi.storage",
     kind: "internal",
     attributes: {
-      "takibi.collection.name": collection,
-      "takibi.storage.operation": operation,
-      ...(id === undefined ? {} : { "takibi.document.id": id }),
+      [TAKIBI_ATTR.collection.name]: collection,
+      [TAKIBI_ATTR.storage.operation]: operation,
+      ...(id === undefined ? {} : { [TAKIBI_ATTR.document.id]: id }),
     },
   };
 }

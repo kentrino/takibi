@@ -24,6 +24,7 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
+import { TAKIBI_ATTR } from "./otel-span";
 import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
@@ -586,14 +587,14 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
 function invocationSpanAttributes(invocation: PublicRequest): SpanAttributes {
   if (invocation.kind === "action") {
     return {
-      "takibi.action.name": invocation.name,
-      "takibi.action.scope": invocation.scope,
+      [TAKIBI_ATTR.action.name]: invocation.name,
+      [TAKIBI_ATTR.action.scope]: invocation.scope,
     };
   }
   return {
-    "takibi.collection.name": invocation.collection,
-    "takibi.operation.name": invocation.operation,
-    ...(invocation.id === undefined ? {} : { "takibi.document.id": invocation.id }),
+    [TAKIBI_ATTR.collection.name]: invocation.collection,
+    [TAKIBI_ATTR.operation.name]: invocation.operation,
+    ...(invocation.id === undefined ? {} : { [TAKIBI_ATTR.document.id]: invocation.id }),
   };
 }
 
