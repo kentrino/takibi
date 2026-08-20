@@ -7,7 +7,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client-entry.ts",
-    "./otel": "./src/otel.ts",
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -24,21 +23,10 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "^4.20250803.0",
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/core": "^2.2.0",
-    "@opentelemetry/sdk-trace-base": "^2.2.0",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "zod": "catalog:"
-  },
-  "peerDependencies": {
-    "@opentelemetry/api": "^1.9.0"
-  },
-  "peerDependenciesMeta": {
-    "@opentelemetry/api": {
-      "optional": true
-    }
   }
 }
