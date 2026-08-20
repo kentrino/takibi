@@ -1,4 +1,3 @@
-export { createClient } from "./client";
 export type {
   ClientOf,
   CreateClientOptions,

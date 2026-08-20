@@ -9,7 +9,8 @@ import {
 import { context, propagation, trace } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { z } from "zod";
-import { createClient, createTakibi, fullAccess } from "../src/index";
+import { createClient } from "@takibi/takibi/client";
+import { createTakibi, fullAccess } from "../src/index";
 import { TakibiInstrumentation, createOtelTakibiTracer } from "../src/otel";
 import { registerGlobalTracer } from "../src/tracing";
 import { createSqliteDurableObjectStorage } from "./sqlite";

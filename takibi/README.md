@@ -2,8 +2,9 @@
 
 Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
-The official public API is `createTakibi`, `createClient`, policy helpers, errors,
-and optional `@takibi/takibi/otel`. Lower-level assembly pieces are unpublished.
+The official public API is `createTakibi`, policy helpers, and errors on
+`@takibi/takibi`, `createClient` on `@takibi/takibi/client`, and optional
+`@takibi/takibi/otel`. Lower-level assembly pieces are unpublished.
 
 ## AuthN vs AuthZ
 
@@ -117,6 +118,8 @@ To exercise a production handler in tests, fork storage and AuthN with
 root actions stay the same references; each call gets its own memory store.
 
 ```ts
+import { createClient } from "@takibi/takibi/client";
+
 const handler = takibiHandler.with({
   memory: true,
   resolve: ({ request }) => {
@@ -420,7 +423,7 @@ the public HTTP response contract.
 Carry credentials your server trusts — not self-declared role or membership JSON.
 
 ```ts
-import { createClient } from "@takibi/takibi";
+import { createClient } from "@takibi/takibi/client";
 import type { Handler } from "./server";
 
 const client = createClient<Handler>("https://localhost:3000/foo", {

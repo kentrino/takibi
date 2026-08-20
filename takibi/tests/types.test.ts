@@ -1,7 +1,8 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { and, createClient, createTakibi, fullAccess, none } from "../src/index";
+import { createClient } from "@takibi/takibi/client";
+import { and, createTakibi, fullAccess, none } from "../src/index";
 import type { ActionDefinition, RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {

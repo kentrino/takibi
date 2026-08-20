@@ -2,8 +2,8 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
 import { executeOperation } from "../src/executor";
+import { createClient } from "@takibi/takibi/client";
 import {
-  createClient,
   createTakibi,
   fullAccess,
   grant,

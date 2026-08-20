@@ -2,7 +2,8 @@ import { afterEach, expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createClient, createTakibi, fullAccess, none } from "../src/index";
+import { createClient } from "@takibi/takibi/client";
+import { createTakibi, fullAccess, none } from "../src/index";
 import {
   createRecordingTracer,
   failNextStorageWrite,

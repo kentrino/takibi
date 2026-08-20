@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import * as Takibi from "../src/index";
+import * as TakibiClient from "../src/client-entry";
 import type {
   AccessContext,
   AccessGrant,
@@ -24,8 +25,58 @@ import type {
   QueryScalar,
 } from "../src/index";
 
+const srcDir = join(import.meta.dirname, "../src");
+const forbiddenClientModules = [
+  "tracing.ts",
+  "context.ts",
+  "schema.ts",
+  "executor.ts",
+  "storage.ts",
+  "otel.ts",
+] as const;
+
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+function collectValueSpecifiers(source: string): string[] {
+  const body = stripComments(source);
+  const specifiers: string[] = [];
+  for (const match of body.matchAll(/(?:^|\n)\s*(?:import|export)\s+[\s\S]*?["']([^"']+)["']/g)) {
+    const statement = match[0] ?? "";
+    const specifier = match[1];
+    if (!specifier) continue;
+    if (/^\s*(?:import|export)\s+type\b/m.test(statement)) continue;
+    specifiers.push(specifier);
+  }
+  return specifiers;
+}
+
+function walkValueImports(entryFile: string): Set<string> {
+  const visited = new Set<string>();
+  const queue = [normalize(entryFile)];
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (!file || visited.has(file) || !existsSync(file)) continue;
+    visited.add(file);
+    const specifiers = collectValueSpecifiers(readFileSync(file, "utf8"));
+    for (const specifier of specifiers) {
+      if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) {
+        visited.add(specifier);
+        continue;
+      }
+      if (!specifier.startsWith(".")) continue;
+      const resolved = normalize(
+        join(dirname(file), specifier.endsWith(".ts") ? specifier : `${specifier}.ts`),
+      );
+      queue.push(resolved);
+    }
+  }
+  return visited;
+}
+
 test("public root exports collection/action entry points", () => {
-  expectTypeOf(Takibi.createClient).toBeFunction();
+  expectTypeOf(Takibi).not.toHaveProperty("createClient");
   expectTypeOf(Takibi.createTakibi).toBeFunction();
   expectTypeOf(Takibi).not.toHaveProperty("allows");
   expectTypeOf(Takibi).not.toHaveProperty("GrantCatalog");
@@ -324,4 +375,48 @@ test("public category copy names a typed multi-tenant collection store", () => {
     "Typed multi-tenant collection store on Cloudflare Durable Objects",
   );
   expect(pkg.description).not.toContain("Firebase-like");
+});
+
+test("createClient lives on the browser entry, not the Worker root", () => {
+  expectTypeOf(TakibiClient.createClient).toBeFunction();
+  expectTypeOf(TakibiClient).not.toHaveProperty("createTakibi");
+  expectTypeOf(TakibiClient).not.toHaveProperty("and");
+  expectTypeOf(TakibiClient).not.toHaveProperty("or");
+  expectTypeOf(TakibiClient).not.toHaveProperty("grant");
+  expectTypeOf(TakibiClient).not.toHaveProperty("none");
+  expectTypeOf(TakibiClient).not.toHaveProperty("read");
+  expectTypeOf(TakibiClient).not.toHaveProperty("write");
+  expectTypeOf(TakibiClient).not.toHaveProperty("fullAccess");
+  expectTypeOf(TakibiClient).not.toHaveProperty("queryImpliesEquality");
+  expectTypeOf(TakibiClient.TakibiError).toBeConstructibleWith("CODE", "message");
+  expectTypeOf(TakibiClient.UnauthorizedError).toBeConstructibleWith();
+  expectTypeOf(TakibiClient.ForbiddenError).toBeConstructibleWith();
+  expectTypeOf(TakibiClient.NotFoundError).toBeConstructibleWith();
+  expectTypeOf(TakibiClient.BadRequestError).toBeConstructibleWith("bad");
+  expectTypeOf(TakibiClient.AlreadyExistsError).toBeConstructibleWith();
+  expectTypeOf<TakibiClient.ClientOf<TakibiHandler>>().not.toBeNever();
+  expectTypeOf<TakibiClient.CreateClientOptions>().toMatchTypeOf<CreateClientOptions>();
+  expectTypeOf<TakibiClient.TakibiResult<unknown>>().toEqualTypeOf<TakibiResult<unknown>>();
+
+  const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")) as {
+    exports: Record<string, string>;
+  };
+  expect(pkg.exports["./client"]).toBe("./src/client-entry.ts");
+});
+
+test("the browser entry static import graph stays off Worker modules", () => {
+  const files = walkValueImports(join(srcDir, "client-entry.ts"));
+  for (const name of forbiddenClientModules) {
+    expect(files.has(normalize(join(srcDir, name))), name).toBe(false);
+  }
+  expect(files.has("node:async_hooks")).toBe(false);
+  expect(files.has("cloudflare:workers")).toBe(false);
+});
+
+test("tracing uses a static AsyncLocalStorage import", () => {
+  const source = readFileSync(join(srcDir, "tracing.ts"), "utf8");
+  expect(source).toContain('import { AsyncLocalStorage } from "node:async_hooks"');
+  expect(source).not.toContain("document");
+  expect(source).not.toContain("createFallbackAls");
+  expect(source).not.toContain('["node", "async_hooks"].join(":")');
 });

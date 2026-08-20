@@ -4,6 +4,7 @@ export default defineConfig({
   pack: {
     entry: {
       index: "src/index.ts",
+      client: "src/client-entry.ts",
       otel: "src/otel.ts",
     },
     dts: {
