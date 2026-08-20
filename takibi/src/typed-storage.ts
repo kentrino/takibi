@@ -19,18 +19,8 @@ import { generateUlid } from "./ulid";
 
 const RESERVED_METADATA_KEYS = RESERVED_DOCUMENT_DATA_KEYS;
 
-type Clock = () => Date;
-
-/** Production clock: wall time via `new Date()`. Overridable in tests. */
-let clock: Clock = () => new Date();
-
-/** Replace the write-path clock. Pass `undefined` to restore `new Date()`. Tests only. */
-export function setClockForTests(next: Clock | undefined): void {
-  clock = next ?? (() => new Date());
-}
-
 function nowIso(): string {
-  return clock().toISOString();
+  return new Date().toISOString();
 }
 
 function reservedMessage(key: (typeof RESERVED_METADATA_KEYS)[number]): string {
