@@ -1,5 +1,5 @@
 import { ForbiddenError, NotFoundError } from "./errors";
-import { collectionSpanAttributes, TAKIBI_SPAN } from "./span-vocabulary";
+import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
 import { withSpan } from "./tracing";

@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { TAKIBI_SPAN } from "./span-vocabulary";
+import { TAKIBI_SPAN } from "./otel-helper";
 import { withSpan } from "./tracing";
 
 export class SchemaValidationError extends Error {
