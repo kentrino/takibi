@@ -112,6 +112,31 @@ When initial context is empty and you use `{ memory: true }`, you can still moun
 with `app.route("/foo", handler)` for simple demos and tests. Durable Object mode
 always needs `stub` (and usually `handle` so AuthN / env reach `resolve` / `stub`).
 
+To exercise a production handler in tests, fork storage and AuthN with
+`.with({ memory: true, resolve })`. Collection maps, collection actions, and
+root actions stay the same references; each call gets its own memory store.
+
+```ts
+const handler = takibiHandler.with({
+  memory: true,
+  resolve: ({ request }) => {
+    const raw = request.headers.get("x-test-user");
+    const user = raw == null ? null : JSON.parse(raw);
+    if (user == null) throw new UnauthorizedError("Sign in required");
+    return { tenantId: "test", principal: user };
+  },
+});
+const client = createClient<typeof takibiHandler>("https://fire.test", {
+  fetch: handler.request,
+  headers: { "x-test-user": JSON.stringify({ id: "u1", role: "member" }) },
+});
+```
+
+`.with({ memory: true })` keeps the production `resolve`. Use that when tests
+call `handle(request, { context })` with a fake session. `handler.request` has
+an empty initial context, so apps whose production `resolve` needs session
+deps should pass a test `resolve`.
+
 ### Collection seeds
 
 Use `seed` for production defaults. It returns schema inputs keyed by document

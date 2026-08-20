@@ -10,6 +10,7 @@ import {
   none,
   queryImpliesEquality,
   read,
+  UnauthorizedError,
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
@@ -1195,4 +1196,175 @@ test("non-JSON resolved context is rejected equally before memory or DO dispatch
     });
   }
   expect(stubCalls).toBe(0);
+});
+
+function createProductionPostsHandler() {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const posts = context.defineCollection({
+    schema: Post,
+    accessPolicy: postPolicy,
+    seed: () => ({ seeded: { title: "from-seed", secret: false } }),
+    actions: (defineAction) => ({
+      ping: defineAction()
+        .policy(fullAccess)
+        .handler(() => ({ pong: true as const })),
+    }),
+  });
+  return context.collections({ posts });
+}
+
+test("with({ memory, resolve }) reuses collection actions on an isolated store", async () => {
+  const production = createProductionPostsHandler();
+  const handler = production.with({ memory: true, resolve: resolveTestContext });
+  const client = createClient<typeof production>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  const ping = await client.posts.ping();
+  expect(ping).toEqual({ ok: true, data: { pong: true } });
+
+  const created = await client.posts.add({ title: "live" }, { id: "p1" });
+  expect(created).toMatchObject({ ok: true, data: { id: "p1", title: "live" } });
+  await expect(client.posts.get("seeded")).resolves.toMatchObject({
+    ok: true,
+    data: { title: "from-seed" },
+  });
+});
+
+test("two with({ memory: true }) handlers do not share documents or seeds", async () => {
+  const production = createProductionPostsHandler();
+  const first = production.with({ memory: true, resolve: resolveTestContext });
+  const second = production.with({ memory: true, resolve: resolveTestContext });
+  const clientA = createClient<typeof production>("http://fire.test", {
+    headers,
+    fetch: (input, init) => first.request(input, init),
+  });
+  const clientB = createClient<typeof production>("http://fire.test", {
+    headers,
+    fetch: (input, init) => second.request(input, init),
+  });
+
+  await clientA.posts.add({ title: "only-a" }, { id: "p1" });
+  await expect(clientB.posts.get("p1")).resolves.toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND", status: 404 },
+  });
+  await expect(clientB.posts.get("seeded")).resolves.toMatchObject({
+    ok: true,
+    data: { title: "from-seed" },
+  });
+});
+
+test("with({ memory: true }) keeps the production resolve and handle context", async () => {
+  type Initial = { token: string };
+  const seen: Initial[] = [];
+  const production = createTakibi<Initial>()({
+    resolve: ({ context }) => {
+      seen.push(context);
+      return { tenantId: "tenant-a", user: { id: "u1", role: "member" as const } };
+    },
+  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const handler = production.with({ memory: true });
+
+  const result = await handler.handle(new Request("http://fire.test/posts/missing"), {
+    context: { token: "session-1" },
+  });
+  expect(result.matched).toBe(true);
+  expect(seen).toEqual([{ token: "session-1" }]);
+  await expect(result.response!.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND" },
+  });
+});
+
+test("replaced resolve UnauthorizedError stays HTTP 401", async () => {
+  const production = createProductionPostsHandler();
+  const handler = production.with({
+    memory: true,
+    resolve: () => {
+      throw new UnauthorizedError("Sign in required");
+    },
+  });
+  const response = await handler.request("http://fire.test/posts/p1");
+  expect(response.status).toBe(401);
+  await expect(response.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "UNAUTHORIZED", status: 401 },
+  });
+});
+
+test("original handle still requires stub after with()", async () => {
+  let stubFetches = 0;
+  const production = createTakibi()({
+    resolve: resolveTestContext,
+    stub: () =>
+      ({
+        fetch: async () => {
+          stubFetches += 1;
+          return Response.json({ ok: true, data: { id: "from-stub" } });
+        },
+      }) as unknown as DurableObjectStub,
+  }).collections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const memory = production.with({ memory: true, resolve: resolveTestContext });
+  const memoryClient = createClient<typeof production>("http://fire.test", {
+    headers,
+    fetch: (input, init) => memory.request(input, init),
+  });
+  await memoryClient.posts.add({ title: "in-memory" }, { id: "p1" });
+
+  const result = await production.handle(
+    new Request("http://fire.test/posts/p1", { headers: headers() }),
+    {},
+  );
+  expect(result.matched).toBe(true);
+  expect(stubFetches).toBe(1);
+  await expect(result.response!.json()).resolves.toEqual({
+    ok: true,
+    data: { id: "from-stub" },
+  });
+
+  const withoutStub = createProductionPostsHandler();
+  withoutStub.with({ memory: true, resolve: resolveTestContext });
+  const missing = await withoutStub.handle(
+    new Request("http://fire.test/posts/p1", { headers: headers() }),
+    {},
+  );
+  expect(missing.response?.status).toBe(500);
+  await expect(missing.response!.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "MISSING_STUB" },
+  });
+});
+
+test("with() clones the action registry so later root actions stay isolated", async () => {
+  const production = createProductionPostsHandler();
+  const first = production.with({ memory: true, resolve: resolveTestContext });
+  const exportAll = first
+    .defineAction()
+    .policy(fullAccess)
+    .handler(() => ({ scope: "first" as const }));
+  const firstWithRoot = first.actions({ exportAll });
+  const second = production.with({ memory: true, resolve: resolveTestContext });
+  const later = production
+    .defineAction()
+    .policy(fullAccess)
+    .handler(() => ({ scope: "later" as const }));
+  production.actions({ later });
+
+  const firstClient = createClient<typeof firstWithRoot>("http://fire.test", {
+    headers,
+    fetch: (input, init) => firstWithRoot.request(input, init),
+  });
+
+  await expect(firstClient.exportAll()).resolves.toEqual({ ok: true, data: { scope: "first" } });
+  await expect(firstClient.posts.ping()).resolves.toEqual({ ok: true, data: { pong: true } });
+  const missingOnSecond = await second.request("http://fire.test/$:exportAll", { method: "POST" });
+  expect(missingOnSecond.status).toBe(404);
+  const missingLaterOnFirst = await firstWithRoot.request("http://fire.test/$:later", {
+    method: "POST",
+  });
+  expect(missingLaterOnFirst.status).toBe(404);
 });

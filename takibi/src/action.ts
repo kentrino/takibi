@@ -339,6 +339,14 @@ export class ActionRegistry {
     this.#register("$", definitions, "root", collectionNames);
   }
 
+  clone(): ActionRegistry {
+    const copy = new ActionRegistry();
+    for (const [key, entry] of this.#actions) {
+      copy.#actions.set(key, entry);
+    }
+    return copy;
+  }
+
   #register(
     scope: string,
     definitions: ActionDefinitions,

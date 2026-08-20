@@ -945,3 +945,39 @@ test("list options can be projected from a public collection method", () => {
   void byPublished;
   void byMissing;
 });
+
+test("with({ memory: true }) keeps ClientOf collection action names", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const posts = context.defineCollection({
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+    actions: (defineAction) => ({
+      duplicate: defineAction()
+        .policy(fullAccess)
+        .handler(() => ({ copied: true as const })),
+    }),
+  });
+  const handler = context.collections({ posts });
+  const forked = handler.with({ memory: true });
+  const replaced = handler.with({
+    memory: true,
+    resolve: (): AppCtx => ({ tenantId: "test", user: { id: "u1", role: "member" } }),
+  });
+
+  expectTypeOf<ClientOf<typeof forked>>().toEqualTypeOf<ClientOf<typeof handler>>();
+  expectTypeOf<ClientOf<typeof replaced>>().toEqualTypeOf<ClientOf<typeof handler>>();
+  expectTypeOf<ClientOf<typeof forked>["posts"]>().toHaveProperty("duplicate");
+  expectTypeOf<ClientOf<ReturnType<typeof handler.with>>["posts"]>().toHaveProperty("duplicate");
+
+  handler.with({
+    memory: true,
+    // @ts-expect-error resolve must return the original execution context
+    resolve: () => ({ tenantId: "acme" }),
+  });
+  // @ts-expect-error memory must be the literal true
+  handler.with({ memory: false });
+  // @ts-expect-error memory is required
+  handler.with({ resolve: (): AppCtx => ({ tenantId: "acme", user: null }) });
+});

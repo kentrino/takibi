@@ -155,6 +155,14 @@ export type TakibiBrand<
    * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
    */
   handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
+  /**
+   * Fork a handler for tests: same collections / actions, new memory store,
+   * optional `resolve` override. The original handler is unchanged.
+   */
+  with(options: {
+    memory: true;
+    resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
+  }): TakibiHandler<TCtx, TCollections, TInitial, TRootActions>;
 };
 
 export type TakibiHandler<
@@ -306,176 +314,198 @@ function buildContext<TInitial>(
         const definitions = getCollectionActions(definition);
         if (definitions) registry.registerCollectionActions(name, definitions);
       }
-      const memory = options.memory ?? false;
-
-      const app = new Hono<{ Bindings: Record<string, unknown> }>();
-
-      const memoryDriver = memory
-        ? createMigratingStorage(collections, createMemoryStorage())
-        : null;
-      const memoryReady = memoryDriver
-        ? seedCollections(collections, memoryDriver)
-        : Promise.resolve();
-
-      const run = async (
-        request: Request,
-        initial: unknown,
-        invocation: PublicRequest,
-      ): Promise<Response> => {
-        const execute = async (): Promise<Response> => {
-          const tracer = resolveTracer(options);
-          try {
-            await memoryReady;
-            const input = { request, context: initial as TInitial };
-            let resolveSpan: SpanContext | undefined;
-            const ctx = await withSpan("takibi.resolve", async () => {
-              resolveSpan = activeSpanContext();
-              const resolved = await resolve(input);
-              assertSerializableContext(resolved);
-              return resolved;
-            });
-
-            if (memoryDriver) {
-              const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
-              const data = await withSpan(
-                "takibi.executor",
-                () =>
-                  invocation.kind === "action"
-                    ? executeAction(registry, collections, driver, ctx, invocation)
-                    : executeOperation(collections, driver, ctx, invocation),
-                resolveSpan,
-              );
-              return Response.json({ ok: true, data } satisfies WireResponse);
-            }
-
-            if (!resolveStub) {
-              throw new TakibiError(
-                "MISSING_STUB",
-                "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
-                500,
-              );
-            }
-
-            const doStub = await resolveStub({ ...input, resolved: ctx });
-            if (!doStub || typeof doStub.fetch !== "function") {
-              throw new TakibiError(
-                "MISSING_STUB",
-                "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
-                500,
-              );
-            }
-
-            const wire: WireRequest = {
-              ...invocation,
-              context: ctx,
-            };
-
-            const res = await withSpan(
-              "takibi.wire",
-              async () => {
-                const headers = new Headers({ "content-type": "application/json" });
-                injectTraceparent(headers);
-                return doStub.fetch(
-                  new Request("https://takibi.internal/", {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(wire),
-                  }),
-                );
-              },
-              resolveSpan,
-            );
-            const json = (await res.json()) as WireResponse;
-            return Response.json(json, { status: json.ok ? 200 : json.error.status });
-          } catch (err) {
-            return Response.json(toWireError(err), { status: statusOf(err) });
-          }
-        };
-        const tracer = resolveTracer(options);
-        return tracer ? bindTracer(tracer, execute) : execute();
-      };
-
-      const serveDecoded = async (
-        request: Request,
-        initial: unknown,
-        decode: () => Promise<PublicRequest>,
-      ): Promise<Response> => {
-        try {
-          const op = await decode();
-          return await run(request, initial, op);
-        } catch (err) {
-          return Response.json(toWireError(err), { status: statusOf(err) });
-        }
-      };
-
-      const mountPublicRoute = (path: string, extra = false) => {
-        app.all(path, async (c) => {
-          const response = extra
-            ? Response.json(toWireError(new NotFoundError()), { status: 404 })
-            : await serveDecoded(c.req.raw, {}, () =>
-                decodePublicRoute(
-                  c.req.method,
-                  [c.req.param("collection"), c.req.param("id")].filter(
-                    (segment): segment is string => segment != null && segment !== "",
-                  ),
-                  new URL(c.req.url).searchParams,
-                  () => (c.req.raw.body === null ? Promise.resolve(undefined) : c.req.json()),
-                ),
-              );
-          return c.newResponse(response.body, response);
-        });
-      };
-
-      // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
-      mountPublicRoute("/:collection");
-      mountPublicRoute("/:collection/:id");
-      mountPublicRoute("/:collection/:id/*", true);
-      app.all("/", async (c) => {
-        const response = await serveDecoded(c.req.raw, {}, () => decodePublicHttp(c.req.raw));
-        return c.newResponse(response.body, response);
+      return assembleHandler({
+        collections,
+        registry,
+        collectionNames,
+        resolve,
+        resolveStub,
+        options,
       });
-
-      const DurableObjectClass = createDurableObjectClass(collections, registry, options);
-
-      const rootActions = Object.create(null) as ActionDefinitions;
-      const handler = app as TakibiHandler<object, typeof collections, TInitial>;
-      Object.defineProperty(handler, "~takibi", {
-        value: {
-          context: null as unknown as object,
-          initial: null as unknown as TInitial,
-          collections,
-          actions: rootActions,
-        },
-        enumerable: false,
-      });
-      handler.DurableObject = DurableObjectClass as TakibiHandler<
-        object,
-        typeof collections,
-        TInitial
-      >["DurableObject"];
-      handler.defineAction = () =>
-        createActionBuilder<object, "root", RootActionArgs<object, typeof collections>>("root");
-      handler.actions = ((definitions: ActionDefinitions) => {
-        registry.registerRootActions(definitions, collectionNames);
-        return handler;
-      }) as typeof handler.actions;
-      handler.handle = async (request, handleOptions) => {
-        if (!matchesPublicPrefix(new URL(request.url).pathname, handleOptions.prefix)) {
-          return { matched: false };
-        }
-
-        const initial =
-          "context" in handleOptions && handleOptions.context !== undefined
-            ? handleOptions.context
-            : {};
-        const response = await serveDecoded(request, initial, () =>
-          decodePublicHttp(request, handleOptions.prefix),
-        );
-        return { matched: true, response };
-      };
-      return handler;
     },
   };
+}
+
+function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(args: {
+  collections: TCollections;
+  registry: ActionRegistry;
+  collectionNames: Set<string>;
+  resolve: ContextResolver<object, TInitial>;
+  resolveStub?: ContextStubResolver<object, TInitial>;
+  options: InternalCollectionsOptions;
+}): TakibiHandler<object, TCollections, TInitial> {
+  const { collections, registry, collectionNames, resolve, resolveStub, options } = args;
+  const memory = options.memory ?? false;
+  const app = new Hono<{ Bindings: Record<string, unknown> }>();
+
+  const memoryDriver = memory ? createMigratingStorage(collections, createMemoryStorage()) : null;
+  const memoryReady = memoryDriver ? seedCollections(collections, memoryDriver) : Promise.resolve();
+
+  const run = async (
+    request: Request,
+    initial: unknown,
+    invocation: PublicRequest,
+  ): Promise<Response> => {
+    const execute = async (): Promise<Response> => {
+      const tracer = resolveTracer(options);
+      try {
+        await memoryReady;
+        const input = { request, context: initial as TInitial };
+        let resolveSpan: SpanContext | undefined;
+        const ctx = await withSpan("takibi.resolve", async () => {
+          resolveSpan = activeSpanContext();
+          const resolved = await resolve(input);
+          assertSerializableContext(resolved);
+          return resolved;
+        });
+
+        if (memoryDriver) {
+          const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
+          const data = await withSpan(
+            "takibi.executor",
+            () =>
+              invocation.kind === "action"
+                ? executeAction(registry, collections, driver, ctx, invocation)
+                : executeOperation(collections, driver, ctx, invocation),
+            resolveSpan,
+          );
+          return Response.json({ ok: true, data } satisfies WireResponse);
+        }
+
+        if (!resolveStub) {
+          throw new TakibiError(
+            "MISSING_STUB",
+            "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
+            500,
+          );
+        }
+
+        const doStub = await resolveStub({ ...input, resolved: ctx });
+        if (!doStub || typeof doStub.fetch !== "function") {
+          throw new TakibiError(
+            "MISSING_STUB",
+            "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
+            500,
+          );
+        }
+
+        const wire: WireRequest = {
+          ...invocation,
+          context: ctx,
+        };
+
+        const res = await withSpan(
+          "takibi.wire",
+          async () => {
+            const headers = new Headers({ "content-type": "application/json" });
+            injectTraceparent(headers);
+            return doStub.fetch(
+              new Request("https://takibi.internal/", {
+                method: "POST",
+                headers,
+                body: JSON.stringify(wire),
+              }),
+            );
+          },
+          resolveSpan,
+        );
+        const json = (await res.json()) as WireResponse;
+        return Response.json(json, { status: json.ok ? 200 : json.error.status });
+      } catch (err) {
+        return Response.json(toWireError(err), { status: statusOf(err) });
+      }
+    };
+    const tracer = resolveTracer(options);
+    return tracer ? bindTracer(tracer, execute) : execute();
+  };
+
+  const serveDecoded = async (
+    request: Request,
+    initial: unknown,
+    decode: () => Promise<PublicRequest>,
+  ): Promise<Response> => {
+    try {
+      const op = await decode();
+      return await run(request, initial, op);
+    } catch (err) {
+      return Response.json(toWireError(err), { status: statusOf(err) });
+    }
+  };
+
+  const mountPublicRoute = (path: string, extra = false) => {
+    app.all(path, async (c) => {
+      const response = extra
+        ? Response.json(toWireError(new NotFoundError()), { status: 404 })
+        : await serveDecoded(c.req.raw, {}, () =>
+            decodePublicRoute(
+              c.req.method,
+              [c.req.param("collection"), c.req.param("id")].filter(
+                (segment): segment is string => segment != null && segment !== "",
+              ),
+              new URL(c.req.url).searchParams,
+              () => (c.req.raw.body === null ? Promise.resolve(undefined) : c.req.json()),
+            ),
+          );
+      return c.newResponse(response.body, response);
+    });
+  };
+
+  // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
+  mountPublicRoute("/:collection");
+  mountPublicRoute("/:collection/:id");
+  mountPublicRoute("/:collection/:id/*", true);
+  app.all("/", async (c) => {
+    const response = await serveDecoded(c.req.raw, {}, () => decodePublicHttp(c.req.raw));
+    return c.newResponse(response.body, response);
+  });
+
+  const DurableObjectClass = createDurableObjectClass(collections, registry, options);
+
+  const rootActions = Object.create(null) as ActionDefinitions;
+  const handler = app as TakibiHandler<object, TCollections, TInitial>;
+  Object.defineProperty(handler, "~takibi", {
+    value: {
+      context: null as unknown as object,
+      initial: null as unknown as TInitial,
+      collections,
+      actions: rootActions,
+    },
+    enumerable: false,
+  });
+  handler.DurableObject = DurableObjectClass as TakibiHandler<
+    object,
+    TCollections,
+    TInitial
+  >["DurableObject"];
+  handler.defineAction = () =>
+    createActionBuilder<object, "root", RootActionArgs<object, TCollections>>("root");
+  handler.actions = ((definitions: ActionDefinitions) => {
+    registry.registerRootActions(definitions, collectionNames);
+    return handler;
+  }) as typeof handler.actions;
+  handler.handle = async (request, handleOptions) => {
+    if (!matchesPublicPrefix(new URL(request.url).pathname, handleOptions.prefix)) {
+      return { matched: false };
+    }
+
+    const initial =
+      "context" in handleOptions && handleOptions.context !== undefined
+        ? handleOptions.context
+        : {};
+    const response = await serveDecoded(request, initial, () =>
+      decodePublicHttp(request, handleOptions.prefix),
+    );
+    return { matched: true, response };
+  };
+  handler.with = ((withOptions: { memory: true; resolve?: ContextResolver<object, TInitial> }) =>
+    assembleHandler({
+      collections,
+      registry: registry.clone(),
+      collectionNames,
+      resolve: withOptions.resolve ?? resolve,
+      options: { ...options, memory: true },
+    })) as typeof handler.with;
+  return handler;
 }
 
 function createDurableObjectClass<TCollections extends CollectionsDef>(
