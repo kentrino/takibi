@@ -2,6 +2,7 @@ import {
   context as otelContext,
   createContextKey,
   createTraceState,
+  diag,
   propagation,
   ROOT_CONTEXT,
   SpanKind as OtelSpanKind,
@@ -22,6 +23,16 @@ import {
 } from "@takibi/takibi/instrumentation";
 
 const tracingStoreKey = createContextKey("takibi.tracing-store");
+const contextManagerProbeKey = createContextKey("takibi.context-manager-probe");
+let warnedMissingContextManager = false;
+
+function contextManagerPropagates(): boolean {
+  return (
+    otelContext.with(otelContext.active().setValue(contextManagerProbeKey, true), () =>
+      otelContext.active().getValue(contextManagerProbeKey),
+    ) === true
+  );
+}
 const otelContextBackend: TracingContextBackend = {
   getStore() {
     return otelContext.active().getValue(tracingStoreKey) as ReturnType<
@@ -115,6 +126,12 @@ function toOtelStatusCode(code: SpanStatus["code"]): SpanStatusCode {
 
 export class TakibiInstrumentation {
   enable(): void {
+    if (!contextManagerPropagates() && !warnedMissingContextManager) {
+      warnedMissingContextManager = true;
+      diag.warn(
+        "@takibi/takibi-opentelemetry: OpenTelemetry context is not propagating. Register a context manager before enable() or Takibi spans stay silent.",
+      );
+    }
     registerTracingContextBackend(otelContextBackend);
     registerGlobalTracer(createOtelTakibiTracer());
   }
