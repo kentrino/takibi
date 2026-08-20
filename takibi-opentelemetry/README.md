@@ -7,9 +7,17 @@ OpenTelemetry runtime or peer dependency; install this package with
 A second copy of the core package isolates the tracer registry, so
 `enable()` succeeds and spans stay silent.
 
+Install the binding with its peers:
+
+```bash
+pnpm add @takibi/takibi @takibi/takibi-opentelemetry @opentelemetry/api
+pnpm add -D @opentelemetry/sdk-trace-base
+```
+
 Register your tracer provider and an OpenTelemetry context manager before
 `enable()` so instrumentation started inside Takibi spans inherits their active
-context. Call `enable()` once per isolate at module scope. Flush stays
+context. Without a context manager, `enable()` still succeeds and emits no
+spans. Call `enable()` once per isolate at module scope. Flush stays
 application-owned.
 
 `enable()` instruments `resolve`, Worker → Durable Object wire, executor,
@@ -29,15 +37,75 @@ core. This package maps them directly to the OpenTelemetry API:
   this adapter.
 
 ```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  context,
+  ROOT_CONTEXT,
+  trace,
+  type Context,
+  type ContextManager,
+} from "@opentelemetry/api";
+import {
+  AlwaysOnSampler,
+  BasicTracerProvider,
+  ParentBasedSampler,
+} from "@opentelemetry/sdk-trace-base";
+import { createTakibi, fullAccess } from "@takibi/takibi";
 import { TakibiInstrumentation } from "@takibi/takibi-opentelemetry";
-import { provider } from "./telemetry.server";
+import { z } from "zod";
 
-const instrumentation = new TakibiInstrumentation();
-instrumentation.enable();
+class AsyncLocalContextManager implements ContextManager {
+  readonly #storage = new AsyncLocalStorage<Context>();
+
+  active(): Context {
+    return this.#storage.getStore() ?? ROOT_CONTEXT;
+  }
+
+  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
+    activeContext: Context,
+    fn: F,
+    thisArg?: ThisParameterType<F>,
+    ...args: A
+  ): ReturnType<F> {
+    return this.#storage.run(activeContext, () => fn.call(thisArg, ...args));
+  }
+
+  bind<T>(_context: Context, target: T): T {
+    return target;
+  }
+
+  enable(): this {
+    return this;
+  }
+
+  disable(): this {
+    this.#storage.disable();
+    return this;
+  }
+}
+
+const provider = new BasicTracerProvider({
+  sampler: new ParentBasedSampler({ root: new AlwaysOnSampler() }),
+});
+trace.setGlobalTracerProvider(provider);
+context.setGlobalContextManager(new AsyncLocalContextManager());
+new TakibiInstrumentation().enable();
+
+const app = createTakibi()({
+  resolve: () => ({ tenantId: "demo" }),
+}).collections(
+  {
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy: fullAccess,
+    },
+  },
+  { memory: true },
+);
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const response = await app.fetch(request, env, ctx);
+  async fetch(request: Request, _env: unknown, ctx: { waitUntil(task: Promise<unknown>): void }) {
+    const response = await app.fetch(request);
     ctx.waitUntil(provider.forceFlush());
     return response;
   },
