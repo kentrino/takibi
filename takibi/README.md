@@ -639,6 +639,20 @@ export default {
 };
 ```
 
+`forceFlush()` affects only the provider in the calling Worker isolate. A
+Durable Object runs in a separate isolate with its own provider, so this
+`waitUntil` does not flush spans buffered there. Configure and enable tracing in
+every isolate that emits spans.
+
+Takibi ends Durable Object spans when their work completes, then leaves export
+to the registered processor and exporter. It does not guarantee export before a
+Durable Object response completes. In particular, `BatchSpanProcessor` exports
+on its configured schedule while the isolate remains alive; deployment, runtime
+shutdown, or a crash can discard buffered spans. Takibi does not install a
+Durable Object shutdown hook or offer request-scoped delivery. Choose processor,
+exporter, and scheduling settings according to that best-effort delivery
+semantic.
+
 Use `enable()` / `disable()` directly. Do not wrap takibi in
 `registerInstrumentations()`.
 

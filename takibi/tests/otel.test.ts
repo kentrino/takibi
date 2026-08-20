@@ -221,7 +221,7 @@ test("root source does not import OTel packages", () => {
   expect(packConfig).toContain('otel: "src/otel.ts"');
 });
 
-test("README documents ./otel enable and waitUntil flush", () => {
+test("README documents ./otel enable and isolate-local flush semantics", () => {
   const readme = readFileSync(join(import.meta.dirname, "../README.md"), "utf8");
   expect(readme).toContain('from "@takibi/takibi/otel"');
   expect(readme).toContain("TakibiInstrumentation");
@@ -229,6 +229,9 @@ test("README documents ./otel enable and waitUntil flush", () => {
   expect(readme).toContain("instrumentation.enable()");
   expect(readme).toContain("waitUntil(createOtelTakibiTracer().forceFlush())");
   expect(readme).toContain("context manager");
+  expect(readme).toContain("only the provider in the calling Worker isolate");
+  expect(readme).toMatch(/does not guarantee export before a\s+Durable Object response completes/);
+  expect(readme).toContain("BatchSpanProcessor");
   expect(readme).not.toContain("registerGlobalTracer");
   expect(readme).not.toContain("internalTracerKey");
   expect(readme).not.toContain("CollectionsOptions.tracer");
