@@ -2,6 +2,7 @@ import { TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
 import { parseSchema, SchemaValidationError } from "./schema";
 import {
+  RESERVED_DOCUMENT_DATA_KEYS,
   TAKIBI_VERSION_KEY,
   type CollectionDefinition,
   type CollectionsDef,
@@ -173,7 +174,7 @@ function withoutVersion(document: StoredDocument): WithMetadata<Record<string, u
 }
 
 function assertNoReservedOutput(parsed: Record<string, unknown>): void {
-  for (const key of ["id", "createdAt", "updatedAt", TAKIBI_VERSION_KEY] as const) {
+  for (const key of RESERVED_DOCUMENT_DATA_KEYS) {
     if (Object.prototype.hasOwnProperty.call(parsed, key)) {
       throw new SchemaValidationError([
         {

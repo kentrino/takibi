@@ -10,6 +10,7 @@ import type {
   CollectionsApi,
   InferCollectionDoc,
   JsonValue,
+  ReservedDocumentSchemaConstraint,
 } from "./types";
 import { collectionActionsBrand } from "./types";
 
@@ -258,7 +259,7 @@ export type CollectionDefinitionInput<
       Extract<keyof TActions, CrudName | ReservedPublicName> | InvalidPublicKeys<TActions>,
       never
     >;
-};
+} & ReservedDocumentSchemaConstraint<TSchema>;
 
 export function defineCollection<
   TCtx extends object,
@@ -284,7 +285,7 @@ export function defineCollection<
     value: actionDefinitions,
     enumerable: false,
   });
-  return collection as CollectionDefinition<TSchema, TCtx, TActions> & {
+  return collection as unknown as CollectionDefinition<TSchema, TCtx, TActions> & {
     readonly [collectionActionsBrand]: TActions;
   };
 }

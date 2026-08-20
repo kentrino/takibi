@@ -3,7 +3,7 @@ import { assertJsonObject } from "./json";
 import { compileListOptions } from "./query";
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
-import { TAKIBI_VERSION_KEY } from "./types";
+import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_VERSION_KEY } from "./types";
 import type {
   ClientCollectionsApi,
   CollectionDefinition,
@@ -15,7 +15,7 @@ import type {
 } from "./types";
 import { generateUlid } from "./ulid";
 
-const RESERVED_METADATA_KEYS = ["id", "createdAt", "updatedAt", TAKIBI_VERSION_KEY] as const;
+const RESERVED_METADATA_KEYS = RESERVED_DOCUMENT_DATA_KEYS;
 
 type Clock = () => Date;
 

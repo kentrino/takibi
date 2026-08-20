@@ -112,7 +112,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
       },
     },
   });
-  expect(first.body).not.toHaveProperty("data._takibiVersion");
+  expect(first.body).not.toHaveProperty("data.$schemaVersion");
   expect(policyDocs).toEqual([
     {
       id: "default",
@@ -129,7 +129,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
     enabled: true,
     createdAt: CREATED_AT,
     updatedAt: UPDATED_AT,
-    _takibiVersion: 2,
+    $schemaVersion: 2,
   });
 
   await invoke(object, {
@@ -173,8 +173,8 @@ test("list migrates each scanned document before current-schema filtering", asyn
     status: 200,
     body: { ok: true, data: { items: [{ id: "a", slug: "match", published: true }] } },
   });
-  expect(await backing.read("posts", "a")).toMatchObject({ slug: "match", _takibiVersion: 1 });
-  expect(await backing.read("posts", "b")).toMatchObject({ slug: "other", _takibiVersion: 1 });
+  expect(await backing.read("posts", "a")).toMatchObject({ slug: "match", $schemaVersion: 1 });
+  expect(await backing.read("posts", "b")).toMatchObject({ slug: "other", $schemaVersion: 1 });
 });
 
 test("get, set, update, and delete policies only see migrated existing documents", async () => {
@@ -299,15 +299,15 @@ test("new writes persist the current marker but reject marker input and marker q
     input: { title: "new" },
   });
   expect(add).toMatchObject({ status: 200, body: { ok: true, data: { title: "new" } } });
-  expect(add.body).not.toHaveProperty("data._takibiVersion");
-  expect(await backing.read("posts", "p1")).toMatchObject({ title: "new", _takibiVersion: 3 });
+  expect(add.body).not.toHaveProperty("data.$schemaVersion");
+  expect(await backing.read("posts", "p1")).toMatchObject({ title: "new", $schemaVersion: 3 });
 
   const reservedInput = await invoke(object, {
     kind: "collection",
     collection: "posts",
     operation: "add",
     id: "p2",
-    input: { title: "bad", _takibiVersion: 3 },
+    input: { title: "bad", $schemaVersion: 3 },
   });
   expect(reservedInput).toMatchObject({
     status: 400,
@@ -319,9 +319,32 @@ test("new writes persist the current marker but reject marker input and marker q
     kind: "collection",
     collection: "posts",
     operation: "list",
-    list: { where: { field: "_takibiVersion", op: "eq", value: 3 } },
+    list: { where: { field: "$schemaVersion", op: "eq", value: 3 } },
   });
   expect(reservedQuery).toMatchObject({
+    status: 400,
+    body: { ok: false, error: { code: "BAD_REQUEST" } },
+  });
+
+  const reservedRevInput = await invoke(object, {
+    kind: "collection",
+    collection: "posts",
+    operation: "add",
+    id: "p3",
+    input: { title: "bad", rev: 1 },
+  });
+  expect(reservedRevInput).toMatchObject({
+    status: 400,
+    body: { ok: false, error: { kind: "validation", code: "VALIDATION" } },
+  });
+
+  const reservedRevQuery = await invoke(object, {
+    kind: "collection",
+    collection: "posts",
+    operation: "list",
+    list: { where: { field: "rev", op: "eq", value: 1 } },
+  });
+  expect(reservedRevQuery).toMatchObject({
     status: 400,
     body: { ok: false, error: { code: "BAD_REQUEST" } },
   });
@@ -372,7 +395,7 @@ test("memory and Durable Object storage share lazy migration semantics", async (
     await expect(raw.get("posts", "p1")).resolves.toMatchObject({
       title: "old",
       published: true,
-      _takibiVersion: 1,
+      $schemaVersion: 1,
     });
   }
 });

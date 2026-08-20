@@ -183,7 +183,7 @@ test("SQL pushdown includes stale rows and filters them after lazy migration", a
     await expect(raw.get("posts", "b")).resolves.toMatchObject({
       slug: "other",
       published: false,
-      _takibiVersion: 1,
+      $schemaVersion: 1,
     });
   });
 });

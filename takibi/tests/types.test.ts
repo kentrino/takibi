@@ -177,6 +177,38 @@ test("collection schemas require plain JSON object outputs", () => {
       schema: z.object({ missing: z.undefined() }),
       accessPolicy: fullAccess,
     });
+    context.defineCollection({
+      // @ts-expect-error server-managed metadata cannot be a schema field
+      schema: z.object({ id: z.string() }),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error server-managed metadata cannot be a schema field
+      schema: z.object({ createdAt: z.string() }),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error server-managed metadata cannot be a schema field
+      schema: z.object({ updatedAt: z.string() }),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error schema version is reserved
+      schema: z.object({ $schemaVersion: z.number() }),
+      accessPolicy: fullAccess,
+    });
+    context.defineCollection({
+      // @ts-expect-error revision is reserved
+      schema: z.object({ rev: z.number() }),
+      accessPolicy: fullAccess,
+    });
+    context.collections({
+      invalid: {
+        // @ts-expect-error revision is reserved
+        schema: z.object({ rev: z.number() }),
+        accessPolicy: fullAccess,
+      },
+    });
   };
   void checkInvalidSchemas;
 });
@@ -204,8 +236,10 @@ test("collection migrations accept unknown intermediate data and constrain the f
   });
   type MigratedInput = CollectionDataInput<typeof migrated>;
   type MigratedDocument = InferCollectionDoc<typeof migrated>;
-  expectTypeOf<MigratedInput>().not.toHaveProperty("_takibiVersion");
-  expectTypeOf<MigratedDocument>().not.toHaveProperty("_takibiVersion");
+  expectTypeOf<MigratedInput>().not.toHaveProperty("$schemaVersion");
+  expectTypeOf<MigratedDocument>().not.toHaveProperty("$schemaVersion");
+  expectTypeOf<MigratedInput>().not.toHaveProperty("rev");
+  expectTypeOf<MigratedDocument>().not.toHaveProperty("rev");
 
   context.defineCollection({
     schema: z.object({ title: z.string(), published: z.boolean() }),
@@ -230,10 +264,16 @@ test("collection migrations accept unknown intermediate data and constrain the f
     const handler = context.collections({ migrated }, { memory: true });
     const client = createClient<typeof handler>("http://fire.test");
     // @ts-expect-error the internal marker is not accepted as document input
-    void client.migrated.add({ title: "x", published: true, _takibiVersion: 4 });
+    void client.migrated.add({ title: "x", published: true, $schemaVersion: 4 });
+    // @ts-expect-error revision is not accepted as document input
+    void client.migrated.add({ title: "x", published: true, rev: 1 });
     void client.migrated.list({
       // @ts-expect-error the internal marker is not queryable
-      where: (query) => query._takibiVersion.eq(4),
+      where: (query) => query.$schemaVersion.eq(4),
+    });
+    void client.migrated.list({
+      // @ts-expect-error revision is not queryable
+      where: (query) => query.rev.eq(1),
     });
   };
   void checkMarkerPrivacy;

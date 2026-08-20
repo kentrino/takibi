@@ -24,13 +24,48 @@ type JsonDocumentSchema<TSchema extends StandardSchemaV1> =
           : never;
 
 export type DocumentId = string;
-export const TAKIBI_VERSION_KEY = "_takibiVersion" as const;
+export const TAKIBI_VERSION_KEY = "$schemaVersion" as const;
+export const TAKIBI_REVISION_KEY = "rev" as const;
 
 export type DocumentMetadata = {
   id: DocumentId;
   createdAt: string;
   updatedAt: string;
 };
+
+export type ReservedDocumentDataKey =
+  | keyof DocumentMetadata
+  | typeof TAKIBI_VERSION_KEY
+  | typeof TAKIBI_REVISION_KEY;
+
+export const RESERVED_DOCUMENT_DATA_KEYS = [
+  "id",
+  "createdAt",
+  "updatedAt",
+  TAKIBI_VERSION_KEY,
+  TAKIBI_REVISION_KEY,
+] as const satisfies readonly ReservedDocumentDataKey[];
+
+type KnownObjectKeys<T> = {
+  [K in keyof T]-?: string extends K ? never : number extends K ? never : K;
+}[keyof T];
+
+type DeclaresReservedDocumentKey<T> =
+  Extract<KnownObjectKeys<T>, ReservedDocumentDataKey> extends never ? false : true;
+
+/** @internal Rejects collection schemas that declare reserved document keys. */
+export type ReservedDocumentSchemaConstraint<TSchema extends StandardSchemaV1> =
+  IsAny<TSchema> extends true
+    ? unknown
+    : unknown extends StandardSchemaV1.InferOutput<TSchema>
+      ? unknown
+      : DeclaresReservedDocumentKey<StandardSchemaV1.InferOutput<TSchema>> extends true
+        ? { schema: never }
+        : unknown extends StandardSchemaV1.InferInput<TSchema>
+          ? unknown
+          : DeclaresReservedDocumentKey<StandardSchemaV1.InferInput<TSchema>> extends true
+            ? { schema: never }
+            : unknown;
 
 export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
 
@@ -150,23 +185,11 @@ export type CollectionDefinition<
    */
   seed?: () =>
     | Readonly<
-        Record<
-          DocumentId,
-          Omit<
-            StandardSchemaV1.InferInput<TSchema>,
-            keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY
-          >
-        >
+        Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, ReservedDocumentDataKey>>
       >
     | Promise<
         Readonly<
-          Record<
-            DocumentId,
-            Omit<
-              StandardSchemaV1.InferInput<TSchema>,
-              keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY
-            >
-          >
+          Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, ReservedDocumentDataKey>>
         >
       >;
   /** @internal Carries collection action definitions for assembly and inference. */
@@ -189,10 +212,7 @@ export type InferCollectionInput<C> = C extends { schema: infer S extends Standa
   ? StandardSchemaV1.InferInput<S>
   : never;
 
-export type CollectionDataInput<C> = Omit<
-  InferCollectionInput<C>,
-  keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY
->;
+export type CollectionDataInput<C> = Omit<InferCollectionInput<C>, ReservedDocumentDataKey>;
 
 export type ValidationIssue = {
   message: string;

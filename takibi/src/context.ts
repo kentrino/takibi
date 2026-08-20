@@ -38,7 +38,13 @@ import { SchemaValidationError } from "./schema";
 import { createDurableObjectStorage, createMemoryStorage } from "./storage";
 import { storageAdd } from "./typed-storage";
 import { collectionActionsBrand } from "./types";
-import type { CollectionDefinition, CollectionsApi, CollectionsDef, StorageDriver } from "./types";
+import type {
+  CollectionDefinition,
+  CollectionsApi,
+  CollectionsDef,
+  ReservedDocumentSchemaConstraint,
+  StorageDriver,
+} from "./types";
 
 /**
  * Application-owned trust boundary: verify credentials, authorize the selected
@@ -170,7 +176,7 @@ type PublicCollectionConstraint<C, TCtx extends object> = C extends {
       accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
       migrations?: CollectionDefinition<S, TCtx>["migrations"];
       seed?: CollectionDefinition<S, TCtx>["seed"];
-    }
+    } & ReservedDocumentSchemaConstraint<S>
   : {
       schema: StandardSchemaV1;
       accessPolicy: CollectionDefinition<StandardSchemaV1, TCtx>["accessPolicy"];
@@ -191,7 +197,7 @@ type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
         schema: CollectionDefinition<S, TCtx>["schema"];
         accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
         migrations?: CollectionDefinition<S, TCtx>["migrations"];
-      }
+      } & ReservedDocumentSchemaConstraint<S>
     : TCollections[K];
 };
 

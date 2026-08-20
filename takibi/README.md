@@ -476,8 +476,9 @@ are checked at runtime.
 
 Every saved document also carries server-managed `createdAt` / `updatedAt` (UTC ISO 8601
 via `Date.prototype.toISOString()`, e.g. `2026-08-09T14:12:00.000Z`). Do not define those
-fields in the collection schema and do not send them from the client — both input own
-properties and schema transforms that emit them fail validation. `add` and create-via-`set`
+fields — or reserved `id`, `$schemaVersion`, and `rev` — in the collection schema, and do
+not send them from the client. `defineCollection` rejects those keys at the type level;
+both input own properties and schema transforms that emit them fail validation. `add` and create-via-`set`
 set both timestamps to the same write-time value; overwrite `set` / `update` keep
 `createdAt` and refresh `updatedAt`. Empty patches and same-value writes still bump
 `updatedAt`. These timestamps are observational only — not revisions, ETags, or optimistic
