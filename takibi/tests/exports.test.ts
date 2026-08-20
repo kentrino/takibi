@@ -26,7 +26,14 @@ import type {
 } from "../src/index";
 
 const srcDir = join(import.meta.dirname, "../src");
-const forbiddenClientModules = ["context.ts", "schema.ts", "executor.ts", "storage.ts"] as const;
+const forbiddenClientModules = [
+  "tracing.ts",
+  "context.ts",
+  "schema.ts",
+  "executor.ts",
+  "storage.ts",
+  "instrumentation.ts",
+] as const;
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -58,7 +65,10 @@ function walkValueImports(entryFile: string): Set<string> {
         visited.add(specifier);
         continue;
       }
-      if (!specifier.startsWith(".")) continue;
+      if (!specifier.startsWith(".")) {
+        visited.add(specifier);
+        continue;
+      }
       const resolved = normalize(
         join(dirname(file), specifier.endsWith(".ts") ? specifier : `${specifier}.ts`),
       );
@@ -220,7 +230,17 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "GrantBuilder"
     | "grantV2"
     | "permissionsOf"
-    | "isAccessGrant";
+    | "isAccessGrant"
+    | "internalTracerKey"
+    | "registerGlobalTracer"
+    | "registerTracingContextBackend"
+    | "TracingContextBackend"
+    | "createRecordingTracer"
+    | "TakibiTracer"
+    | "TakibiSpan"
+    | "TakibiInstrumentation"
+    | "createOtelTakibiTracer"
+    | "failNextStorageWrite";
   expectTypeOf<Extract<Removed, keyof PublicModule>>().toBeNever();
 
   // @ts-expect-error allows must not remain on the public root
@@ -406,4 +426,10 @@ test("the browser entry static import graph stays off Worker modules", () => {
   }
   expect(files.has("node:async_hooks")).toBe(false);
   expect(files.has("cloudflare:workers")).toBe(false);
+});
+
+test("the Worker root static import graph stays off Node compatibility modules", () => {
+  const files = walkValueImports(join(srcDir, "index.ts"));
+  expect([...files].filter((file) => file.startsWith("node:"))).toEqual([]);
+  expect([...files].filter((file) => file.startsWith("@opentelemetry/"))).toEqual([]);
 });

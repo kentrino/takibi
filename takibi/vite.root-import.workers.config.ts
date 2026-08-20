@@ -4,11 +4,10 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      wrangler: { configPath: "./wrangler.test.jsonc" },
+      wrangler: { configPath: "./wrangler.root-import.test.jsonc" },
     }),
   ],
   test: {
-    include: ["tests/**/*.workers.ts"],
-    exclude: ["tests/root-import.workers.ts"],
+    include: ["tests/root-import.workers.ts"],
   },
 });

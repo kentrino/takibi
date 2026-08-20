@@ -3,8 +3,9 @@
 Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
 The official public API is `createTakibi`, policy helpers, and errors on
-`@takibi/takibi`, and `createClient` on `@takibi/takibi/client`.
-Lower-level assembly pieces are unpublished.
+`@takibi/takibi` and `createClient` on `@takibi/takibi/client`.
+OpenTelemetry support is distributed separately as
+`@takibi/takibi-opentelemetry`.
 
 ## AuthN vs AuthZ
 
@@ -616,6 +617,35 @@ Notes:
 - Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
   The object name is that `tenantId`; prefixed names are not supported.
   `fetch` on the class is stub-only — do not route public HTTP to it.
+- The root `@takibi/takibi` import does not require `nodejs_als`,
+  `nodejs_compat`, or a minimum compatibility date.
+
+## Observability
+
+Install `@takibi/takibi-opentelemetry` to enable OpenTelemetry spans for
+`resolve`, Worker → Durable Object wire, executor, policy, schema, storage, and
+actions. The integration package owns its OpenTelemetry peer dependency,
+runtime adapter, setup documentation, and tests; the core package has no
+OpenTelemetry dependency. See that package's README for provider, context
+manager, and flushing setup.
+
+Takibi core owns span semantics as well as span placement. `takibi.wire` is a
+client span, a Durable Object `takibi.executor` is a server span, and local
+executor, policy, schema, storage, and action work is internal. Relevant spans
+carry only operation metadata: `takibi.collection.name`,
+`takibi.operation.name`, `takibi.action.name`, `takibi.action.scope`,
+`takibi.storage.operation`, and, when available, `takibi.document.id`. They do
+not include document contents, resolved context, request headers, or action
+input/output. Core also decides exception normalization and error status; the
+integration package only maps that structural contract to OpenTelemetry.
+
+`takibi.wire` is a transport span. It covers the Durable Object fetch, full
+response-body read, JSON decoding, and wire-envelope validation. Fetch or body
+failures and malformed responses mark it as an error. A valid `{ ok: false }`
+envelope, including one received with a non-2xx status, is a successfully
+received remote-operation result and leaves the wire span successful; the
+Durable Object's executor, policy, schema, storage, or action span records that
+operation failure.
 
 ## Limits and layout
 

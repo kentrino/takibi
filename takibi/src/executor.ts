@@ -1,6 +1,8 @@
 import { ForbiddenError, NotFoundError } from "./errors";
+import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
+import { withSpan } from "./tracing";
 import {
   commitAddDoc,
   prepareAddDoc,
@@ -70,12 +72,21 @@ async function assertAccess(
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
 ): Promise<void> {
-  const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
-  if (allows(granted, accessCtx.permission)) return;
-  if (options.conceal) {
-    throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
-  }
-  throw new ForbiddenError();
+  await withSpan(
+    {
+      name: TAKIBI_SPAN.policy,
+      kind: "internal",
+      attributes: collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
+    },
+    async () => {
+      const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
+      if (allows(granted, accessCtx.permission)) return;
+      if (options.conceal) {
+        throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
+      }
+      throw new ForbiddenError();
+    },
+  );
 }
 
 /**
