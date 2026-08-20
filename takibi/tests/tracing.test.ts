@@ -662,6 +662,70 @@ test("tracing presence does not change collections, handler, or client inference
   );
 });
 
+test("withSpan keeps the request path when the tracer adapter throws", async () => {
+  registerGlobalTracer({
+    startSpan() {
+      throw new Error("adapter-start");
+    },
+    inject() {},
+    extract() {
+      return undefined;
+    },
+  });
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "t" }),
+  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  const added = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "n" }),
+  });
+  expect(added.status).toBe(200);
+});
+
+test("withSpan swallows adapter errors on success and failure paths", async () => {
+  registerGlobalTracer({
+    startSpan() {
+      return {
+        context: {
+          traceId: "11111111111111111111111111111111",
+          spanId: "2222222222222222",
+          traceFlags: 1,
+        },
+        runWithActiveContext: (fn) => fn(),
+        recordException() {
+          throw new Error("adapter-record");
+        },
+        setStatus() {
+          throw new Error("adapter-status");
+        },
+        end() {
+          throw new Error("adapter-end");
+        },
+      };
+    },
+    inject() {},
+    extract() {
+      return undefined;
+    },
+  });
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "t" }),
+  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  const added = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "n" }),
+  });
+  expect(added.status).toBe(200);
+  const rejected = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "" }),
+  });
+  expect(rejected.status).toBeGreaterThanOrEqual(400);
+});
+
 test("instrumentation contract stays off the public root", () => {
   const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")) as {
     dependencies?: Record<string, string>;

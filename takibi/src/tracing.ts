@@ -133,6 +133,14 @@ export function formatTraceparent(span: SpanContext): string {
   return `00-${span.traceId}-${span.spanId}-${traceFlags}`;
 }
 
+function ignoreAdapterError(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    // Tracing adapters are best-effort and must not take down the request path.
+  }
+}
+
 export async function withSpan<T>(
   spec: SpanSpec,
   fn: () => Promise<T>,
@@ -143,19 +151,23 @@ export async function withSpan<T>(
   const store = backend.getStore();
   if (!store) return fn();
   const parent = parentOverride ?? store.span;
-  const span = store.tracer.startSpan(spec, parent);
+  let span: TakibiSpan;
+  try {
+    span = store.tracer.startSpan(spec, parent);
+  } catch {
+    return fn();
+  }
   return span.runWithActiveContext(() =>
     backend.run({ tracer: store.tracer, span: span.context }, async () => {
       try {
-        const value = await fn();
-        span.end();
-        return value;
+        return await fn();
       } catch (err) {
         const exception = normalizeException(err);
-        span.recordException(exception);
-        span.setStatus({ code: "error", message: exception.message });
-        span.end();
+        ignoreAdapterError(() => span.recordException(exception));
+        ignoreAdapterError(() => span.setStatus({ code: "error", message: exception.message }));
         throw err;
+      } finally {
+        ignoreAdapterError(() => span.end());
       }
     }),
   );
