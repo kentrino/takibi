@@ -24,7 +24,7 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
-import { TAKIBI_ATTR } from "./attr";
+import { invocationSpanAttributes } from "./otel-helper";
 import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
@@ -47,7 +47,6 @@ import {
   resolveTracer,
   tracedStorage,
   withSpan,
-  type SpanAttributes,
   type SpanContext,
   type TakibiTracer,
 } from "./tracing";
@@ -581,20 +580,6 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
       };
       return tracer ? bindTracer(tracer, execute) : execute();
     }
-  };
-}
-
-function invocationSpanAttributes(invocation: PublicRequest): SpanAttributes {
-  if (invocation.kind === "action") {
-    return {
-      [TAKIBI_ATTR.action.name]: invocation.name,
-      [TAKIBI_ATTR.action.scope]: invocation.scope,
-    };
-  }
-  return {
-    [TAKIBI_ATTR.collection.name]: invocation.collection,
-    [TAKIBI_ATTR.operation.name]: invocation.operation,
-    ...(invocation.id === undefined ? {} : { [TAKIBI_ATTR.document.id]: invocation.id }),
   };
 }
 

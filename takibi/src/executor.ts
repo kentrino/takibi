@@ -1,5 +1,5 @@
 import { ForbiddenError, NotFoundError } from "./errors";
-import { TAKIBI_ATTR } from "./attr";
+import { collectionSpanAttributes } from "./otel-helper";
 import { allows, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
 import { withSpan } from "./tracing";
@@ -76,11 +76,7 @@ async function assertAccess(
     {
       name: "takibi.policy",
       kind: "internal",
-      attributes: {
-        [TAKIBI_ATTR.collection.name]: accessCtx.collection,
-        [TAKIBI_ATTR.operation.name]: accessCtx.operation,
-        ...(options.id === undefined ? {} : { [TAKIBI_ATTR.document.id]: options.id }),
-      },
+      attributes: collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
     },
     async () => {
       const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
