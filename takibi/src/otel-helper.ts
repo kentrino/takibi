@@ -28,6 +28,16 @@ export const TAKIBI_ATTR = takibiAttributes satisfies AttributeKeyTree<
   "takibi"
 >;
 
+export const TAKIBI_SPAN = {
+  action: "takibi.action",
+  executor: "takibi.executor",
+  policy: "takibi.policy",
+  resolve: "takibi.resolve",
+  schema: "takibi.schema",
+  storage: "takibi.storage",
+  wire: "takibi.wire",
+} as const;
+
 type SpanAttributes = Readonly<Record<string, string | number | boolean>>;
 
 export function actionSpanAttributes(name: string, scope: string): SpanAttributes {

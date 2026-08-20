@@ -24,7 +24,7 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
-import { invocationSpanAttributes } from "./otel-helper";
+import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {
@@ -360,7 +360,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         await memoryReady;
         const input = { request, context: initial as TInitial };
         let resolveSpan: SpanContext | undefined;
-        const ctx = await withSpan({ name: "takibi.resolve", kind: "internal" }, async () => {
+        const ctx = await withSpan({ name: TAKIBI_SPAN.resolve, kind: "internal" }, async () => {
           resolveSpan = activeSpanContext();
           const resolved = await resolve(input);
           assertSerializableContext(resolved);
@@ -371,7 +371,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
           const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
           const data = await withSpan(
             {
-              name: "takibi.executor",
+              name: TAKIBI_SPAN.executor,
               kind: "internal",
               attributes: invocationSpanAttributes(invocation),
             },
@@ -408,7 +408,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
 
         const json = await withSpan(
           {
-            name: "takibi.wire",
+            name: TAKIBI_SPAN.wire,
             kind: "client",
             attributes: invocationSpanAttributes(invocation),
           },
@@ -562,7 +562,7 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
           const parent = extractSpanContext(request.headers);
           const data = await withSpan(
             {
-              name: "takibi.executor",
+              name: TAKIBI_SPAN.executor,
               kind: "server",
               attributes: invocationSpanAttributes(invocation),
             },

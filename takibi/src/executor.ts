@@ -1,5 +1,5 @@
 import { ForbiddenError, NotFoundError } from "./errors";
-import { collectionSpanAttributes } from "./otel-helper";
+import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
 import { withSpan } from "./tracing";
@@ -74,7 +74,7 @@ async function assertAccess(
 ): Promise<void> {
   await withSpan(
     {
-      name: "takibi.policy",
+      name: TAKIBI_SPAN.policy,
       kind: "internal",
       attributes: collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
     },

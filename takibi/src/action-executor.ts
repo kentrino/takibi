@@ -2,7 +2,7 @@ import { ActionRegistry, type ActionGateContext } from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
-import { actionSpanAttributes } from "./otel-helper";
+import { actionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import {
   allows,
   evaluateAccessPolicy,
@@ -48,7 +48,7 @@ export async function executeAction<TCtx extends object>(
   };
   const spanAttributes = actionSpanAttributes(invocation.name, invocation.scope);
   await withSpan(
-    { name: "takibi.policy", kind: "internal", attributes: spanAttributes },
+    { name: TAKIBI_SPAN.policy, kind: "internal", attributes: spanAttributes },
     async () => {
       const grant = isAccessGrant(definition.policy)
         ? definition.policy
@@ -105,7 +105,7 @@ export async function executeAction<TCtx extends object>(
     }
 
     const output = await withSpan(
-      { name: "takibi.action", kind: "internal", attributes: spanAttributes },
+      { name: TAKIBI_SPAN.action, kind: "internal", attributes: spanAttributes },
       async () => definition.handler(args),
     );
     if (output === undefined) return null;
