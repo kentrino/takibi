@@ -65,7 +65,10 @@ function walkValueImports(entryFile: string): Set<string> {
         visited.add(specifier);
         continue;
       }
-      if (!specifier.startsWith(".")) continue;
+      if (!specifier.startsWith(".")) {
+        visited.add(specifier);
+        continue;
+      }
       const resolved = normalize(
         join(dirname(file), specifier.endsWith(".ts") ? specifier : `${specifier}.ts`),
       );
@@ -418,4 +421,5 @@ test("the browser entry static import graph stays off Worker modules", () => {
 test("the Worker root static import graph stays off Node compatibility modules", () => {
   const files = walkValueImports(join(srcDir, "index.ts"));
   expect([...files].filter((file) => file.startsWith("node:"))).toEqual([]);
+  expect([...files].filter((file) => file.startsWith("@opentelemetry/"))).toEqual([]);
 });
