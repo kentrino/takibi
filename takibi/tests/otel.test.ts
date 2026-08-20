@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AlwaysOnSampler,
+  BatchSpanProcessor,
   BasicTracerProvider,
   InMemorySpanExporter,
   ParentBasedSampler,
-  SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import {
   context,
@@ -81,7 +81,7 @@ test("./otel preserves sampling and tracestate without changing root inference",
   const exporter = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({
     sampler: new ParentBasedSampler({ root: new AlwaysOnSampler() }),
-    spanProcessors: [new SimpleSpanProcessor(exporter)],
+    spanProcessors: [new BatchSpanProcessor(exporter, { scheduledDelayMillis: 60_000 })],
   });
   trace.setGlobalTracerProvider(provider);
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
@@ -133,6 +133,7 @@ test("./otel preserves sampling and tracestate without changing root inference",
   expect(extractedSpan?.traceId).toBeDefined();
   expect(extractedSpan?.spanId).toBeDefined();
 
+  expect(exporter.getFinishedSpans()).toEqual([]);
   await createOtelTakibiTracer().forceFlush();
   const exported = exporter.getFinishedSpans();
   expect(exported.map((span) => span.name)).toEqual(
@@ -189,6 +190,10 @@ test("./otel preserves sampling and tracestate without changing root inference",
   });
   expect(sampledHeaders.get("traceparent")).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
   expect(sampledHeaders.get("tracestate")).toBe("vendor=sampled");
+  expect(exporter.getFinishedSpans().map((span) => span.name)).not.toEqual(
+    expect.arrayContaining(["takibi.worker", "takibi.do"]),
+  );
+  await tracer.forceFlush();
   expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual(
     expect.arrayContaining(["takibi.worker", "takibi.do"]),
   );

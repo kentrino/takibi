@@ -12,9 +12,9 @@ import {
 } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
+  BatchSpanProcessor,
   BasicTracerProvider,
   InMemorySpanExporter,
-  SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";
@@ -90,7 +90,7 @@ test("global-only Workers runtime records spans and flushes through waitUntil", 
 test("real OTel provider propagates spans through an actual Durable Object namespace", async () => {
   const exporter = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({
-    spanProcessors: [new SimpleSpanProcessor(exporter)],
+    spanProcessors: [new BatchSpanProcessor(exporter, { scheduledDelayMillis: 60_000 })],
   });
   trace.setGlobalTracerProvider(provider);
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
@@ -110,6 +110,7 @@ test("real OTel provider propagates spans through an actual Durable Object names
     body: JSON.stringify({ title: "workers-otel" }),
   });
   expect(response.status).toBe(200);
+  expect(exporter.getFinishedSpans()).toEqual([]);
 
   const executionContext = createExecutionContext();
   executionContext.waitUntil(createOtelTakibiTracer().forceFlush());
