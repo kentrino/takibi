@@ -610,6 +610,10 @@ Notes:
 - Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
   The object name is that `tenantId`; prefixed names are not supported.
   `fetch` on the class is stub-only — do not route public HTTP to it.
+- The root `@takibi/takibi` import does not require `nodejs_als`,
+  `nodejs_compat`, or a minimum compatibility date. The opt-in `./otel` entry
+  delegates async context to the OpenTelemetry context manager you register;
+  apply that context manager's runtime compatibility requirements separately.
 
 ## Observability
 

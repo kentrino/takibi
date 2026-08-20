@@ -1,4 +1,5 @@
-import { afterEach, expect, expectTypeOf, test } from "vite-plus/test";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { afterEach, beforeEach, expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +11,9 @@ import {
   formatTraceparent,
   internalTracerKey,
   registerGlobalTracer,
+  registerTracingContextBackend,
   type RecordedSpan,
+  type TracingContextBackend,
 } from "../src/tracing";
 import { createSqliteDurableObjectStorage } from "./sqlite";
 import type { WireResponse } from "../src/protocol";
@@ -24,9 +27,19 @@ import type { WireResponse } from "../src/protocol";
  * - Discard conditions: none matched. No public CollectionsOptions.tracer or lifecycle hook.
  */
 const Post = z.object({ title: z.string().min(1) });
+const tracingStore = new AsyncLocalStorage<Parameters<TracingContextBackend["run"]>[0]>();
+
+beforeEach(() => {
+  registerTracingContextBackend({
+    getStore: () => tracingStore.getStore(),
+    run: (store, fn) => tracingStore.run(store, fn),
+  });
+});
 
 afterEach(() => {
   registerGlobalTracer(undefined);
+  registerTracingContextBackend(undefined);
+  tracingStore.disable();
 });
 
 function createFakeDurableObjectState(
@@ -614,6 +627,8 @@ test("OTel and tracing helpers stay off the public root", () => {
   type Hidden =
     | "internalTracerKey"
     | "registerGlobalTracer"
+    | "registerTracingContextBackend"
+    | "TracingContextBackend"
     | "createRecordingTracer"
     | "TakibiTracer"
     | "TakibiSpan"

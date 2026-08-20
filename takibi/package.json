@@ -13,8 +13,9 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "test": "vp test && vp run test:workers",
+    "test": "vp test && vp run test:workers && vp run test:root-compat",
     "test:workers": "vp test --config vite.workers.config.ts",
+    "test:root-compat": "vp test --config vite.root-import.workers.config.ts",
     "check": "vp check"
   },
   "dependencies": {

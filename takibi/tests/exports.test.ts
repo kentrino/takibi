@@ -221,6 +221,8 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "isAccessGrant"
     | "internalTracerKey"
     | "registerGlobalTracer"
+    | "registerTracingContextBackend"
+    | "TracingContextBackend"
     | "createRecordingTracer"
     | "TakibiTracer"
     | "TakibiSpan"
@@ -413,10 +415,7 @@ test("the browser entry static import graph stays off Worker modules", () => {
   expect(files.has("cloudflare:workers")).toBe(false);
 });
 
-test("tracing uses a static AsyncLocalStorage import", () => {
-  const source = readFileSync(join(srcDir, "tracing.ts"), "utf8");
-  expect(source).toContain('import { AsyncLocalStorage } from "node:async_hooks"');
-  expect(source).not.toContain("document");
-  expect(source).not.toContain("createFallbackAls");
-  expect(source).not.toContain('["node", "async_hooks"].join(":")');
+test("the Worker root static import graph stays off Node compatibility modules", () => {
+  const files = walkValueImports(join(srcDir, "index.ts"));
+  expect([...files].filter((file) => file.startsWith("node:"))).toEqual([]);
 });

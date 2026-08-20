@@ -1,6 +1,14 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { expect, test } from "vite-plus/test";
-import { propagation, trace } from "@opentelemetry/api";
+import {
+  context,
+  propagation,
+  ROOT_CONTEXT,
+  trace,
+  type Context,
+  type ContextManager,
+} from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
   BasicTracerProvider,
@@ -12,8 +20,40 @@ import { createTakibi, fullAccess } from "../src/index";
 import { createOtelTakibiTracer, TakibiInstrumentation } from "../src/otel";
 import { createRecordingTracer, registerGlobalTracer } from "../src/tracing";
 
+class AsyncLocalContextManager implements ContextManager {
+  readonly #storage = new AsyncLocalStorage<Context>();
+
+  active(): Context {
+    return this.#storage.getStore() ?? ROOT_CONTEXT;
+  }
+
+  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
+    activeContext: Context,
+    fn: F,
+    thisArg?: ThisParameterType<F>,
+    ...args: A
+  ): ReturnType<F> {
+    return this.#storage.run(activeContext, () => fn.call(thisArg, ...args));
+  }
+
+  bind<T>(_context: Context, target: T): T {
+    return target;
+  }
+
+  enable(): this {
+    return this;
+  }
+
+  disable(): this {
+    return this;
+  }
+}
+
 test("global-only Workers runtime records spans and flushes through waitUntil", async () => {
   expect(import.meta.url.includes("opentelemetry")).toBe(false);
+  context.setGlobalContextManager(new AsyncLocalContextManager());
+  const instrumentation = new TakibiInstrumentation();
+  instrumentation.enable();
   const recording = createRecordingTracer();
   registerGlobalTracer(recording.tracer);
   const handler = createTakibi()({
@@ -35,7 +75,8 @@ test("global-only Workers runtime records spans and flushes through waitUntil", 
   executionContext.waitUntil(recording.forceFlush());
   await waitOnExecutionContext(executionContext);
   expect(recording.didFlush).toBe(true);
-  registerGlobalTracer(undefined);
+  instrumentation.disable();
+  context.disable();
 });
 
 test("real OTel provider exports spans after waitUntil flush", async () => {
@@ -45,6 +86,7 @@ test("real OTel provider exports spans after waitUntil flush", async () => {
   });
   trace.setGlobalTracerProvider(provider);
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  context.setGlobalContextManager(new AsyncLocalContextManager());
   const instrumentation = new TakibiInstrumentation();
   instrumentation.enable();
 
@@ -70,5 +112,6 @@ test("real OTel provider exports spans after waitUntil flush", async () => {
 
   instrumentation.disable();
   await provider.shutdown();
+  context.disable();
   registerGlobalTracer(undefined);
 });

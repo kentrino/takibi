@@ -1,5 +1,6 @@
 import {
   context as otelContext,
+  createContextKey,
   createTraceState,
   propagation,
   ROOT_CONTEXT,
@@ -10,7 +11,25 @@ import {
   type TextMapSetter,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { registerGlobalTracer, type SpanContext, type TakibiTracer } from "./tracing";
+import {
+  registerGlobalTracer,
+  registerTracingContextBackend,
+  type SpanContext,
+  type TakibiTracer,
+  type TracingContextBackend,
+} from "./tracing";
+
+const tracingStoreKey = createContextKey("takibi.tracing-store");
+const otelContextBackend: TracingContextBackend = {
+  getStore() {
+    return otelContext.active().getValue(tracingStoreKey) as ReturnType<
+      TracingContextBackend["getStore"]
+    >;
+  },
+  run(store, fn) {
+    return otelContext.with(otelContext.active().setValue(tracingStoreKey, store), fn);
+  },
+};
 
 const headersSetter: TextMapSetter<Headers> = {
   set(carrier, key, value) {
@@ -71,11 +90,13 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
 
 export class TakibiInstrumentation {
   enable(): void {
+    registerTracingContextBackend(otelContextBackend);
     registerGlobalTracer(createOtelTakibiTracer());
   }
 
   disable(): void {
     registerGlobalTracer(undefined);
+    registerTracingContextBackend(undefined);
   }
 }
 

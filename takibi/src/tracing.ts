@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { StorageDriver } from "./types";
 
 export const internalTracerKey: unique symbol = Symbol.for("takibi.internalTracer");
@@ -42,12 +41,20 @@ type TracingStore = {
   span?: SpanContext;
 };
 
-const tracingStore = new AsyncLocalStorage<TracingStore>();
+export type TracingContextBackend = {
+  getStore(): TracingStore | undefined;
+  run<T>(store: TracingStore, fn: () => T): T;
+};
 
 let globalTracer: TakibiTracer | undefined;
+let contextBackend: TracingContextBackend | undefined;
 
 export function registerGlobalTracer(tracer: TakibiTracer | undefined): void {
   globalTracer = tracer;
+}
+
+export function registerTracingContextBackend(backend: TracingContextBackend | undefined): void {
+  contextBackend = backend;
 }
 
 export function resolveTracer(options: object | undefined): TakibiTracer | undefined {
@@ -59,21 +66,22 @@ export function resolveTracer(options: object | undefined): TakibiTracer | undef
 }
 
 export function bindTracer<T>(tracer: TakibiTracer, fn: () => T): T {
-  return tracingStore.run({ tracer }, fn);
+  const backend = contextBackend;
+  return backend ? backend.run({ tracer }, fn) : fn();
 }
 
 export function activeSpanContext(): SpanContext | undefined {
-  return tracingStore.getStore()?.span;
+  return contextBackend?.getStore()?.span;
 }
 
 export function injectTraceparent(headers: Headers): void {
-  const store = tracingStore.getStore();
+  const store = contextBackend?.getStore();
   if (!store?.span) return;
   store.tracer.inject(headers, store.span);
 }
 
 export function extractSpanContext(headers: Headers): SpanContext | undefined {
-  const tracer = tracingStore.getStore()?.tracer;
+  const tracer = contextBackend?.getStore()?.tracer;
   if (!tracer) return undefined;
   return tracer.extract(headers);
 }
@@ -103,12 +111,14 @@ export async function withSpan<T>(
   fn: () => Promise<T>,
   parentOverride?: SpanContext,
 ): Promise<T> {
-  const store = tracingStore.getStore();
+  const backend = contextBackend;
+  if (!backend) return fn();
+  const store = backend.getStore();
   if (!store) return fn();
   const parent = parentOverride ?? store.span;
   const span = store.tracer.startSpan(name, parent);
   return span.runWithActiveContext(() =>
-    tracingStore.run({ tracer: store.tracer, span: span.context }, async () => {
+    backend.run({ tracer: store.tracer, span: span.context }, async () => {
       try {
         const value = await fn();
         span.end();

@@ -229,6 +229,8 @@ test("README documents ./otel enable and isolate-local flush semantics", () => {
   expect(readme).toContain("instrumentation.enable()");
   expect(readme).toContain("waitUntil(createOtelTakibiTracer().forceFlush())");
   expect(readme).toContain("context manager");
+  expect(readme).toContain("root `@takibi/takibi` import does not require `nodejs_als`");
+  expect(readme).toContain("apply that context manager's runtime compatibility requirements");
   expect(readme).toContain("only the provider in the calling Worker isolate");
   expect(readme).toMatch(/does not guarantee export before a\s+Durable Object response completes/);
   expect(readme).toContain("BatchSpanProcessor");
