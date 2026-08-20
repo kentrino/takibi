@@ -1,15 +1,53 @@
 {
   "name": "@takibi/takibi",
   "version": "0.0.0",
-  "private": true,
   "description": "Typed multi-tenant collection store on Cloudflare Durable Objects.",
+  "keywords": [
+    "cloudflare",
+    "durable-objects",
+    "multi-tenant",
+    "typescript"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/takibi"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client-entry.ts",
     "./instrumentation": "./src/instrumentation.ts",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./client": {
+        "types": "./dist/client.d.mts",
+        "import": "./dist/client.mjs"
+      },
+      "./instrumentation": {
+        "types": "./dist/instrumentation.d.mts",
+        "import": "./dist/instrumentation.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",
@@ -31,5 +69,8 @@
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "zod": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }
