@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { SpanKind } from "@opentelemetry/api";
 import { expect, test } from "vite-plus/test";
 import { createTakibi, fullAccess } from "@takibi/takibi";
 import { z } from "zod";
@@ -43,7 +44,32 @@ test("integration propagates OTel spans through a real Durable Object namespace"
 
   const wire = workerSpans.find(({ name }) => name === "takibi.wire");
   const executor = objectSpans.find(({ name }) => name === "takibi.executor");
-  const storage = objectSpans.find(({ name }) => name === "takibi.storage");
+  const storage = objectSpans.find(
+    ({ name, attributes }) =>
+      name === "takibi.storage" && attributes["takibi.storage.operation"] === "put",
+  );
+  expect(wire).toMatchObject({
+    kind: SpanKind.CLIENT,
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.operation.name": "add",
+    },
+  });
+  expect(executor).toMatchObject({
+    kind: SpanKind.SERVER,
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.operation.name": "add",
+    },
+  });
+  expect(storage).toMatchObject({
+    kind: SpanKind.INTERNAL,
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.storage.operation": "put",
+      "takibi.document.id": expect.any(String),
+    },
+  });
   expect(executor?.traceId).toBe(wire?.traceId);
   expect(executor?.parentSpanId).toBe(wire?.spanId);
   expect(storage?.traceId).toBe(executor?.traceId);

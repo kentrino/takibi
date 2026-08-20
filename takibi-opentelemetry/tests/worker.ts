@@ -48,6 +48,8 @@ class AsyncLocalContextManager implements ContextManager {
 
 export type ExportedSpan = {
   name: string;
+  kind: number;
+  attributes: Readonly<Record<string, unknown>>;
   traceId: string;
   spanId: string;
   parentSpanId?: string;
@@ -79,6 +81,8 @@ export async function flushOwnedProviderAndReadSpans(
     flushCount,
     spans: exporter.getFinishedSpans().map((span) => ({
       name: span.name,
+      kind: span.kind,
+      attributes: span.attributes,
       traceId: span.spanContext().traceId,
       spanId: span.spanContext().spanId,
       ...(span.parentSpanContext ? { parentSpanId: span.parentSpanContext.spanId } : {}),

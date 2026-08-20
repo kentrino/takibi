@@ -10,14 +10,40 @@ export type SpanContext = {
   isRemote?: boolean;
 };
 
+export type SpanKind = "internal" | "client" | "server" | "producer" | "consumer";
+
+export type SpanAttributeValue = string | number | boolean;
+
+export type SpanAttributes = Readonly<Record<string, SpanAttributeValue>>;
+
+export type SpanSpec = {
+  name: string;
+  kind: SpanKind;
+  attributes?: SpanAttributes;
+};
+
+export type SpanException = {
+  name: string;
+  message: string;
+  stack?: string;
+};
+
+export type SpanStatus = {
+  code: "unset" | "ok" | "error";
+  message?: string;
+};
+
 export type RecordedSpan = {
   name: string;
+  kind: SpanKind;
+  attributes: SpanAttributes;
   traceId: string;
   spanId: string;
   traceFlags: number;
   parentSpanId?: string;
   status: "ok" | "error";
-  errorName?: string;
+  statusMessage?: string;
+  exception?: SpanException;
   ended: boolean;
   endCount: number;
 };
@@ -25,12 +51,13 @@ export type RecordedSpan = {
 export type TakibiSpan = {
   readonly context: SpanContext;
   runWithActiveContext<T>(fn: () => T): T;
-  recordError(err: unknown): void;
+  recordException(exception: SpanException): void;
+  setStatus(status: SpanStatus): void;
   end(): void;
 };
 
 export type TakibiTracer = {
-  startSpan(name: string, parent?: SpanContext): TakibiSpan;
+  startSpan(spec: SpanSpec, parent?: SpanContext): TakibiSpan;
   inject(headers: Headers, span: SpanContext): void;
   extract(headers: Headers): SpanContext | undefined;
 };
@@ -106,7 +133,7 @@ export function formatTraceparent(span: SpanContext): string {
 }
 
 export async function withSpan<T>(
-  name: string,
+  spec: SpanSpec,
   fn: () => Promise<T>,
   parentOverride?: SpanContext,
 ): Promise<T> {
@@ -115,7 +142,7 @@ export async function withSpan<T>(
   const store = backend.getStore();
   if (!store) return fn();
   const parent = parentOverride ?? store.span;
-  const span = store.tracer.startSpan(name, parent);
+  const span = store.tracer.startSpan(spec, parent);
   return span.runWithActiveContext(() =>
     backend.run({ tracer: store.tracer, span: span.context }, async () => {
       try {
@@ -123,7 +150,9 @@ export async function withSpan<T>(
         span.end();
         return value;
       } catch (err) {
-        span.recordError(err);
+        const exception = normalizeException(err);
+        span.recordException(exception);
+        span.setStatus({ code: "error", message: exception.message });
         span.end();
         throw err;
       }
@@ -139,22 +168,45 @@ export function failNextStorageWrite(): void {
 
 export function tracedStorage(driver: StorageDriver): StorageDriver {
   const wrap = (next: StorageDriver): StorageDriver => ({
-    get: (resource, id) => withSpan("takibi.storage", () => next.get(resource, id)),
+    get: (resource, id) =>
+      withSpan(storageSpanSpec("get", resource, id), () => next.get(resource, id)),
     put: (resource, doc) =>
-      withSpan("takibi.storage", async () => {
+      withSpan(storageSpanSpec("put", resource, doc.id), async () => {
         if (failNextWrite) {
           failNextWrite = false;
           throw new Error("storage-failed");
         }
         return next.put(resource, doc);
       }),
-    delete: (resource, id) => withSpan("takibi.storage", () => next.delete(resource, id)),
+    delete: (resource, id) =>
+      withSpan(storageSpanSpec("delete", resource, id), () => next.delete(resource, id)),
     list: (resource, opts, plan) =>
-      withSpan("takibi.storage", () => next.list(resource, opts, plan)),
+      withSpan(storageSpanSpec("list", resource), () => next.list(resource, opts, plan)),
     transaction: (callback) =>
-      withSpan("takibi.storage", () => next.transaction((scoped) => callback(wrap(scoped)))),
+      withSpan(
+        {
+          name: "takibi.storage",
+          kind: "internal",
+          attributes: {
+            "takibi.storage.operation": "transaction",
+          },
+        },
+        () => next.transaction((scoped) => callback(wrap(scoped))),
+      ),
   });
   return wrap(driver);
+}
+
+function storageSpanSpec(operation: string, collection: string, id?: string): SpanSpec {
+  return {
+    name: "takibi.storage",
+    kind: "internal",
+    attributes: {
+      "takibi.collection.name": collection,
+      "takibi.storage.operation": operation,
+      ...(id === undefined ? {} : { "takibi.document.id": id }),
+    },
+  };
 }
 
 export function createRecordingTracer(): {
@@ -163,7 +215,7 @@ export function createRecordingTracer(): {
 } {
   const spans: RecordedSpan[] = [];
   const tracer: TakibiTracer = {
-    startSpan(name, parent) {
+    startSpan(spec, parent) {
       const context: SpanContext = {
         traceId: parent?.traceId ?? randomHex(16),
         spanId: randomHex(8),
@@ -171,7 +223,9 @@ export function createRecordingTracer(): {
         ...(parent?.traceState ? { traceState: parent.traceState } : {}),
       };
       const recorded: RecordedSpan = {
-        name,
+        name: spec.name,
+        kind: spec.kind,
+        attributes: { ...spec.attributes },
         traceId: context.traceId,
         spanId: context.spanId,
         traceFlags: context.traceFlags,
@@ -184,9 +238,12 @@ export function createRecordingTracer(): {
       return {
         context,
         runWithActiveContext: (fn) => fn(),
-        recordError(err) {
-          recorded.status = "error";
-          recorded.errorName = err instanceof Error ? err.name : "Error";
+        recordException(exception) {
+          recorded.exception = { ...exception };
+        },
+        setStatus(status) {
+          recorded.status = status.code === "error" ? "error" : "ok";
+          recorded.statusMessage = status.message;
         },
         end() {
           recorded.ended = true;
@@ -201,6 +258,17 @@ export function createRecordingTracer(): {
     extract: extractW3cSpanContext,
   };
   return { tracer, spans };
+}
+
+function normalizeException(error: unknown): SpanException {
+  if (error instanceof Error) {
+    return {
+      name: error.name || "Error",
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return { name: "Error", message: String(error) };
 }
 
 function randomHex(bytes: number): string {

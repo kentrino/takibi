@@ -46,6 +46,7 @@ import {
   resolveTracer,
   tracedStorage,
   withSpan,
+  type SpanAttributes,
   type SpanContext,
   type TakibiTracer,
 } from "./tracing";
@@ -359,7 +360,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         await memoryReady;
         const input = { request, context: initial as TInitial };
         let resolveSpan: SpanContext | undefined;
-        const ctx = await withSpan("takibi.resolve", async () => {
+        const ctx = await withSpan({ name: "takibi.resolve", kind: "internal" }, async () => {
           resolveSpan = activeSpanContext();
           const resolved = await resolve(input);
           assertSerializableContext(resolved);
@@ -369,7 +370,11 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         if (memoryDriver) {
           const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
           const data = await withSpan(
-            "takibi.executor",
+            {
+              name: "takibi.executor",
+              kind: "internal",
+              attributes: invocationSpanAttributes(invocation),
+            },
             () =>
               invocation.kind === "action"
                 ? executeAction(registry, collections, driver, ctx, invocation)
@@ -402,7 +407,11 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         };
 
         const json = await withSpan(
-          "takibi.wire",
+          {
+            name: "takibi.wire",
+            kind: "client",
+            attributes: invocationSpanAttributes(invocation),
+          },
           async () => {
             const headers = new Headers({ "content-type": "application/json" });
             injectTraceparent(headers);
@@ -552,7 +561,11 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
           const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
           const parent = extractSpanContext(request.headers);
           const data = await withSpan(
-            "takibi.executor",
+            {
+              name: "takibi.executor",
+              kind: "server",
+              attributes: invocationSpanAttributes(invocation),
+            },
             () =>
               invocation.kind === "action"
                 ? executeAction(registry, collections, driver, ctx, invocation as ActionInvocation)
@@ -567,6 +580,20 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
       };
       return tracer ? bindTracer(tracer, execute) : execute();
     }
+  };
+}
+
+function invocationSpanAttributes(invocation: PublicRequest): SpanAttributes {
+  if (invocation.kind === "action") {
+    return {
+      "takibi.action.name": invocation.name,
+      "takibi.action.scope": invocation.scope,
+    };
+  }
+  return {
+    "takibi.collection.name": invocation.collection,
+    "takibi.operation.name": invocation.operation,
+    ...(invocation.id === undefined ? {} : { "takibi.document.id": invocation.id }),
   };
 }
 

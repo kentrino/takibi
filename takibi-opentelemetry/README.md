@@ -13,6 +13,18 @@ application-owned.
 policy, schema, storage, and actions. It does not change the public types of
 collections, handlers, or clients.
 
+Span kinds, attributes, exception recording, and status are selected by Takibi
+core. This package maps them directly to the OpenTelemetry API:
+
+- Worker → Durable Object `takibi.wire` spans use `CLIENT`; Durable Object
+  `takibi.executor` spans use `SERVER`; local work uses `INTERNAL`.
+- Collection, operation, action, action scope, storage operation, and available
+  document IDs use `takibi.*` attributes.
+- Document contents, resolved context, headers, and action input/output are
+  never span attributes.
+- Thrown values are normalized and assigned error status by core rather than by
+  this adapter.
+
 ```ts
 import { TakibiInstrumentation } from "@takibi/takibi-opentelemetry";
 import { provider } from "./telemetry.server";

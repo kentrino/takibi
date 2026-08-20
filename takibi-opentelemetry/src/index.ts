@@ -4,6 +4,7 @@ import {
   createTraceState,
   propagation,
   ROOT_CONTEXT,
+  SpanKind as OtelSpanKind,
   SpanStatusCode,
   trace,
   type SpanContext as OtelSpanContext,
@@ -14,6 +15,8 @@ import {
   registerGlobalTracer,
   registerTracingContextBackend,
   type SpanContext,
+  type SpanKind as TakibiSpanKind,
+  type SpanStatus,
   type TakibiTracer,
   type TracingContextBackend,
 } from "@takibi/takibi/instrumentation";
@@ -48,21 +51,32 @@ const headersGetter: TextMapGetter<Headers> = {
 export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
   const tracer = trace.getTracer(name);
   return {
-    startSpan(spanName, parent) {
+    startSpan(spec, parent) {
       const parentContext = parent
         ? trace.setSpanContext(otelContext.active(), toOtelSpanContext(parent))
         : otelContext.active();
-      const span = tracer.startSpan(spanName, undefined, parentContext);
+      const span = tracer.startSpan(
+        spec.name,
+        {
+          kind: toOtelSpanKind(spec.kind),
+          ...(spec.attributes ? { attributes: spec.attributes } : {}),
+        },
+        parentContext,
+      );
       const context = span.spanContext();
       return {
         context: fromOtelSpanContext(context),
         runWithActiveContext(fn) {
           return otelContext.with(trace.setSpan(parentContext, span), fn);
         },
-        recordError(err) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          span.recordException(error);
-          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        recordException(exception) {
+          span.recordException(exception);
+        },
+        setStatus(status) {
+          span.setStatus({
+            code: toOtelStatusCode(status.code),
+            ...(status.message === undefined ? {} : { message: status.message }),
+          });
         },
         end() {
           span.end();
@@ -79,6 +93,24 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
       return span ? fromOtelSpanContext(span) : undefined;
     },
   };
+}
+
+function toOtelSpanKind(kind: TakibiSpanKind): OtelSpanKind {
+  return {
+    internal: OtelSpanKind.INTERNAL,
+    client: OtelSpanKind.CLIENT,
+    server: OtelSpanKind.SERVER,
+    producer: OtelSpanKind.PRODUCER,
+    consumer: OtelSpanKind.CONSUMER,
+  }[kind];
+}
+
+function toOtelStatusCode(code: SpanStatus["code"]): SpanStatusCode {
+  return {
+    unset: SpanStatusCode.UNSET,
+    ok: SpanStatusCode.OK,
+    error: SpanStatusCode.ERROR,
+  }[code];
 }
 
 export class TakibiInstrumentation {

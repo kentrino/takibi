@@ -71,14 +71,25 @@ async function assertAccess(
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
 ): Promise<void> {
-  await withSpan("takibi.policy", async () => {
-    const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
-    if (allows(granted, accessCtx.permission)) return;
-    if (options.conceal) {
-      throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
-    }
-    throw new ForbiddenError();
-  });
+  await withSpan(
+    {
+      name: "takibi.policy",
+      kind: "internal",
+      attributes: {
+        "takibi.collection.name": accessCtx.collection,
+        "takibi.operation.name": accessCtx.operation,
+        ...(options.id === undefined ? {} : { "takibi.document.id": options.id }),
+      },
+    },
+    async () => {
+      const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
+      if (allows(granted, accessCtx.permission)) return;
+      if (options.conceal) {
+        throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
+      }
+      throw new ForbiddenError();
+    },
+  );
 }
 
 /**

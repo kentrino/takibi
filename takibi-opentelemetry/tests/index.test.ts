@@ -5,6 +5,8 @@ import {
   context,
   propagation,
   ROOT_CONTEXT,
+  SpanKind,
+  SpanStatusCode,
   trace,
   TraceFlags,
   type Context,
@@ -95,11 +97,23 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
     traceState: "vendor=sampled",
     isRemote: true,
   };
-  const span = tracer.startSpan("takibi.integration", parent);
+  const span = tracer.startSpan(
+    {
+      name: "takibi.integration",
+      kind: "client",
+      attributes: {
+        "takibi.collection.name": "posts",
+        "takibi.operation.name": "integration",
+      },
+    },
+    parent,
+  );
   span.runWithActiveContext(() => {
     const nested = trace.getTracer("third-party").startSpan("nested");
     nested.end();
   });
+  span.recordException({ name: "IntegrationError", message: "integration failed" });
+  span.setStatus({ code: "error", message: "integration failed" });
   const headers = new Headers();
   tracer.inject(headers, span.context);
   expect(headers.get("traceparent")).toMatch(/^00-1{32}-[0-9a-f]{16}-01$/);
@@ -112,13 +126,16 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
   });
   span.end();
 
-  const unsampled = tracer.startSpan("takibi.unsampled", {
-    ...parent,
-    traceId: "33333333333333333333333333333333",
-    spanId: "4444444444444444",
-    traceFlags: TraceFlags.NONE,
-    traceState: "vendor=unsampled",
-  });
+  const unsampled = tracer.startSpan(
+    { name: "takibi.unsampled", kind: "internal", attributes: {} },
+    {
+      ...parent,
+      traceId: "33333333333333333333333333333333",
+      spanId: "4444444444444444",
+      traceFlags: TraceFlags.NONE,
+      traceState: "vendor=unsampled",
+    },
+  );
   const unsampledHeaders = new Headers();
   tracer.inject(unsampledHeaders, unsampled.context);
   expect(unsampledHeaders.get("traceparent")).toMatch(/^00-3{32}-[0-9a-f]{16}-00$/);
@@ -126,10 +143,32 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
   unsampled.end();
 
   await provider.forceFlush();
-  expect(exporter.getFinishedSpans().map(({ name }) => name)).toEqual(
+  const finished = exporter.getFinishedSpans();
+  expect(finished.map(({ name }) => name)).toEqual(
     expect.arrayContaining(["takibi.resolve", "takibi.storage", "takibi.integration", "nested"]),
   );
-  expect(exporter.getFinishedSpans().map(({ name }) => name)).not.toContain("takibi.unsampled");
+  expect(finished.map(({ name }) => name)).not.toContain("takibi.unsampled");
+  const integration = finished.find(({ name }) => name === "takibi.integration");
+  expect(integration).toMatchObject({
+    kind: SpanKind.CLIENT,
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.operation.name": "integration",
+    },
+    status: {
+      code: SpanStatusCode.ERROR,
+      message: "integration failed",
+    },
+  });
+  expect(integration?.events).toEqual([
+    expect.objectContaining({
+      name: "exception",
+      attributes: expect.objectContaining({
+        "exception.type": "IntegrationError",
+        "exception.message": "integration failed",
+      }),
+    }),
+  ]);
 
   instrumentation.disable();
   await provider.shutdown();
@@ -146,4 +185,5 @@ test("package README documents setup and isolate-local flushing", () => {
   expect(readme).toContain("only the provider owned by the calling");
   expect(source).not.toMatch(/forceFlush|getDelegate|TracerProvider/);
   expect(source).not.toMatch(/@opentelemetry\/sdk|SpanProcessor|SpanExporter/);
+  expect(source).not.toMatch(/instanceof Error|new Error\(String/);
 });

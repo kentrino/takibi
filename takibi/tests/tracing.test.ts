@@ -124,9 +124,40 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
   const resolve = spanNamed(recording.spans, "takibi.resolve");
   const wire = child(recording.spans, resolve, "takibi.wire");
   const executor = child(recording.spans, wire, "takibi.executor");
-  expect(spanNamed(recording.spans, "takibi.storage").parentSpanId).toBe(executor.spanId);
+  const storage = recording.spans.find(
+    (span) =>
+      span.name === "takibi.storage" && span.attributes["takibi.storage.operation"] === "put",
+  );
+  expect(storage).toBeDefined();
+  expect(storage!.parentSpanId).toBe(executor.spanId);
   expect(new Set(recording.spans.map((span) => span.traceId)).size).toBe(1);
   expect(recording.spans.every((span) => span.ended)).toBe(true);
+  expect(wire).toMatchObject({
+    kind: "client",
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.operation.name": "add",
+    },
+  });
+  expect(executor).toMatchObject({
+    kind: "server",
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.operation.name": "add",
+    },
+  });
+  expect(storage).toMatchObject({
+    kind: "internal",
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.storage.operation": "put",
+      "takibi.document.id": expect.any(String),
+    },
+  });
+  const attributes = JSON.stringify(recording.spans.map((span) => span.attributes));
+  expect(attributes).not.toContain("hello");
+  expect(attributes).not.toContain("tenant-a");
+  expect(attributes).not.toContain("content-type");
 });
 
 test("B global registration matches C span names without collections options", async () => {
@@ -293,7 +324,23 @@ test("DO path injected failures mark the innermost span and end every span once"
     const failed =
       recording.spans.find((span) => span.name === testCase.name && span.status === "error") ??
       recording.spans.find((span) => span.name === testCase.name);
-    expect(failed, testCase.name).toMatchObject({ status: "error", ended: true, endCount: 1 });
+    expect(failed, testCase.name).toMatchObject({
+      status: "error",
+      exception: {
+        name: expect.any(String),
+        message: expect.any(String),
+      },
+      ended: true,
+      endCount: 1,
+    });
+    if (testCase.action) {
+      expect(failed).toMatchObject({
+        attributes: {
+          "takibi.action.name": "boom",
+          "takibi.action.scope": "$",
+        },
+      });
+    }
     expect(
       recording.spans.every((span) => span.ended && span.endCount === 1),
       `${testCase.name} left an open or double-ended span`,

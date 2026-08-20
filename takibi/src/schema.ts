@@ -15,7 +15,7 @@ export async function parseSchema<S extends StandardSchemaV1>(
   schema: S,
   value: unknown,
 ): Promise<StandardSchemaV1.InferOutput<S>> {
-  return withSpan("takibi.schema", async () => {
+  return withSpan({ name: "takibi.schema", kind: "internal" }, async () => {
     const result = await schema["~standard"].validate(value);
     if (result.issues) {
       throw new SchemaValidationError(result.issues);
