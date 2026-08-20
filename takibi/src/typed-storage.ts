@@ -1,9 +1,10 @@
-import { AlreadyExistsError, NotFoundError, TakibiError } from "./errors";
+import { AlreadyExistsError, NotFoundError, StaleWriteError, TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
 import { compileListOptions } from "./query";
+import { documentRevision, takeRevisionPrecondition } from "./revision";
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
-import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_VERSION_KEY } from "./types";
+import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
 import type {
   ClientCollectionsApi,
   CollectionDefinition,
@@ -78,6 +79,7 @@ function domainDataFromExisting(
     id: _id,
     createdAt: _createdAt,
     updatedAt: _updatedAt,
+    [TAKIBI_REVISION_KEY]: _rev,
     [TAKIBI_VERSION_KEY]: _version,
     ...domain
   } = existing;
@@ -96,7 +98,7 @@ export async function prepareAddDoc(
   assertNoParsedMetadata(parsed);
   const id = resolveDocumentId(options?.id);
   const now = nowIso();
-  return { ...parsed, id, createdAt: now, updatedAt: now };
+  return { ...parsed, id, createdAt: now, updatedAt: now, rev: 1 };
 }
 
 /** CREATE-only put: rejects when `doc.id` already exists. */
@@ -120,13 +122,21 @@ export async function prepareSetDoc(
   input: unknown,
   existing: WithMetadata<Record<string, unknown>> | null,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  assertNoReservedMetadataInData(input);
-  const parsed = await parseSchema(def.schema, asDataObject(input));
+  const { data, expectedRev } = takeRevisionPrecondition(input);
+  assertRevisionPrecondition(existing, expectedRev);
+  assertNoReservedMetadataInData(data);
+  const parsed = await parseSchema(def.schema, asDataObject(data));
   assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const now = nowIso();
   const createdAt = existing?.createdAt ?? now;
-  return { ...parsed, id, createdAt, updatedAt: now };
+  return {
+    ...parsed,
+    id,
+    createdAt,
+    updatedAt: now,
+    rev: existing ? documentRevision(existing) + 1 : 1,
+  };
 }
 
 /** Build the document that would be stored for `update`, without put. */
@@ -136,16 +146,34 @@ export async function prepareUpdateDoc(
   input: unknown,
   existing: WithMetadata<Record<string, unknown>>,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  assertNoReservedMetadataInData(input);
+  const { data, expectedRev } = takeRevisionPrecondition(input);
+  assertRevisionPrecondition(existing, expectedRev);
+  assertNoReservedMetadataInData(data);
   const merged = {
     ...domainDataFromExisting(existing),
-    ...asDataObject(input),
+    ...asDataObject(data),
   };
   const parsed = await parseSchema(def.schema, merged);
   assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const now = nowIso();
-  return { ...parsed, id, createdAt: existing.createdAt, updatedAt: now };
+  return {
+    ...parsed,
+    id,
+    createdAt: existing.createdAt,
+    updatedAt: now,
+    rev: documentRevision(existing) + 1,
+  };
+}
+
+function assertRevisionPrecondition(
+  existing: WithMetadata<Record<string, unknown>> | null,
+  expectedRev: number | undefined,
+): void {
+  if (expectedRev === undefined) return;
+  if (!existing || documentRevision(existing) !== expectedRev) {
+    throw new StaleWriteError();
+  }
 }
 
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */

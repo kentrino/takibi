@@ -8,7 +8,7 @@ import { createSqliteDurableObjectStorage } from "./sqlite";
 const TS = "2026-08-09T14:12:00.000Z";
 
 function meta<T extends Record<string, unknown>>(doc: { id: string } & T): WithMetadata<T> {
-  return { ...doc, createdAt: TS, updatedAt: TS };
+  return { ...doc, createdAt: TS, updatedAt: TS, rev: 1 };
 }
 
 function decodeCursor(token: string): Record<string, unknown> {

@@ -10,6 +10,7 @@ export type { CollectionsOptions, TakibiHandler, HandleOptions, HandleResult } f
 
 export {
   AlreadyExistsError,
+  StaleWriteError,
   BadRequestError,
   TakibiError,
   ForbiddenError,

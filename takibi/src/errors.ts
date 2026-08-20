@@ -44,3 +44,10 @@ export class AlreadyExistsError extends TakibiError {
     this.name = "AlreadyExistsError";
   }
 }
+
+export class StaleWriteError extends TakibiError {
+  constructor(message = "Stale write") {
+    super("STALE_WRITE", message, 409);
+    this.name = "StaleWriteError";
+  }
+}

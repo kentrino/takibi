@@ -1,8 +1,10 @@
 import { TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
+import { documentRevision } from "./revision";
 import { parseSchema, SchemaValidationError } from "./schema";
 import {
   RESERVED_DOCUMENT_DATA_KEYS,
+  TAKIBI_REVISION_KEY,
   TAKIBI_VERSION_KEY,
   type CollectionDefinition,
   type CollectionsDef,
@@ -123,6 +125,7 @@ async function migrateDocument(
     id: stored.id,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
+    rev: documentRevision(stored),
     [TAKIBI_VERSION_KEY]: currentVersion,
   };
   await storage.put(collection, migrated);
@@ -162,6 +165,7 @@ function domainData(document: StoredDocument): Record<string, unknown> {
     id: _id,
     createdAt: _createdAt,
     updatedAt: _updatedAt,
+    [TAKIBI_REVISION_KEY]: _rev,
     [TAKIBI_VERSION_KEY]: _version,
     ...data
   } = document;

@@ -15,7 +15,7 @@ function meta<T extends Record<string, unknown>>(
     id: string;
   } & T,
 ): WithMetadata<T> {
-  return { ...document, createdAt: TS, updatedAt: TS };
+  return { ...document, createdAt: TS, updatedAt: TS, rev: 1 };
 }
 
 function storageStub(name: string): DurableObjectStub<StorageTestObject> {

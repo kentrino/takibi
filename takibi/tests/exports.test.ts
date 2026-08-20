@@ -84,6 +84,7 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi.write).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi.fullAccess).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi).toHaveProperty("AlreadyExistsError");
+  expectTypeOf(Takibi).toHaveProperty("StaleWriteError");
   expectTypeOf<AccessGrant>().not.toHaveProperty("has");
   expectTypeOf<AccessGrant>().not.toHaveProperty("size");
   expectTypeOf<AccessGrant>().not.toMatchTypeOf<ReadonlySet<AccessPermission>>();
@@ -101,6 +102,14 @@ test("AlreadyExistsError is the ALREADY_EXISTS 409 class", () => {
   expect(error.status).toBe(409);
   expect(error.message).toBe("Already exists");
   expect(error.name).toBe("AlreadyExistsError");
+});
+
+test("StaleWriteError is the STALE_WRITE 409 class", () => {
+  const error = new Takibi.StaleWriteError();
+  expect(error.code).toBe("STALE_WRITE");
+  expect(error.status).toBe(409);
+  expect(error.message).toBe("Stale write");
+  expect(error.name).toBe("StaleWriteError");
 });
 
 test("public annotation types use the collection/action vocabulary", () => {
@@ -379,6 +388,7 @@ test("createClient lives on the browser entry, not the Worker root", () => {
   expectTypeOf(TakibiClient.NotFoundError).toBeConstructibleWith();
   expectTypeOf(TakibiClient.BadRequestError).toBeConstructibleWith("bad");
   expectTypeOf(TakibiClient.AlreadyExistsError).toBeConstructibleWith();
+  expectTypeOf(TakibiClient.StaleWriteError).toBeConstructibleWith();
   expectTypeOf<TakibiClient.ClientOf<TakibiHandler>>().not.toBeNever();
   expectTypeOf<TakibiClient.CreateClientOptions>().toMatchTypeOf<CreateClientOptions>();
   expectTypeOf<TakibiClient.TakibiResult<unknown>>().toEqualTypeOf<TakibiResult<unknown>>();

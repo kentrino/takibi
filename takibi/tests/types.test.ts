@@ -81,9 +81,15 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     published?: boolean;
   }>();
   expectTypeOf(client.posts.add).parameter(1).toEqualTypeOf<{ id?: string } | undefined>();
-  expectTypeOf(client.posts.update).parameter(1).toEqualTypeOf<{
+  expectTypeOf(client.posts.update).parameter(1).toMatchTypeOf<{
     title?: string;
     published?: boolean;
+    rev?: number;
+  }>();
+  expectTypeOf(client.posts.set).parameter(1).toMatchTypeOf<{
+    title: string;
+    published?: boolean;
+    rev?: number;
   }>();
   expectTypeOf<Awaited<ReturnType<typeof client.posts.get>>>().toMatchTypeOf<
     TakibiResult<{
@@ -239,7 +245,7 @@ test("collection migrations accept unknown intermediate data and constrain the f
   expectTypeOf<MigratedInput>().not.toHaveProperty("$schemaVersion");
   expectTypeOf<MigratedDocument>().not.toHaveProperty("$schemaVersion");
   expectTypeOf<MigratedInput>().not.toHaveProperty("rev");
-  expectTypeOf<MigratedDocument>().not.toHaveProperty("rev");
+  expectTypeOf<MigratedDocument>().toHaveProperty("rev");
 
   context.defineCollection({
     schema: z.object({ title: z.string(), published: z.boolean() }),

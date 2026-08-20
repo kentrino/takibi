@@ -214,7 +214,7 @@ Migration is per-document and lazy. Takibi does not enumerate tenants, eagerly
 migrate a whole deployment, report global progress, provide rollback or backup
 tooling, or guarantee when inactive tenants finish migrating.
 
-`accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt`) so you can authorize on document attributes — not only collection-level actions:
+`accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt` / `rev`) so you can authorize on document attributes — not only collection-level actions:
 
 | operation | `doc`                               | `nextDoc`                    |
 | --------- | ----------------------------------- | ---------------------------- |
@@ -317,7 +317,7 @@ const posts = context.defineCollection({
       .policy(staffPolicy)
       .handler(async ({ input, collection, $collection }) => {
         const source = await $collection.get(input.id);
-        const { id: _id, createdAt: _c, updatedAt: _u, ...fields } = source;
+        const { id: _id, createdAt: _c, updatedAt: _u, rev: _rev, ...fields } = source;
         return collection.add({ ...fields, title: input.title });
       }),
     stats: defineAction()
@@ -475,14 +475,20 @@ JSON object are rejected by `defineCollection`; transforms with an `unknown` out
 are checked at runtime.
 
 Every saved document also carries server-managed `createdAt` / `updatedAt` (UTC ISO 8601
-via `Date.prototype.toISOString()`, e.g. `2026-08-09T14:12:00.000Z`). Do not define those
-fields — or reserved `id`, `$schemaVersion`, and `rev` — in the collection schema, and do
-not send them from the client. `defineCollection` rejects those keys at the type level;
-both input own properties and schema transforms that emit them fail validation. `add` and create-via-`set`
-set both timestamps to the same write-time value; overwrite `set` / `update` keep
-`createdAt` and refresh `updatedAt`. Empty patches and same-value writes still bump
-`updatedAt`. These timestamps are observational only — not revisions, ETags, or optimistic
-lock tokens. Same-millisecond writes may share a value.
+via `Date.prototype.toISOString()`, e.g. `2026-08-09T14:12:00.000Z`) and `rev` (a positive
+integer). Do not define those fields — or reserved `id` and `$schemaVersion` — in the
+collection schema. `defineCollection` rejects those keys at the type level; both input own
+properties and schema transforms that emit them fail validation. `add` and create-via-`set`
+set both timestamps to the same write-time value and start `rev` at `1`; overwrite
+`set` / `update` keep `createdAt`, refresh `updatedAt`, and increment `rev` even when
+field values are unchanged. Same-millisecond writes may share a timestamp. Rows stored
+without `rev` read as `1`.
+
+`createdAt` / `updatedAt` are observational only — not revisions, ETags, or optimistic
+lock tokens. Use `rev` for that. Include the document's current `rev` on `set` /
+`update` to require that generation; a mismatch or a `rev`-qualified write to a missing
+document fails with `STALE_WRITE` (409) and leaves storage unchanged. Omitting `rev`
+keeps last-write-wins. `add` still rejects `rev`. `list.where` cannot query `rev`.
 
 ### List queries
 

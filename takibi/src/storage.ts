@@ -10,6 +10,7 @@ import type {
   StoredDocument,
   WithMetadata,
 } from "./types";
+import { withDocumentRevision } from "./revision";
 import { TAKIBI_VERSION_KEY } from "./types";
 
 type ListCursorV2 = {
@@ -86,7 +87,8 @@ function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): S
 
   return {
     async get(resource, id) {
-      return table(resource).get(id) ?? null;
+      const document = table(resource).get(id);
+      return document === undefined ? null : withDocumentRevision(document);
     },
     async put(resource, doc) {
       await coordinate(() => {
@@ -100,7 +102,7 @@ function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): S
       const prepared = prepareList(resource, opts);
       const items = [...table(resource).values()]
         .sort((a, b) => compareIds(a.id, b.id))
-        .map((document) => ({ id: document.id, document }));
+        .map((document) => ({ id: document.id, document: withDocumentRevision(document) }));
       return paginate(
         prepared,
         async (startAfter, limit) => {
@@ -147,7 +149,7 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
           id,
         )
         .toArray();
-      return rows[0] === undefined ? null : rowToDocument(rows[0]);
+      return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
     },
     async put(resource, doc) {
       const encoded = encodeDocument(doc);
@@ -284,7 +286,7 @@ function createSqlChunkReader(
         ...bindings,
       )
       .toArray()
-      .map((row) => ({ id: row.id, document: rowToDocument(row) }));
+      .map((row) => ({ id: row.id, document: withDocumentRevision(rowToDocument(row)) }));
   };
 }
 
@@ -322,13 +324,13 @@ function rowToDocument(row: DocumentRow): StoredDocument {
     subject: "Stored document",
     error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),
   });
-  return {
+  return withDocumentRevision({
     ...data,
     id: row.id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.schema_version === 0 ? {} : { [TAKIBI_VERSION_KEY]: row.schema_version }),
-  };
+  });
 }
 
 function prepareList(resource: string, opts: StorageListOptions | undefined): PreparedList {

@@ -9,7 +9,7 @@ import type { CollectionsDef, StorageDriver, StoredDocument } from "../src/types
 const TS = "2026-08-19T00:00:00.000Z";
 
 function document(id: string, value: string): StoredDocument {
-  return { id, value, createdAt: TS, updatedAt: TS };
+  return { id, value, createdAt: TS, updatedAt: TS, rev: 1 };
 }
 
 test("memory transactions commit, rollback, and serialize concurrent writes", async () => {

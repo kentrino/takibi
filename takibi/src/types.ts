@@ -115,7 +115,11 @@ export type QueryField<T> = ([QueryEqValue<T>] extends [never]
       });
 
 type QueryFields<TDoc> = {
-  [K in keyof TDoc as K extends string ? K : never]-?: QueryField<TDoc[K]>;
+  [K in keyof TDoc as K extends string
+    ? K extends typeof TAKIBI_REVISION_KEY | typeof TAKIBI_VERSION_KEY
+      ? never
+      : K
+    : never]-?: QueryField<TDoc[K]>;
 };
 
 export type QueryBuilder<TDoc> = QueryFields<TDoc> & {
@@ -205,7 +209,7 @@ export type CollectionsDef<
 };
 
 export type InferCollectionDoc<C> = C extends { schema: infer S extends StandardSchemaV1 }
-  ? WithMetadata<StandardSchemaV1.InferOutput<S>>
+  ? WithMetadata<StandardSchemaV1.InferOutput<S>> & { [TAKIBI_REVISION_KEY]: number }
   : never;
 
 export type InferCollectionInput<C> = C extends { schema: infer S extends StandardSchemaV1 }
@@ -213,6 +217,14 @@ export type InferCollectionInput<C> = C extends { schema: infer S extends Standa
   : never;
 
 export type CollectionDataInput<C> = Omit<InferCollectionInput<C>, ReservedDocumentDataKey>;
+
+export type CollectionWriteInput<C> = CollectionDataInput<C> & {
+  [TAKIBI_REVISION_KEY]?: number;
+};
+
+export type CollectionPatchInput<C> = Partial<CollectionDataInput<C>> & {
+  [TAKIBI_REVISION_KEY]?: number;
+};
 
 export type ValidationIssue = {
   message: string;
@@ -244,9 +256,9 @@ export type CollectionApi<C> = {
     data: CollectionDataInput<C>,
     options?: { id?: DocumentId },
   ) => Promise<InferCollectionDoc<C>>;
-  set: (id: DocumentId, data: CollectionDataInput<C>) => Promise<InferCollectionDoc<C>>;
+  set: (id: DocumentId, data: CollectionWriteInput<C>) => Promise<InferCollectionDoc<C>>;
   get: (id: DocumentId) => Promise<InferCollectionDoc<C>>;
-  update: (id: DocumentId, data: Partial<CollectionDataInput<C>>) => Promise<InferCollectionDoc<C>>;
+  update: (id: DocumentId, data: CollectionPatchInput<C>) => Promise<InferCollectionDoc<C>>;
   delete: (id: DocumentId) => Promise<{ id: DocumentId }>;
   list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<{
     items: InferCollectionDoc<C>[];
@@ -266,12 +278,12 @@ export type ClientCollectionApi<C> = {
   ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   set: (
     id: DocumentId,
-    data: CollectionDataInput<C>,
+    data: CollectionWriteInput<C>,
   ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   get: (id: DocumentId) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   update: (
     id: DocumentId,
-    data: Partial<CollectionDataInput<C>>,
+    data: CollectionPatchInput<C>,
   ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   delete: (id: DocumentId) => Promise<TakibiResult<{ id: DocumentId }>>;
   list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<

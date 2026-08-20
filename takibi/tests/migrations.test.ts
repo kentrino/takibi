@@ -16,6 +16,7 @@ type StoredDocument = Record<string, unknown> & {
   id: string;
   createdAt: string;
   updatedAt: string;
+  rev?: number;
 };
 
 function createInspectableDurableObjectStorage() {
@@ -25,7 +26,7 @@ function createInspectableDurableObjectStorage() {
   return {
     storage,
     async seed(collection: string, document: StoredDocument): Promise<void> {
-      await driver.put(collection, document);
+      await driver.put(collection, document as import("../src/types").StoredDocument);
     },
     async read(collection: string, id: string): Promise<StoredDocument | undefined> {
       return (await driver.get(collection, id)) ?? undefined;
@@ -120,6 +121,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
       enabled: true,
       createdAt: CREATED_AT,
       updatedAt: UPDATED_AT,
+      rev: 1,
     },
   ]);
   expect(stepInputs).toEqual([{ name: "Clinic" }, { name: "Clinic", label: "Clinic" }]);
@@ -129,6 +131,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
     enabled: true,
     createdAt: CREATED_AT,
     updatedAt: UPDATED_AT,
+    rev: 1,
     $schemaVersion: 2,
   });
 
@@ -224,6 +227,7 @@ test("get, set, update, and delete policies only see migrated existing documents
         published: true,
         createdAt: CREATED_AT,
         updatedAt: UPDATED_AT,
+        rev: 1,
       },
     ]);
   }
@@ -275,7 +279,7 @@ test("migration throw, validation failure, and versions below base leave storage
     });
 
     expect(result.body).toMatchObject({ ok: false });
-    expect(await backing.read("counters", `c${index}`)).toEqual(original);
+    expect(await backing.read("counters", `c${index}`)).toEqual({ ...original, rev: 1 });
   }
 });
 
@@ -382,7 +386,7 @@ test("memory and Durable Object storage share lazy migration semantics", async (
   };
 
   for (const raw of rawDrivers) {
-    await raw.put("posts", legacy("p1", { title: "old" }));
+    await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
     const storage = createMigratingStorage({ posts: definition }, raw);
 
     await expect(storage.get("posts", "p1")).resolves.toEqual({
@@ -391,6 +395,7 @@ test("memory and Durable Object storage share lazy migration semantics", async (
       published: true,
       createdAt: CREATED_AT,
       updatedAt: UPDATED_AT,
+      rev: 1,
     });
     await expect(raw.get("posts", "p1")).resolves.toMatchObject({
       title: "old",
