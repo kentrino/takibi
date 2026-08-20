@@ -29,7 +29,9 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
 
   expect(integration.name).toBe("@takibi/takibi-opentelemetry");
   expect(integration.exports?.["."]).toBe("./src/index.ts");
-  expect(integration.dependencies?.["@takibi/takibi"]).toBe("workspace:*");
+  expect(integration.dependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(integration.devDependencies?.["@takibi/takibi"]).toBe("workspace:*");
+  expect(integration.peerDependencies?.["@takibi/takibi"]).toBe("workspace:^");
   expect(integration.peerDependencies?.["@opentelemetry/api"]).toBe("^1.9.0");
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).not.toBe(true);
 });
