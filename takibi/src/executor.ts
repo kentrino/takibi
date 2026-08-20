@@ -1,8 +1,8 @@
 import { ForbiddenError, NotFoundError } from "./errors";
+import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
-import { withSpan } from "./tracing";
 import {
   commitAddDoc,
   prepareAddDoc,
@@ -71,12 +71,21 @@ async function assertAccess(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AccessContext TDoc varies
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
+  logger?: InternalLogger,
 ): Promise<void> {
-  await withSpan(
+  await withLoggedSpan(
+    logger,
     {
       name: TAKIBI_SPAN.policy,
       kind: "internal",
       attributes: collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
+    },
+    {
+      event: "takibi.policy",
+      collection: accessCtx.collection,
+      operation: accessCtx.operation,
+      ...(options.id === undefined ? {} : { documentId: options.id }),
+      ...(accessCtx.where === undefined ? {} : { query: accessCtx.where }),
     },
     async () => {
       const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
@@ -99,6 +108,7 @@ export async function executeOperation<TCtx extends object>(
   storage: StorageDriver,
   ctx: TCtx,
   req: ExecuteRequest,
+  logger?: InternalLogger,
 ): Promise<unknown> {
   const def = collections[req.collection] as CollectionDefinition | undefined;
   if (!def) {
@@ -107,7 +117,7 @@ export async function executeOperation<TCtx extends object>(
 
   switch (req.operation) {
     case "add": {
-      const nextDoc = await prepareAddDoc(def, req.input, { id: req.id });
+      const nextDoc = await prepareAddDoc(def, req.input, { id: req.id }, logger);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
         collection: req.collection,
@@ -115,13 +125,13 @@ export async function executeOperation<TCtx extends object>(
         permission: "create",
         nextDoc,
       };
-      await assertAccess(def, accessCtx, { conceal: false });
+      await assertAccess(def, accessCtx, { conceal: false }, logger);
       return commitAddDoc(storage, req.collection, nextDoc);
     }
     case "set": {
       if (!req.id) throw new NotFoundError("Missing id");
       const existing = await storage.get(req.collection, req.id);
-      const nextDoc = await prepareSetDoc(def, req.id, req.input, existing);
+      const nextDoc = await prepareSetDoc(def, req.id, req.input, existing, logger);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
         collection: req.collection,
@@ -130,7 +140,7 @@ export async function executeOperation<TCtx extends object>(
         ...(existing ? { doc: existing } : {}),
         nextDoc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
       await storage.put(req.collection, nextDoc);
       return nextDoc;
     }
@@ -145,14 +155,14 @@ export async function executeOperation<TCtx extends object>(
         permission: "get",
         doc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
       return doc;
     }
     case "update": {
       if (!req.id) throw new NotFoundError("Missing id");
       const doc = await storage.get(req.collection, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
-      const nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc);
+      const nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc, logger);
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
         collection: req.collection,
@@ -161,7 +171,7 @@ export async function executeOperation<TCtx extends object>(
         doc,
         nextDoc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
       await storage.put(req.collection, nextDoc);
       return nextDoc;
     }
@@ -176,7 +186,7 @@ export async function executeOperation<TCtx extends object>(
         permission: "delete",
         doc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id });
+      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
       return storageDelete(storage, req.collection, req.id);
     }
     case "list": {
@@ -187,7 +197,7 @@ export async function executeOperation<TCtx extends object>(
         permission: "list",
         ...(req.list?.where ? { where: req.list.where } : {}),
       };
-      await assertAccess(def, accessCtx, { conceal: false });
+      await assertAccess(def, accessCtx, { conceal: false }, logger);
       return storage.list(req.collection, req.list);
     }
     default: {
@@ -200,55 +210,96 @@ export async function executeOperation<TCtx extends object>(
 export function createPolicyCollections<
   TCtx extends object,
   TCollections extends CollectionsDef<TCtx>,
->(collections: TCollections, storage: StorageDriver, ctx: TCtx): CollectionsApi<TCollections> {
+>(
+  collections: TCollections,
+  storage: StorageDriver,
+  ctx: TCtx,
+  logger?: InternalLogger,
+): CollectionsApi<TCollections> {
   const api = Object.create(null) as CollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
     api[name] = {
       add: (input, options) =>
-        executeOperation(collections, storage, ctx, {
-          kind: "collection",
-          collection: name,
-          operation: "add",
-          input,
-          ...(options?.id !== undefined ? { id: options.id } : {}),
-        }),
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "add",
+            input,
+            ...(options?.id !== undefined ? { id: options.id } : {}),
+          },
+          logger,
+        ),
       set: (id, input) =>
-        executeOperation(collections, storage, ctx, {
-          kind: "collection",
-          collection: name,
-          operation: "set",
-          id,
-          input,
-        }),
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "set",
+            id,
+            input,
+          },
+          logger,
+        ),
       get: (id) =>
-        executeOperation(collections, storage, ctx, {
-          kind: "collection",
-          collection: name,
-          operation: "get",
-          id,
-        }),
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "get",
+            id,
+          },
+          logger,
+        ),
       update: (id, input) =>
-        executeOperation(collections, storage, ctx, {
-          kind: "collection",
-          collection: name,
-          operation: "update",
-          id,
-          input,
-        }),
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "update",
+            id,
+            input,
+          },
+          logger,
+        ),
       delete: (id) =>
-        executeOperation(collections, storage, ctx, {
-          kind: "collection",
-          collection: name,
-          operation: "delete",
-          id,
-        }),
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "delete",
+            id,
+          },
+          logger,
+        ),
       list: (list) =>
-        executeOperation(collections, storage, ctx, {
-          kind: "collection",
-          collection: name,
-          operation: "list",
-          ...(list ? { list: compileListOptions(list) } : {}),
-        }),
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "list",
+            ...(list ? { list: compileListOptions(list) } : {}),
+          },
+          logger,
+        ),
     } as CollectionApi<TCollections[typeof name]>;
   }
   return api;
@@ -257,19 +308,20 @@ export function createPolicyCollections<
 export function createTrustedCollections<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,
+  logger?: InternalLogger,
 ): CollectionsApi<TCollections> {
   const api = Object.create(null) as CollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
     const definition = collections[name]!;
     api[name] = {
-      add: (input, options) => storageAdd(definition, storage, name, input, options),
-      set: (id, input) => storageSet(definition, storage, name, id, input),
+      add: (input, options) => storageAdd(definition, storage, name, input, options, logger),
+      set: (id, input) => storageSet(definition, storage, name, id, input, undefined, logger),
       async get(id) {
         const doc = await storage.get(name, id);
         if (!doc) throw new NotFoundError(`Document not found: ${id}`);
         return doc;
       },
-      update: (id, input) => storageUpdate(definition, storage, name, id, input),
+      update: (id, input) => storageUpdate(definition, storage, name, id, input, logger),
       delete: (id) => storageDelete(storage, name, id),
       list: (options) => storage.list(name, compileListOptions(options)),
     } as CollectionApi<TCollections[typeof name]>;

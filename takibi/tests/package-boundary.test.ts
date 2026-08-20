@@ -42,15 +42,19 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
 
   expect(integration.name).toBe("@takibi/takibi-opentelemetry");
   expect(integration.exports?.["."]).toBe("./src/index.ts");
+  expect(integration.exports?.["./logs"]).toBe("./src/logs.ts");
   expect(integration.files).toEqual(["dist", "README.md", "LICENSE"]);
   expect(integration.publishConfig?.exports).toMatchObject({
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
+    "./logs": { types: "./dist/logs.d.mts", import: "./dist/logs.mjs" },
   });
   expect(integration.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(integration.devDependencies?.["@takibi/takibi"]).toBe("workspace:*");
   expect(integration.peerDependencies?.["@takibi/takibi"]).toBe("workspace:^");
   expect(integration.peerDependencies?.["@opentelemetry/api"]).toBe("^1.9.0");
+  expect(integration.peerDependencies?.["@opentelemetry/api-logs"]).toBe("^0.221.0");
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).not.toBe(true);
+  expect(integration.peerDependenciesMeta?.["@opentelemetry/api-logs"]?.optional).toBe(true);
 });
 
 test("instrumentation exports the stable Takibi telemetry vocabulary", () => {

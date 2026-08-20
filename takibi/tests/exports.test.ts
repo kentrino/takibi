@@ -19,6 +19,11 @@ import type {
   InferCollectionDoc,
   InferHandlerCollections,
   JsonValue,
+  Logger,
+  LogEvent,
+  LogLevel,
+  LoggingOptions,
+  PrettyConsoleLoggerOptions,
   QueryBuilder,
   QueryExpr,
   QueryOperator,
@@ -32,6 +37,7 @@ const forbiddenClientModules = [
   "schema.ts",
   "executor.ts",
   "storage.ts",
+  "logging.ts",
   "instrumentation.ts",
 ] as const;
 
@@ -81,6 +87,7 @@ function walkValueImports(entryFile: string): Set<string> {
 test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi).not.toHaveProperty("createClient");
   expectTypeOf(Takibi.createTakibi).toBeFunction();
+  expectTypeOf(Takibi.createPrettyConsoleLogger).toBeFunction();
   expectTypeOf(Takibi).not.toHaveProperty("allows");
   expectTypeOf(Takibi).not.toHaveProperty("GrantCatalog");
   expectTypeOf(Takibi).not.toHaveProperty("GrantBuilder");
@@ -141,6 +148,11 @@ test("public annotation types use the collection/action vocabulary", () => {
     InferCollectionDoc: InferCollectionDoc<Collections[string]>;
     InferHandlerCollections: InferHandlerCollections<TakibiHandler>;
     JsonValue: JsonValue;
+    Logger: Logger;
+    LogEvent: LogEvent;
+    LogLevel: LogLevel;
+    LoggingOptions: LoggingOptions;
+    PrettyConsoleLoggerOptions: PrettyConsoleLoggerOptions;
     QueryBuilder: QueryBuilder<Record<string, string>>;
     QueryExpr: QueryExpr;
     QueryOperator: QueryOperator;
@@ -402,6 +414,9 @@ test("createClient lives on the browser entry, not the Worker root", () => {
   expectTypeOf(TakibiClient).not.toHaveProperty("write");
   expectTypeOf(TakibiClient).not.toHaveProperty("fullAccess");
   expectTypeOf(TakibiClient).not.toHaveProperty("queryImpliesEquality");
+  expectTypeOf(TakibiClient).not.toHaveProperty("createPrettyConsoleLogger");
+  // @ts-expect-error logging is server-only
+  type _Logger = import("../src/client-entry").Logger;
   expectTypeOf(TakibiClient.TakibiError).toBeConstructibleWith("CODE", "message");
   expectTypeOf(TakibiClient.UnauthorizedError).toBeConstructibleWith();
   expectTypeOf(TakibiClient.ForbiddenError).toBeConstructibleWith();

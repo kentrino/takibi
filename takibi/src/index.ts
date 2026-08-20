@@ -7,6 +7,14 @@ export type {
 
 export { createTakibi } from "./context";
 export type { CollectionsOptions, TakibiHandler, HandleOptions, HandleResult } from "./context";
+export { createPrettyConsoleLogger } from "./logging";
+export type {
+  Logger,
+  LogEvent,
+  LogLevel,
+  LoggingOptions,
+  PrettyConsoleLoggerOptions,
+} from "./logging";
 
 export {
   AlreadyExistsError,

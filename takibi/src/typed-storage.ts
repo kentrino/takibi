@@ -1,5 +1,6 @@
 import { AlreadyExistsError, NotFoundError, StaleWriteError, TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
+import type { InternalLogger } from "./logging";
 import { compileListOptions } from "./query";
 import { documentRevision, takeRevisionPrecondition } from "./revision";
 import { asTakibiResult } from "./result";
@@ -91,9 +92,10 @@ export async function prepareAddDoc(
   def: CollectionDefinition,
   input: unknown,
   options?: { id?: DocumentId },
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   assertNoReservedMetadataInData(input);
-  const parsed = await parseSchema(def.schema, input ?? {});
+  const parsed = await parseSchema(def.schema, input ?? {}, logger);
   assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const id = resolveDocumentId(options?.id);
@@ -121,11 +123,12 @@ export async function prepareSetDoc(
   id: string,
   input: unknown,
   existing: WithMetadata<Record<string, unknown>> | null,
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const { data, expectedRev } = takeRevisionPrecondition(input);
   assertRevisionPrecondition(existing, expectedRev);
   assertNoReservedMetadataInData(data);
-  const parsed = await parseSchema(def.schema, asDataObject(data));
+  const parsed = await parseSchema(def.schema, asDataObject(data), logger);
   assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const now = nowIso();
@@ -145,6 +148,7 @@ export async function prepareUpdateDoc(
   id: string,
   input: unknown,
   existing: WithMetadata<Record<string, unknown>>,
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const { data, expectedRev } = takeRevisionPrecondition(input);
   assertRevisionPrecondition(existing, expectedRev);
@@ -153,7 +157,7 @@ export async function prepareUpdateDoc(
     ...domainDataFromExisting(existing),
     ...asDataObject(data),
   };
-  const parsed = await parseSchema(def.schema, merged);
+  const parsed = await parseSchema(def.schema, merged, logger);
   assertDocumentOutput(parsed);
   assertNoParsedMetadata(parsed);
   const now = nowIso();
@@ -183,8 +187,9 @@ export async function storageAdd(
   collection: string,
   input: unknown,
   options?: { id?: DocumentId },
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const doc = await prepareAddDoc(def, input, options);
+  const doc = await prepareAddDoc(def, input, options, logger);
   return commitAddDoc(storage, collection, doc);
 }
 
@@ -195,10 +200,11 @@ export async function storageSet(
   id: string,
   input: unknown,
   options?: { existing?: WithMetadata<Record<string, unknown>> | null },
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const existing =
     options && "existing" in options ? options.existing : await storage.get(collection, id);
-  const doc = await prepareSetDoc(def, id, input, existing ?? null);
+  const doc = await prepareSetDoc(def, id, input, existing ?? null, logger);
   await storage.put(collection, doc);
   return doc;
 }
@@ -209,10 +215,11 @@ export async function storageUpdate(
   collection: string,
   id: string,
   input: unknown,
+  logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const existing = await storage.get(collection, id);
   if (!existing) throw new NotFoundError(`Document not found: ${id}`);
-  const doc = await prepareUpdateDoc(def, id, input, existing);
+  const doc = await prepareUpdateDoc(def, id, input, existing, logger);
   await storage.put(collection, doc);
   return doc;
 }
