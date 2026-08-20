@@ -238,6 +238,9 @@ test("package README documents setup and isolate-local flushing", () => {
   expect(readme).toContain('from "@takibi/takibi-opentelemetry"');
   expect(readme).toContain("TakibiInstrumentation");
   expect(readme).toContain("createOtelTakibiTracer");
+  expect(readme).toContain("TAKIBI_SPAN");
+  expect(readme).toContain("TAKIBI_ATTR");
+  expect(readme).toContain("@takibi/takibi/instrumentation");
   expect(readme).toContain("createTakibi");
   expect(readme).toContain("trace.setGlobalTracerProvider(provider)");
   expect(readme).toContain("context.setGlobalContextManager");
