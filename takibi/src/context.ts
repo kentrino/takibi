@@ -24,7 +24,7 @@ import {
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
-import { TAKIBI_ATTR } from "./otel-span";
+import { TAKIBI_ATTR } from "./attr";
 import { createPolicyHelper } from "./policy";
 import type { PolicyHelper } from "./policy";
 import {

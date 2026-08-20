@@ -1,4 +1,4 @@
-import { TAKIBI_ATTR } from "./otel-span";
+import { TAKIBI_ATTR } from "./attr";
 import type { StorageDriver } from "./types";
 
 export const internalTracerKey: unique symbol = Symbol.for("takibi.internalTracer");
