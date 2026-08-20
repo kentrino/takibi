@@ -1,6 +1,7 @@
 export {
   registerGlobalTracer,
   registerTracingContextBackend,
+  type ExtractedTraceContext,
   type SpanAttributes,
   type SpanAttributeValue,
   type SpanContext,

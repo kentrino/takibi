@@ -95,13 +95,23 @@ export function createOtelTakibiTracer(name = "takibi"): TakibiTracer {
       };
     },
     inject(headers, span) {
-      const context = trace.setSpanContext(ROOT_CONTEXT, toOtelSpanContext(span));
+      const context = trace.setSpanContext(otelContext.active(), toOtelSpanContext(span));
       propagation.inject(context, headers, headersSetter);
     },
     extract(headers) {
-      const context = propagation.extract(ROOT_CONTEXT, headers, headersGetter);
-      const span = trace.getSpanContext(context);
-      return span ? fromOtelSpanContext(span) : undefined;
+      const tracingStore = otelContext.active().getValue(tracingStoreKey);
+      const baseContext =
+        tracingStore === undefined
+          ? ROOT_CONTEXT
+          : ROOT_CONTEXT.setValue(tracingStoreKey, tracingStore);
+      const extractedContext = propagation.extract(baseContext, headers, headersGetter);
+      const span = trace.getSpanContext(extractedContext);
+      return {
+        ...(span ? { span: fromOtelSpanContext(span) } : {}),
+        runWithActiveContext(fn) {
+          return otelContext.with(extractedContext, fn);
+        },
+      };
     },
   };
 }

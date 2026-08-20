@@ -120,6 +120,14 @@ The application must retain the SDK provider it configured. The
 `createOtelTakibiTracer()` adapter binds tracing APIs only; it does not discover
 or flush a provider.
 
+Worker → Durable Object requests are injected and extracted with the globally
+registered OpenTelemetry propagator. A composite propagator containing
+`W3CTraceContextPropagator` and `W3CBaggagePropagator` therefore carries both
+trace context and baggage into the Durable Object's active context. Custom
+propagator fields are preserved by the same mechanism. Do not put credentials,
+personal data, or other secrets in baggage because it is transmitted as HTTP
+headers and may cross service boundaries.
+
 The core `@takibi/takibi` import does not require `nodejs_als`,
 `nodejs_compat`, or a minimum compatibility date. This integration delegates
 async context to the OpenTelemetry context manager you register; apply that

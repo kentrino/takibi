@@ -7,13 +7,17 @@ import {
   type Context,
   type ContextManager,
 } from "@opentelemetry/api";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import {
+  CompositePropagator,
+  W3CBaggagePropagator,
+  W3CTraceContextPropagator,
+} from "@opentelemetry/core";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { createTakibi, fullAccess } from "@takibi/takibi";
+import { createTakibi, fullAccess, none } from "@takibi/takibi";
 import { z } from "zod";
 import { TakibiInstrumentation } from "../src/index";
 
@@ -60,7 +64,11 @@ const provider = new BasicTracerProvider({
   spanProcessors: [new SimpleSpanProcessor(exporter)],
 });
 trace.setGlobalTracerProvider(provider);
-propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+propagation.setGlobalPropagator(
+  new CompositePropagator({
+    propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+  }),
+);
 context.setGlobalContextManager(new AsyncLocalContextManager());
 new TakibiInstrumentation().enable();
 
@@ -81,7 +89,10 @@ const tracingHandler = createTakibi()({
 }).collections({
   posts: {
     schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
+    accessPolicy: () =>
+      propagation.getBaggage(context.active())?.getEntry("tenant.id")?.value === "tenant-a"
+        ? fullAccess
+        : none,
   },
 });
 

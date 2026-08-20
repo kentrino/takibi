@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { SpanKind } from "@opentelemetry/api";
+import { context, propagation, SpanKind } from "@opentelemetry/api";
 import { expect, test } from "vite-plus/test";
 import { createTakibi, fullAccess } from "@takibi/takibi";
 import { z } from "zod";
@@ -16,11 +16,19 @@ test("integration propagates OTel spans through a real Durable Object namespace"
     },
   });
 
-  const response = await handler.request("https://takibi.test/posts", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: "workers-otel" }),
-  });
+  const baggageContext = propagation.setBaggage(
+    context.active(),
+    propagation.createBaggage({
+      "tenant.id": { value: "tenant-a" },
+    }),
+  );
+  const response = await context.with(baggageContext, () =>
+    handler.request("https://takibi.test/posts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "workers-otel" }),
+    }),
+  );
   expect(response.status).toBe(200);
 
   // This pool loads the test and its Durable Object from one worker module graph, so it verifies

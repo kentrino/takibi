@@ -14,7 +14,11 @@ import {
   type Context,
   type ContextManager,
 } from "@opentelemetry/api";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import {
+  CompositePropagator,
+  W3CBaggagePropagator,
+  W3CTraceContextPropagator,
+} from "@opentelemetry/core";
 import {
   AlwaysOnSampler,
   BatchSpanProcessor,
@@ -64,7 +68,11 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
     spanProcessors: [new BatchSpanProcessor(exporter, { scheduledDelayMillis: 60_000 })],
   });
   trace.setGlobalTracerProvider(provider);
-  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  propagation.setGlobalPropagator(
+    new CompositePropagator({
+      propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+    }),
+  );
   context.setGlobalContextManager(new AsyncLocalContextManager());
 
   const instrumentation = new TakibiInstrumentation();
@@ -119,15 +127,27 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
     span.recordException({ name: "IntegrationError", message: "integration failed" });
     span.setStatus({ code: "error", message: "integration failed" });
     const headers = new Headers();
-    tracer.inject(headers, span.context);
+    const baggageContext = propagation.setBaggage(
+      context.active(),
+      propagation.createBaggage({
+        "tenant.id": { value: "tenant-a" },
+      }),
+    );
+    context.with(baggageContext, () => tracer.inject(headers, span.context));
     expect(headers.get("traceparent")).toMatch(/^00-1{32}-[0-9a-f]{16}-01$/);
     expect(headers.get("tracestate")).toBe("vendor=sampled");
-    expect(tracer.extract(headers)).toMatchObject({
+    expect(headers.get("baggage")).toBe("tenant.id=tenant-a");
+    const extracted = tracer.extract(headers);
+    expect(extracted?.span).toMatchObject({
       traceId: parent.traceId,
       traceFlags: TraceFlags.SAMPLED,
       traceState: parent.traceState,
       isRemote: true,
     });
+    const extractedBaggage = extracted?.runWithActiveContext(
+      () => propagation.getBaggage(context.active())?.getEntry("tenant.id")?.value,
+    );
+    expect(extractedBaggage).toBe("tenant-a");
     span.end();
 
     const unsampled = tracer.startSpan(
