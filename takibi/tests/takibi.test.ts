@@ -348,6 +348,31 @@ test("document action ids containing colons roundtrip as %3A on the wire", async
   expect(calls.at(-1)).toBe("http://fire.test/posts/a%3Ab:audited");
 });
 
+test("no-input document actions accept a zero-length POST body", async () => {
+  const { handler } = createActionApp();
+  const created = await handler.request("http://fire.test/posts/p1", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ title: "first" }),
+  });
+  expect(created.status).toBe(200);
+
+  const result = await handler.handle(
+    new Request("http://fire.test/api/fire/posts/p1:audited", {
+      method: "POST",
+      headers: headers(),
+      body: new Uint8Array(),
+    }),
+    { prefix: "/api/fire" },
+  );
+  expect(result.matched).toBe(true);
+  expect(result.response?.status).toBe(200);
+  await expect(result.response!.json()).resolves.toEqual({
+    ok: true,
+    data: { audits: 1 },
+  });
+});
+
 test("action input schema refinements become validation failures", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
   const RegisterInput = z
