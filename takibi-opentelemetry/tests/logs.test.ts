@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   context,
+  propagation,
   ROOT_CONTEXT,
   trace,
   TraceFlags,
@@ -10,10 +11,12 @@ import {
   type ContextManager,
 } from "@opentelemetry/api";
 import { SeverityNumber, type LogRecord, type Logger as OtelLogger } from "@opentelemetry/api-logs";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { createTakibi, fullAccess } from "@takibi/takibi";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
+import { createSqliteDurableObjectStorage } from "../../takibi/tests/sqlite";
 import { TakibiInstrumentation } from "../src/index";
 import { createOtelLogger } from "../src/logs";
 
@@ -129,12 +132,13 @@ test("logs entrypoint is optional and absent from the tracing import graph", () 
   expect(tracingSource).not.toContain("./logs");
 });
 
-test("Takibi stage logs carry their active span while request logs remain valid without one", async () => {
+test("Takibi request and stage logs carry their active span", async () => {
   const records: LogRecord[] = [];
   const manager = new AsyncLocalContextManager();
   const provider = new BasicTracerProvider();
   context.setGlobalContextManager(manager);
   trace.setGlobalTracerProvider(provider);
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
   const instrumentation = new TakibiInstrumentation();
   instrumentation.enable();
   try {
@@ -164,11 +168,137 @@ test("Takibi stage logs carry their active span while request logs remain valid 
     expect(resolveSpan?.spanId).toMatch(/^[0-9a-f]{16}$/);
     const requestRecords = records.filter(({ eventName }) => eventName === "takibi.request");
     expect(requestRecords).toHaveLength(2);
-    expect(
-      requestRecords.every((record) => trace.getSpanContext(record.context!) === undefined),
-    ).toBe(true);
+    const requestContexts = requestRecords.map((record) => trace.getSpanContext(record.context!));
+    expect(requestContexts[0]?.traceId).toBe(resolveSpan?.traceId);
+    expect(requestContexts[0]?.spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(requestContexts[1]).toEqual(requestContexts[0]);
   } finally {
     instrumentation.disable();
+    propagation.disable();
+    trace.disable();
+    context.disable();
+    await provider.shutdown();
+  }
+});
+
+test("worker and Durable Object failures correlate one error record to the request trace", async () => {
+  const records: LogRecord[] = [];
+  const manager = new AsyncLocalContextManager();
+  const provider = new BasicTracerProvider();
+  context.setGlobalContextManager(manager);
+  trace.setGlobalTracerProvider(provider);
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  const instrumentation = new TakibiInstrumentation();
+  instrumentation.enable();
+  const logger = createOtelLogger(capturingOtelLogger(records));
+  try {
+    const cases: Array<{ name: string; request: () => Promise<Response> }> = [];
+
+    const decodeHandler = createTakibi()({
+      resolve: () => ({ tenantId: "tenant-a" }),
+      logger,
+      logLevel: "info",
+    }).collections(
+      { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
+      { memory: true },
+    );
+    cases.push({
+      name: "decode",
+      request: async () =>
+        decodeHandler.request("https://takibi.test/posts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{",
+        }),
+    });
+
+    const resolveHandler = createTakibi()({
+      resolve: (): { tenantId: string } => {
+        throw new Error("resolve failed");
+      },
+      logger,
+      logLevel: "info",
+    }).collections(
+      { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
+      { memory: true },
+    );
+    cases.push({
+      name: "resolve",
+      request: async () => resolveHandler.request("https://takibi.test/posts/p1"),
+    });
+
+    const memoryBase = createTakibi()({
+      resolve: () => ({ tenantId: "tenant-a" }),
+      logger,
+      logLevel: "info",
+    }).collections({}, { memory: true });
+    const memoryHandler = memoryBase.actions({
+      boom: memoryBase
+        .defineAction()
+        .policy(fullAccess)
+        .handler(() => {
+          throw new Error("memory executor failed");
+        }),
+    });
+    cases.push({
+      name: "memory executor",
+      request: async () =>
+        memoryHandler.request("https://takibi.test/$:boom", {
+          method: "POST",
+        }),
+    });
+
+    let durableObject!: DurableObject;
+    const durableBase = createTakibi()({
+      resolve: () => ({ tenantId: "tenant-a" }),
+      stub: () =>
+        ({
+          fetch: (request: Request) => durableObject.fetch(request),
+        }) as DurableObjectStub,
+      logger,
+      logLevel: "info",
+    }).collections({});
+    const durableHandler = durableBase.actions({
+      boom: durableBase
+        .defineAction()
+        .policy(fullAccess)
+        .handler(() => {
+          throw new Error("Durable Object executor failed");
+        }),
+    });
+    durableObject = new durableHandler.DurableObject(
+      {
+        id: { name: "tenant-a" },
+        storage: createSqliteDurableObjectStorage(),
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
+          return callback();
+        },
+      } as DurableObjectState,
+      {},
+    );
+    cases.push({
+      name: "Durable Object executor",
+      request: async () =>
+        durableHandler.request("https://takibi.test/$:boom", {
+          method: "POST",
+        }),
+    });
+
+    for (const testCase of cases) {
+      records.length = 0;
+      const response = await testCase.request();
+      expect(response.status, testCase.name).toBeGreaterThanOrEqual(400);
+      const requestRecord = records.find(({ eventName }) => eventName === "takibi.request");
+      const errorRecords = records.filter(({ eventName }) => eventName === "takibi.error");
+      expect(errorRecords, testCase.name).toHaveLength(1);
+      const requestContext = trace.getSpanContext(requestRecord!.context!);
+      const errorContext = trace.getSpanContext(errorRecords[0]!.context!);
+      expect(requestContext?.traceId, testCase.name).toMatch(/^[0-9a-f]{32}$/);
+      expect(errorContext?.traceId, testCase.name).toBe(requestContext?.traceId);
+    }
+  } finally {
+    instrumentation.disable();
+    propagation.disable();
     trace.disable();
     context.disable();
     await provider.shutdown();

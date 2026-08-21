@@ -101,7 +101,15 @@ export function resolveTracer(options: object | undefined): TakibiTracer | undef
 
 export function bindTracer<T>(tracer: TakibiTracer, fn: () => T): T {
   const backend = getTracingConfig().contextBackend;
-  return backend ? backend.run({ tracer }, fn) : fn();
+  if (!backend) return fn();
+  const active = backend.getStore();
+  return backend.run(
+    {
+      tracer,
+      ...(active?.span === undefined ? {} : { span: active.span }),
+    },
+    fn,
+  );
 }
 
 export function activeSpanContext(): SpanContext | undefined {

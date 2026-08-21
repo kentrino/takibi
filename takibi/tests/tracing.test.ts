@@ -6,10 +6,12 @@ import { join } from "node:path";
 import { createClient } from "@takibi/takibi/client";
 import { createTakibi, fullAccess, none } from "../src/index";
 import {
+  bindTracer,
   formatTraceparent,
   internalTracerKey,
   registerGlobalTracer,
   registerTracingContextBackend,
+  withSpan,
   type TracingContextBackend,
 } from "../src/tracing";
 import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
@@ -94,6 +96,75 @@ test("A baseline records no internal spans", async () => {
   expect(recording.spans).toEqual([]);
 });
 
+test("public request span encloses the memory lifecycle and inherits an active parent", async () => {
+  const recording = createRecordingTracer();
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a" }),
+  }).collections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { memory: true, [internalTracerKey]: recording.tracer },
+  );
+
+  const response = await bindTracer(recording.tracer, () =>
+    withSpan({ name: "caller", kind: "server" }, async () =>
+      handler.request("http://fire.test/posts", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer private-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ title: "private document body" }),
+      }),
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  const caller = spanNamed(recording.spans, "caller");
+  const requests = recording.spans.filter(({ name }) => name === "takibi.request");
+  expect(requests).toHaveLength(1);
+  const request = requests[0]!;
+  expect(request).toMatchObject({
+    kind: "server",
+    attributes: {},
+    parentSpanId: caller.spanId,
+    ended: true,
+    endCount: 1,
+  });
+  const resolve = child(recording.spans, request, "takibi.resolve");
+  const executor = child(recording.spans, resolve, "takibi.executor");
+  expect(child(recording.spans, executor, "takibi.storage").traceId).toBe(request.traceId);
+  expect(JSON.stringify(request.attributes)).not.toMatch(
+    /private-token|private document body|tenant-a|content-type/,
+  );
+});
+
+test("decode failure creates and ends one root request span", async () => {
+  const recording = createRecordingTracer();
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a" }),
+  }).collections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { memory: true, [internalTracerKey]: recording.tracer },
+  );
+
+  const response = await handler.request("http://fire.test/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{",
+  });
+
+  expect(response.status).toBe(400);
+  const requests = recording.spans.filter(({ name }) => name === "takibi.request");
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({
+    kind: "server",
+    attributes: {},
+    ended: true,
+    endCount: 1,
+  });
+  expect(requests[0]).not.toHaveProperty("parentSpanId");
+});
+
 test("C explicit internal tracer records Worker-DO-executor-storage parentage", async () => {
   const recording = createRecordingTracer();
   const context = createTakibi()({
@@ -119,7 +190,8 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
   });
   expect(added.status).toBe(200);
 
-  const resolve = spanNamed(recording.spans, "takibi.resolve");
+  const request = spanNamed(recording.spans, "takibi.request");
+  const resolve = child(recording.spans, request, "takibi.resolve");
   const wire = child(recording.spans, resolve, "takibi.wire");
   const executor = child(recording.spans, wire, "takibi.executor");
   const storage = recording.spans.find(
@@ -130,6 +202,12 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
   expect(storage!.parentSpanId).toBe(executor.spanId);
   expect(new Set(recording.spans.map((span) => span.traceId)).size).toBe(1);
   expect(recording.spans.every((span) => span.ended)).toBe(true);
+  expect(request).toMatchObject({
+    kind: "server",
+    attributes: {},
+    ended: true,
+    endCount: 1,
+  });
   expect(wire).toMatchObject({
     kind: "client",
     attributes: {
@@ -214,7 +292,8 @@ test("B global-only records Worker-DO-executor-storage parentage", async () => {
   });
   expect(added.status).toBe(200);
 
-  const resolve = spanNamed(recording.spans, "takibi.resolve");
+  const request = spanNamed(recording.spans, "takibi.request");
+  const resolve = child(recording.spans, request, "takibi.resolve");
   const wire = child(recording.spans, resolve, "takibi.wire");
   const executor = child(recording.spans, wire, "takibi.executor");
   expect(spanNamed(recording.spans, "takibi.storage").parentSpanId).toBe(executor.spanId);
@@ -255,7 +334,8 @@ test("takibi.resolve ends before wire and executor start", async () => {
     body: JSON.stringify({ title: "hello" }),
   });
   await enteredResolve.promise;
-  expect(recording.spans.map((span) => span.name)).toEqual(["takibi.resolve"]);
+  expect(recording.spans.map((span) => span.name)).toEqual(["takibi.request", "takibi.resolve"]);
+  expect(spanNamed(recording.spans, "takibi.request").ended).toBe(false);
   expect(spanNamed(recording.spans, "takibi.resolve").ended).toBe(false);
   holdResolve.resolve();
   await enteredWire.promise;
@@ -447,14 +527,14 @@ test("injected failures record error on the failed interval and still end", asyn
   for (const testCase of cases) {
     const recording = createRecordingTracer();
     const durable = testCase.failStorage
-      ? { fetch: (request: Request) => object.fetch(request) }
+      ? { fetch: (request: Request) => object!.fetch(request) }
       : undefined;
     const builder = testCase.failStorage
       ? createTakibi()({
           resolve: () => ({ tenantId: "t" }),
           stub: () => durable as unknown as DurableObjectStub,
         })
-      : testCase.context();
+      : testCase.context!();
     const base = builder.collections(
       testCase.collections ?? { posts: { schema: Post, accessPolicy: fullAccess } },
       {

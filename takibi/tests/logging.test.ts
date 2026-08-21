@@ -132,6 +132,37 @@ test("errors match the public failure and logger throws never change results", a
   ).resolves.toMatchObject({ status: 200 });
 });
 
+test("failure logging emits one error before the request completion", async () => {
+  const events: LogEvent[] = [];
+  const handler = createMemoryHandler(events, "info");
+
+  const response = await handler.request("https://takibi.test/posts/missing");
+  const body = (await response.json()) as {
+    ok: false;
+    error: { code: string; status: number };
+  };
+
+  expect(response.status).toBe(404);
+  expect(events).toEqual([
+    expect.objectContaining({
+      event: "takibi.request",
+      message: "started",
+      operation: "get",
+    }),
+    expect.objectContaining({
+      event: "takibi.error",
+      errorCode: body.error.code,
+      status: body.error.status,
+    }),
+    expect.objectContaining({
+      event: "takibi.request",
+      message: "completed",
+      operation: "get",
+      status: 404,
+    }),
+  ]);
+});
+
 test("logger mutation cannot change an in-flight query", async () => {
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),

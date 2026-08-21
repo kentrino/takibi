@@ -27,9 +27,10 @@ context. Without a context manager, `enable()` still succeeds and emits no
 spans. Call `enable()` once per isolate at module scope. Flush stays
 application-owned.
 
-`enable()` instruments `resolve`, Worker → Durable Object wire, executor,
-policy, schema, storage, and actions. It does not change the public types of
-collections, handlers, or clients.
+`enable()` instruments each accepted public request with one `takibi.request`
+server span, then instruments `resolve`, Worker → Durable Object wire,
+executor, policy, schema, storage, and actions inside that trace. It does not
+change the public types of collections, handlers, or clients.
 
 Span kinds, attributes, exception recording, and status are selected by Takibi
 core. This package maps them directly to the OpenTelemetry API:
@@ -165,9 +166,11 @@ export default {
 `createOtelLogger()` maps severity, message body, event name, collection,
 operation, document ID, duration, error code/status, and a JSON-encoded query to
 an OpenTelemetry `LogRecord`. It supplies the OpenTelemetry context active at
-`Logger.log()` time. Logs emitted inside a Takibi span therefore receive the
-backend's native trace/span correlation; logs without an active span are still
-emitted as uncorrelated records. The adapter does not configure a
+`Logger.log()` time. With tracing enabled, request start/completion records and
+Worker or memory failure records correlate to the active `takibi.request`
+span. Durable Object failure records correlate through the propagated request
+trace. With tracing disabled, the same request and error records are still
+emitted without trace/span correlation. The adapter does not configure a
 `LoggerProvider`, processor, exporter, sampling, retention, or flushing.
 
 Use the same backend for logs and traces if you expect to navigate between
