@@ -38,7 +38,7 @@ import {
   rawPathSegments,
   type PublicRequest,
 } from "./http";
-import { resolveLogging, withLoggedSpan, type LoggingOptions } from "./logging";
+import { requestLogFields, resolveLogging, withLoggedSpan, type LoggingOptions } from "./logging";
 import { assertCollectionMigrations, createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { createPolicyHelper } from "./policy";
@@ -297,7 +297,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
       );
       return Response.json(json, { status: json.ok ? 200 : json.error.status });
     } catch (err) {
-      return errorResponse(err, logger, invocation);
+      return errorResponse(err, logger, invocation, request);
     }
   };
 
@@ -310,6 +310,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     const execute = () =>
       withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, async () => {
         const startedAt = performance.now();
+        const http = requestLogFields(request);
         let invocation: PublicRequest | undefined;
         let response: Response;
         try {
@@ -318,16 +319,18 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
             level: "info",
             event: "takibi.request",
             message: "started",
+            ...http,
             ...invocationFields(invocation),
           });
           response = await run(request, initial, invocation, tracer);
         } catch (err) {
-          response = errorResponse(err, logger, invocation);
+          response = errorResponse(err, logger, invocation, request);
         }
         logger?.emit({
           level: "info",
           event: "takibi.request",
           message: "completed",
+          ...http,
           ...(invocation === undefined ? {} : invocationFields(invocation)),
           durationMs: performance.now() - startedAt,
           status: response.status,

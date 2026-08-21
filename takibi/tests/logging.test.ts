@@ -103,12 +103,15 @@ test("errors match the public failure and logger throws never change results", a
   expect(missing.status).toBe(404);
   const failure = (await missing.json()) as {
     ok: false;
-    error: { code: string; status: number };
+    error: { code: string; message: string; status: number };
   };
   expect(events).toEqual([
     expect.objectContaining({
       event: "takibi.error",
       level: "error",
+      message: failure.error.message,
+      method: "GET",
+      path: "/posts/missing",
       errorCode: failure.error.code,
       status: failure.error.status,
     }),
@@ -163,6 +166,39 @@ test("failure logging emits one error before the request completion", async () =
       status: 404,
     }),
   ]);
+});
+
+test("decode failures log the error message and request path", async () => {
+  const events: LogEvent[] = [];
+  const handler = createMemoryHandler(events, "error");
+  const result = await handler.handle(
+    new Request("https://takibi.test/posts", {
+      method: "POST",
+      body: new Uint8Array(),
+    }),
+    {},
+  );
+
+  expect(result.matched).toBe(true);
+  expect(result.response?.status).toBe(400);
+  const failure = (await result.response!.json()) as {
+    ok: false;
+    error: { code: string; message: string; status: number };
+  };
+  expect(failure.error.message).toBe("Expected JSON body");
+  expect(events).toEqual([
+    expect.objectContaining({
+      event: "takibi.error",
+      level: "error",
+      message: "Expected JSON body",
+      method: "POST",
+      path: "/posts",
+      errorCode: failure.error.code,
+      status: 400,
+    }),
+  ]);
+  expect(events[0]).not.toHaveProperty("collection");
+  expect(events[0]).not.toHaveProperty("operation");
 });
 
 test("logger mutation cannot change an in-flight query", async () => {

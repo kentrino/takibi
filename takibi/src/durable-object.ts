@@ -89,7 +89,7 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
             );
             return Response.json({ ok: true, data } satisfies WireResponse);
           } catch (err) {
-            return errorResponse(err, logger, invocation);
+            return errorResponse(err, logger, invocation, request);
           }
         };
         return extracted

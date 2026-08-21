@@ -20,6 +20,8 @@ export type LogEvent = {
   collection?: string;
   operation?: string;
   documentId?: string;
+  method?: string;
+  path?: string;
   errorCode?: string;
   status?: number;
   query?: QueryExpr;
@@ -95,6 +97,8 @@ export function createPrettyConsoleLogger(options: PrettyConsoleLoggerOptions = 
         `[${level}]`,
         event.event,
         event.message,
+        event.method === undefined ? undefined : `method=${event.method}`,
+        event.path === undefined ? undefined : `path=${event.path}`,
         event.collection === undefined ? undefined : `collection=${event.collection}`,
         event.operation === undefined ? undefined : `operation=${event.operation}`,
         event.documentId === undefined ? undefined : `documentId=${event.documentId}`,
@@ -140,15 +144,22 @@ export async function withLoggedSpan<T>(
   );
 }
 
+export function requestLogFields(request: Request): Pick<LogEvent, "method" | "path"> {
+  return {
+    method: request.method,
+    path: new URL(request.url).pathname,
+  };
+}
+
 export function emitFailure(
   logger: InternalLogger | undefined,
   failure: TakibiFailure,
-  fields: Pick<LogEvent, "collection" | "operation" | "documentId"> = {},
+  fields: Pick<LogEvent, "collection" | "operation" | "documentId" | "method" | "path"> = {},
 ): void {
   logger?.emit({
     level: "error",
     event: "takibi.error",
-    message: "request failed",
+    message: failure.message,
     ...fields,
     errorCode: failure.code,
     status: failure.status,
