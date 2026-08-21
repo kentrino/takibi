@@ -13,18 +13,8 @@ const RecordSchema = z.object({ value: z.string().min(1) });
 const orders = context.defineCollection({
   schema: RecordSchema,
   accessPolicy: fullAccess,
-  actions: (defineAction) => ({
-    updateThenFail: defineAction()
-      .input(z.object({ id: z.string(), value: z.string() }))
-      .atomic()
-      .policy(fullAccess)
-      .handler(async ({ input, $collection }) => {
-        await $collection.update(input.id, { value: input.value });
-        throw new Error("collection action failed");
-      }),
-  }),
 });
-const base = context.collections(
+const app = context.defineCollections(
   {
     orders,
     inventory: { schema: RecordSchema, accessPolicy: fullAccess },
@@ -33,11 +23,21 @@ const base = context.collections(
   },
   { memory: true },
 );
+const ordersActions = app.orders.actions((defineAction) => ({
+  updateThenFail: defineAction()
+    .input(z.object({ value: z.string() }))
+    .atomic()
+    .policy(fullAccess)
+    .handler(async ({ id, input, $collection }) => {
+      await $collection.update(id, { value: input.value });
+      throw new Error("collection action failed");
+    }),
+}));
 const Input = z.object({
   prefix: z.string(),
   failure: z.enum(["none", "second", "third", "storage", "handler", "policy"]),
 });
-const transact = base
+const transact = app
   .defineAction()
   .input(Input)
   .atomic()
@@ -63,7 +63,7 @@ const transact = base
     }
     return { prefix: input.prefix };
   });
-const invalidOutput = base
+const invalidOutput = app
   .defineAction()
   .input(z.string())
   .atomic()
@@ -74,7 +74,7 @@ const invalidOutput = base
     Object.defineProperty(output, "hidden", { value: true });
     return output;
   });
-const nonAtomic = base
+const nonAtomic = app
   .defineAction()
   .input(z.string())
   .policy(fullAccess)
@@ -82,7 +82,7 @@ const nonAtomic = base
     await $collections.orders.add({ value: "non-atomic" }, { id: `${input}-order` });
     throw new Error("non-atomic failed");
   });
-const external = base
+const external = app
   .defineAction()
   .input(z.string())
   .atomic()
@@ -92,10 +92,13 @@ const external = base
     externalEffects.push(input);
     throw new Error("external failed");
   });
-const handler = base.actions({ transact, invalidOutput, nonAtomic, external });
+const handler = app.actions({
+  $: { transact, invalidOutput, nonAtomic, external },
+  orders: ordersActions,
+});
 
 type Backend = {
-  invoke(scope: "$" | "orders", name: string, input: unknown): Promise<WireResponse>;
+  invoke(scope: "$" | "orders", name: string, input: unknown, id?: string): Promise<WireResponse>;
   list(collection: "orders" | "inventory" | "events"): Promise<string[]>;
   addOrder(id: string, value: string): Promise<void>;
   getOrder(id: string): Promise<string>;
@@ -129,7 +132,7 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
   const collectionId = `${prefix}-collection`;
   await backend.addOrder(collectionId, "before");
   await expect(
-    backend.invoke("orders", "updateThenFail", { id: collectionId, value: "after" }),
+    backend.invoke("orders", "updateThenFail", { value: "after" }, collectionId),
   ).resolves.toMatchObject({ ok: false });
   expect(await backend.getOrder(collectionId)).toBe("before");
 
@@ -150,8 +153,10 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
 
 test("atomic actions have matching memory and actual SQLite-backed DO semantics", async () => {
   const memory: Backend = {
-    async invoke(scope, name, input) {
-      const response = await handler.request(`http://takibi.test/${scope}:${name}`, {
+    async invoke(scope, name, input, id) {
+      const path =
+        id === undefined ? `${scope}:${name}` : `${scope}/${encodeURIComponent(id)}:${name}`;
+      const response = await handler.request(`http://takibi.test/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
@@ -186,11 +191,12 @@ test("atomic actions have matching memory and actual SQLite-backed DO semantics"
   await runInDurableObject(stub, async (_instance, state) => {
     const object = new handler.DurableObject(state, {});
     const durable: Backend = {
-      async invoke(scope, name, input) {
+      async invoke(scope, name, input, id) {
         const request: WireRequest = {
           kind: "action",
           scope,
           name,
+          ...(id === undefined ? {} : { id }),
           input,
           context: { tenantId },
         };

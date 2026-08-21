@@ -78,7 +78,7 @@ const takibi = createTakibi<Initial>()({
 });
 
 const memberAccess = grant("create", "get", "list", "update", "delete");
-const handler = takibi.collections({
+const takibiApp = takibi.defineCollections({
   posts: {
     schema: z.object({
       title: z.string(),
@@ -91,6 +91,9 @@ const handler = takibi.collections({
     },
   },
 });
+// `defineCollections` returns an app definition; register actions (or `{}`)
+// exactly once to obtain the handler.
+const handler = takibiApp.actions({});
 
 export type Handler = typeof handler;
 export class TenantStore extends handler.DurableObject {}
@@ -147,19 +150,21 @@ Use `seed` for production defaults. It returns schema inputs keyed by document
 ID, so IDs do not need to be repeated inside document data:
 
 ```ts
-const handler = context.collections({
-  settings: {
-    schema: z.object({
-      bookingUrl: z.string(),
-    }),
-    accessPolicy: fullAccess,
-    seed: () => ({
-      default: {
-        bookingUrl: "",
-      },
-    }),
-  },
-});
+const handler = context
+  .defineCollections({
+    settings: {
+      schema: z.object({
+        bookingUrl: z.string(),
+      }),
+      accessPolicy: fullAccess,
+      seed: () => ({
+        default: {
+          bookingUrl: "",
+        },
+      }),
+    },
+  })
+  .actions({});
 ```
 
 Seeds run before the Durable Object accepts requests and before memory-mode
@@ -179,25 +184,27 @@ write merge:
 ```ts
 type SettingsV0 = { bookingUrl: string };
 
-const handler = context.collections({
-  settings: {
-    schema: z.object({
-      bookingUrl: z.string(),
-      reminders: z.boolean(),
-    }),
-    migrations: {
-      // Omit base for 0. The current version is base + steps.length.
-      base: 0,
-      steps: [
-        (data) => ({
-          ...(data as SettingsV0),
-          reminders: true,
-        }),
-      ],
+const handler = context
+  .defineCollections({
+    settings: {
+      schema: z.object({
+        bookingUrl: z.string(),
+        reminders: z.boolean(),
+      }),
+      migrations: {
+        // Omit base for 0. The current version is base + steps.length.
+        base: 0,
+        steps: [
+          (data) => ({
+            ...(data as SettingsV0),
+            reminders: true,
+          }),
+        ],
+      },
+      accessPolicy: fullAccess,
     },
-    accessPolicy: fullAccess,
-  },
-});
+  })
+  .actions({});
 ```
 
 Documents written by the current definition carry a private library version
@@ -217,20 +224,21 @@ tooling, or guarantee when inactive tenants finish migrating.
 
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt` / `rev`) so you can authorize on document attributes — not only collection-level actions:
 
-| operation | `doc`                               | `nextDoc`                    |
-| --------- | ----------------------------------- | ---------------------------- |
-| add       | —                                   | validated create candidate   |
-| get       | saved value                         | —                            |
-| list      | —                                   | —                            |
-| update    | saved value                         | merge + validation candidate |
-| delete    | saved value                         | —                            |
-| set       | saved value if present, else absent | validated replace candidate  |
+| operation                | `doc`                               | `nextDoc`                    |
+| ------------------------ | ----------------------------------- | ---------------------------- |
+| add                      | —                                   | validated create candidate   |
+| get                      | saved value                         | —                            |
+| list                     | —                                   | —                            |
+| update                   | saved value                         | merge + validation candidate |
+| delete                   | saved value                         | —                            |
+| set                      | saved value if present, else absent | validated replace candidate  |
+| invoke (document action) | target document (gate)              | —                            |
 
 Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying get / update / delete / **set** also returns `NOT_FOUND` so IDs are not leaked — `set` uses the same code for a new id and an existing id. Denying create (`add`) / list returns `FORBIDDEN`.
 
 ### Grants: `fullAccess` / `write` / `read` / `none` / `grant(...)`
 
-`accessPolicy` returns an **`AccessGrant`** — an opaque value for the permissions the subject may perform on this collection / document — not a yes/no for the current request. Build a grant with `grant(...)` or a predefined grant (`fullAccess` / `write` / `read` / `none`) and return it from the policy. The executor allows the call when that grant includes the required `permission` (`create` / `get` / `list` / `update` / `delete`).
+`accessPolicy` returns an **`AccessGrant`** — an opaque value for the permissions the subject may perform on this collection / document — not a yes/no for the current request. Build a grant with `grant(...)` or a predefined grant (`fullAccess` / `write` / `read` / `none`) and return it from the policy. The executor allows the call when that grant includes the required `permission` (`create` / `get` / `list` / `update` / `delete` / `invoke`).
 
 | helper                            | permissions                               |
 | --------------------------------- | ----------------------------------------- |
@@ -262,12 +270,14 @@ const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
   doc?.isSeeded || nextDoc?.isSeeded ? read : fullAccess,
 );
 
-const handler = context.collections({
-  items: {
-    schema: itemSchema,
-    accessPolicy: and(staffPolicy, isSeededData),
-  },
-});
+const handler = context
+  .defineCollections({
+    items: {
+      schema: itemSchema,
+      accessPolicy: and(staffPolicy, isSeededData),
+    },
+  })
+  .actions({});
 ```
 
 Staff can read and write unseeded documents and invoke actions; seeded documents
@@ -304,62 +314,88 @@ resolved context is a JSON-safe object but does not interpret its keys.
 
 ### Actions
 
-Use actions for named server-side work that CRUD cannot express. Collection
-actions are declared with `defineCollection`; root actions are built from the
-assembled handler and registered with `.actions()`.
+Use actions for named server-side work that CRUD cannot express. Actions are
+defined on the app definition returned by `defineCollections`:
+`app.<collection>.actions(cb)` for collection actions, `app.defineAction()`
+for root actions. Register every action map with a single `app.actions({ ... })`
+call (root actions go under the reserved `$` key) to obtain the handler.
+
+A collection `defineAction()` starts as a **document action**: it targets one
+existing document, the client passes the target id as the first argument, and
+the handler receives `{ id, doc }` without re-fetching. Call `.detached()`
+(before `.input()` / `.policy()`) for actions that are not bound to one
+existing document — creation, aggregation, no-target pings.
 
 ```ts
 const posts = context.defineCollection({
   schema: postSchema,
   accessPolicy: postPolicy,
-  actions: (defineAction) => ({
-    duplicate: defineAction()
-      .input(z.object({ id: z.string(), title: z.string() }))
-      .policy(staffPolicy)
-      .handler(async ({ input, collection, $collection }) => {
-        const source = await $collection.get(input.id);
-        const { id: _id, createdAt: _c, updatedAt: _u, rev: _rev, ...fields } = source;
-        return collection.add({ ...fields, title: input.title });
-      }),
-    stats: defineAction()
-      .requires("list")
-      .policy(staffPolicy)
-      .handler(async ({ collection }) => {
-        const page = await collection.list();
-        return { count: page.items.length };
-      }),
-  }),
 });
+const app = context.defineCollections({ posts });
 
-const base = context.collections({ posts });
-const exportAll = base
+const postsActions = app.posts.actions((defineAction) => ({
+  duplicate: defineAction()
+    .input(z.object({ title: z.string() }))
+    .policy(staffPolicy)
+    .handler(async ({ input, doc, collection }) => {
+      const { id: _id, createdAt: _c, updatedAt: _u, rev: _rev, ...fields } = doc;
+      return collection.add({ ...fields, title: input.title });
+    }),
+  stats: defineAction()
+    .detached()
+    .requires("list")
+    .policy(staffPolicy)
+    .handler(async ({ collection }) => {
+      const page = await collection.list();
+      return { count: page.items.length };
+    }),
+}));
+
+const exportAll = app
   .defineAction()
   .policy(staffPolicy)
   .handler(async ({ collections }) => ({
     posts: (await collections.posts.list()).items,
   }));
-const handler = base.actions({ exportAll });
+
+const handler = app.actions({ $: { exportAll }, posts: postsActions });
 ```
 
-`.input(...)` takes a Standard Schema, including refinements. Input failures
-become `{ kind: "validation", code: "VALIDATION" }` with field `issues`. Throw a
-`TakibiError` subclass from the handler for operation failures.
+Every action handler receives `collections` / `$collections` (all collections);
+collection-scope actions additionally receive the shorthand
+`collection` / `$collection` for their own collection. Document actions also
+receive `{ id, doc }` — `doc` is the target document (schema output plus
+metadata), fetched before the handler runs. A missing id fails with
+`NOT_FOUND` before the handler.
 
-Every action has a mandatory gate policy. Collection `defineAction().policy()`
-accepts the same schema-bound policy as that collection's `accessPolicy`; the
-gate evaluates it without a target `doc` (the same shape as `list` / `add`).
-Root actions have no collection schema, so they still take a grant, a
-context-only policy, or an `ActionGateContext` callback. Normal
-`collection` / `collections` CRUD evaluates each collection's `accessPolicy`;
-`$collection` / `$collections` bypasses only that document policy and never
-bypasses the action gate. These server-side facades throw `TakibiError` on
-failure.
+`.input(...)` takes a Standard Schema, including refinements. Document action
+inputs must not contain the target id — the id travels in the path. Input
+failures become `{ kind: "validation", code: "VALIDATION" }` with field
+`issues`. Throw a `TakibiError` subclass from the handler for operation
+failures.
+
+Every action has a mandatory gate policy. A document action's `.policy()`
+accepts the same schema-bound policy as that collection's `accessPolicy` and
+evaluates it **with the target document**
+(`{ operation: "invoke", permission, doc }`), so document-attribute rules work
+in the gate. A gate callback receives `target: { id, doc }`. Gate denial is
+concealed as `NOT_FOUND`, like get / update / delete.
+
+Detached and root actions have no target document: their gate takes a grant, a
+context-only policy, or a gate callback (without `target`) — schema-bound
+policies are rejected at the type level and with `INVALID_ACTION` at
+registration. Gate denial is `FORBIDDEN`.
+
+Normal `collection` / `collections` CRUD evaluates each collection's
+`accessPolicy`; `$collection` / `$collections` bypasses only that document
+policy and never bypasses the action gate. These server-side facades throw
+`TakibiError` on failure.
 
 Add `.atomic()` before `.handler()` when all Takibi collection storage
 operations in an action must commit or roll back together:
 
 ```ts
-const placeOrder = base
+const placeOrder = app
   .defineAction()
   .input(placeOrderSchema)
   .atomic()
@@ -372,12 +408,15 @@ const placeOrder = base
   });
 ```
 
-The action gate and input validation run before the transaction. The handler,
-collection schema validation and storage operations, `void`-to-`null`
-normalization, and JSON output validation run inside it; they commit only when
-all succeed. Any thrown failure rolls back writes already completed by that
-atomic action. Actions without `.atomic()` keep the normal per-operation
-behavior, so an earlier write remains after a later failure.
+For detached and root actions the gate and input validation run before the
+transaction. The handler, collection schema validation and storage operations,
+`void`-to-`null` normalization, and JSON output validation run inside it; they
+commit only when all succeed. An atomic **document** action runs the target
+lookup, gate, input parse, and handler inside one transaction, so the `doc` the
+handler receives is consistent with its writes. Any thrown failure rolls back
+writes already completed by that atomic action. Actions without `.atomic()`
+keep the normal per-operation behavior, so an earlier write remains after a
+later failure.
 
 Atomic actions cover only operations performed through Takibi's
 `collection(s)` / `$collection(s)` facades. HTTP requests, email, queue
@@ -385,15 +424,17 @@ publishes, and other external side effects cannot be rolled back, even when
 they occur inside an atomic handler. Split those effects into a separate action
 or use an application-level delivery pattern when they must be coordinated.
 
-The public client is flat:
+The public client is flat; document actions take the target id first:
 
 ```ts
-await client.posts.duplicate({ id: "p1", title: "Copy" });
-await client.posts.stats();
-await client.exportAll();
+await client.posts.duplicate("p1", { title: "Copy" }); // document action
+await client.posts.stats(); // detached action
+await client.exportAll(); // root action
 ```
 
-Actions use `POST {baseUrl}/{collection}:{name}` and root actions use
+Document actions use `POST {baseUrl}/{collection}/{id}:{name}` (the id is
+percent-encoded, so an id containing `:` travels as `%3A`). Detached collection
+actions use `POST {baseUrl}/{collection}:{name}` and root actions use
 `POST {baseUrl}/$:{name}`. Query parameters are rejected. Input is validated
 with Standard Schema; omitted input remains `undefined`, while JSON `null`
 remains explicit. Outputs must be JSON-safe; `void` becomes `data: null`.
@@ -623,8 +664,8 @@ Notes:
 ## Observability
 
 Logging and tracing are separate signals. Both are off by default. Configure a
-logger on `createTakibi()`, `collections()`, or `.with()`; the more local setting
-wins field by field:
+logger on `createTakibi()`, `defineCollections()`, or `.with()`; the more local
+setting wins field by field:
 
 ```ts
 import { createPrettyConsoleLogger, createTakibi } from "@takibi/takibi";
@@ -636,8 +677,8 @@ const takibi = createTakibi()({
   logLevel: "debug",
 });
 
-const production = takibi.collections(definitions, { logLevel: "info" });
-const silent = takibi.collections(definitions, { logger: false });
+const production = takibi.defineCollections(definitions, { logLevel: "info" }).actions({});
+const silent = takibi.defineCollections(definitions, { logger: false }).actions({});
 const captured = production.with({ memory: true, logger: testLogger });
 ```
 

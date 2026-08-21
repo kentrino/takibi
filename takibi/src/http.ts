@@ -37,42 +37,59 @@ export function publicPathRemainder(pathname: string, prefix: string | undefined
   return path.slice(pre.length);
 }
 
+/**
+ * Trailing raw (still percent-encoded) segments of a matched route. Used by
+ * the Hono mounts, whose params are decoded too early for raw colon routing.
+ */
+export function rawPathSegments(pathname: string, count: number): string[] {
+  const path = normalizePathname(pathname);
+  const segments = path === "/" ? [] : path.slice(1).split("/");
+  return segments.slice(Math.max(0, segments.length - count));
+}
+
 export type PublicRequest = ExecuteRequest | ActionInvocation;
 
 export async function decodePublicHttp(request: Request, prefix?: string): Promise<PublicRequest> {
   const url = new URL(request.url);
   const rest = publicPathRemainder(url.pathname, prefix);
   const rawSegments = rest === "/" ? [] : rest.slice(1).split("/");
-  let segments: string[];
-  try {
-    segments = rawSegments.map((segment) => decodeURIComponent(segment));
-  } catch {
-    throw new BadRequestError("Malformed path encoding");
-  }
-  return decodePublicRoute(request.method, segments, url.searchParams, () =>
+  return decodePublicRoute(request.method, rawSegments, url.searchParams, () =>
     request.body === null ? Promise.resolve(undefined) : request.json(),
   );
 }
 
+function decodeSegmentPart(part: string): string {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    throw new BadRequestError("Malformed path encoding");
+  }
+}
+
+/**
+ * Decode a public route from raw (still percent-encoded) path segments.
+ * Colon routing happens on the raw text so encoded `%3A` inside ids never
+ * collides with the `:`-separated action syntax.
+ */
 export async function decodePublicRoute(
   method: string,
-  segments: string[],
+  rawSegments: string[],
   searchParams: URLSearchParams,
   readBody: () => Promise<unknown>,
 ): Promise<PublicRequest> {
-  if (segments.length === 0 || segments.some((segment) => segment === "")) {
+  if (rawSegments.length === 0 || rawSegments.some((segment) => segment === "")) {
     throw new BadRequestError("Missing collection");
   }
-  if (segments.length > 2) {
+  if (rawSegments.length > 2) {
     throw new NotFoundError();
   }
 
-  const collection = segments[0]!;
-  const separator = collection.indexOf(":");
+  const rawCollection = rawSegments[0]!;
+  const separator = rawCollection.indexOf(":");
   if (separator >= 0) {
-    if (segments.length !== 1) throw new NotFoundError();
-    const scope = collection.slice(0, separator);
-    const name = collection.slice(separator + 1);
+    if (rawSegments.length !== 1) throw new NotFoundError();
+    const scope = decodeSegmentPart(rawCollection.slice(0, separator));
+    const name = decodeSegmentPart(rawCollection.slice(separator + 1));
     if (!scope || !name || name.includes(":")) {
       throw new BadRequestError("Invalid action path");
     }
@@ -86,7 +103,33 @@ export async function decodePublicRoute(
       ...(input.present ? { input: input.value } : {}),
     };
   }
-  const id = segments[1];
+
+  const collection = decodeSegmentPart(rawCollection);
+  const rawId = rawSegments[1];
+
+  if (rawId !== undefined && rawId.includes(":")) {
+    // Document action route: split on the raw last colon, then decode. The
+    // client encodes ids with encodeURIComponent, so a raw `:` always marks
+    // the action name boundary.
+    const boundary = rawId.lastIndexOf(":");
+    const id = decodeSegmentPart(rawId.slice(0, boundary));
+    const name = decodeSegmentPart(rawId.slice(boundary + 1));
+    if (!id || !name) {
+      throw new BadRequestError("Invalid action path");
+    }
+    if (method !== "POST") throw new MethodNotAllowedError();
+    assertNoQuery(searchParams, "Query parameters are not allowed on actions");
+    const input = await readOptionalJsonBody(readBody);
+    return {
+      kind: "action",
+      scope: collection,
+      name,
+      id,
+      ...(input.present ? { input: input.value } : {}),
+    };
+  }
+
+  const id = rawId === undefined ? undefined : decodeSegmentPart(rawId);
 
   if (id === undefined) {
     if (method === "POST") {

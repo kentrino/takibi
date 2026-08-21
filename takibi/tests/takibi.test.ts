@@ -48,59 +48,75 @@ function postPolicy({ user, doc, nextDoc }: AccessContext<AppCtx>): ReturnType<t
 function createActionApp() {
   const context = createTakibi()({ resolve: resolveTestContext });
   const staff = context.policy(({ user }) => (user ? fullAccess : none));
+  const postGate = context.policy(Post, postPolicy);
 
   const posts = context.defineCollection({
     schema: Post,
     accessPolicy: postPolicy,
-    actions: (defineAction) => ({
-      duplicate: defineAction()
-        .input(z.object({ id: z.string(), title: z.string().min(1) }))
-        .policy(staff)
-        .handler(async ({ input, collection, $collection, ctx }) => {
-          const source = await $collection.get(input.id);
-          return collection.add({
-            title: `${input.title}:${ctx.user?.id ?? "none"}`,
-            secret: source.secret,
-          });
-        }),
-      stats: defineAction()
-        .requires("list")
-        .policy(read)
-        .handler(async ({ collection }) => {
-          const page = await collection.list();
-          return { count: page.items.length };
-        }),
-      ping: defineAction()
-        .policy(staff)
-        .handler(() => ({ pong: true })),
-      noContent: defineAction()
-        .policy(staff)
-        .handler(() => undefined),
-      coerced: defineAction()
-        .input(z.coerce.number())
-        .policy(staff)
-        .handler(({ input }) => ({ value: input })),
-      readSecret: defineAction()
-        .input(z.string())
-        .policy(staff)
-        .handler(({ input, collection }) => collection.get(input)),
-      readSecretTrusted: defineAction()
-        .input(z.string())
-        .policy(staff)
-        .handler(({ input, $collection }) => $collection.get(input)),
-    }),
   });
+  const audits = context.defineCollection({
+    schema: z.object({ action: z.string() }),
+    accessPolicy: fullAccess,
+  });
+  const app = context.defineCollections({ posts, audits }, { memory: true });
 
-  const base = context.collections({ posts }, { memory: true });
-  const exportAll = base
+  const postsActions = app.posts.actions((defineAction) => ({
+    // Document action gated by a schema-bound policy: secret docs are concealed.
+    duplicate: defineAction()
+      .input(z.object({ title: z.string().min(1) }))
+      .policy(postGate)
+      .handler(({ input, doc, collection, ctx }) =>
+        collection.add({
+          title: `${input.title}:${ctx.user?.id ?? "none"}`,
+          secret: doc.secret,
+        }),
+      ),
+    // Document action writing to another collection via $collections.
+    audited: defineAction()
+      .policy(staff)
+      .handler(async ({ id, $collections }) => {
+        await $collections.audits.add({ action: `audited:${id}` }, { id: `audit-${id}` });
+        const page = await $collections.audits.list();
+        return { audits: page.items.length };
+      }),
+    stats: defineAction()
+      .detached()
+      .requires("list")
+      .policy(read)
+      .handler(async ({ collection }) => {
+        const page = await collection.list();
+        return { count: page.items.length };
+      }),
+    ping: defineAction()
+      .detached()
+      .policy(staff)
+      .handler(() => ({ pong: true })),
+    noContent: defineAction()
+      .detached()
+      .policy(staff)
+      .handler(() => undefined),
+    readSecret: defineAction()
+      .policy(staff)
+      .handler(({ id, collection }) => collection.get(id)),
+    readSecretTrusted: defineAction()
+      .policy(staff)
+      .handler(({ doc }) => doc),
+  }));
+
+  const exportAll = app
     .defineAction()
     .policy(staff)
     .handler(async ({ ctx, collections }) => {
       const page = await collections.posts.list();
       return { by: ctx.user?.id ?? "none", titles: page.items.map((post) => post.title) };
     });
-  const handler = base.actions({ exportAll });
-  return { base, handler };
+  const coerced = app
+    .defineAction()
+    .input(z.coerce.number())
+    .policy(staff)
+    .handler(({ input }) => ({ value: input }));
+  const handler = app.actions({ $: { exportAll, coerced }, posts: postsActions });
+  return { app, handler };
 }
 
 function clientFor(
@@ -128,18 +144,20 @@ function createFakeDurableObjectState(
 
 test("bounded array fields roundtrip through whole-document add, get, and update", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
-  const handler = context.collections(
-    {
-      posts: {
-        schema: z.object({
-          title: z.string(),
-          comments: z.array(z.object({ body: z.string() })),
-        }),
-        accessPolicy: fullAccess,
+  const handler = context
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({
+            title: z.string(),
+            comments: z.array(z.object({ body: z.string() })),
+          }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -187,36 +205,57 @@ test("CRUD and collection/root actions roundtrip in memory mode", async () => {
   const noContent = await client.posts.noContent();
   expect(noContent).toEqual({ ok: true, data: null });
 
-  const coerced = await client.posts.coerced("42");
+  const coerced = await client.coerced("42");
   expect(coerced).toEqual({ ok: true, data: { value: 42 } });
 });
 
-test("collection actions reuse a schema-bound accessPolicy as the gate", async () => {
+test("document actions read and write other collections through $collections", async () => {
+  const { handler } = createActionApp();
+  const client = clientFor(handler);
+
+  await client.posts.add({ title: "first" }, { id: "p1" });
+  const audited = await client.posts.audited("p1");
+  expect(audited).toEqual({ ok: true, data: { audits: 1 } });
+});
+
+test("document actions reuse a schema-bound accessPolicy as a doc-aware gate", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
-  const directory = context.policy(Post, ({ user }) => (user ? fullAccess : none));
+  const directory = context.policy(Post, ({ user, doc }) =>
+    user && doc?.secret !== true ? fullAccess : none,
+  );
   const posts = context.defineCollection({
     schema: Post,
-    accessPolicy: directory,
-    actions: (defineAction) => ({
-      ping: defineAction()
-        .policy(directory)
-        .handler(() => ({ pong: true })),
+    accessPolicy: fullAccess,
+    seed: () => ({
+      open: { title: "open", secret: false },
+      hidden: { title: "hidden", secret: true },
     }),
   });
-  const handler = context.collections({ posts }, { memory: true });
-  const allowed = createClient<typeof handler>("http://fire.test", {
+  const app = context.defineCollections({ posts }, { memory: true });
+  const postsActions = app.posts.actions((defineAction) => ({
+    touch: defineAction()
+      .policy(directory)
+      .handler(({ id }) => ({ touched: id })),
+  }));
+  const handler = app.actions({ posts: postsActions });
+  const member = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "u1", role: "member" }),
     fetch: (input, init) => handler.request(input, init),
   });
-  expect(await allowed.posts.ping()).toEqual({ ok: true, data: { pong: true } });
+  expect(await member.posts.touch("open")).toEqual({ ok: true, data: { touched: "open" } });
+  // Gate denial on a secret seed document conceals existence (ADR 0015).
+  expect(await member.posts.touch("hidden")).toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND", status: 404 },
+  });
 
   const denied = createClient<typeof handler>("http://fire.test", {
     headers: () => headers(null),
     fetch: (input, init) => handler.request(input, init),
   });
-  expect(await denied.posts.ping()).toMatchObject({
+  expect(await denied.posts.touch("open")).toMatchObject({
     ok: false,
-    error: { code: "FORBIDDEN", status: 403 },
+    error: { code: "NOT_FOUND", status: 404 },
   });
 });
 
@@ -236,7 +275,7 @@ test("duplicate add returns ALREADY_EXISTS as an operation failure", async () =>
   });
 });
 
-test("action input is validated and client uses one-segment colon routes", async () => {
+test("action input is validated and client routes document actions by id", async () => {
   const { handler } = createActionApp();
   const calls: { method: string; url: string; body?: unknown }[] = [];
   const client = createClient<typeof handler>("http://fire.test/api/fire", {
@@ -257,12 +296,19 @@ test("action input is validated and client uses one-segment colon routes", async
     ok: true,
     data: { id: "p1", title: "source" },
   });
-  const duplicate = await client.posts.duplicate({ id: "p1", title: "copy" });
+  const duplicate = await client.posts.duplicate("p1", { title: "copy" });
   expect(duplicate).toMatchObject({ ok: true, data: { title: "copy:u1" } });
   expect(calls.at(-1)).toEqual({
     method: "POST",
-    url: "http://fire.test/api/fire/posts:duplicate",
-    body: { id: "p1", title: "copy" },
+    url: "http://fire.test/api/fire/posts/p1:duplicate",
+    body: { title: "copy" },
+  });
+
+  const detached = await client.posts.stats();
+  expect(detached).toMatchObject({ ok: true });
+  expect(calls.at(-1)).toEqual({
+    method: "POST",
+    url: "http://fire.test/api/fire/posts:stats",
   });
 
   await client.exportAll();
@@ -271,11 +317,35 @@ test("action input is validated and client uses one-segment colon routes", async
     url: "http://fire.test/api/fire/$:exportAll",
   });
 
-  const invalid = await client.posts.duplicate({ id: "p1", title: "" });
+  const invalid = await client.posts.duplicate("p1", { title: "" });
   expect(invalid).toMatchObject({
     ok: false,
     error: { kind: "validation", code: "VALIDATION", status: 400 },
   });
+
+  const emptyId = await client.posts.duplicate("", { title: "copy" });
+  expect(emptyId).toMatchObject({
+    ok: false,
+    error: { kind: "validation", code: "VALIDATION", status: 400 },
+  });
+});
+
+test("document action ids containing colons roundtrip as %3A on the wire", async () => {
+  const { handler } = createActionApp();
+  const calls: string[] = [];
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      calls.push(request.url);
+      return handler.request(request, init);
+    },
+  });
+
+  await client.posts.add({ title: "colon" }, { id: "a:b" });
+  const audited = await client.posts.audited("a:b");
+  expect(audited).toEqual({ ok: true, data: { audits: 1 } });
+  expect(calls.at(-1)).toBe("http://fire.test/posts/a%3Ab:audited");
 });
 
 test("action input schema refinements become validation failures", async () => {
@@ -286,16 +356,16 @@ test("action input schema refinements become validation failures", async () => {
       message: "blocked domain",
       path: ["email"],
     });
-  const base = context.collections(
+  const app = context.defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
-  const register = base
+  const register = app
     .defineAction()
     .input(RegisterInput)
     .policy(fullAccess)
     .handler(({ input }) => ({ email: input.email }));
-  const handler = base.actions({ register });
+  const handler = app.actions({ $: { register } });
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -357,21 +427,26 @@ test("owner policy only grants list when the whole query implies the caller owne
     ownerId: z.string(),
     status: z.string(),
   });
-  const handler = context.collections(
-    {
-      notes: {
-        schema: Note,
-        accessPolicy: context.policy(Note.pick({ ownerId: true }), ({ user, operation, where }) => {
-          if (user?.role === "admin") return fullAccess;
-          if (operation === "list" && user && queryImpliesEquality(where, "ownerId", user.id)) {
-            return grant("list");
-          }
-          return none;
-        }),
+  const handler = context
+    .defineCollections(
+      {
+        notes: {
+          schema: Note,
+          accessPolicy: context.policy(
+            Note.pick({ ownerId: true }),
+            ({ user, operation, where }) => {
+              if (user?.role === "admin") return fullAccess;
+              if (operation === "list" && user && queryImpliesEquality(where, "ownerId", user.id)) {
+                return grant("list");
+              }
+              return none;
+            },
+          ),
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
   const admin = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "admin", role: "admin" }),
     fetch: (input, init) => handler.request(input, init),
@@ -486,11 +561,11 @@ test("action gate keeps resolved context under ctx without claim collisions", as
       scope: "application-scope" as const,
     }),
   });
-  const base = context.collections(
+  const app = context.defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
-  const inspect = base
+  const inspect = app
     .defineAction()
     .policy(({ ctx, permission, scope }) =>
       ctx.permission === "application-admin" &&
@@ -501,7 +576,7 @@ test("action gate keeps resolved context under ctx without claim collisions", as
         : none,
     )
     .handler(({ ctx }) => ({ permission: ctx.permission, scope: ctx.scope }));
-  const handler = base.actions({ inspect });
+  const handler = app.actions({ $: { inspect } });
   const client = createClient<typeof handler>("http://fire.test", {
     fetch: (input, init) => handler.request(input, init),
   });
@@ -514,10 +589,12 @@ test("action gate keeps resolved context under ctx without claim collisions", as
 
 test("set policy denial conceals existence for new and existing ids", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
-  const handler = context.collections(
-    { posts: { schema: Post, accessPolicy: ({ user }) => (user ? fullAccess : none) } },
-    { memory: true },
-  );
+  const handler = context
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: ({ user }) => (user ? fullAccess : none) } },
+      { memory: true },
+    )
+    .actions({});
   const admin = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "admin", role: "admin" }),
     fetch: (input, init) => handler.request(input, init),
@@ -555,7 +632,7 @@ test("set policy denial conceals existence for new and existing ids", async () =
   });
 });
 
-test("normal action CRUD enforces accessPolicy and $collection bypass is local", async () => {
+test("normal action CRUD enforces accessPolicy and trusted doc access is local", async () => {
   const { handler } = createActionApp();
   const admin = clientFor(handler, { id: "admin", role: "admin" });
   await admin.posts.add({ title: "secret", secret: true }, { id: "secret" });
@@ -570,17 +647,17 @@ test("normal action CRUD enforces accessPolicy and $collection bypass is local",
     data: { id: "secret", title: "secret", secret: true },
   });
 
-  const duplicate = await client.posts.duplicate({ id: "secret", title: "copy" });
+  // The schema-bound gate sees the secret target doc and conceals it.
+  const duplicate = await client.posts.duplicate("secret", { title: "copy" });
   expect(duplicate).toMatchObject({
     ok: false,
-    error: { code: "FORBIDDEN", status: 403 },
+    error: { code: "NOT_FOUND", status: 404 },
   });
 });
 
 test("actions execute inside the generated Durable Object", async () => {
-  const { base, handler } = createActionApp();
-  expect(base).toBe(handler);
-  const object = new base.DurableObject(
+  const { handler } = createActionApp();
+  const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
@@ -606,12 +683,84 @@ test("actions execute inside the generated Durable Object", async () => {
   });
 });
 
+test("wire id is required for document actions and rejected elsewhere", async () => {
+  const { handler } = createActionApp();
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  await object.$collections.posts.add({ title: "target" }, { id: "p1" });
+  const context = { tenantId: "tenant-a", user: { id: "u1", role: "member" } };
+  const send = async (body: WireRequest) => {
+    const response = await object.fetch(
+      new Request("https://takibi.internal", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+    return { status: response.status, body: (await response.json()) as unknown };
+  };
+
+  const documentOk = await send({
+    kind: "action",
+    scope: "posts",
+    name: "audited",
+    id: "p1",
+    context,
+  });
+  expect(documentOk).toMatchObject({ status: 200, body: { ok: true, data: { audits: 1 } } });
+
+  const missingId = await send({ kind: "action", scope: "posts", name: "audited", context });
+  expect(missingId).toMatchObject({
+    status: 400,
+    body: { ok: false, error: { code: "BAD_REQUEST" } },
+  });
+
+  const detachedWithId = await send({
+    kind: "action",
+    scope: "posts",
+    name: "ping",
+    id: "p1",
+    context,
+  });
+  expect(detachedWithId).toMatchObject({
+    status: 400,
+    body: { ok: false, error: { code: "BAD_REQUEST" } },
+  });
+
+  const rootWithId = await send({
+    kind: "action",
+    scope: "$",
+    name: "exportAll",
+    id: "p1",
+    context,
+  });
+  expect(rootWithId).toMatchObject({
+    status: 400,
+    body: { ok: false, error: { code: "BAD_REQUEST" } },
+  });
+
+  const emptyId = await send({
+    kind: "action",
+    scope: "posts",
+    name: "audited",
+    id: "",
+    context,
+  } as never);
+  expect(emptyId).toMatchObject({
+    status: 400,
+    body: { ok: false, error: { code: "BAD_REQUEST" } },
+  });
+});
+
 test("named Durable Object fetch accepts a matching tenantId", async () => {
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
@@ -653,9 +802,11 @@ test("named Durable Object fetch rejects a tenant mismatch before storage", asyn
   } as DurableObjectStorage;
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(watched, { name: "tenant-a" }),
     {},
@@ -685,9 +836,11 @@ test("named Durable Object fetch rejects a tenant mismatch before storage", asyn
 test("named Durable Object fetch rejects an empty tenantId", async () => {
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
@@ -715,9 +868,11 @@ test("named Durable Object fetch rejects an empty tenantId", async () => {
 test("unnamed Durable Object fetch skips the tenant name check", async () => {
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const unnamed = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
@@ -755,9 +910,11 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
     stub: () => object as unknown as DurableObjectStub,
   });
-  const handler = context.collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  const handler = context
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
@@ -805,9 +962,11 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
     stub: () => object as unknown as DurableObjectStub,
   });
-  const handler = context.collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  const handler = context
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
@@ -868,15 +1027,15 @@ test("Worker forwards only the action invocation and resolved context", async ()
         },
       }) as DurableObjectStub,
   });
-  const base = context.collections({
+  const app = context.defineCollections({
     posts: { schema: Post, accessPolicy: fullAccess },
   });
-  const ping = base
+  const ping = app
     .defineAction()
     .atomic()
     .policy(fullAccess)
     .handler(() => ({ pong: true }));
-  const handler = base.actions({ ping });
+  const handler = app.actions({ $: { ping } });
   expect(handler).not.toHaveProperty("$collections");
 
   const client = createClient<typeof handler>("http://fire.test", {
@@ -912,13 +1071,15 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
       return object as unknown as DurableObjectStub;
     },
   });
-  const handler = context.collections({
-    posts: {
-      schema: Post,
-      accessPolicy: ({ clinic, actor }) =>
-        clinic.slug === "clinic-a" && actor.id === "u1" ? fullAccess : none,
-    },
-  });
+  const handler = context
+    .defineCollections({
+      posts: {
+        schema: Post,
+        accessPolicy: ({ clinic, actor }) =>
+          clinic.slug === "clinic-a" && actor.id === "u1" ? fullAccess : none,
+      },
+    })
+    .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
@@ -938,28 +1099,22 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
   });
 });
 
-test("action registration is atomic and validates collisions", async () => {
+test("action registration validates definitions and app.actions() is one-shot", async () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u", role: "admin" as const } }),
   });
-  const base = context.collections(
+  const app = context.defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
-  const valid = base
+  const valid = app
     .defineAction()
     .policy(fullAccess)
     .handler(() => ({ ok: true }));
   const invalid = { ...valid, kind: "collection" } as never;
-  const register = (definitions: ActionDefinitions) => base.actions(definitions as never);
+  const register = (definitions: ActionDefinitions) => app.actions({ $: definitions } as never);
 
   expect(() => register({ valid, invalid })).toThrow(/Invalid root action/);
-  const beforeCommit = await base.request("http://fire.test/$:valid", {
-    method: "POST",
-    headers: headers(),
-  });
-  expect(beforeCommit.status).toBe(404);
-
   expect(() => register({ posts: valid })).toThrow(/reserved name/);
   expect(() => register({ bind: valid })).toThrow(/Invalid action name/);
   expect(() =>
@@ -986,35 +1141,95 @@ test("action registration is atomic and validates collisions", async () => {
   expect(() => register({ [Symbol("hidden")]: valid } as ActionDefinitions)).toThrow(
     /names must be strings/,
   );
+  expect(() => app.actions({ ghosts: {} } as never)).toThrow(/Unknown action scope/);
   register({ valid });
-  expect(() => register({ valid })).toThrow(/already registered/);
+  expect(() => register({ valid })).toThrow(/only be called once/);
 });
 
-test("collection action definitions reject CRUD names and require defineCollection", () => {
+test("scoped action maps are rejected when registered under another collection", () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: null }),
   });
-  const invalid = context.defineCollection({
-    schema: Post,
+  const posts = context.defineCollection({ schema: Post, accessPolicy: fullAccess });
+  const audits = context.defineCollection({
+    schema: z.object({ action: z.string() }),
     accessPolicy: fullAccess,
-    // @ts-expect-error CRUD action names are rejected by the public builder type
-    actions: (defineAction) => ({
-      get: defineAction()
-        .policy(fullAccess)
-        .handler(() => ({ bad: true })),
-    }),
   });
-  expect(() => context.collections({ posts: invalid })).toThrow(/reserved name/);
+  const app = context.defineCollections({ posts, audits }, { memory: true });
+  const postsActions = app.posts.actions((defineAction) => ({
+    touch: defineAction()
+      .policy(fullAccess)
+      .handler(({ id }) => ({ id })),
+  }));
 
+  expect(() => app.actions({ audits: postsActions } as never)).toThrow(
+    /defined for scope "posts" but registered under "audits"/,
+  );
+});
+
+test("detached and root actions reject schema-bound gate policies at registration", () => {
+  const context = createTakibi()({
+    resolve: () => ({ tenantId: "t", user: null }),
+  });
+  const bound = context.policy(Post, () => fullAccess);
+  const app = context.defineCollections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { memory: true },
+  );
+  const detachedActions = app.posts.actions((defineAction) => ({
+    bad: defineAction()
+      .detached()
+      // @ts-expect-error schema-bound policies are excluded from detached gates
+      .policy(bound)
+      .handler(() => null),
+  }));
+  expect(() => app.actions({ posts: detachedActions })).toThrow(
+    /Schema-bound policies require a document action gate/,
+  );
+
+  const root = app
+    .defineAction()
+    // @ts-expect-error schema-bound policies are excluded from root gates
+    .policy(bound)
+    .handler(() => null);
+  expect(() => app.actions({ $: { root } })).toThrow(
+    /Schema-bound policies require a document action gate/,
+  );
+});
+
+test("collection action definitions reject CRUD names and the legacy actions option", () => {
+  const context = createTakibi()({
+    resolve: () => ({ tenantId: "t", user: null }),
+  });
   expect(() =>
-    context.collections({
+    context.defineCollection({
+      schema: Post,
+      accessPolicy: fullAccess,
+      actions: () => ({}),
+    } as never),
+  ).toThrow(/no longer take actions/);
+  expect(() =>
+    context.defineCollections({
       posts: {
         schema: Post,
         accessPolicy: fullAccess,
         actions: () => ({}),
       } as never,
     }),
-  ).toThrow(/require defineCollection/);
+  ).toThrow(/no longer take actions/);
+
+  const app = context.defineCollections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { memory: true },
+  );
+  const crudNamed = app.posts.actions((defineAction) => ({
+    // @ts-expect-error CRUD action names are rejected by the public builder type
+    get: defineAction()
+      .detached()
+      .policy(fullAccess)
+      .handler(() => ({ bad: true })),
+  }));
+  expect(() => app.actions({ posts: crudNamed })).toThrow(/reserved name/);
 });
 
 test("collection registration rejects hidden, symbol, and inherited entries", () => {
@@ -1028,12 +1243,18 @@ test("collection registration rejects hidden, symbol, and inherited entries", ()
     enumerable: false,
   });
 
-  expect(() => context.collections(hidden as never)).toThrow(/enumerable data properties/);
-  expect(() => context.collections({ [Symbol("posts")]: definition } as never)).toThrow(
+  expect(() => context.defineCollections(hidden as never)).toThrow(/enumerable data properties/);
+  expect(() => context.defineCollections({ [Symbol("posts")]: definition } as never)).toThrow(
     /names must be strings/,
   );
-  expect(() => context.collections(Object.create({ posts: definition }) as never)).toThrow(
+  expect(() => context.defineCollections(Object.create({ posts: definition }) as never)).toThrow(
     /plain object/,
+  );
+  expect(() => context.defineCollections({ actions: definition } as never)).toThrow(
+    /Invalid collection name/,
+  );
+  expect(() => context.defineCollections({ defineAction: definition } as never)).toThrow(
+    /Invalid collection name/,
   );
 });
 
@@ -1059,15 +1280,15 @@ test("non-JSON action output is rejected before the success envelope", async () 
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
-  const base = context.collections(
+  const app = context.defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
-  const invalid = base
+  const invalid = app
     .defineAction()
     .policy(fullAccess)
     .handler((() => new Date()) as never);
-  const handler = base.actions({ invalid });
+  const handler = app.actions({ $: { invalid } });
   const response = await handler.request("http://fire.test/$:invalid", {
     method: "POST",
   });
@@ -1082,11 +1303,11 @@ test("custom serialization hooks are rejected from action output", async () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
-  const base = context.collections(
+  const app = context.defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
-  const serialize = base
+  const serialize = app
     .defineAction()
     .policy(fullAccess)
     .handler(() => {
@@ -1097,7 +1318,7 @@ test("custom serialization hooks are rejected from action output", async () => {
       });
       return output;
     });
-  const handler = base.actions({ serialize });
+  const handler = app.actions({ $: { serialize } });
   const response = await handler.request("http://fire.test/$:serialize", {
     method: "POST",
   });
@@ -1139,11 +1360,11 @@ test("action output arrays reject ignored custom and accessor properties", async
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
-  const base = context.collections(
+  const app = context.defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { memory: true },
   );
-  const invalidArray = base
+  const invalidArray = app
     .defineAction()
     .policy(fullAccess)
     .handler(() => {
@@ -1154,7 +1375,7 @@ test("action output arrays reject ignored custom and accessor properties", async
       });
       return output;
     });
-  const handler = base.actions({ invalidArray });
+  const handler = app.actions({ $: { invalidArray } });
   const response = await handler.request("http://fire.test/$:invalidArray", {
     method: "POST",
   });
@@ -1181,10 +1402,12 @@ test("non-JSON resolved context is rejected equally before memory or DO dispatch
         } as unknown as DurableObjectStub;
       },
     });
-    return context.collections(
-      { posts: { schema: Post, accessPolicy: fullAccess } },
-      memory ? { memory: true } : undefined,
-    );
+    return context
+      .defineCollections(
+        { posts: { schema: Post, accessPolicy: fullAccess } },
+        memory ? { memory: true } : undefined,
+      )
+      .actions({});
   };
 
   for (const handler of [create(true), create(false)]) {
@@ -1204,13 +1427,15 @@ function createProductionPostsHandler() {
     schema: Post,
     accessPolicy: postPolicy,
     seed: () => ({ seeded: { title: "from-seed", secret: false } }),
-    actions: (defineAction) => ({
-      ping: defineAction()
-        .policy(fullAccess)
-        .handler(() => ({ pong: true as const })),
-    }),
   });
-  return context.collections({ posts });
+  const app = context.defineCollections({ posts });
+  const postsActions = app.posts.actions((defineAction) => ({
+    ping: defineAction()
+      .detached()
+      .policy(fullAccess)
+      .handler(() => ({ pong: true as const })),
+  }));
+  return app.actions({ posts: postsActions });
 }
 
 test("with({ memory, resolve }) reuses collection actions on an isolated store", async () => {
@@ -1264,7 +1489,9 @@ test("with({ memory: true }) keeps the production resolve and handle context", a
       seen.push(context);
       return { tenantId: "tenant-a", user: { id: "u1", role: "member" as const } };
     },
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
+    .actions({});
   const handler = production.with({ memory: true });
 
   const result = await handler.handle(new Request("http://fire.test/posts/missing"), {
@@ -1305,9 +1532,11 @@ test("original handle still requires stub after with()", async () => {
           return Response.json({ ok: true, data: { id: "from-stub" } });
         },
       }) as unknown as DurableObjectStub,
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const memory = production.with({ memory: true, resolve: resolveTestContext });
   const memoryClient = createClient<typeof production>("http://fire.test", {
     headers,
@@ -1339,32 +1568,12 @@ test("original handle still requires stub after with()", async () => {
   });
 });
 
-test("with() clones the action registry so later root actions stay isolated", async () => {
+test("handlers expose no post-hoc action registration surface", () => {
   const production = createProductionPostsHandler();
-  const first = production.with({ memory: true, resolve: resolveTestContext });
-  const exportAll = first
-    .defineAction()
-    .policy(fullAccess)
-    .handler(() => ({ scope: "first" as const }));
-  const firstWithRoot = first.actions({ exportAll });
-  const second = production.with({ memory: true, resolve: resolveTestContext });
-  const later = production
-    .defineAction()
-    .policy(fullAccess)
-    .handler(() => ({ scope: "later" as const }));
-  production.actions({ later });
+  const forked = production.with({ memory: true, resolve: resolveTestContext });
 
-  const firstClient = createClient<typeof firstWithRoot>("http://fire.test", {
-    headers,
-    fetch: (input, init) => firstWithRoot.request(input, init),
-  });
-
-  await expect(firstClient.exportAll()).resolves.toEqual({ ok: true, data: { scope: "first" } });
-  await expect(firstClient.posts.ping()).resolves.toEqual({ ok: true, data: { pong: true } });
-  const missingOnSecond = await second.request("http://fire.test/$:exportAll", { method: "POST" });
-  expect(missingOnSecond.status).toBe(404);
-  const missingLaterOnFirst = await firstWithRoot.request("http://fire.test/$:later", {
-    method: "POST",
-  });
-  expect(missingLaterOnFirst.status).toBe(404);
+  for (const handler of [production, forked]) {
+    expect(Reflect.get(handler, "defineAction")).toBeUndefined();
+    expect(Reflect.get(handler, "actions")).toBeUndefined();
+  }
 });

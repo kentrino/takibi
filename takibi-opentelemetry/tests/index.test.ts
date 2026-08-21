@@ -83,15 +83,17 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
 
     const handler = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
-    }).collections(
-      {
-        posts: {
-          schema: z.object({ title: z.string() }),
-          accessPolicy: fullAccess,
+    })
+      .defineCollections(
+        {
+          posts: {
+            schema: z.object({ title: z.string() }),
+            accessPolicy: fullAccess,
+          },
         },
-      },
-      { memory: true },
-    );
+        { memory: true },
+      )
+      .actions({});
     const response = await handler.request("https://takibi.test/posts", {
       method: "POST",
       headers: { "content-type": "application/json" },

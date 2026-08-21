@@ -68,28 +68,30 @@ test("missing markers migrate in order once, validate, write back, and stay priv
   const stepInputs: unknown[] = [];
   const policyDocs: unknown[] = [];
   const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
-  const handler = context.collections({
-    settings: {
-      schema: z.object({ label: z.string(), enabled: z.boolean() }),
-      migrations: {
-        steps: [
-          (data) => {
-            stepInputs.push(structuredClone(data));
-            return { ...(data as { name: string }), label: (data as { name: string }).name };
-          },
-          (data) => {
-            stepInputs.push(structuredClone(data));
-            const { name: _name, ...rest } = data as { name: string; label: string };
-            return { ...rest, enabled: true };
-          },
-        ],
+  const handler = context
+    .defineCollections({
+      settings: {
+        schema: z.object({ label: z.string(), enabled: z.boolean() }),
+        migrations: {
+          steps: [
+            (data) => {
+              stepInputs.push(structuredClone(data));
+              return { ...(data as { name: string }), label: (data as { name: string }).name };
+            },
+            (data) => {
+              stepInputs.push(structuredClone(data));
+              const { name: _name, ...rest } = data as { name: string; label: string };
+              return { ...rest, enabled: true };
+            },
+          ],
+        },
+        accessPolicy(ctx) {
+          policyDocs.push(structuredClone(ctx.doc));
+          return fullAccess;
+        },
       },
-      accessPolicy(ctx) {
-        policyDocs.push(structuredClone(ctx.doc));
-        return fullAccess;
-      },
-    },
-  });
+    })
+    .actions({});
   const backing = createInspectableDurableObjectStorage();
   await backing.seed("settings", legacy("default", { name: "Clinic" }));
   const object = new handler.DurableObject(createState(backing.storage), {});
@@ -146,20 +148,22 @@ test("missing markers migrate in order once, validate, write back, and stay priv
 
 test("list migrates each scanned document before current-schema filtering", async () => {
   const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
-  const handler = context.collections({
-    posts: {
-      schema: z.object({ slug: z.string(), published: z.boolean() }),
-      migrations: {
-        steps: [
-          (data) => ({
-            slug: (data as { title: string }).title.toLowerCase(),
-            published: (data as { visible: boolean }).visible,
-          }),
-        ],
+  const handler = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ slug: z.string(), published: z.boolean() }),
+        migrations: {
+          steps: [
+            (data) => ({
+              slug: (data as { title: string }).title.toLowerCase(),
+              published: (data as { visible: boolean }).visible,
+            }),
+          ],
+        },
+        accessPolicy: fullAccess,
       },
-      accessPolicy: fullAccess,
-    },
-  });
+    })
+    .actions({});
   const backing = createInspectableDurableObjectStorage();
   await backing.seed("posts", legacy("a", { title: "MATCH", visible: true }));
   await backing.seed("posts", legacy("b", { title: "OTHER", visible: false }));
@@ -184,23 +188,25 @@ test("get, set, update, and delete policies only see migrated existing documents
   for (const operation of ["get", "set", "update", "delete"] as const) {
     const observed: unknown[] = [];
     const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
-    const handler = context.collections({
-      posts: {
-        schema: z.object({ title: z.string(), published: z.boolean() }),
-        migrations: {
-          steps: [
-            (data) => ({
-              ...(data as { title: string }),
-              published: true,
-            }),
-          ],
+    const handler = context
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string(), published: z.boolean() }),
+          migrations: {
+            steps: [
+              (data) => ({
+                ...(data as { title: string }),
+                published: true,
+              }),
+            ],
+          },
+          accessPolicy(ctx: AccessContext<{ tenantId: string }>) {
+            observed.push(structuredClone(ctx.doc));
+            return fullAccess;
+          },
         },
-        accessPolicy(ctx: AccessContext<{ tenantId: string }>) {
-          observed.push(structuredClone(ctx.doc));
-          return fullAccess;
-        },
-      },
-    });
+      })
+      .actions({});
     const backing = createInspectableDurableObjectStorage();
     await backing.seed("posts", legacy("p1", { title: "old" }));
     const object = new handler.DurableObject(createState(backing.storage), {});
@@ -259,13 +265,15 @@ test("migration throw, validation failure, and versions below base leave storage
 
   for (const [index, definition] of cases.entries()) {
     const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
-    const handler = context.collections({
-      counters: {
-        schema: z.object({ count: z.number() }),
-        migrations: definition.migrations,
-        accessPolicy: fullAccess,
-      },
-    });
+    const handler = context
+      .defineCollections({
+        counters: {
+          schema: z.object({ count: z.number() }),
+          migrations: definition.migrations,
+          accessPolicy: fullAccess,
+        },
+      })
+      .actions({});
     const backing = createInspectableDurableObjectStorage();
     const original = legacy(`c${index}`, { count: 1 });
     await backing.seed("counters", original);
@@ -285,13 +293,15 @@ test("migration throw, validation failure, and versions below base leave storage
 
 test("new writes persist the current marker but reject marker input and marker queries", async () => {
   const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
-  const handler = context.collections({
-    posts: {
-      schema: z.object({ title: z.string() }),
-      migrations: { base: 2, steps: [(data) => data as { title: string }] },
-      accessPolicy: fullAccess,
-    },
-  });
+  const handler = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        migrations: { base: 2, steps: [(data) => data as { title: string }] },
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
   const backing = createInspectableDurableObjectStorage();
   const object = new handler.DurableObject(createState(backing.storage), {});
 
@@ -358,7 +368,7 @@ test("collection registration rejects migration bases that are not non-negative 
   const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
   for (const base of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
     expect(() =>
-      context.collections({
+      context.defineCollections({
         posts: {
           schema: z.object({ title: z.string() }),
           migrations: { base, steps: [] },

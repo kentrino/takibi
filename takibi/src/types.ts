@@ -144,13 +144,17 @@ export type AccessContext<
   TDoc = WithMetadata<Record<string, unknown>>,
 > = TCtx & {
   collection: string;
-  operation: "add" | "set" | "get" | "update" | "delete" | "list";
-  permission: Exclude<AccessPermission, "invoke">;
+  operation: "add" | "set" | "get" | "update" | "delete" | "list" | "invoke";
+  permission: AccessPermission;
   /** Normalized list query. Present only when list was called with `where`. */
   where?: QueryExpr;
-  /** Saved document for get / update / delete / existing set. Absent for add / list / new set. */
+  /**
+   * Saved document for get / update / delete / existing set, and the target
+   * document for a document action gate (`invoke`). Absent for add / list /
+   * new set.
+   */
   doc?: TDoc;
-  /** Validated write candidate for add / update / set. Absent for get / delete / list. */
+  /** Validated write candidate for add / update / set. Absent for get / delete / list / invoke. */
   nextDoc?: TDoc;
 };
 
@@ -171,14 +175,11 @@ export type AccessPolicy<TCtx extends object, TDoc = WithMetadata<Record<string,
   | AccessGrant
   | AccessPolicyFn<TCtx, TDoc>;
 
-export const collectionActionsBrand: unique symbol = Symbol("fire.collectionActions");
-
 export type CollectionDefinition<
   TSchema extends StandardSchemaV1 = any,
   // Default `any` keeps collection maps assignable regardless of concrete context.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional for assignability
   TCtx extends object = any,
-  TActions = unknown,
 > = {
   schema: JsonDocumentSchema<TSchema>;
   accessPolicy: AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>;
@@ -196,8 +197,6 @@ export type CollectionDefinition<
           Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, ReservedDocumentDataKey>>
         >
       >;
-  /** @internal Carries collection action definitions for assembly and inference. */
-  readonly [collectionActionsBrand]?: TActions;
 };
 
 export type CollectionsDef<
@@ -205,7 +204,7 @@ export type CollectionsDef<
   TCtx extends object = any,
 > = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous collection map
-  [key: string]: CollectionDefinition<any, TCtx, any>;
+  [key: string]: CollectionDefinition<any, TCtx>;
 };
 
 export type InferCollectionDoc<C> = C extends { schema: infer S extends StandardSchemaV1 }

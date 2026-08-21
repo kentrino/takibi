@@ -3,7 +3,6 @@ import { unsafeClientPropertyNames } from "./action";
 import type { TakibiHandler } from "./context-types";
 import { isWireResponse, type WireResponse } from "./protocol";
 import { compileListOptions } from "./query";
-import { collectionActionsBrand } from "./types";
 import type {
   ClientCollectionApi,
   CollectionOperation,
@@ -19,17 +18,14 @@ export type InferHandlerCollections<H> = H extends {
     ? C
     : never;
 
+/** Scope map registered via `app.actions({ ... })` (`$` plus collection keys). */
 export type InferHandlerActions<H> = H extends {
   readonly "~takibi": { actions: infer A };
 }
   ? A
   : Record<never, never>;
 
-type InferCollectionActions<C> = C extends {
-  readonly [collectionActionsBrand]: infer A;
-}
-  ? A
-  : Record<never, never>;
+type ScopeActionsOf<TMap, K extends string> = K extends keyof TMap ? TMap[K] : Record<never, never>;
 
 type ActionSchema<TAction> = TAction extends {
   readonly inputSchema: infer TSchema;
@@ -52,7 +48,9 @@ type ActionOutput<TAction> = TAction extends {
   ? NormalizeActionOutput<Awaited<TResult>>
   : never;
 
-type ActionClientMethod<TAction> = TAction extends { readonly inputSchema: infer TSchema }
+type DetachedActionClientMethod<TAction> = TAction extends {
+  readonly inputSchema: infer TSchema;
+}
   ? TSchema extends StandardSchemaV1
     ? undefined extends ActionInput<TAction>
       ? (input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
@@ -60,18 +58,32 @@ type ActionClientMethod<TAction> = TAction extends { readonly inputSchema: infer
     : () => Promise<TakibiResult<ActionOutput<TAction>>>
   : never;
 
+type DocumentActionClientMethod<TAction> = TAction extends {
+  readonly inputSchema: infer TSchema;
+}
+  ? TSchema extends StandardSchemaV1
+    ? undefined extends ActionInput<TAction>
+      ? (id: string, input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
+      : (id: string, input: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
+    : (id: string) => Promise<TakibiResult<ActionOutput<TAction>>>
+  : never;
+
+type ActionClientMethod<TAction> = TAction extends { readonly target: "document" }
+  ? DocumentActionClientMethod<TAction>
+  : DetachedActionClientMethod<TAction>;
+
 type ActionsClient<TActions> = {
-  [K in keyof TActions]: ActionClientMethod<TActions[K]>;
+  [K in keyof TActions as K extends string ? K : never]: ActionClientMethod<TActions[K]>;
 };
 
 type TakibiHandlerCarrier = {
   readonly "~takibi": { collections: unknown };
 };
 
-type ClientFromMaps<TCollections, TRootActions = Record<never, never>> = {
+type ClientFromMaps<TCollections, TActionMap = Record<never, never>> = {
   [K in keyof TCollections]: ClientCollectionApi<TCollections[K]> &
-    ActionsClient<InferCollectionActions<TCollections[K]>>;
-} & ActionsClient<TRootActions>;
+    (K extends string ? ActionsClient<ScopeActionsOf<TActionMap, K>> : Record<never, never>);
+} & ActionsClient<ScopeActionsOf<TActionMap, "$">>;
 
 export type ClientOf<H extends TakibiHandlerCarrier> = H extends infer Concrete
   ? ClientFromMaps<InferHandlerCollections<Concrete>, InferHandlerActions<Concrete>>
@@ -128,16 +140,7 @@ function createCollectionClient(
     parts: { id?: string; input?: unknown; list?: StorageListOptions } = {},
   ): Promise<TakibiResult<T>> => {
     if (parts.id === "") {
-      return {
-        ok: false,
-        error: {
-          kind: "validation",
-          code: "VALIDATION",
-          message: "id must be a non-empty string",
-          status: 400,
-          issues: [{ message: "id must be a non-empty string", path: ["id"] }],
-        },
-      };
+      return Promise.resolve(emptyIdFailure());
     }
 
     const request = buildPublicRequest(collection, operation, parts);
@@ -161,17 +164,47 @@ function createCollectionClient(
       }
       let action = actions.get(name);
       if (!action) {
-        action = (...args: unknown[]) =>
-          callEndpoint<unknown>(baseUrl, options, {
+        // Document actions are called as `(id, input?)`. A lone string
+        // argument is always a document id — detached collection actions
+        // cannot accept bare-string input (enforced at definition time), so
+        // the two call shapes never collide at runtime.
+        action = (...args: unknown[]) => {
+          const documentCall = args.length >= 2 || typeof args[0] === "string";
+          if (documentCall) {
+            const id = args[0];
+            if (typeof id !== "string" || id === "") {
+              return Promise.resolve(emptyIdFailure());
+            }
+            return callEndpoint<unknown>(baseUrl, options, {
+              method: "POST",
+              path: `${encodeURIComponent(collection)}/${encodeURIComponent(id)}:${name}`,
+              ...(args.length > 1 && args[1] !== undefined ? { input: args[1] } : {}),
+            });
+          }
+          return callEndpoint<unknown>(baseUrl, options, {
             method: "POST",
             path: `${collection}:${name}`,
             ...(args.length > 0 && args[0] !== undefined ? { input: args[0] } : {}),
           });
+        };
         actions.set(name, action);
       }
       return action;
     },
   }) as ClientCollectionApi<{ schema: never }>;
+}
+
+function emptyIdFailure(): TakibiResult<never> {
+  return {
+    ok: false,
+    error: {
+      kind: "validation",
+      code: "VALIDATION",
+      message: "id must be a non-empty string",
+      status: 400,
+      issues: [{ message: "id must be a non-empty string", path: ["id"] }],
+    },
+  };
 }
 
 function buildPublicRequest(

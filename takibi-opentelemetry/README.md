@@ -105,15 +105,17 @@ new TakibiInstrumentation().enable();
 
 const app = createTakibi()({
   resolve: () => ({ tenantId: "demo" }),
-}).collections(
-  {
-    posts: {
-      schema: z.object({ title: z.string() }),
-      accessPolicy: fullAccess,
+})
+  .defineCollections(
+    {
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
     },
-  },
-  { memory: true },
-);
+    { memory: true },
+  )
+  .actions({});
 
 export default {
   async fetch(request: Request, _env: unknown, ctx: { waitUntil(task: Promise<unknown>): void }) {
@@ -150,7 +152,9 @@ const handler = createTakibi()({
   stub,
   logger: createOtelLogger(logs.getLogger("takibi")),
   logLevel: "info",
-}).collections(definitions);
+})
+  .defineCollections(definitions)
+  .actions({});
 
 export default {
   async fetch(request: Request, _env: unknown, ctx: ExecutionContext) {

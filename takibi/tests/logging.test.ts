@@ -28,7 +28,7 @@ function createMemoryHandler(events: LogEvent[], logLevel: "debug" | "info" | "e
     }),
     logger: capturingLogger(events),
     logLevel,
-  }).collections(
+  }).defineCollections(
     {
       posts: {
         schema: Post,
@@ -41,7 +41,7 @@ function createMemoryHandler(events: LogEvent[], logLevel: "debug" | "info" | "e
     .defineAction()
     .policy(fullAccess)
     .handler(() => ({ pong: true }));
-  return base.actions({ ping });
+  return base.actions({ $: { ping } });
 }
 
 function fakeState(storage: DurableObjectStorage): DurableObjectState {
@@ -122,7 +122,9 @@ test("errors match the public failure and logger throws never change results", a
       },
     },
     logLevel: "debug",
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .actions({});
   await expect(
     throwing.request("https://takibi.test/posts/p1", {
       method: "POST",
@@ -174,15 +176,17 @@ test("logger mutation cannot change an in-flight query", async () => {
       },
     },
     logLevel: "debug",
-  }).collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string(), ownerId: z.string() }),
-        accessPolicy: fullAccess,
+  })
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({ title: z.string(), ownerId: z.string() }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
   for (const [id, ownerId] of [
     ["p1", "u1"],
     ["p2", "u2"],
@@ -210,24 +214,30 @@ test("logging options inherit and override by field through collections and with
     logger: capturingLogger(baseEvents),
     logLevel: "debug",
   });
-  const disabled = builder.collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true, logger: false },
-  );
+  const disabled = builder
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { memory: true, logger: false },
+    )
+    .actions({});
   await disabled.request("https://takibi.test/posts/missing");
   expect(baseEvents).toEqual([]);
 
-  const narrowed = builder.collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true, logLevel: "error" },
-  );
+  const narrowed = builder
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { memory: true, logLevel: "error" },
+    )
+    .actions({});
   await narrowed.request("https://takibi.test/posts/missing");
   expect(baseEvents).toEqual([expect.objectContaining({ event: "takibi.error" })]);
 
   baseEvents.length = 0;
-  const production = builder.collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  const production = builder
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const inherited = production.with({ memory: true });
   await inherited.request("https://takibi.test/posts/missing");
   expect(baseEvents.some(({ event }) => event === "takibi.resolve")).toBe(true);
@@ -257,14 +267,18 @@ test("built-in console modes keep structured and pretty output distinct", async 
   try {
     const silent = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
-    }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+    })
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .actions({});
     await silent.request("https://takibi.test/posts/missing");
     expect(calls).toEqual([]);
 
     const structured = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logger: true,
-    }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+    })
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .actions({});
     await structured.request("https://takibi.test/posts/missing");
     expect(calls.some(({ method, value }) => method === "info" && typeof value === "object")).toBe(
       true,
@@ -275,7 +289,9 @@ test("built-in console modes keep structured and pretty output distinct", async 
     const levelOnly = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logLevel: "debug",
-    }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+    })
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .actions({});
     await levelOnly.request("https://takibi.test/posts/missing");
     expect(calls.some(({ method, value }) => method === "debug" && typeof value === "object")).toBe(
       true,
@@ -323,9 +339,11 @@ test("Durable Object executor uses the same event vocabulary", async () => {
     resolve: () => ({ tenantId: "tenant-a" }),
     logger: capturingLogger(events),
     logLevel: "debug",
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
   const object = new handler.DurableObject(fakeState(createSqliteDurableObjectStorage()), {});
   const response = await object.fetch(
     new Request("https://takibi.internal", {
@@ -362,9 +380,11 @@ test("Durable Object dispatch emits the wire stage without serializing its logge
       }) as DurableObjectStub,
     logger: capturingLogger(events),
     logLevel: "debug",
-  }).collections({
-    posts: { schema: Post, accessPolicy: fullAccess },
-  });
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
 
   const response = await handler.request("https://takibi.test/posts/p1");
   expect(response.status).toBe(200);

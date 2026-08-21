@@ -86,7 +86,9 @@ test("A baseline records no internal spans", async () => {
   expect(recording).not.toHaveProperty("forceFlush");
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .actions({});
   const added = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -100,10 +102,12 @@ test("public request span encloses the memory lifecycle and inherits an active p
   const recording = createRecordingTracer();
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
-  }).collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true, [internalTracerKey]: recording.tracer },
-  );
+  })
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { memory: true, [internalTracerKey]: recording.tracer },
+    )
+    .actions({});
 
   const response = await bindTracer(recording.tracer, () =>
     withSpan({ name: "caller", kind: "server" }, async () =>
@@ -142,10 +146,12 @@ test("decode failure creates and ends one root request span", async () => {
   const recording = createRecordingTracer();
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
-  }).collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true, [internalTracerKey]: recording.tracer },
-  );
+  })
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { memory: true, [internalTracerKey]: recording.tracer },
+    )
+    .actions({});
 
   const response = await handler.request("http://fire.test/posts", {
     method: "POST",
@@ -175,10 +181,9 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
       }) as unknown as DurableObjectStub,
   });
   const options = { [internalTracerKey]: recording.tracer };
-  const handler = context.collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    options,
-  );
+  const handler = context
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, options)
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
@@ -259,7 +264,9 @@ test("B global registration matches C span names without collections options", a
   registerGlobalTracer(recording.tracer);
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .actions({});
   await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -280,7 +287,9 @@ test("B global-only records Worker-DO-executor-storage parentage", async () => {
         fetch: (request: Request) => object.fetch(request),
       }) as unknown as DurableObjectStub,
   });
-  const handler = context.collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const handler = context
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
@@ -322,7 +331,9 @@ test("takibi.resolve ends before wire and executor start", async () => {
           return object.fetch(request);
         },
       }) as unknown as DurableObjectStub,
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
@@ -396,19 +407,21 @@ test("DO path injected failures mark the innermost span and end every span once"
           fetch: (request: Request) => object.fetch(request),
         }) as unknown as DurableObjectStub,
     });
-    const base = builder.collections(
+    const app = builder.defineCollections(
       testCase.collections ?? { posts: { schema: Post, accessPolicy: fullAccess } },
     );
     const handler = testCase.action
-      ? base.actions({
-          boom: base
-            .defineAction()
-            .policy(fullAccess)
-            .handler(() => {
-              throw new Error("action-failed");
-            }),
+      ? app.actions({
+          $: {
+            boom: app
+              .defineAction()
+              .policy(fullAccess)
+              .handler(() => {
+                throw new Error("action-failed");
+              }),
+          },
         })
-      : base;
+      : app.actions({});
     const object = new handler.DurableObject(
       createFakeDurableObjectState(
         testCase.failStorage
@@ -535,7 +548,7 @@ test("injected failures record error on the failed interval and still end", asyn
           stub: () => durable as unknown as DurableObjectStub,
         })
       : testCase.context!();
-    const base = builder.collections(
+    const app = builder.defineCollections(
       testCase.collections ?? { posts: { schema: Post, accessPolicy: fullAccess } },
       {
         ...(testCase.name === "takibi.wire" || testCase.failStorage ? {} : { memory: true }),
@@ -543,15 +556,17 @@ test("injected failures record error on the failed interval and still end", asyn
       },
     );
     const handler = testCase.action
-      ? base.actions({
-          boom: base
-            .defineAction()
-            .policy(fullAccess)
-            .handler(() => {
-              throw new Error("action-failed");
-            }),
+      ? app.actions({
+          $: {
+            boom: app
+              .defineAction()
+              .policy(fullAccess)
+              .handler(() => {
+                throw new Error("action-failed");
+              }),
+          },
         })
-      : base;
+      : app.actions({});
     const object = testCase.failStorage
       ? new handler.DurableObject(
           createFakeDurableObjectState(createFailingDocumentWriteStorage(), { name: "t" }),
@@ -605,10 +620,12 @@ test("wire span covers response consumption and validates the transport envelope
         ({
           fetch: async () => testCase.response(),
         }) as unknown as DurableObjectStub,
-    }).collections(
-      { posts: { schema: Post, accessPolicy: fullAccess } },
-      { [internalTracerKey]: recording.tracer },
-    );
+    })
+      .defineCollections(
+        { posts: { schema: Post, accessPolicy: fullAccess } },
+        { [internalTracerKey]: recording.tracer },
+      )
+      .actions({});
 
     const response = await handler.request("http://fire.test/posts", {
       method: "POST",
@@ -653,10 +670,12 @@ test("wire span stays open through a delayed body", async () => {
             { headers: { "content-type": "application/json" } },
           ),
       }) as unknown as DurableObjectStub,
-  }).collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { [internalTracerKey]: recording.tracer },
-  );
+  })
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { [internalTracerKey]: recording.tracer },
+    )
+    .actions({});
 
   const responsePromise = handler.request("http://fire.test/posts", {
     method: "POST",
@@ -694,10 +713,12 @@ test("wire span treats a valid non-2xx failure envelope as a received remote res
             { status: 403 },
           ),
       }) as unknown as DurableObjectStub,
-  }).collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { [internalTracerKey]: recording.tracer },
-  );
+  })
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { [internalTracerKey]: recording.tracer },
+    )
+    .actions({});
 
   const response = await handler.request("http://fire.test/posts", {
     method: "POST",
@@ -718,10 +739,12 @@ test("wire span treats a valid non-2xx failure envelope as a received remote res
 
 test("wire error conversion still identifies the failed interval", async () => {
   const recording = createRecordingTracer();
-  const handler = createTakibi()({ resolve: () => ({ tenantId: "t" }) }).collections(
-    { posts: { schema: Post, accessPolicy: none } },
-    { memory: true, [internalTracerKey]: recording.tracer },
-  );
+  const handler = createTakibi()({ resolve: () => ({ tenantId: "t" }) })
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: none } },
+      { memory: true, [internalTracerKey]: recording.tracer },
+    )
+    .actions({});
   const response = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -748,10 +771,12 @@ test("W3C traceparent is injected on the internal Request and not via context.tr
         },
       }) as unknown as DurableObjectStub,
   });
-  const handler = context.collections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { [internalTracerKey]: recording.tracer },
-  );
+  const handler = context
+    .defineCollections(
+      { posts: { schema: Post, accessPolicy: fullAccess } },
+      { [internalTracerKey]: recording.tracer },
+    )
+    .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
@@ -772,9 +797,13 @@ test("W3C traceparent is injected on the internal Request and not via context.tr
 test("tracing presence does not change collections, handler, or client inference", () => {
   const recording = createRecordingTracer();
   const context = createTakibi()({ resolve: () => ({ tenantId: "t" }) });
-  const off = context.collections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const off = context
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
+    .actions({});
   const options = { [internalTracerKey]: recording.tracer };
-  const on = context.collections({ posts: { schema: Post, accessPolicy: fullAccess } }, options);
+  const on = context
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, options)
+    .actions({});
   expectTypeOf(on).toEqualTypeOf(off);
   expectTypeOf(createClient<typeof on>("http://fire.test")).toEqualTypeOf(
     createClient<typeof off>("http://fire.test"),
@@ -793,7 +822,9 @@ test("withSpan keeps the request path when the tracer adapter throws", async () 
   });
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .actions({});
   const added = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -830,7 +861,9 @@ test("withSpan swallows adapter errors on success and failure paths", async () =
   });
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
-  }).collections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true });
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .actions({});
   const added = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
