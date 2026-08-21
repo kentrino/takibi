@@ -5,6 +5,9 @@ import type {
   AccessPermission,
   AccessPolicy,
   AccessPolicyFn,
+  PolicyReason,
+  PolicyReasonCodeCarrier,
+  PolicyReasonCodeOf,
   WithMetadata,
 } from "./types";
 
@@ -16,20 +19,28 @@ export type InferPolicyDoc<TSchema extends StandardSchemaV1> = WithMetadata<
  * Schema-bound policy. Assigns to a collection when every pick-schema key exists
  * on the collection document — optional vs required does not matter.
  */
-export type ConstrainedPolicy<TCtx extends object, TPick> = <TDoc>(
+type ReasonCodeCarrier<TCode extends string> = [TCode] extends [never]
+  ? object
+  : PolicyReasonCodeCarrier<TCode>;
+
+export type ConstrainedPolicy<TCtx extends object, TPick, TReasonCode extends string = never> = (<
+  TDoc,
+>(
   ctx: AccessContext<TCtx, keyof TPick extends keyof TDoc ? TDoc : never>,
-) => AccessGrant | Promise<AccessGrant>;
+) => AccessGrant | Promise<AccessGrant>) &
+  ReasonCodeCarrier<TReasonCode>;
 
 type CombinablePolicy<TCtx extends object, TDoc> =
   | AccessPolicy<TCtx, TDoc>
-  | ConstrainedPolicy<TCtx, TDoc>;
+  | ConstrainedPolicy<TCtx, TDoc, string>
+  | ContextPolicy<TCtx, string>;
 
 export const contextPolicyBrand: unique symbol = Symbol("fire.contextPolicy");
 type ContextPolicyFn<TCtx> = (ctx: TCtx) => AccessGrant | Promise<AccessGrant>;
-export type ContextPolicy<TCtx> = {
+export type ContextPolicy<TCtx, TReasonCode extends string = never> = {
   (ctx: TCtx): AccessGrant | Promise<AccessGrant>;
   readonly [contextPolicyBrand]: true;
-};
+} & ReasonCodeCarrier<TReasonCode>;
 
 export const constrainedPolicyBrand: unique symbol = Symbol("fire.constrainedPolicy");
 
@@ -81,11 +92,20 @@ const GRANT_CATALOG: GrantCatalog = Object.freeze({
   invoke: "invoke",
 });
 
-const grantPermissions = new WeakMap<object, ReadonlySet<AccessPermission>>();
+type DenialReasonMap = ReadonlyMap<AccessPermission, PolicyReason>;
 
-function createGrant(permissions: readonly AccessPermission[]): AccessGrant {
+const grantPermissions = new WeakMap<object, ReadonlySet<AccessPermission>>();
+const grantDenialReasons = new WeakMap<object, DenialReasonMap>();
+
+function createGrant(
+  permissions: readonly AccessPermission[],
+  denialReasons?: DenialReasonMap,
+): AccessGrant {
   const value = Object.freeze({}) as AccessGrant;
   grantPermissions.set(value, new Set(permissions));
+  if (denialReasons && denialReasons.size > 0) {
+    grantDenialReasons.set(value, new Map(denialReasons));
+  }
   return value;
 }
 
@@ -117,21 +137,20 @@ export function allows(decision: AccessGrant, permission: AccessPermission): boo
   return permissionsOf(decision).has(permission);
 }
 
+/** @internal Return the public reason attributed to a denied permission. */
+export function denialReasonOf(
+  decision: AccessGrant,
+  permission: AccessPermission,
+): PolicyReason | undefined {
+  return grantDenialReasons.get(decision)?.get(permission);
+}
+
 export async function evaluateAccessPolicy<TCtx extends object, TDoc>(
   policy: CombinablePolicy<TCtx, TDoc>,
   ctx: AccessContext<TCtx, TDoc>,
 ): Promise<AccessGrant> {
   if (isAccessGrant(policy)) return policy;
   return await (policy as AccessPolicyFn<TCtx, TDoc>)(ctx);
-}
-
-function intersect(left: AccessGrant, right: AccessGrant): AccessGrant {
-  const rightSet = permissionsOf(right);
-  return createGrant([...permissionsOf(left)].filter((permission) => rightSet.has(permission)));
-}
-
-function union(left: AccessGrant, right: AccessGrant): AccessGrant {
-  return createGrant([...permissionsOf(left), ...permissionsOf(right)]);
 }
 
 function isEmpty(decision: AccessGrant): boolean {
@@ -146,41 +165,94 @@ function isFullAccess(decision: AccessGrant): boolean {
   return true;
 }
 
+function composedGrant(
+  permissions: ReadonlySet<AccessPermission>,
+  reasons: ReadonlyMap<AccessPermission, PolicyReason>,
+): AccessGrant {
+  if (reasons.size === 0) {
+    if (permissions.size === 0) return none;
+    if (permissions.size === ALL_PERMISSIONS.length) return fullAccess;
+  }
+  return createGrant([...permissions], reasons);
+}
+
 /**
  * Combine policies with AND (grant intersection). `TDoc` is inferred from the
  * arguments: schema-bound policies keep their pick, schema-less ones do not
  * widen it away.
  */
-export function and<TCtx extends object, TDoc>(
-  ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
-): ConstrainedPolicy<TCtx, TDoc> {
-  return brandConstrainedPolicy(async (ctx) => {
-    let acc: AccessGrant | undefined;
+export function and<
+  TCtx extends object,
+  TDoc,
+  const TPolicies extends readonly [unknown, ...unknown[]],
+>(
+  ...policies: TPolicies & [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
+): ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>> {
+  return brandConstrainedPolicy(async (ctx: AccessContext<TCtx, TDoc>) => {
+    const permissions = new Set<AccessPermission>(ALL_PERMISSIONS);
+    const reasons = new Map<AccessPermission, PolicyReason>();
     for (const policy of policies) {
       const next = await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>);
-      acc = acc ? intersect(acc, next) : next;
-      if (isEmpty(acc)) return none;
+      for (const permission of permissions) {
+        if (allows(next, permission)) continue;
+        permissions.delete(permission);
+        const reason = denialReasonOf(next, permission);
+        if (reason) reasons.set(permission, reason);
+      }
+      const acc = composedGrant(permissions, reasons);
+      if (isEmpty(acc)) return acc;
     }
-    return acc ?? none;
-  }) as ConstrainedPolicy<TCtx, TDoc>;
+    return composedGrant(permissions, reasons);
+  }) as unknown as ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>>;
 }
 
 /**
  * Combine policies with OR (grant union). `TDoc` is inferred from the
  * arguments the same way as `and`.
  */
-export function or<TCtx extends object, TDoc>(
-  ...policies: [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
-): ConstrainedPolicy<TCtx, TDoc> {
-  return brandConstrainedPolicy(async (ctx) => {
-    let acc: AccessGrant = none;
-    for (const policy of policies) {
-      acc = union(acc, await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>));
+export function or<
+  TCtx extends object,
+  TDoc,
+  const TPolicies extends readonly [unknown, ...unknown[]],
+>(
+  ...policies: TPolicies & [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
+): ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>> {
+  return brandConstrainedPolicy(async (ctx: AccessContext<TCtx, TDoc>) => {
+    const permissions = new Set<AccessPermission>();
+    const firstReasons = new Map<AccessPermission, PolicyReason>();
+    for (const [index, policy] of policies.entries()) {
+      const next = await evaluateAccessPolicy(
+        policy as CombinablePolicy<TCtx, TDoc>,
+        ctx as AccessContext<TCtx, TDoc>,
+      );
+      if (index === 0) {
+        for (const permission of ALL_PERMISSIONS) {
+          const reason = denialReasonOf(next, permission);
+          if (reason) firstReasons.set(permission, reason);
+        }
+      }
+      for (const permission of permissionsOf(next)) permissions.add(permission);
+      const acc = composedGrant(permissions, new Map());
       if (isFullAccess(acc)) return fullAccess;
     }
-    return acc;
-  }) as ConstrainedPolicy<TCtx, TDoc>;
+    const reasons = new Map<AccessPermission, PolicyReason>();
+    for (const permission of ALL_PERMISSIONS) {
+      if (permissions.has(permission)) continue;
+      const reason = firstReasons.get(permission);
+      if (reason) reasons.set(permission, reason);
+    }
+    return composedGrant(permissions, reasons);
+  }) as unknown as ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>>;
 }
+
+type SchemaPolicyOptions<TSchema extends StandardSchemaV1, TCode extends string> = {
+  readonly schema: TSchema;
+  readonly reason: PolicyReason<TCode>;
+};
+
+type ContextPolicyOptions<TCode extends string> = {
+  readonly reason: PolicyReason<TCode>;
+};
 
 export type PolicyHelper<TCtx extends object> = {
   /**
@@ -192,11 +264,19 @@ export type PolicyHelper<TCtx extends object> = {
     schema: TSchema,
     policy: AccessPolicy<TCtx, InferPolicyDoc<TSchema>>,
   ): ConstrainedPolicy<TCtx, InferPolicyDoc<TSchema>>;
+  <TSchema extends StandardSchemaV1, const TCode extends string>(
+    options: SchemaPolicyOptions<TSchema, TCode>,
+    policy: AccessPolicy<TCtx, InferPolicyDoc<TSchema>>,
+  ): ConstrainedPolicy<TCtx, InferPolicyDoc<TSchema>, TCode>;
   /**
    * Context-only policy (identity, role, …). Assignable to every collection
    * that shares this execution context.
    */
   (policy: AccessGrant | ContextPolicyFn<TCtx>): AccessGrant | ContextPolicy<TCtx>;
+  <const TCode extends string>(
+    options: ContextPolicyOptions<TCode>,
+    policy: AccessGrant | ContextPolicyFn<TCtx>,
+  ): ContextPolicy<TCtx, TCode>;
 };
 
 /**
@@ -207,20 +287,59 @@ export type PolicyHelper<TCtx extends object> = {
  */
 export function createPolicyHelper<TCtx extends object>(): PolicyHelper<TCtx> {
   function policy(
-    schemaOrPolicy: StandardSchemaV1 | AccessPolicy<TCtx, unknown> | ContextPolicyFn<TCtx>,
+    schemaOrPolicy:
+      | StandardSchemaV1
+      | SchemaPolicyOptions<StandardSchemaV1, string>
+      | ContextPolicyOptions<string>
+      | AccessPolicy<TCtx, unknown>
+      | ContextPolicyFn<TCtx>,
     maybePolicy?: AccessPolicy<TCtx, unknown>,
   ): AccessPolicy<TCtx, unknown> | ContextPolicy<TCtx> {
     if (maybePolicy) {
+      if (isPolicyOptions(schemaOrPolicy)) {
+        const wrapped = withStaticReason(maybePolicy, schemaOrPolicy.reason);
+        if ("schema" in schemaOrPolicy) return brandConstrainedPolicy(wrapped);
+        return brandContextPolicy(wrapped);
+      }
       if (isAccessGrant(maybePolicy)) return maybePolicy;
       return brandConstrainedPolicy(maybePolicy);
     }
     if (isAccessGrant(schemaOrPolicy)) return schemaOrPolicy;
-    const contextPolicy = schemaOrPolicy as ContextPolicy<TCtx>;
-    Object.defineProperty(contextPolicy, contextPolicyBrand, {
-      value: true,
-      enumerable: false,
-    });
-    return contextPolicy;
+    return brandContextPolicy(schemaOrPolicy as ContextPolicy<TCtx>);
   }
   return policy as PolicyHelper<TCtx>;
+}
+
+function brandContextPolicy<T extends object>(policy: T): T {
+  Object.defineProperty(policy, contextPolicyBrand, {
+    value: true,
+    enumerable: false,
+  });
+  return policy;
+}
+
+function isPolicyOptions(
+  value: unknown,
+): value is SchemaPolicyOptions<StandardSchemaV1, string> | ContextPolicyOptions<string> {
+  return typeof value === "object" && value !== null && !isAccessGrant(value) && "reason" in value;
+}
+
+function withStaticReason<TCtx extends object>(
+  policy: AccessPolicy<TCtx, unknown>,
+  reason: PolicyReason,
+): AccessPolicyFn<TCtx, unknown> {
+  const safeReason = Object.freeze({
+    code: reason.code,
+    ...(reason.description === undefined ? {} : { description: reason.description }),
+  });
+  const evaluate = isAccessGrant(policy) ? () => policy : policy;
+  return async (ctx) => {
+    const decision = await evaluate(ctx);
+    if (!isAccessGrant(decision)) return decision;
+    const reasons = new Map<AccessPermission, PolicyReason>();
+    for (const permission of ALL_PERMISSIONS) {
+      if (!allows(decision, permission)) reasons.set(permission, safeReason);
+    }
+    return createGrant([...permissionsOf(decision)], reasons);
+  };
 }

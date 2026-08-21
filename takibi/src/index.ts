@@ -44,6 +44,7 @@ export type {
   CollectionDataInput,
   CollectionApi,
   CollectionsApi,
+  PolicyReason,
   TakibiResult,
   InferCollectionDoc,
   InferCollectionInput,

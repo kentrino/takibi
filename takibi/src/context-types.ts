@@ -199,10 +199,13 @@ type ReservedCollectionName = ReservedPublicName | "defineAction" | "actions";
 
 export type CreateContextBuilder<TCtx extends object, TInitial> = {
   policy: PolicyHelper<TCtx>;
-  defineCollection<TSchema extends StandardSchemaV1>(
-    definition: CollectionDefinitionInput<TSchema, TCtx> &
+  defineCollection<
+    TSchema extends StandardSchemaV1,
+    const TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"],
+  >(
+    definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy> &
       ReservedDocumentSchemaConstraint<TSchema>,
-  ): CollectionDefinition<TSchema, TCtx>;
+  ): CollectionDefinition<TSchema, TCtx, TPolicy>;
   defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
     collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
     options?: InternalCollectionsOptions,

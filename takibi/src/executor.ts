@@ -1,7 +1,7 @@
 import { ForbiddenError, NotFoundError } from "./errors";
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
-import { allows, evaluateAccessPolicy } from "./policy";
+import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
 import {
   commitAddDoc,
@@ -93,7 +93,7 @@ async function assertAccess(
       if (options.conceal) {
         throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
       }
-      throw new ForbiddenError();
+      throw new ForbiddenError("Forbidden", denialReasonOf(granted, accessCtx.permission));
     },
   );
 }

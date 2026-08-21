@@ -257,7 +257,11 @@ distinguish list from get.
 
 ### Typed policies with `context.policy`
 
-`context.policy` is identity at runtime. It exists so reusable `accessPolicy` functions keep `user` from `resolve` and, when you pass a schema, type `doc` / `nextDoc` inside the callback. Pass the collection schema or a pick of its fields. A pick-schema policy assigns to a collection iff those keys exist on the document (optional vs required does not matter). `and` / `or` infer that pick from their arguments.
+`context.policy` keeps reusable `accessPolicy` functions typed with `user` from
+`resolve` and, when you pass a schema, types `doc` / `nextDoc` inside the
+callback. Pass the collection schema or a pick of its fields. A pick-schema
+policy assigns to a collection iff those keys exist on the document (optional
+vs required does not matter). `and` / `or` infer that pick from their arguments.
 
 `and` intersects grants; `or` unions them. Import the root functions. Identity
 rules and document rules compose:
@@ -283,6 +287,43 @@ const handler = context
 Staff can read and write unseeded documents and invoke actions; seeded documents
 stay readable. `and(staffPolicy, read)` is the same pattern with a constant
 grant.
+
+#### Public policy denial reasons
+
+A policy can declare one static, machine-readable reason. Use
+`{ schema, reason }` for a schema-bound policy or `{ reason }` for a
+context-only policy:
+
+```ts
+const seededDataPolicy = context.policy(
+  {
+    schema: z.object({ isSeeded: z.boolean() }),
+    reason: {
+      code: "SEEDED_DATA_IMMUTABLE",
+      description: "Seeded data cannot be modified.",
+    },
+  },
+  ({ doc }) =>
+    doc?.isSeeded ? read : grant("create", "get", "list", "update", "delete", "invoke"),
+);
+```
+
+`reason.code` stays a literal union through `and` / `or`, collection and action
+definitions, `TakibiResult`, and `ClientOf<typeof handler>`. `description` is an
+optional developer description. Both values are serialized, so they must be
+static, public, and free of document data, identity data, secrets, or other
+sensitive details. Do not use `description` as localized UI copy.
+
+When `and` denies a permission, the first policy in declaration order that
+drops that permission supplies the reason. When `or` denies because every
+policy drops the permission, only the first policy supplies the reason. If that
+selected policy has no reason, Takibi does not fall back to a later policy.
+Existing `and` / `or` short-circuit order is unchanged.
+
+Reasons are exposed only on `FORBIDDEN` failures from add, list, and action
+gates. Concealed get, update, delete, and set denials remain `NOT_FOUND` with no
+reason. Missing documents, `UNAUTHORIZED`, and validation failures also never
+carry one. Policies without a reason keep the existing generic failure.
 
 ### Owner-scoped collections
 
@@ -501,6 +542,21 @@ const post = created.data;
 All public client collection methods return `Promise<TakibiResult<T>>`.
 Server-decided failures (`NOT_FOUND`, `FORBIDDEN`, `VALIDATION`, `ALREADY_EXISTS`, …)
 resolve as `{ ok: false, error }` — they do **not** reject.
+
+For a typed policy denial, keep `FORBIDDEN` as the operation classification and
+map `reason.code` to client-owned localized copy. Always fall back to the
+existing operation message when the reason is absent or unknown:
+
+```ts
+const result = await client.items.archive(id);
+if (!result.ok && result.error.kind === "operation") {
+  const message =
+    result.error.code === "FORBIDDEN" && result.error.reason?.code === "SEEDED_DATA_IMMUTABLE"
+      ? t("errors.seededDataImmutable")
+      : result.error.message;
+  showError(message);
+}
+```
 
 Transport / protocol problems still reject the Promise (fetch failure, abort, invalid
 JSON, invalid response envelope). Use `try/catch` only for those.

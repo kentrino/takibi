@@ -1,7 +1,13 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { TakibiError } from "./errors";
+import { ForbiddenError, TakibiError } from "./errors";
 import { SchemaValidationError } from "./schema";
-import type { TakibiFailure, TakibiResult, ValidationIssue } from "./types";
+import type {
+  PolicyReason,
+  TakibiFailure,
+  TakibiOperationFailure,
+  TakibiResult,
+  ValidationIssue,
+} from "./types";
 
 /** Copy only JSON-safe message/path from Standard Schema issues. */
 export function normalizeValidationIssues(
@@ -26,7 +32,9 @@ export function normalizeValidationIssues(
   });
 }
 
-export function toTakibiFailure(err: SchemaValidationError | TakibiError): TakibiFailure {
+export function toTakibiFailure<TReasonCode extends string = string>(
+  err: SchemaValidationError | TakibiError,
+): TakibiFailure<TReasonCode> {
   if (err instanceof SchemaValidationError) {
     return {
       kind: "validation",
@@ -41,15 +49,20 @@ export function toTakibiFailure(err: SchemaValidationError | TakibiError): Takib
     code: err.code,
     message: err.message,
     status: err.status,
-  };
+    ...(err instanceof ForbiddenError && err.reason
+      ? { reason: err.reason as PolicyReason<TReasonCode> }
+      : {}),
+  } as TakibiOperationFailure<TReasonCode>;
 }
 
-export async function asTakibiResult<T>(fn: () => Promise<T>): Promise<TakibiResult<T>> {
+export async function asTakibiResult<T, TReasonCode extends string = never>(
+  fn: () => Promise<T>,
+): Promise<TakibiResult<T, TReasonCode>> {
   try {
     return { ok: true, data: await fn() };
   } catch (err) {
     if (err instanceof SchemaValidationError || err instanceof TakibiError) {
-      return { ok: false, error: toTakibiFailure(err) };
+      return { ok: false, error: toTakibiFailure<TReasonCode>(err) };
     }
     throw err;
   }
