@@ -54,8 +54,19 @@ export async function decodePublicHttp(request: Request, prefix?: string): Promi
   const rest = publicPathRemainder(url.pathname, prefix);
   const rawSegments = rest === "/" ? [] : rest.slice(1).split("/");
   return decodePublicRoute(request.method, rawSegments, url.searchParams, () =>
-    request.body === null ? Promise.resolve(undefined) : request.json(),
+    readRequestJson(request),
   );
+}
+
+/** Empty POST bodies are omitted input; invalid JSON is a bad request. */
+export async function readRequestJson(request: Request): Promise<unknown> {
+  const text = await request.text();
+  if (text === "") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new BadRequestError("Expected JSON body");
+  }
 }
 
 function decodeSegmentPart(part: string): string {

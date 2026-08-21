@@ -36,6 +36,7 @@ import {
   decodePublicRoute,
   matchesPublicPrefix,
   rawPathSegments,
+  readRequestJson,
   type PublicRequest,
 } from "./http";
 import { requestLogFields, resolveLogging, withLoggedSpan, type LoggingOptions } from "./logging";
@@ -351,7 +352,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
               c.req.method,
               rawPathSegments(new URL(c.req.url).pathname, segmentCount),
               new URL(c.req.url).searchParams,
-              () => (c.req.raw.body === null ? Promise.resolve(undefined) : c.req.json()),
+              () => readRequestJson(c.req.raw),
             ),
       );
       return c.newResponse(response.body, response);
