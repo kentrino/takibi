@@ -11,7 +11,7 @@ export type {
   TakibiHandler,
   HandleOptions,
   HandleResult,
-} from "./context-types";
+} from "./context/types";
 export { createPrettyConsoleLogger } from "./logging";
 export type {
   Logger,

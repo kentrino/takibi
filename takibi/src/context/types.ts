@@ -12,17 +12,17 @@ import type {
   RootActionArgs,
   RootActionBuilder,
   ScopedActions,
-} from "./action";
-import type { LoggingOptions } from "./logging";
-import type { PolicyHelper } from "./policy";
-import { internalTracerKey, type TakibiTracer } from "./tracing";
+} from "../action";
+import type { LoggingOptions } from "../logging";
+import type { PolicyHelper } from "../policy";
+import { internalTracerKey, type TakibiTracer } from "../tracing";
 import type {
   CollectionDefinition,
   CollectionsApi,
   CollectionsDef,
   InferCollectionDoc,
   ReservedDocumentSchemaConstraint,
-} from "./types";
+} from "../types";
 
 export type ContextResolverInput<TInitial = Record<string, never>> = {
   request: Request;
