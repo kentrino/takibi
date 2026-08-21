@@ -694,13 +694,15 @@ and never change a request result.
 
 Takibi logs request boundaries and failures at `info` / `error`, and emits
 `debug` timing events for resolve, Worker → Durable Object wire, executor,
-policy, schema, storage, and actions. Events can contain only operation
-metadata: collection, operation, document ID, duration, error code/status, and
-the normalized list query AST. They never contain documents, action input or
-output, resolved context, request/response bodies or headers, cookies,
-credentials, stubs, or bindings. A query comparison value can still be a name,
-phone number, or other personal data. Restrict access to debug logs and retain
-them only briefly.
+policy, schema, storage, and actions. A failure log uses the public error
+message (not a generic "request failed") and includes the HTTP method and
+path so decode-time errors are diagnosable without opening a trace. Events
+can contain only operation metadata: collection, operation, document ID,
+HTTP method/path, duration, error code/status, and the normalized list query
+AST. They never contain documents, action input or output, resolved context,
+request/response bodies or headers, cookies, credentials, stubs, or bindings.
+A query comparison value can still be a name, phone number, or other personal
+data. Restrict access to debug logs and retain them only briefly.
 
 Install `@takibi/takibi-opentelemetry` to enable OpenTelemetry spans and,
 optionally, map permitted `LogEvent` values to OpenTelemetry Logs. The

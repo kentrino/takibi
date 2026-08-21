@@ -34,6 +34,8 @@ function eventAttributes(event: LogEvent): LogAttributes {
     ...(event.collection === undefined ? {} : { "takibi.collection.name": event.collection }),
     ...(event.operation === undefined ? {} : { "takibi.operation.name": event.operation }),
     ...(event.documentId === undefined ? {} : { "takibi.document.id": event.documentId }),
+    ...(event.method === undefined ? {} : { "takibi.http.method": event.method }),
+    ...(event.path === undefined ? {} : { "takibi.http.path": event.path }),
     ...(event.errorCode === undefined ? {} : { "takibi.error.code": event.errorCode }),
     ...(event.status === undefined ? {} : { "takibi.response.status": event.status }),
     ...(event.durationMs === undefined ? {} : { "takibi.duration.ms": event.durationMs }),

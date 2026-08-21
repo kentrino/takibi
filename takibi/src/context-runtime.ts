@@ -1,6 +1,12 @@
 import { TakibiError } from "./errors";
 import type { ExecuteRequest } from "./executor";
-import { emitFailure, loggedStorage, type InternalLogger, type LoggingOptions } from "./logging";
+import {
+  emitFailure,
+  loggedStorage,
+  requestLogFields,
+  type InternalLogger,
+  type LoggingOptions,
+} from "./logging";
 import type { PublicRequest } from "./http";
 import type { WireFailure } from "./protocol";
 import { toTakibiFailure } from "./result";
@@ -63,9 +69,13 @@ export function errorResponse(
   error: unknown,
   logger: InternalLogger | undefined,
   invocation?: PublicRequest,
+  request?: Request,
 ): Response {
   const wire = toWireError(error);
-  emitFailure(logger, wire.error, invocation === undefined ? {} : invocationFields(invocation));
+  emitFailure(logger, wire.error, {
+    ...(invocation === undefined ? {} : invocationFields(invocation)),
+    ...(request === undefined ? {} : requestLogFields(request)),
+  });
   return Response.json(wire, { status: statusOf(error) });
 }
 
