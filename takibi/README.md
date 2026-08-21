@@ -91,8 +91,8 @@ const takibiApp = takibi.defineCollections({
     },
   },
 });
-// `defineCollections` returns an app definition; register actions (or `{}`)
-// exactly once to obtain the handler.
+// `defineCollections` returns an app definition; `app.actions({ ... })`
+// registers the maps and returns the handler.
 const handler = takibiApp.actions({});
 
 export type Handler = typeof handler;

@@ -158,8 +158,9 @@ export type AppDefinition<TCtx extends object, TCollections, TInitial> = {
 } & {
   defineAction(): RootActionBuilder<TCtx, RootActionArgs<TCtx, TCollections>>;
   /**
-   * Register every action map and assemble the handler. Callable exactly
-   * once; apps without actions still call `app.actions({})`.
+   * Register every action map and assemble a handler. Each call returns a
+   * new handler; it does not mutate a previous one. Apps without actions
+   * still call `app.actions({})`.
    */
   actions<const TMap extends ActionScopeMap>(
     map: TMap & ActionsMapConstraint<TMap, TCollections>,
