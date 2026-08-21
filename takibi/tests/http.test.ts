@@ -122,6 +122,35 @@ test("decodePublicHttp maps collection and root colon actions", async () => {
   });
 });
 
+test("action routes treat a zero-length POST body as omitted input", async () => {
+  const emptyBody = new Uint8Array();
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/posts/p1:archive", {
+        method: "POST",
+        body: emptyBody,
+      }),
+    ),
+  ).resolves.toEqual({
+    kind: "action",
+    scope: "posts",
+    name: "archive",
+    id: "p1",
+  });
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/posts:stats", {
+        method: "POST",
+        body: emptyBody,
+      }),
+    ),
+  ).resolves.toEqual({
+    kind: "action",
+    scope: "posts",
+    name: "stats",
+  });
+});
+
 test("action routes reject methods, queries, malformed paths, and extra segments", async () => {
   await expect(
     decodePublicHttp(new Request("http://fire.test/posts:stats")),
