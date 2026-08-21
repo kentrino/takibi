@@ -131,7 +131,6 @@ function createAppDefinition<TInitial>(args: {
 }): AppDefinition<object, CollectionsDef<object>, TInitial> {
   const { collections, resolve, resolveStub, options } = args;
   const collectionNames = new Set(Object.keys(collections));
-  let assembled = false;
 
   const app = Object.create(null) as Record<string, unknown>;
   for (const name of collectionNames) {
@@ -143,9 +142,6 @@ function createAppDefinition<TInitial>(args: {
   }
   app.defineAction = () => createRootActionBuilder();
   app.actions = (map: ActionScopeMap) => {
-    if (assembled) {
-      throw new TakibiError("INVALID_ACTION", "app.actions() can only be called once", 500);
-    }
     if (typeof map !== "object" || map === null) {
       throw new TakibiError("INVALID_ACTION", "Action scope map must be an object", 500);
     }
@@ -175,7 +171,6 @@ function createAppDefinition<TInitial>(args: {
         throw new TakibiError("INVALID_ACTION", `Unknown action scope: ${scopeKey}`, 500);
       }
     }
-    assembled = true;
     return assembleHandler({
       collections,
       registry,

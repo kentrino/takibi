@@ -1099,7 +1099,7 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
   });
 });
 
-test("action registration validates definitions and app.actions() is one-shot", async () => {
+test("action registration validates definitions", async () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u", role: "admin" as const } }),
   });
@@ -1142,8 +1142,9 @@ test("action registration validates definitions and app.actions() is one-shot", 
     /names must be strings/,
   );
   expect(() => app.actions({ ghosts: {} } as never)).toThrow(/Unknown action scope/);
-  register({ valid });
-  expect(() => register({ valid })).toThrow(/only be called once/);
+  const first = register({ valid });
+  const second = register({ valid });
+  expect(second).not.toBe(first);
 });
 
 test("scoped action maps are rejected when registered under another collection", () => {
