@@ -34,7 +34,7 @@ import type {
 const srcDir = join(import.meta.dirname, "../src");
 const forbiddenClientModules = [
   "tracing.ts",
-  "context.ts",
+  "context/index.ts",
   "schema.ts",
   "executor.ts",
   "storage.ts",
@@ -59,6 +59,15 @@ function collectValueSpecifiers(source: string): string[] {
   return specifiers;
 }
 
+function resolveTsModule(fromFile: string, specifier: string): string {
+  if (specifier.endsWith(".ts")) {
+    return normalize(join(dirname(fromFile), specifier));
+  }
+  const asFile = normalize(join(dirname(fromFile), `${specifier}.ts`));
+  if (existsSync(asFile)) return asFile;
+  return normalize(join(dirname(fromFile), specifier, "index.ts"));
+}
+
 function walkValueImports(entryFile: string): Set<string> {
   const visited = new Set<string>();
   const queue = [normalize(entryFile)];
@@ -76,10 +85,7 @@ function walkValueImports(entryFile: string): Set<string> {
         visited.add(specifier);
         continue;
       }
-      const resolved = normalize(
-        join(dirname(file), specifier.endsWith(".ts") ? specifier : `${specifier}.ts`),
-      );
-      queue.push(resolved);
+      queue.push(resolveTsModule(file, specifier));
     }
   }
   return visited;

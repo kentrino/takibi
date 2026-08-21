@@ -1,17 +1,17 @@
-import { TakibiError } from "./errors";
-import type { ExecuteRequest } from "./executor";
+import { TakibiError } from "../errors";
+import type { ExecuteRequest } from "../executor";
+import type { PublicRequest } from "../http";
 import {
   emitFailure,
   loggedStorage,
   requestLogFields,
   type InternalLogger,
   type LoggingOptions,
-} from "./logging";
-import type { PublicRequest } from "./http";
-import type { WireFailure } from "./protocol";
-import { toTakibiFailure } from "./result";
-import { SchemaValidationError } from "./schema";
-import type { StorageDriver } from "./types";
+} from "../logging";
+import type { WireFailure } from "../protocol";
+import { toTakibiFailure } from "../result";
+import { SchemaValidationError } from "../schema";
+import type { StorageDriver } from "../types";
 
 export function applyStorageLogging(
   driver: StorageDriver,

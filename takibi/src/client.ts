@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { unsafeClientPropertyNames } from "./action";
-import type { TakibiHandler } from "./context-types";
+import type { TakibiHandler } from "./context/types";
 import { isWireResponse, type WireResponse } from "./protocol";
 import { compileListOptions } from "./query";
 import type {

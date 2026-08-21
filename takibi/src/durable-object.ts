@@ -1,7 +1,7 @@
 import type { ActionRegistry } from "./action";
 import { executeAction, type ActionInvocation } from "./action-executor";
-import type { InternalCollectionsOptions } from "./context-types";
-import { applyStorageLogging, debugInvocationFields, errorResponse } from "./context-runtime";
+import { applyStorageLogging, debugInvocationFields, errorResponse } from "./context/runtime";
+import type { InternalCollectionsOptions } from "./context/types";
 import { ForbiddenError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import type { PublicRequest } from "./http";

@@ -7,16 +7,13 @@ import {
   createRootActionBuilder,
   defineCollection as defineCollectionValue,
   type ActionDefinitions,
-} from "./action";
-import { executeAction } from "./action-executor";
+} from "../action";
 import {
   assertSerializableContext,
-  applyStorageLogging,
-  debugInvocationFields,
   errorResponse,
   invocationFields,
   mergeLoggingOptions,
-} from "./context-runtime";
+} from "./runtime";
 import type {
   ActionScopeMap,
   AppDefinition,
@@ -27,10 +24,9 @@ import type {
   CreateContextFn,
   InternalCollectionsOptions,
   TakibiHandler,
-} from "./context-types";
-import { createDurableObjectClass, seedCollections } from "./durable-object";
-import { NotFoundError, TakibiError } from "./errors";
-import { executeOperation } from "./executor";
+} from "./types";
+import { createDurableObjectClass } from "../durable-object";
+import { NotFoundError, TakibiError } from "../errors";
 import {
   decodePublicHttp,
   decodePublicRoute,
@@ -38,24 +34,22 @@ import {
   rawPathSegments,
   readRequestJson,
   type PublicRequest,
-} from "./http";
-import { requestLogFields, resolveLogging, withLoggedSpan, type LoggingOptions } from "./logging";
-import { assertCollectionMigrations, createMigratingStorage } from "./migrations";
-import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
-import { createPolicyHelper } from "./policy";
-import { isWireResponse, type WireRequest, type WireResponse } from "./protocol";
-import { createMemoryStorage } from "./storage";
+} from "../http";
+import { requestLogFields, resolveLogging, withLoggedSpan, type LoggingOptions } from "../logging";
+import { assertCollectionMigrations } from "../migrations";
+import { TAKIBI_SPAN } from "../otel-helper";
+import { createPolicyHelper } from "../policy";
 import {
   activeSpanContext,
   bindTracer,
-  injectTraceparent,
   resolveTracer,
-  tracedStorage,
   withSpan,
   type SpanContext,
   type TakibiTracer,
-} from "./tracing";
-import type { CollectionsDef } from "./types";
+} from "../tracing";
+import type { CollectionsDef } from "../types";
+import { createMemoryExecutor, createStubExecutor } from "./executors";
+import { ownStringEntries } from "./own-entries";
 
 export type {
   CollectionsOptions,
@@ -68,7 +62,7 @@ export type {
   HandleResult,
   TakibiBrand,
   TakibiHandler,
-} from "./context-types";
+} from "./types";
 
 /**
  * Bind typed initial context (`handle(..., { context })` deps), then call the
@@ -90,29 +84,13 @@ function buildContext<TInitial>(
     policy: createPolicyHelper(),
     defineCollection: defineCollectionValue,
     defineCollections(collections, options: InternalCollectionsOptions = {}) {
-      if (typeof collections !== "object" || collections === null) {
-        throw new TakibiError("INVALID_COLLECTION", "Collections must be an object", 500);
-      }
-      const prototype = Object.getPrototypeOf(collections);
-      if (prototype !== Object.prototype && prototype !== null) {
-        throw new TakibiError("INVALID_COLLECTION", "Collections must be a plain object", 500);
-      }
-      for (const propertyKey of Reflect.ownKeys(collections)) {
-        if (typeof propertyKey !== "string") {
-          throw new TakibiError("INVALID_COLLECTION", "Collection names must be strings", 500);
-        }
-        const descriptor = Object.getOwnPropertyDescriptor(collections, propertyKey);
-        if (!descriptor?.enumerable || !("value" in descriptor)) {
-          throw new TakibiError(
-            "INVALID_COLLECTION",
-            `Collections must be enumerable data properties: ${propertyKey}`,
-            500,
-          );
-        }
-        const definition = descriptor.value as CollectionsDef<object>[string];
+      for (const [propertyKey, definition] of ownStringEntries(collections, "INVALID_COLLECTION", {
+        subject: "Collections",
+        keys: "Collection names",
+      })) {
         assertCollectionName(propertyKey);
-        assertNoActionsOption(definition);
-        assertCollectionMigrations(definition, propertyKey);
+        assertNoActionsOption(definition as CollectionsDef<object>[string]);
+        assertCollectionMigrations(definition as CollectionsDef<object>[string], propertyKey);
       }
       return createAppDefinition({
         collections: collections as CollectionsDef<object>,
@@ -143,31 +121,15 @@ function createAppDefinition<TInitial>(args: {
   }
   app.defineAction = () => createRootActionBuilder();
   app.actions = (map: ActionScopeMap) => {
-    if (typeof map !== "object" || map === null) {
-      throw new TakibiError("INVALID_ACTION", "Action scope map must be an object", 500);
-    }
-    const mapPrototype = Object.getPrototypeOf(map);
-    if (mapPrototype !== Object.prototype && mapPrototype !== null) {
-      throw new TakibiError("INVALID_ACTION", "Action scope map must be a plain object", 500);
-    }
     const registry = new ActionRegistry();
-    for (const scopeKey of Reflect.ownKeys(map)) {
-      if (typeof scopeKey !== "string") {
-        throw new TakibiError("INVALID_ACTION", "Action scopes must be strings", 500);
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(map, scopeKey);
-      if (!descriptor?.enumerable || !("value" in descriptor)) {
-        throw new TakibiError(
-          "INVALID_ACTION",
-          `Action scopes must be enumerable data properties: ${scopeKey}`,
-          500,
-        );
-      }
-      const definitions = descriptor.value as ActionDefinitions;
+    for (const [scopeKey, definitions] of ownStringEntries(map, "INVALID_ACTION", {
+      subject: "Action scope map",
+      keys: "Action scopes",
+    })) {
       if (scopeKey === "$") {
-        registry.registerRootActions(definitions, collectionNames);
+        registry.registerRootActions(definitions as ActionDefinitions, collectionNames);
       } else if (collectionNames.has(scopeKey)) {
-        registry.registerCollectionActions(scopeKey, definitions);
+        registry.registerCollectionActions(scopeKey, definitions as ActionDefinitions);
       } else {
         throw new TakibiError("INVALID_ACTION", `Unknown action scope: ${scopeKey}`, 500);
       }
@@ -197,15 +159,9 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   const app = new Hono<{ Bindings: Record<string, unknown> }>();
   const logger = resolveLogging(options);
 
-  const memoryDriver = memory
-    ? applyStorageLogging(
-        createMigratingStorage(collections, createMemoryStorage(), logger),
-        logger,
-      )
-    : null;
-  const memoryReady = memoryDriver
-    ? seedCollections(collections, memoryDriver, logger)
-    : Promise.resolve();
+  const execute = memory
+    ? createMemoryExecutor(collections, registry, logger)
+    : createStubExecutor(resolveStub, logger);
 
   const run = async (
     request: Request,
@@ -214,8 +170,6 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     tracer: TakibiTracer | undefined,
   ): Promise<Response> => {
     try {
-      await memoryReady;
-      const input = { request, context: initial as TInitial };
       let resolveSpan: SpanContext | undefined;
       const ctx = await withLoggedSpan(
         logger,
@@ -223,79 +177,12 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         { event: "takibi.resolve" },
         async () => {
           resolveSpan = activeSpanContext();
-          const resolved = await resolve(input);
+          const resolved = await resolve({ request, context: initial as TInitial });
           assertSerializableContext(resolved);
           return resolved;
         },
       );
-
-      if (memoryDriver) {
-        const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
-        const data = await withLoggedSpan(
-          logger,
-          {
-            name: TAKIBI_SPAN.executor,
-            kind: "internal",
-            attributes: invocationSpanAttributes(invocation),
-          },
-          { event: "takibi.executor", ...debugInvocationFields(invocation) },
-          () =>
-            invocation.kind === "action"
-              ? executeAction(registry, collections, driver, ctx, invocation, logger)
-              : executeOperation(collections, driver, ctx, invocation, logger),
-          resolveSpan,
-        );
-        return Response.json({ ok: true, data } satisfies WireResponse);
-      }
-
-      if (!resolveStub) {
-        throw new TakibiError(
-          "MISSING_STUB",
-          "Durable Object mode requires stub on createTakibi()({ stub }) — or use defineCollections(..., { memory: true }) for tests",
-          500,
-        );
-      }
-
-      const doStub = await resolveStub({ ...input, resolved: ctx });
-      if (!doStub || typeof doStub.fetch !== "function") {
-        throw new TakibiError(
-          "MISSING_STUB",
-          "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
-          500,
-        );
-      }
-
-      const wire: WireRequest = { ...invocation, context: ctx };
-      const json = await withLoggedSpan(
-        logger,
-        {
-          name: TAKIBI_SPAN.wire,
-          kind: "client",
-          attributes: invocationSpanAttributes(invocation),
-        },
-        { event: "takibi.wire", ...debugInvocationFields(invocation) },
-        async () => {
-          const headers = new Headers({ "content-type": "application/json" });
-          injectTraceparent(headers);
-          const res = await doStub.fetch(
-            new Request("https://takibi.internal/", {
-              method: "POST",
-              headers,
-              body: JSON.stringify(wire),
-            }),
-          );
-          const body: unknown = await res.json();
-          if (!isWireResponse(body)) {
-            throw new TakibiError(
-              "INVALID_DO_RESPONSE",
-              "Invalid response from Durable Object",
-              500,
-            );
-          }
-          return body;
-        },
-        resolveSpan,
-      );
+      const json = await execute({ request, initial, ctx, invocation, tracer, resolveSpan });
       return Response.json(json, { status: json.ok ? 200 : json.error.status });
     } catch (err) {
       return errorResponse(err, logger, invocation, request);
@@ -308,7 +195,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     decode: () => Promise<PublicRequest>,
   ): Promise<Response> => {
     const tracer = resolveTracer(options);
-    const execute = () =>
+    const serve = () =>
       withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, async () => {
         const startedAt = performance.now();
         const http = requestLogFields(request);
@@ -338,7 +225,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         });
         return response;
       });
-    return tracer ? bindTracer(tracer, execute) : execute();
+    return tracer ? bindTracer(tracer, serve) : serve();
   };
 
   // Routes read the trailing raw path segments: action ids are split on the
