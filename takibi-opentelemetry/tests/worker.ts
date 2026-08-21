@@ -86,15 +86,17 @@ export async function flushProviderAndReadSpans(): Promise<ExportedSpan[]> {
 
 const tracingHandler = createTakibi()({
   resolve: () => ({ tenantId: "unused-in-durable-object" }),
-}).collections({
-  posts: {
-    schema: z.object({ title: z.string() }),
-    accessPolicy: () =>
-      propagation.getBaggage(context.active())?.getEntry("tenant.id")?.value === "tenant-a"
-        ? fullAccess
-        : none,
-  },
-});
+})
+  .defineCollections({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy: () =>
+        propagation.getBaggage(context.active())?.getEntry("tenant.id")?.value === "tenant-a"
+          ? fullAccess
+          : none,
+    },
+  })
+  .actions({});
 
 export class TracingTestObject extends tracingHandler.DurableObject {}
 

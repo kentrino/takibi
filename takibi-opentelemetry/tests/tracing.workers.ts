@@ -9,12 +9,14 @@ test("integration propagates OTel spans through a real Durable Object namespace"
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
     stub: ({ resolved }) => env.TAKIBI_TRACING_TEST.getByName(resolved.tenantId),
-  }).collections({
-    posts: {
-      schema: z.object({ title: z.string() }),
-      accessPolicy: fullAccess,
-    },
-  });
+  })
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
 
   const baggageContext = propagation.setBaggage(
     context.active(),

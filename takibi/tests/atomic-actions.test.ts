@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { ActionRegistry, createActionBuilder, type RootActionArgs } from "../src/action";
+import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "../src/action";
 import { executeAction } from "../src/action-executor";
 import { fullAccess, none } from "../src/policy";
 import { createMemoryStorage } from "../src/storage";
@@ -75,16 +75,14 @@ test("policy and input failures happen before an atomic transaction or handler",
   };
   let handlerCalls = 0;
   const registry = new ActionRegistry();
-  const denied = createActionBuilder<Ctx, "root", RootActionArgs<Ctx, typeof collections>>("root")
+  const denied = createRootActionBuilder<Ctx, RootActionArgs<Ctx, typeof collections>>()
     .atomic()
     .policy(({ ctx }) => (ctx.allowed ? fullAccess : none))
     .handler(() => {
       handlerCalls += 1;
       return null;
     });
-  const validated = createActionBuilder<Ctx, "root", RootActionArgs<Ctx, typeof collections>>(
-    "root",
-  )
+  const validated = createRootActionBuilder<Ctx, RootActionArgs<Ctx, typeof collections>>()
     .input(z.object({ value: z.string().min(1) }))
     .atomic()
     .policy(fullAccess)
@@ -126,7 +124,7 @@ test("policy and input failures happen before an atomic transaction or handler",
 });
 
 test("atomic is idempotent and retained by the runtime registry", () => {
-  const action = createActionBuilder<object, "root", RootActionArgs<object, {}>>("root")
+  const action = createRootActionBuilder<object, RootActionArgs<object, {}>>()
     .atomic()
     .atomic()
     .policy(fullAccess)

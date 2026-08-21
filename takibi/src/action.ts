@@ -1,8 +1,9 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { TakibiError } from "./errors";
-import { isAccessGrant, permissionsOf } from "./policy";
+import { isAccessGrant, isConstrainedPolicy, permissionsOf } from "./policy";
 import type { ConstrainedPolicy, ContextPolicy } from "./policy";
 import type {
+  AccessContext,
   AccessGrant,
   AccessPermission,
   CollectionApi,
@@ -10,28 +11,56 @@ import type {
   CollectionsApi,
   InferCollectionDoc,
   JsonValue,
-  ReservedDocumentSchemaConstraint,
 } from "./types";
-import { collectionActionsBrand } from "./types";
 
 const actionDefinitionBrand: unique symbol = Symbol("fire.actionDefinition");
 
-export type ActionGateContext<TCtx> = {
+/** Type-only brand carried by `app.<collection>.actions(cb)` return maps. */
+declare const scopedActionsBrand: unique symbol;
+
+export type ScopedActions<TScope extends string, TActions> = TActions & {
+  readonly [scopedActionsBrand]: TScope;
+};
+
+export type ActionTarget = "document" | "detached";
+
+export type ActionGateContext<TCtx, TDoc = unknown> = {
   ctx: TCtx;
   scope: { kind: "collection"; name: string } | { kind: "root" };
   invocation: { kind: "action"; name: string };
   permission: AccessPermission;
+  /** Present only when a document action is gated. */
+  target?: { id: string; doc: TDoc };
 };
 
-type ActionGatePolicyFn<TCtx> = (
-  ctx: ActionGateContext<TCtx>,
+export type DocumentGateContext<TCtx, TDoc> = ActionGateContext<TCtx, TDoc> & {
+  target: { id: string; doc: TDoc };
+};
+
+type DetachedGatePolicyFn<TCtx> = (
+  ctx: ActionGateContext<TCtx, never>,
 ) => AccessGrant | Promise<AccessGrant>;
+
+type DocumentGatePolicyFn<TCtx, TDoc> = (
+  ctx: DocumentGateContext<TCtx, TDoc>,
+) => AccessGrant | Promise<AccessGrant>;
+
+/**
+ * Schema-bound gate for document actions. Two ConstrainedPolicy signatures
+ * compare as bare generic functions and always unify, so the pick-key check
+ * would silently pass; intersecting with the instantiated policy function
+ * forces the pick-keys conditional to resolve against this collection's
+ * document type.
+ */
+type DocumentConstrainedGate<TCtx extends object, TDoc> = ConstrainedPolicy<TCtx, TDoc> &
+  ((ctx: AccessContext<TCtx, TDoc>) => AccessGrant | Promise<AccessGrant>);
 
 export type ActionGatePolicy<TCtx, TDoc = never> =
   | AccessGrant
   | ContextPolicy<TCtx>
   | ConstrainedPolicy<TCtx extends object ? TCtx : object, TDoc>
-  | ActionGatePolicyFn<TCtx>;
+  | DocumentGatePolicyFn<TCtx, TDoc>
+  | DetachedGatePolicyFn<TCtx>;
 
 type ActionKind = "collection" | "root";
 type MaybeSchema = StandardSchemaV1 | undefined;
@@ -97,12 +126,33 @@ export type InvalidPublicKeys<TMap> = {
   [K in keyof TMap]: K extends string ? (IsValidIdentifier<K> extends true ? never : K) : K;
 }[keyof TMap];
 
+export type ActionNameConstraint<TActions> = Record<
+  Extract<keyof TActions, CrudName | ReservedPublicName> | InvalidPublicKeys<TActions>,
+  never
+>;
+
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
 type JsonInputSchema<TSchema extends StandardSchemaV1> =
   unknown extends StandardSchemaV1.InferInput<TSchema>
     ? TSchema
     : Exclude<StandardSchemaV1.InferInput<TSchema>, undefined> extends JsonValue
       ? TSchema
       : never;
+
+/**
+ * Detached collection actions must not accept bare-string input: the client
+ * routes a single string argument as a document id, so a string input would
+ * be indistinguishable from a document target on the wire.
+ */
+type DetachedInputSchema<TSchema extends StandardSchemaV1> =
+  IsAny<StandardSchemaV1.InferInput<TSchema>> extends true
+    ? never
+    : unknown extends StandardSchemaV1.InferInput<TSchema>
+      ? never
+      : Extract<StandardSchemaV1.InferInput<TSchema>, string> extends never
+        ? JsonInputSchema<TSchema>
+        : never;
 
 type ParsedInput<TSchema extends MaybeSchema> = TSchema extends StandardSchemaV1
   ? StandardSchemaV1.InferOutput<TSchema>
@@ -113,9 +163,13 @@ export type ActionDefinition<
   TSchema extends MaybeSchema = MaybeSchema,
   TOutput extends JsonValue | void = JsonValue | void,
   TBaseArgs = unknown,
+  TTarget extends ActionTarget = ActionTarget,
 > = {
   readonly [actionDefinitionBrand]: true;
   readonly kind: TKind;
+  readonly target: TTarget;
+  /** Registration scope this definition was created for (collection name or `$`). */
+  readonly scope: string;
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
@@ -131,17 +185,12 @@ export type ActionDefinitions = Record<string, AuthoredAction>;
 
 export type RuntimeActionDefinition = {
   readonly kind: ActionKind;
+  readonly target: ActionTarget;
   readonly inputSchema: MaybeSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
   readonly policy: ActionGatePolicy<unknown, unknown>;
   readonly handler: (args: unknown) => unknown;
-};
-
-export type CollectionActionArgs<TCtx, TCollection> = {
-  ctx: TCtx;
-  collection: CollectionApi<TCollection>;
-  $collection: CollectionApi<TCollection>;
 };
 
 export type RootActionArgs<TCtx, TCollections> = {
@@ -150,150 +199,204 @@ export type RootActionArgs<TCtx, TCollections> = {
   $collections: CollectionsApi<TCollections>;
 };
 
-export type ActionBuilder<
+export type CollectionActionArgs<TCtx, TCollections, TCollection> = RootActionArgs<
   TCtx,
-  TKind extends ActionKind,
-  TBaseArgs,
-  TSchema extends MaybeSchema = undefined,
-  TDoc = never,
-> = {
-  input<TNextSchema extends StandardSchemaV1>(
-    schema: JsonInputSchema<TNextSchema>,
-  ): ActionBuilder<TCtx, TKind, TBaseArgs, TNextSchema, TDoc>;
-  requires(permission: AccessPermission): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema, TDoc>;
-  atomic(): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema, TDoc>;
-  policy: {
-    (policy: AccessGrant | ContextPolicy<TCtx>): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
-    (
-      policy: ConstrainedPolicy<TCtx extends object ? TCtx : object, TDoc>,
-    ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
-    (policy: ActionGatePolicyFn<TCtx>): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
-  };
+  TCollections
+> & {
+  collection: CollectionApi<TCollection>;
+  $collection: CollectionApi<TCollection>;
+};
+
+export type DocumentActionArgs<TCtx, TCollections, TCollection> = CollectionActionArgs<
+  TCtx,
+  TCollections,
+  TCollection
+> & {
+  id: string;
+  doc: InferCollectionDoc<TCollection>;
 };
 
 export type ActionHandlerBuilder<
   TKind extends ActionKind,
   TBaseArgs,
   TSchema extends MaybeSchema,
+  TTarget extends ActionTarget = "detached",
 > = {
   handler<TOutput extends JsonValue | void>(
     handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
-  ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs>;
-  atomic(): ActionHandlerBuilder<TKind, TBaseArgs, TSchema>;
+  ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs, TTarget>;
+  atomic(): ActionHandlerBuilder<TKind, TBaseArgs, TSchema, TTarget>;
 };
 
-type BuilderState<TKind extends ActionKind, TSchema extends MaybeSchema> = {
-  kind: TKind;
-  inputSchema: TSchema;
+/**
+ * Collection action builder. Starts as a document action (the handler
+ * receives `{ id, doc }` and the gate sees the target document); call
+ * `.detached()` before `.input()` / `.policy()` for actions that are not
+ * bound to one existing document (creation, aggregation, no-target pings).
+ */
+export type DocumentActionBuilder<
+  TCtx,
+  TDocArgs,
+  TDetachedArgs,
+  TDoc,
+  TSchema extends MaybeSchema = undefined,
+> = {
+  input<TNextSchema extends StandardSchemaV1>(
+    schema: JsonInputSchema<TNextSchema>,
+  ): Omit<DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TNextSchema>, "detached">;
+  requires(
+    permission: AccessPermission,
+  ): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>;
+  atomic(): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>;
+  detached(): DetachedActionBuilder<TCtx, TDetachedArgs, TSchema>;
+  policy: {
+    (
+      policy: AccessGrant | ContextPolicy<TCtx>,
+    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document">;
+    // Inline gate callbacks must be tried before ConstrainedPolicy: that type
+    // is an unbranded generic function, so it would contextually swallow bare
+    // arrows and hide `target` from them.
+    (
+      policy: DocumentGatePolicyFn<TCtx, TDoc>,
+    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document">;
+    (
+      policy: DocumentConstrainedGate<TCtx extends object ? TCtx : object, TDoc>,
+    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document">;
+  };
+};
+
+export type DetachedActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema = undefined> = {
+  input<TNextSchema extends StandardSchemaV1>(
+    schema: DetachedInputSchema<TNextSchema>,
+  ): DetachedActionBuilder<TCtx, TBaseArgs, TNextSchema>;
+  requires(permission: AccessPermission): DetachedActionBuilder<TCtx, TBaseArgs, TSchema>;
+  atomic(): DetachedActionBuilder<TCtx, TBaseArgs, TSchema>;
+  policy: {
+    (
+      policy: AccessGrant | ContextPolicy<TCtx>,
+    ): ActionHandlerBuilder<"collection", TBaseArgs, TSchema, "detached">;
+    (
+      policy: DetachedGatePolicyFn<TCtx>,
+    ): ActionHandlerBuilder<"collection", TBaseArgs, TSchema, "detached">;
+  };
+};
+
+export type RootActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema = undefined> = {
+  input<TNextSchema extends StandardSchemaV1>(
+    schema: JsonInputSchema<TNextSchema>,
+  ): RootActionBuilder<TCtx, TBaseArgs, TNextSchema>;
+  requires(permission: AccessPermission): RootActionBuilder<TCtx, TBaseArgs, TSchema>;
+  atomic(): RootActionBuilder<TCtx, TBaseArgs, TSchema>;
+  policy: {
+    (
+      policy: AccessGrant | ContextPolicy<TCtx>,
+    ): ActionHandlerBuilder<"root", TBaseArgs, TSchema, "detached">;
+    (
+      policy: DetachedGatePolicyFn<TCtx>,
+    ): ActionHandlerBuilder<"root", TBaseArgs, TSchema, "detached">;
+  };
+};
+
+type BuilderState = {
+  kind: ActionKind;
+  target: ActionTarget;
+  scope: string;
+  inputSchema: MaybeSchema;
   permission: AccessPermission;
   atomic: boolean;
 };
 
-export function createActionBuilder<TCtx, TKind extends ActionKind, TBaseArgs, TDoc = never>(
-  kind: TKind,
-): ActionBuilder<TCtx, TKind, TBaseArgs, undefined, TDoc> {
-  const createHandlerBuilder = <TSchema extends MaybeSchema>(
-    state: BuilderState<TKind, TSchema>,
-    policy: ActionGatePolicy<TCtx, TDoc>,
-  ): ActionHandlerBuilder<TKind, TBaseArgs, TSchema> => {
-    return {
-      atomic() {
-        return createHandlerBuilder({ ...state, atomic: true }, policy);
-      },
-      handler<TOutput extends JsonValue | void>(
-        handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
-      ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> {
-        const definition: ActionDefinition<TKind, TSchema, TOutput, TBaseArgs> = {
-          [actionDefinitionBrand]: true,
-          kind: state.kind,
-          inputSchema: state.inputSchema,
-          permission: state.permission,
-          atomic: state.atomic,
-          policy,
-          handler,
-        };
-        return Object.freeze(definition);
-      },
-    };
-  };
-
-  const build = <TSchema extends MaybeSchema>(
-    state: BuilderState<TKind, TSchema>,
-  ): ActionBuilder<TCtx, TKind, TBaseArgs, TSchema, TDoc> => ({
-    input<TNextSchema extends StandardSchemaV1>(schema: JsonInputSchema<TNextSchema>) {
-      return build<TNextSchema>({ ...state, inputSchema: schema });
-    },
-    requires(permission) {
-      return build({ ...state, permission });
-    },
+function createHandlerBuilder(
+  state: BuilderState,
+  policy: ActionGatePolicy<unknown, unknown>,
+): ActionHandlerBuilder<ActionKind, unknown, MaybeSchema, ActionTarget> {
+  return {
     atomic() {
-      return build({ ...state, atomic: true });
+      return createHandlerBuilder({ ...state, atomic: true }, policy);
     },
-    policy(policy) {
-      return createHandlerBuilder(state, policy);
+    handler(handler) {
+      const definition = {
+        [actionDefinitionBrand]: true as const,
+        kind: state.kind,
+        target: state.target,
+        scope: state.scope,
+        inputSchema: state.inputSchema,
+        permission: state.permission,
+        atomic: state.atomic,
+        policy: policy as ActionGatePolicy<never, never>,
+        handler,
+      };
+      return Object.freeze(definition) as never;
     },
-  });
-
-  return build({ kind, inputSchema: undefined, permission: "invoke", atomic: false });
+  } as ActionHandlerBuilder<ActionKind, unknown, MaybeSchema, ActionTarget>;
 }
 
-export type CollectionDefinitionInput<
-  TSchema extends StandardSchemaV1,
-  TCtx extends object,
-  TActions,
-> = {
+function createBuilder(state: BuilderState): Record<string, unknown> {
+  return {
+    input(schema: StandardSchemaV1) {
+      return createBuilder({ ...state, inputSchema: schema });
+    },
+    requires(permission: AccessPermission) {
+      return createBuilder({ ...state, permission });
+    },
+    atomic() {
+      return createBuilder({ ...state, atomic: true });
+    },
+    detached() {
+      return createBuilder({ ...state, target: "detached" });
+    },
+    policy(policy: ActionGatePolicy<unknown, unknown>) {
+      return createHandlerBuilder(state, policy);
+    },
+  };
+}
+
+export function createDocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>(
+  collection: string,
+): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc> {
+  return createBuilder({
+    kind: "collection",
+    target: "document",
+    scope: collection,
+    inputSchema: undefined,
+    permission: "invoke",
+    atomic: false,
+  }) as unknown as DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>;
+}
+
+export function createRootActionBuilder<TCtx, TBaseArgs>(): RootActionBuilder<TCtx, TBaseArgs> {
+  return createBuilder({
+    kind: "root",
+    target: "detached",
+    scope: "$",
+    inputSchema: undefined,
+    permission: "invoke",
+    atomic: false,
+  }) as unknown as RootActionBuilder<TCtx, TBaseArgs>;
+}
+
+export type CollectionDefinitionInput<TSchema extends StandardSchemaV1, TCtx extends object> = {
   schema: CollectionDefinition<TSchema, TCtx>["schema"];
   accessPolicy: CollectionDefinition<TSchema, TCtx>["accessPolicy"];
   migrations?: CollectionDefinition<TSchema, TCtx>["migrations"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];
-  actions?: (
-    defineAction: () => ActionBuilder<
-      TCtx,
-      "collection",
-      CollectionActionArgs<TCtx, CollectionDefinition<TSchema, TCtx>>,
-      undefined,
-      InferCollectionDoc<CollectionDefinition<TSchema, TCtx>>
-    >,
-  ) => TActions &
-    Record<
-      Extract<keyof TActions, CrudName | ReservedPublicName> | InvalidPublicKeys<TActions>,
-      never
-    >;
-} & ReservedDocumentSchemaConstraint<TSchema>;
+};
 
-export function defineCollection<
-  TCtx extends object,
-  TSchema extends StandardSchemaV1,
-  const TActions extends ActionDefinitions = Record<never, never>,
->(
-  definition: CollectionDefinitionInput<TSchema, TCtx, TActions>,
-): CollectionDefinition<TSchema, TCtx, TActions> & {
-  readonly [collectionActionsBrand]: TActions;
-} {
-  const { actions, ...collection } = definition;
-  const actionDefinitions = actions
-    ? actions(() =>
-        createActionBuilder<
-          TCtx,
-          "collection",
-          CollectionActionArgs<TCtx, CollectionDefinition<TSchema, TCtx>>,
-          InferCollectionDoc<CollectionDefinition<TSchema, TCtx>>
-        >("collection"),
-      )
-    : (Object.create(null) as TActions);
-  Object.defineProperty(collection, collectionActionsBrand, {
-    value: actionDefinitions,
-    enumerable: false,
-  });
-  return collection as unknown as CollectionDefinition<TSchema, TCtx, TActions> & {
-    readonly [collectionActionsBrand]: TActions;
-  };
+export function defineCollection<TCtx extends object, TSchema extends StandardSchemaV1>(
+  definition: CollectionDefinitionInput<TSchema, TCtx>,
+): CollectionDefinition<TSchema, TCtx> {
+  assertNoActionsOption(definition);
+  return definition as CollectionDefinition<TSchema, TCtx>;
 }
 
-export function getCollectionActions(definition: CollectionDefinition): ActionDefinitions | null {
-  if (!(collectionActionsBrand in definition)) return null;
-  const actions = definition[collectionActionsBrand];
-  return actions === undefined ? null : (actions as unknown as ActionDefinitions);
+export function assertNoActionsOption(definition: object): void {
+  if ("actions" in definition) {
+    throw new TakibiError(
+      "INVALID_COLLECTION",
+      "Collection definitions no longer take actions — define them via app.<collection>.actions()",
+      500,
+    );
+  }
 }
 
 export type RegisteredAction = {
@@ -321,6 +424,8 @@ const REFLECTION_NAMES = new Set([
   "caller",
   "arguments",
 ]);
+/** App definition members that collection names must not shadow. */
+const APP_DEFINITION_NAMES = new Set(["defineAction", "actions"]);
 const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export const unsafeClientPropertyNames: ReadonlySet<string> = REFLECTION_NAMES;
@@ -391,6 +496,13 @@ export class ActionRegistry {
           500,
         );
       }
+      if (definition.scope !== scope) {
+        throw new TakibiError(
+          "INVALID_ACTION",
+          `Action was defined for scope "${definition.scope}" but registered under "${scope}": ${name}`,
+          500,
+        );
+      }
       const runtimeDefinition = eraseForRegistry(name, definition);
       const registryKey = actionKey(scope, name);
       if (
@@ -421,11 +533,21 @@ function assertActionContract(name: string, definition: AuthoredAction): void {
   if (!ACCESS_PERMISSIONS.has(definition.permission)) {
     throw new TakibiError("INVALID_ACTION", `Invalid action permission: ${name}`, 500);
   }
+  if (definition.target !== "document" && definition.target !== "detached") {
+    throw new TakibiError("INVALID_ACTION", `Invalid action target: ${name}`, 500);
+  }
   if (typeof definition.atomic !== "boolean") {
     throw new TakibiError("INVALID_ACTION", `Invalid action atomic flag: ${name}`, 500);
   }
   if (typeof definition.policy !== "function" && !isAccessGrant(definition.policy)) {
     throw new TakibiError("INVALID_ACTION", `Action policy is required: ${name}`, 500);
+  }
+  if (definition.target === "detached" && isConstrainedPolicy(definition.policy)) {
+    throw new TakibiError(
+      "INVALID_ACTION",
+      `Schema-bound policies require a document action gate: ${name}`,
+      500,
+    );
   }
   if (isAccessGrant(definition.policy)) {
     for (const permission of permissionsOf(definition.policy)) {
@@ -448,6 +570,7 @@ function eraseForRegistry(name: string, definition: AuthoredAction): RuntimeActi
   assertActionContract(name, definition);
   return {
     kind: definition.kind,
+    target: definition.target,
     inputSchema: definition.inputSchema,
     permission: definition.permission,
     atomic: definition.atomic,
@@ -458,7 +581,7 @@ function eraseForRegistry(name: string, definition: AuthoredAction): RuntimeActi
 
 export function assertCollectionName(name: string): void {
   assertPublicName(name, "collection");
-  if (name === "$" || name.includes(":")) {
+  if (name === "$" || name.includes(":") || APP_DEFINITION_NAMES.has(name)) {
     throw new TakibiError("RESERVED_COLLECTION", `Invalid collection name: ${name}`, 500);
   }
 }
@@ -479,6 +602,7 @@ function isActionDefinition(value: unknown): value is AuthoredAction {
     value !== null &&
     (value as Partial<ActionDefinition>)[actionDefinitionBrand] === true &&
     typeof (value as Partial<ActionDefinition>).handler === "function" &&
+    typeof (value as Partial<ActionDefinition>).scope === "string" &&
     ((value as Partial<ActionDefinition>).kind === "collection" ||
       (value as Partial<ActionDefinition>).kind === "root")
   );

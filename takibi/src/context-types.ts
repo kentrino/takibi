@@ -1,21 +1,26 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Hono } from "hono";
 import type {
-  ActionBuilder,
   ActionDefinitions,
+  ActionNameConstraint,
+  CollectionActionArgs,
   CollectionDefinitionInput,
+  DocumentActionArgs,
+  DocumentActionBuilder,
   InvalidPublicKeys,
   ReservedPublicName,
   RootActionArgs,
+  RootActionBuilder,
+  ScopedActions,
 } from "./action";
 import type { LoggingOptions } from "./logging";
 import type { PolicyHelper } from "./policy";
 import { internalTracerKey, type TakibiTracer } from "./tracing";
-import { collectionActionsBrand } from "./types";
 import type {
   CollectionDefinition,
   CollectionsApi,
   CollectionsDef,
+  InferCollectionDoc,
   ReservedDocumentSchemaConstraint,
 } from "./types";
 
@@ -65,31 +70,30 @@ export type HandleResult =
   | { matched: true; response: Response }
   | { matched: false; response?: undefined };
 
+/**
+ * Actions registered on `app.actions({ ... })`, keyed by wire scope:
+ * `$` for root actions, a collection name for its collection actions.
+ */
+export type ActionScopeMap = {
+  [scope: string]: ActionDefinitions;
+};
+
 export type TakibiBrand<
   TCtx extends object,
   TCollections,
   TInitial = Record<string, never>,
-  TRootActions extends ActionDefinitions = Record<never, never>,
+  TActionMap extends ActionScopeMap = Record<never, never>,
 > = {
   readonly "~takibi": {
     context: TCtx;
     initial: TInitial;
     collections: TCollections;
-    actions: TRootActions;
+    actions: TActionMap;
   };
   DurableObject: new (
     state: DurableObjectState,
     env: unknown,
   ) => DurableObject & { $collections: CollectionsApi<TCollections> };
-  defineAction(): ActionBuilder<TCtx, "root", RootActionArgs<TCtx, TCollections>>;
-  actions<const TActions extends ActionDefinitions>(
-    definitions: TActions &
-      Record<
-        | Extract<keyof TActions, keyof TCollections | keyof TRootActions | ReservedPublicName>
-        | InvalidPublicKeys<TActions>,
-        never
-      >,
-  ): TakibiHandler<TCtx, TCollections, TInitial, TRootActions & TActions>;
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
    * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
@@ -104,16 +108,63 @@ export type TakibiBrand<
       memory: true;
       resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
     },
-  ): TakibiHandler<TCtx, TCollections, TInitial, TRootActions>;
+  ): TakibiHandler<TCtx, TCollections, TInitial, TActionMap>;
 };
 
 export type TakibiHandler<
   TCtx extends object = Record<string, unknown>,
   TCollections = CollectionsDef<TCtx>,
   TInitial = Record<string, never>,
-  TRootActions extends ActionDefinitions = Record<never, never>,
+  TActionMap extends ActionScopeMap = Record<never, never>,
 > = Hono<{ Bindings: Record<string, unknown> }> &
-  TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
+  TakibiBrand<TCtx, TCollections, TInitial, TActionMap>;
+
+type RootActionsConstraint<TActions, TCollections> = Record<
+  Extract<keyof TActions, keyof TCollections | ReservedPublicName> | InvalidPublicKeys<TActions>,
+  never
+>;
+
+type ActionsMapConstraint<TMap, TCollections> = {
+  [K in keyof TMap]: K extends "$"
+    ? ActionDefinitions & RootActionsConstraint<TMap[K], TCollections>
+    : K extends keyof TCollections & string
+      ? ScopedActions<K, ActionDefinitions>
+      : never;
+};
+
+/**
+ * Definition surface returned by `defineCollections()`. Define actions on it
+ * (`app.<collection>.actions(cb)` / `app.defineAction()`), then obtain the
+ * handler with a single `app.actions({ ... })` call.
+ */
+export type AppDefinition<TCtx extends object, TCollections, TInitial> = {
+  [K in keyof TCollections & string]: {
+    /**
+     * Define this collection's actions. `defineAction()` starts a document
+     * action (client: `(id, input?)`); call `.detached()` for actions that
+     * are not bound to one existing document.
+     */
+    actions<const TActions extends ActionDefinitions>(
+      define: (
+        defineAction: () => DocumentActionBuilder<
+          TCtx,
+          DocumentActionArgs<TCtx, TCollections, TCollections[K]>,
+          CollectionActionArgs<TCtx, TCollections, TCollections[K]>,
+          InferCollectionDoc<TCollections[K]>
+        >,
+      ) => TActions & ActionNameConstraint<TActions>,
+    ): ScopedActions<K, TActions>;
+  };
+} & {
+  defineAction(): RootActionBuilder<TCtx, RootActionArgs<TCtx, TCollections>>;
+  /**
+   * Register every action map and assemble the handler. Callable exactly
+   * once; apps without actions still call `app.actions({})`.
+   */
+  actions<const TMap extends ActionScopeMap>(
+    map: TMap & ActionsMapConstraint<TMap, TCollections>,
+  ): TakibiHandler<TCtx, TCollections, TInitial, TMap>;
+};
 
 type PublicCollectionConstraint<C, TCtx extends object> = C extends {
   schema: infer S extends StandardSchemaV1;
@@ -143,25 +194,23 @@ type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
     : TCollections[K];
 };
 
+type ReservedCollectionName = ReservedPublicName | "defineAction" | "actions";
+
 export type CreateContextBuilder<TCtx extends object, TInitial> = {
   policy: PolicyHelper<TCtx>;
-  defineCollection<
-    TSchema extends StandardSchemaV1,
-    const TActions extends ActionDefinitions = Record<never, never>,
-  >(
-    definition: CollectionDefinitionInput<TSchema, TCtx, TActions>,
-  ): CollectionDefinition<TSchema, TCtx, TActions> & {
-    readonly [collectionActionsBrand]: TActions;
-  };
-  collections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
+  defineCollection<TSchema extends StandardSchemaV1>(
+    definition: CollectionDefinitionInput<TSchema, TCtx> &
+      ReservedDocumentSchemaConstraint<TSchema>,
+  ): CollectionDefinition<TSchema, TCtx>;
+  defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
     collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
     options?: InternalCollectionsOptions,
     ...invalidName: [
-      Extract<keyof TCollections, ReservedPublicName> | InvalidPublicKeys<TCollections>,
+      Extract<keyof TCollections, ReservedCollectionName> | InvalidPublicKeys<TCollections>,
     ] extends [never]
       ? []
       : ["Collection names must be safe TypeScript identifiers"]
-  ): TakibiHandler<TCtx, TCollections, TInitial>;
+  ): AppDefinition<TCtx, TCollections, TInitial>;
 };
 
 export type CreateContextFn<TInitial> = <R extends object | Promise<object>>(config: {

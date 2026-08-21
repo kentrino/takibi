@@ -146,15 +146,17 @@ test("Takibi request and stage logs carry their active span", async () => {
       resolve: () => ({ tenantId: "tenant-a" }),
       logger: createOtelLogger(capturingOtelLogger(records)),
       logLevel: "debug",
-    }).collections(
-      {
-        posts: {
-          schema: z.object({ title: z.string() }),
-          accessPolicy: fullAccess,
+    })
+      .defineCollections(
+        {
+          posts: {
+            schema: z.object({ title: z.string() }),
+            accessPolicy: fullAccess,
+          },
         },
-      },
-      { memory: true },
-    );
+        { memory: true },
+      )
+      .actions({});
     const response = await handler.request("https://takibi.test/posts/p1", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -198,10 +200,12 @@ test("worker and Durable Object failures correlate one error record to the reque
       resolve: () => ({ tenantId: "tenant-a" }),
       logger,
       logLevel: "info",
-    }).collections(
-      { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-      { memory: true },
-    );
+    })
+      .defineCollections(
+        { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
+        { memory: true },
+      )
+      .actions({});
     cases.push({
       name: "decode",
       request: async () =>
@@ -218,27 +222,31 @@ test("worker and Durable Object failures correlate one error record to the reque
       },
       logger,
       logLevel: "info",
-    }).collections(
-      { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-      { memory: true },
-    );
+    })
+      .defineCollections(
+        { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
+        { memory: true },
+      )
+      .actions({});
     cases.push({
       name: "resolve",
       request: async () => resolveHandler.request("https://takibi.test/posts/p1"),
     });
 
-    const memoryBase = createTakibi()({
+    const memoryApp = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logger,
       logLevel: "info",
-    }).collections({}, { memory: true });
-    const memoryHandler = memoryBase.actions({
-      boom: memoryBase
-        .defineAction()
-        .policy(fullAccess)
-        .handler(() => {
-          throw new Error("memory executor failed");
-        }),
+    }).defineCollections({}, { memory: true });
+    const memoryHandler = memoryApp.actions({
+      $: {
+        boom: memoryApp
+          .defineAction()
+          .policy(fullAccess)
+          .handler(() => {
+            throw new Error("memory executor failed");
+          }),
+      },
     });
     cases.push({
       name: "memory executor",
@@ -249,7 +257,7 @@ test("worker and Durable Object failures correlate one error record to the reque
     });
 
     let durableObject!: DurableObject;
-    const durableBase = createTakibi()({
+    const durableApp = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       stub: () =>
         ({
@@ -257,14 +265,16 @@ test("worker and Durable Object failures correlate one error record to the reque
         }) as DurableObjectStub,
       logger,
       logLevel: "info",
-    }).collections({});
-    const durableHandler = durableBase.actions({
-      boom: durableBase
-        .defineAction()
-        .policy(fullAccess)
-        .handler(() => {
-          throw new Error("Durable Object executor failed");
-        }),
+    }).defineCollections({});
+    const durableHandler = durableApp.actions({
+      $: {
+        boom: durableApp
+          .defineAction()
+          .policy(fullAccess)
+          .handler(() => {
+            throw new Error("Durable Object executor failed");
+          }),
+      },
     });
     durableObject = new durableHandler.DurableObject(
       {

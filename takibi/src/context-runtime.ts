@@ -37,6 +37,7 @@ export function invocationFields(invocation: PublicRequest): {
     ? {
         ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
         operation: invocation.name,
+        ...(invocation.id === undefined ? {} : { documentId: invocation.id }),
       }
     : {
         collection: invocation.collection,

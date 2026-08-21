@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient } from "@takibi/takibi/client";
 import { and, createTakibi, fullAccess, none } from "../src/index";
-import type { ActionDefinition, RegisteredAction, RuntimeActionDefinition } from "../src/action";
+import type { RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {
   AccessContext,
@@ -17,42 +17,10 @@ import type {
   InferCollectionDoc,
   InferHandlerCollections,
 } from "../src/index";
-import { collectionActionsBrand, type StorageDriver } from "../src/types";
+import type { StorageDriver } from "../src/types";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
-
-type LegacyActionInput<TAction> =
-  TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
-    ? TSchema extends StandardSchemaV1
-      ? StandardSchemaV1.InferInput<TSchema>
-      : never
-    : never;
-
-type LegacyActionOutput<TAction> =
-  TAction extends ActionDefinition<
-    "collection" | "root",
-    StandardSchemaV1 | undefined,
-    infer TOutput,
-    never
-  >
-    ? TOutput extends void
-      ? null
-      : TOutput
-    : JsonValue;
-
-type LegacyActionClientMethod<TAction> =
-  TAction extends ActionDefinition<"collection" | "root", infer TSchema, JsonValue | void, never>
-    ? TSchema extends StandardSchemaV1
-      ? undefined extends LegacyActionInput<TAction>
-        ? (input?: LegacyActionInput<TAction>) => Promise<TakibiResult<LegacyActionOutput<TAction>>>
-        : (input: LegacyActionInput<TAction>) => Promise<TakibiResult<LegacyActionOutput<TAction>>>
-      : () => Promise<TakibiResult<LegacyActionOutput<TAction>>>
-    : never;
-
-type LegacyActionsClient<TActions> = {
-  [K in keyof TActions]: LegacyActionClientMethod<TActions[K]>;
-};
 
 const createContext = createTakibi();
 
@@ -60,6 +28,7 @@ test("registered actions use the unknown-based runtime definition", () => {
   expectTypeOf<RegisteredAction["definition"]>().toEqualTypeOf<RuntimeActionDefinition>();
   expectTypeOf<Parameters<RuntimeActionDefinition["handler"]>[0]>().toEqualTypeOf<unknown>();
   expectTypeOf<Awaited<ReturnType<RuntimeActionDefinition["handler"]>>>().toEqualTypeOf<unknown>();
+  expectTypeOf<RuntimeActionDefinition["target"]>().toEqualTypeOf<"document" | "detached">();
 });
 
 test("collection schemas type CRUD clients without handler $collections", () => {
@@ -72,8 +41,8 @@ test("collection schemas type CRUD clients without handler $collections", () => 
       accessPolicy: fullAccess,
     },
   };
-  const handler = context.collections(collections, { memory: true });
-  const durableHandler = context.collections(collections);
+  const handler = context.defineCollections(collections, { memory: true }).actions({});
+  const durableHandler = context.defineCollections(collections).actions({});
   const client = createClient<typeof handler>("http://fire.test");
 
   expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{
@@ -208,7 +177,7 @@ test("collection schemas require plain JSON object outputs", () => {
       schema: z.object({ rev: z.number() }),
       accessPolicy: fullAccess,
     });
-    context.collections({
+    context.defineCollections({
       invalid: {
         // @ts-expect-error revision is reserved
         schema: z.object({ rev: z.number() }),
@@ -255,7 +224,7 @@ test("collection migrations accept unknown intermediate data and constrain the f
       steps: [() => ({ title: "missing published" })],
     },
   });
-  context.collections({
+  context.defineCollections({
     invalid: {
       schema: z.object({ title: z.string(), published: z.boolean() }),
       accessPolicy: fullAccess,
@@ -267,7 +236,7 @@ test("collection migrations accept unknown intermediate data and constrain the f
   });
 
   const checkMarkerPrivacy = () => {
-    const handler = context.collections({ migrated }, { memory: true });
+    const handler = context.defineCollections({ migrated }, { memory: true }).actions({});
     const client = createClient<typeof handler>("http://fire.test");
     // @ts-expect-error the internal marker is not accepted as document input
     void client.migrated.add({ title: "x", published: true, $schemaVersion: 4 });
@@ -285,7 +254,7 @@ test("collection migrations accept unknown intermediate data and constrain the f
   void checkMarkerPrivacy;
 });
 
-test("collection action input/output and scoped handler args are inferred", () => {
+test("document and detached action handler args and client signatures are inferred", () => {
   const context = createContext({
     resolve: (): AppCtx => ({
       tenantId: "acme",
@@ -295,68 +264,101 @@ test("collection action input/output and scoped handler args are inferred", () =
   const posts = context.defineCollection({
     schema: z.object({ title: z.string() }),
     accessPolicy: fullAccess,
-    actions: (defineAction) => ({
-      transformed: defineAction()
-        .input(z.string().transform((value) => value.length))
-        .policy(fullAccess)
-        .handler(({ input, ctx, collection, $collection }) => {
-          expectTypeOf(input).toEqualTypeOf<number>();
-          expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
-          expectTypeOf(collection).toEqualTypeOf($collection);
-          return { length: input };
-        }),
-      optional: defineAction()
-        .input(z.string().optional())
-        .policy(fullAccess)
-        .handler(({ input }) => ({ value: input ?? null })),
-      coerced: defineAction()
-        .input(z.coerce.number())
-        .policy(fullAccess)
-        .handler(({ input }) => {
-          expectTypeOf(input).toEqualTypeOf<number>();
-          return { value: input };
-        }),
-      noInput: defineAction()
-        .policy(fullAccess)
-        .handler(({ input }) => {
-          expectTypeOf(input).toEqualTypeOf<undefined>();
-          return { ok: true };
-        }),
-      promised: defineAction()
-        .policy(fullAccess)
-        .handler(() => Promise.resolve({ async: true as const })),
-      voidOutput: defineAction()
-        .policy(fullAccess)
-        .handler(() => undefined),
-    }),
   });
-  const handler = context.collections({ posts }, { memory: true });
+  const app = context.defineCollections({ posts }, { memory: true });
+  const postsActions = app.posts.actions((defineAction) => ({
+    transformed: defineAction()
+      .input(z.string().transform((value) => value.length))
+      .policy(fullAccess)
+      .handler(({ input, id, doc, ctx, collection, $collection, collections, $collections }) => {
+        expectTypeOf(input).toEqualTypeOf<number>();
+        expectTypeOf(id).toEqualTypeOf<string>();
+        expectTypeOf(doc.title).toEqualTypeOf<string>();
+        expectTypeOf(doc.rev).toEqualTypeOf<number>();
+        expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
+        expectTypeOf(collection).toEqualTypeOf($collection);
+        expectTypeOf(collections).toEqualTypeOf($collections);
+        expectTypeOf(collections).toHaveProperty("posts");
+        return { length: input };
+      }),
+    optional: defineAction()
+      .input(z.object({ label: z.string() }).optional())
+      .policy(fullAccess)
+      .handler(({ input }) => ({ value: input?.label ?? null })),
+    noInput: defineAction()
+      .policy(fullAccess)
+      .handler(({ input }) => {
+        expectTypeOf(input).toEqualTypeOf<undefined>();
+        return { ok: true };
+      }),
+    stats: defineAction()
+      .detached()
+      .input(z.object({ limit: z.number() }))
+      .policy(fullAccess)
+      .handler((args) => {
+        expectTypeOf(args.input).toEqualTypeOf<{ limit: number }>();
+        expectTypeOf(args).not.toHaveProperty("id");
+        expectTypeOf(args).not.toHaveProperty("doc");
+        expectTypeOf(args.collection).toEqualTypeOf(args.$collection);
+        expectTypeOf(args.collections).toEqualTypeOf(args.$collections);
+        return { count: args.input.limit };
+      }),
+    promised: defineAction()
+      .detached()
+      .policy(fullAccess)
+      .handler(() => Promise.resolve({ async: true as const })),
+    voidOutput: defineAction()
+      .detached()
+      .policy(fullAccess)
+      .handler(() => undefined),
+  }));
+  const handler = app.actions({ posts: postsActions });
   const client = createClient<typeof handler>("http://fire.test");
 
-  expectTypeOf(client.posts.transformed).parameter(0).toEqualTypeOf<string>();
+  expectTypeOf(client.posts.transformed).parameters.toEqualTypeOf<[string, string]>();
   expectTypeOf(client.posts.transformed).returns.resolves.toEqualTypeOf<
     TakibiResult<{ length: number }>
   >();
-  expectTypeOf(client.posts.coerced).parameter(0).toEqualTypeOf<unknown>();
+  expectTypeOf(client.posts.noInput).parameters.toEqualTypeOf<[string]>();
+  expectTypeOf(client.posts.stats).parameter(0).toEqualTypeOf<{ limit: number }>();
   expectTypeOf(client.posts.promised).returns.resolves.toEqualTypeOf<
     TakibiResult<{ async: true }>
   >();
   expectTypeOf(client.posts.voidOutput).returns.resolves.toEqualTypeOf<TakibiResult<null>>();
-  type CollectionActions = (typeof posts)[typeof collectionActionsBrand];
-  expectTypeOf<Pick<typeof client.posts, keyof CollectionActions>>().toEqualTypeOf<
-    LegacyActionsClient<CollectionActions>
-  >();
+
   const checkCalls = () => {
-    void client.posts.optional();
-    void client.posts.optional("value");
+    void client.posts.optional("p1");
+    void client.posts.optional("p1", { label: "x" });
+    void client.posts.noInput("p1");
+    // @ts-expect-error document actions require the target id first
     void client.posts.noInput();
-    // @ts-expect-error no-input actions do not accept arguments
-    void client.posts.noInput("value");
+    // @ts-expect-error no-input document actions accept only the id
+    void client.posts.noInput("p1", "value");
+    // @ts-expect-error detached actions do not take a document id
+    void client.posts.stats("p1", { limit: 1 });
   };
   void checkCalls;
+
+  const checkDetachedStringInput = () => {
+    app.posts.actions((defineAction) => ({
+      bad: defineAction()
+        .detached()
+        // @ts-expect-error detached collection actions cannot accept bare-string input
+        .input(z.string())
+        .policy(fullAccess)
+        .handler(() => null),
+      alsoBad: defineAction()
+        .detached()
+        // @ts-expect-error detached collection actions cannot accept string unions either
+        .input(z.union([z.string(), z.object({ ok: z.boolean() })]))
+        .policy(fullAccess)
+        .handler(() => null),
+    }));
+  };
+  void checkDetachedStringInput;
 });
 
-test("mixed collections() maps keep defineCollection action brands per entry", () => {
+test("action maps attach methods per collection scope and enforce the scope brand", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
@@ -367,120 +369,52 @@ test("mixed collections() maps keep defineCollection action brands per entry", (
   const posts = context.defineCollection({
     schema: z.object({ title: z.string() }),
     accessPolicy: fullAccess,
-    actions: (defineAction) => ({
-      duplicate: defineAction()
-        .policy(fullAccess)
-        .handler(({ $collection }) => $collection.add({ title: "copy" })),
-    }),
   });
-  const handler = context.collections({ notes, posts }, { memory: true });
-  const postsOnly = context.collections({ posts }, { memory: true });
+  const app = context.defineCollections({ notes, posts }, { memory: true });
+  const postsActions = app.posts.actions((defineAction) => ({
+    duplicate: defineAction()
+      .policy(fullAccess)
+      .handler(({ doc, $collection }) => $collection.add({ title: doc.title })),
+  }));
+  const handler = app.actions({ posts: postsActions });
   const client = createClient<typeof handler>("http://fire.test");
-  const postsOnlyClient = createClient<typeof postsOnly>("http://fire.test");
 
-  expectTypeOf(client.posts.duplicate).toEqualTypeOf(postsOnlyClient.posts.duplicate);
+  expectTypeOf(client.posts.duplicate).parameters.toEqualTypeOf<[string]>();
   expectTypeOf(client.notes).not.toHaveProperty("duplicate");
   expectTypeOf(client.notes.add).parameter(0).toEqualTypeOf<{ body: string }>();
   expectTypeOf(client.posts.add).parameter(0).toEqualTypeOf<{ title: string }>();
+
+  const checkScopeBrand = () => {
+    // @ts-expect-error scoped action maps cannot register under another collection
+    app.actions({ notes: postsActions });
+    // @ts-expect-error unknown scopes are rejected
+    app.actions({ ghosts: postsActions });
+  };
+  void checkScopeBrand;
 });
 
-test("homogeneous collections() maps keep existing client inference", () => {
-  const context = createContext({
-    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
-  });
-  const plainNotes = {
-    schema: z.object({ body: z.string() }),
-    accessPolicy: fullAccess,
-  };
-  const plainPosts = {
-    schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
-  };
-  const brandedNotes = context.defineCollection({
-    schema: z.object({ body: z.string() }),
-    accessPolicy: fullAccess,
-  });
-  const brandedPosts = context.defineCollection({
-    schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
-    actions: (defineAction) => ({
-      duplicate: defineAction()
-        .policy(fullAccess)
-        .handler(({ $collection }) => $collection.add({ title: "copy" })),
-    }),
-  });
-
-  const allPlain = context.collections({ notes: plainNotes, posts: plainPosts }, { memory: true });
-  const allBranded = context.collections(
-    { notes: brandedNotes, posts: brandedPosts },
-    { memory: true },
-  );
-  const plainClientFromHandler = createClient<typeof allPlain>("http://fire.test");
-  const brandedClient = createClient<typeof allBranded>("http://fire.test");
-
-  const postsOnly = context.collections({ posts: brandedPosts }, { memory: true });
-  const postsOnlyClient = createClient<typeof postsOnly>("http://fire.test");
-
-  expectTypeOf(plainClientFromHandler.notes.add).parameter(0).toEqualTypeOf<{ body: string }>();
-  expectTypeOf(plainClientFromHandler.posts.add).parameter(0).toEqualTypeOf<{ title: string }>();
-  expectTypeOf(plainClientFromHandler.notes).not.toHaveProperty("duplicate");
-  expectTypeOf(plainClientFromHandler.posts).not.toHaveProperty("duplicate");
-  expectTypeOf(brandedClient.notes.add).parameter(0).toEqualTypeOf<{ body: string }>();
-  expectTypeOf(brandedClient.posts.duplicate).toEqualTypeOf(postsOnlyClient.posts.duplicate);
-  expectTypeOf(brandedClient.notes).not.toHaveProperty("duplicate");
-});
-
-test("mixed collections() maps keep schema-bound policy and migration checks", () => {
-  const takibi = createContext({
-    resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
-  });
-  const seeded = takibi.policy(z.object({ isSeed: z.boolean() }), ({ doc }) =>
-    doc?.isSeed === true ? none : fullAccess,
-  );
-  const notes = {
-    schema: z.object({ body: z.string() }),
-    accessPolicy: fullAccess,
-  };
-  const items = takibi.defineCollection({
-    schema: z.object({ name: z.string(), isSeed: z.boolean() }),
-    accessPolicy: seeded,
-  });
-
-  takibi.collections({ notes, items });
-  takibi.collections({
-    notes,
-    invalid: {
-      schema: z.object({ title: z.string(), published: z.boolean() }),
-      accessPolicy: fullAccess,
-      migrations: {
-        // @ts-expect-error mixed maps still constrain the final migration step
-        steps: [() => ({ title: "missing published" })],
-      },
-    },
-  });
-
-  const checkMissingKeys = () => {
-    takibi.collections({
-      notes,
-      items: {
-        schema: z.object({ name: z.string() }),
-        // @ts-expect-error mixed maps still require schema-bound policy keys
-        accessPolicy: seeded,
-      },
-    });
-  };
-  void checkMissingKeys;
-});
-
-test("ClientOf projects action methods from inputSchema and handler", () => {
+test("ClientOf projects action methods by scope and target", () => {
   const inputSchema = z.string().transform((value) => value.length);
   type StructuralHandler = {
     readonly "~takibi": {
-      readonly collections: {};
+      readonly collections: {
+        readonly posts: {
+          readonly schema: z.ZodObject<{ title: z.ZodString }>;
+        };
+      };
       readonly actions: {
-        readonly inspect: {
-          readonly inputSchema: typeof inputSchema;
-          readonly handler: (args: { input: number }) => Promise<{ positive: boolean }>;
+        readonly $: {
+          readonly inspect: {
+            readonly inputSchema: typeof inputSchema;
+            readonly handler: (args: { input: number }) => Promise<{ positive: boolean }>;
+          };
+        };
+        readonly posts: {
+          readonly touch: {
+            readonly target: "document";
+            readonly inputSchema: undefined;
+            readonly handler: (args: { id: string }) => Promise<{ touched: true }>;
+          };
         };
       };
     };
@@ -490,20 +424,23 @@ test("ClientOf projects action methods from inputSchema and handler", () => {
   expectTypeOf<StructuralClient["inspect"]>().toEqualTypeOf<
     (input: string) => Promise<TakibiResult<{ positive: boolean }>>
   >();
+  expectTypeOf<StructuralClient["posts"]["touch"]>().toEqualTypeOf<
+    (id: string) => Promise<TakibiResult<{ touched: true }>>
+  >();
 });
 
 test("root actions infer all collections and appear flat on the client", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const base = context.collections(
+  const app = context.defineCollections(
     {
       posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
       notes: { schema: z.object({ body: z.string() }), accessPolicy: fullAccess },
     },
     { memory: true },
   );
-  const exportAll = base
+  const exportAll = app
     .defineAction()
     .policy(fullAccess)
     .handler(({ input, ctx, collections, $collections }) => {
@@ -514,7 +451,7 @@ test("root actions infer all collections and appear flat on the client", () => {
       expectTypeOf(collections).toEqualTypeOf($collections);
       return { count: 0 };
     });
-  const handler = base.actions({ exportAll });
+  const handler = app.actions({ $: { exportAll } });
   const client = createClient<typeof handler>("http://fire.test");
 
   expectTypeOf(client.exportAll).returns.resolves.toEqualTypeOf<TakibiResult<{ count: number }>>();
@@ -526,27 +463,30 @@ test("atomic actions preserve builder, handler, and client inference at every st
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const Input = z.object({ title: z.string() });
-  const posts = context.defineCollection({
-    schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
-    actions: (defineAction) => ({
-      duplicate: defineAction()
-        .atomic()
-        .input(Input)
-        .requires("create")
-        .atomic()
-        .policy(fullAccess)
-        .atomic()
-        .handler(({ input, ctx, collection, $collection }) => {
-          expectTypeOf(input).toEqualTypeOf<{ title: string }>();
-          expectTypeOf(ctx).toEqualTypeOf<AppCtx>();
-          expectTypeOf(collection).toEqualTypeOf($collection);
-          return { title: input.title, ok: true as const };
-        }),
-    }),
-  });
-  const base = context.collections({ posts }, { memory: true });
-  const exportAll = base
+  const app = context.defineCollections(
+    {
+      posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+    },
+    { memory: true },
+  );
+  const postsActions = app.posts.actions((defineAction) => ({
+    duplicate: defineAction()
+      .atomic()
+      .input(Input)
+      .requires("create")
+      .atomic()
+      .policy(fullAccess)
+      .atomic()
+      .handler(({ input, id, doc, ctx, collection, $collection }) => {
+        expectTypeOf(input).toEqualTypeOf<{ title: string }>();
+        expectTypeOf(id).toEqualTypeOf<string>();
+        expectTypeOf(doc.title).toEqualTypeOf<string>();
+        expectTypeOf(ctx).toEqualTypeOf<AppCtx>();
+        expectTypeOf(collection).toEqualTypeOf($collection);
+        return { title: input.title, ok: true as const };
+      }),
+  }));
+  const exportAll = app
     .defineAction()
     .input(Input)
     .atomic()
@@ -560,13 +500,14 @@ test("atomic actions preserve builder, handler, and client inference at every st
       expectTypeOf(collections).toEqualTypeOf($collections);
       return { title: input.title, count: 0 };
     });
-  const handler = base.actions({ exportAll });
+  const handler = app.actions({ $: { exportAll }, posts: postsActions });
   const client = createClient<typeof handler>("http://fire.test");
 
   expectTypeOf(client.exportAll).parameter(0).toEqualTypeOf<{ title: string }>();
   expectTypeOf(client.exportAll).returns.resolves.toEqualTypeOf<
     TakibiResult<{ title: string; count: number }>
   >();
+  expectTypeOf(client.posts.duplicate).parameters.toEqualTypeOf<[string, { title: string }]>();
   expectTypeOf(client.posts.duplicate).returns.resolves.toEqualTypeOf<
     TakibiResult<{ title: string; ok: true }>
   >();
@@ -577,15 +518,15 @@ test("action builder requires policy before handler", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const base = context.collections({
+  const app = context.defineCollections({
     posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
   });
-  const builder = base.defineAction();
+  const builder = app.defineAction();
   expectTypeOf(builder).not.toHaveProperty("handler");
   const checkMissingHandler = () => {
     // @ts-expect-error handler is unavailable until policy is set
     builder.handler(() => null);
-    base
+    app
       .defineAction()
       // @ts-expect-error action inputs must be JSON-safe before schema parsing
       .input(z.date());
@@ -594,94 +535,143 @@ test("action builder requires policy before handler", () => {
   builder.policy(fullAccess).handler(() => null);
 });
 
-test("action gate callbacks infer ctx, scope, invocation, and permission", () => {
+test("detached() is unavailable after input() and absent from root builders", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const app = context.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+  expectTypeOf(app.defineAction()).not.toHaveProperty("detached");
+  const checkDetachedOrdering = () => {
+    app.posts.actions((defineAction) => ({
+      late: defineAction()
+        .input(z.object({ title: z.string() }))
+        // @ts-expect-error detached() must be called before input()
+        .detached()
+        .policy(fullAccess)
+        .handler(() => null),
+    }));
+  };
+  void checkDetachedOrdering;
+});
+
+test("action gate callbacks infer ctx, scope, invocation, permission, and target", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
   });
-  const base = context.collections({
+  const app = context.defineCollections({
     posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
   });
-  base.defineAction().policy(({ ctx, scope, invocation, permission }) => {
+  app.defineAction().policy(({ ctx, scope, invocation, permission }) => {
     expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
     expectTypeOf(scope).toEqualTypeOf<{ kind: "collection"; name: string } | { kind: "root" }>();
     expectTypeOf(invocation).toEqualTypeOf<{ kind: "action"; name: string }>();
     expectTypeOf(permission).toEqualTypeOf<AccessPermission>();
     return ctx.user ? fullAccess : none;
   });
+  app.posts.actions((defineAction) => ({
+    touch: defineAction()
+      .policy(({ ctx, target }) => {
+        expectTypeOf(target.id).toEqualTypeOf<string>();
+        expectTypeOf(target.doc.title).toEqualTypeOf<string>();
+        return ctx.user ? fullAccess : none;
+      })
+      .handler(({ id }) => ({ touched: id })),
+    detachedGate: defineAction()
+      .detached()
+      .policy((gate) => {
+        expectTypeOf(gate.target).toEqualTypeOf<undefined | { id: string; doc: never }>();
+        return gate.ctx.user ? fullAccess : none;
+      })
+      .handler(() => null),
+  }));
 });
 
 test("action and collection collisions are type errors", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  context.defineCollection({
-    schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
-    // @ts-expect-error CRUD method names are reserved
-    actions: (defineAction) => ({
+  const app = context.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+  const checkCollectionActionNames = () => {
+    app.posts.actions((defineAction) => ({
+      // @ts-expect-error CRUD method names are reserved
       get: defineAction()
         .policy(fullAccess)
         .handler(() => null),
-    }),
-  });
-  context.defineCollection({
-    schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
-    // @ts-expect-error action names must be safe TypeScript identifiers
-    actions: (defineAction) => ({
+    }));
+    app.posts.actions((defineAction) => ({
+      // @ts-expect-error action names must be safe TypeScript identifiers
       "bad-name": defineAction()
         .policy(fullAccess)
         .handler(() => null),
-    }),
-  });
+    }));
+  };
+  void checkCollectionActionNames;
 
-  const base = context.collections({
-    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
-  });
-  const action = base
+  const action = app
     .defineAction()
     .policy(fullAccess)
     .handler(() => null);
   const symbolName = Symbol("action");
   const checkCollisions = () => {
-    base.actions({
-      // @ts-expect-error root action names cannot collide with collections
-      posts: action,
+    app.actions({
+      $: {
+        // @ts-expect-error root action names cannot collide with collections
+        posts: action,
+      },
     });
-    base.actions({
-      // @ts-expect-error reflective names are reserved
-      // oxlint-disable-next-line unicorn/no-thenable -- verifies the API rejects thenables
-      then: action,
+    app.actions({
+      $: {
+        // @ts-expect-error reflective names are reserved
+        // oxlint-disable-next-line unicorn/no-thenable -- verifies the API rejects thenables
+        then: action,
+      },
     });
-    base.actions({
-      // @ts-expect-error action names must be safe TypeScript identifiers
-      "bad-name": action,
+    app.actions({
+      $: {
+        // @ts-expect-error action names must be safe TypeScript identifiers
+        "bad-name": action,
+      },
     });
-    base.actions({
-      // @ts-expect-error numeric action names are not public identifiers
-      1: action,
+    app.actions({
+      $: {
+        // @ts-expect-error numeric action names are not public identifiers
+        1: action,
+      },
     });
-    base.actions({
-      // @ts-expect-error symbol action names are not public identifiers
-      [symbolName]: action,
+    app.actions({
+      $: {
+        // @ts-expect-error symbol action names are not public identifiers
+        [symbolName]: action,
+      },
     });
     // @ts-expect-error collection names must be safe TypeScript identifiers
-    context.collections({
+    context.defineCollections({
       "bad-name": {
         schema: z.object({ title: z.string() }),
         accessPolicy: fullAccess,
       },
     });
     // @ts-expect-error numeric collection names are not public identifiers
-    context.collections({
+    context.defineCollections({
       1: {
         schema: z.object({ title: z.string() }),
         accessPolicy: fullAccess,
       },
     });
     // @ts-expect-error symbol collection names are not public identifiers
-    context.collections({
+    context.defineCollections({
       [symbolName]: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    });
+    // @ts-expect-error app definition members are reserved collection names
+    context.defineCollections({
+      actions: {
         schema: z.object({ title: z.string() }),
         accessPolicy: fullAccess,
       },
@@ -690,15 +680,15 @@ test("action and collection collisions are type errors", () => {
   void checkCollisions;
 });
 
-test("policy context uses permission vocabulary", () => {
+test("policy context uses the widened permission vocabulary", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  context.collections({
+  context.defineCollections({
     posts: {
       schema: z.object({ title: z.string() }),
       accessPolicy({ permission, collection, user }) {
-        expectTypeOf(permission).toEqualTypeOf<Exclude<AccessPermission, "invoke">>();
+        expectTypeOf(permission).toEqualTypeOf<AccessPermission>();
         expectTypeOf(collection).toEqualTypeOf<string>();
         expectTypeOf(user).toEqualTypeOf<User | null>();
         return none;
@@ -715,34 +705,35 @@ test("createTakibi binds TInitial then infers execution context from resolve", (
       return { tenantId: "acme" as const, user: { id: context.token } };
     },
   });
-  const posts = takibi.defineCollection({
-    schema: z.object({ title: z.string() }),
-    accessPolicy: fullAccess,
-    actions: (defineAction) => ({
-      ping: defineAction()
-        .policy(fullAccess)
-        .handler(({ ctx }) => {
-          expectTypeOf(ctx.user).toEqualTypeOf<{ id: string }>();
-          return { ok: true as const };
-        }),
-    }),
+  const app = takibi.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
   });
-  void posts;
+  app.posts.actions((defineAction) => ({
+    ping: defineAction()
+      .detached()
+      .policy(fullAccess)
+      .handler(({ ctx }) => {
+        expectTypeOf(ctx.user).toEqualTypeOf<{ id: string }>();
+        return { ok: true as const };
+      }),
+  }));
 });
 
 test("inferred document uses collection names from the handler", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const handler = context.collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy: fullAccess,
+  const handler = context
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
   type Document = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
   expectTypeOf<Document["title"]>().toEqualTypeOf<string>();
@@ -754,15 +745,17 @@ test("JsonValue includes arrays and inferred document ids are unconstrained stri
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const handler = context.collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy: fullAccess,
+  const handler = context
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
   type Document = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
   const dotted: Document["id"] = "post.1:item";
@@ -805,13 +798,13 @@ test("schema-bound policy requires pick keys on the collection document", () => 
     doc?.isSeed === true ? none : fullAccess,
   );
 
-  takibi.collections({
+  takibi.defineCollections({
     items: {
       schema: z.object({ name: z.string(), isSeed: z.boolean() }),
       accessPolicy: and(staff, seeded),
     },
   });
-  takibi.collections({
+  takibi.defineCollections({
     items: {
       schema: z.object({ name: z.string(), isSeed: z.boolean().optional() }),
       accessPolicy: seeded,
@@ -823,14 +816,14 @@ test("schema-bound policy requires pick keys on the collection document", () => 
   });
 
   const checkMissingKeys = () => {
-    takibi.collections({
+    takibi.defineCollections({
       items: {
         schema: z.object({ name: z.string() }),
         // @ts-expect-error schema-bound policy keys must exist on the collection document
         accessPolicy: seeded,
       },
     });
-    takibi.collections({
+    takibi.defineCollections({
       items: {
         schema: z.object({ name: z.string() }),
         // @ts-expect-error and() preserves the schema-bound key constraint
@@ -851,7 +844,7 @@ test("schema-bound policy requires pick keys on the collection document", () => 
   void checkMissingKeys;
 });
 
-test("collection actions accept the collection schema-bound policy as a gate", () => {
+test("document action gates accept schema-bound policies; detached and root do not", () => {
   const takibi = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: { id: "u1", role: "member" } }),
   });
@@ -861,42 +854,48 @@ test("collection actions accept the collection schema-bound policy as a gate", (
   );
   const itemSchema = z.object({ name: z.string(), isSeed: z.boolean() });
 
-  takibi.defineCollection({
-    schema: itemSchema,
-    accessPolicy: and(staff, seeded),
-    actions: (defineAction) => ({
-      duplicate: defineAction()
-        .policy(seeded)
-        .handler(() => null),
-      publish: defineAction()
-        .policy(and(staff, seeded))
-        .handler(() => null),
-    }),
-  });
-
-  const base = takibi.collections({
+  const app = takibi.defineCollections({
     items: { schema: itemSchema, accessPolicy: seeded },
   });
+  app.items.actions((defineAction) => ({
+    duplicate: defineAction()
+      .policy(seeded)
+      .handler(() => null),
+    publish: defineAction()
+      .policy(and(staff, seeded))
+      .handler(() => null),
+  }));
+
   const checkRootRejectsSchemaBound = () => {
-    base
+    app
       .defineAction()
-      // @ts-expect-error root actions have no collection schema to bind
+      // @ts-expect-error root actions have no target document to bind
       .policy(seeded)
       .handler(() => null);
   };
   void checkRootRejectsSchemaBound;
 
+  const checkDetachedRejectsSchemaBound = () => {
+    app.items.actions((defineAction) => ({
+      ping: defineAction()
+        .detached()
+        // @ts-expect-error detached actions have no target document to bind
+        .policy(seeded)
+        .handler(() => null),
+    }));
+  };
+  void checkDetachedRejectsSchemaBound;
+
   const checkActionPickKeys = () => {
-    takibi.defineCollection({
-      schema: z.object({ name: z.string() }),
-      accessPolicy: fullAccess,
-      actions: (defineAction) => ({
-        ping: defineAction()
-          // @ts-expect-error schema-bound policy keys must exist on the collection document
-          .policy(seeded)
-          .handler(() => null),
-      }),
+    const bare = takibi.defineCollections({
+      items: { schema: z.object({ name: z.string() }), accessPolicy: fullAccess },
     });
+    bare.items.actions((defineAction) => ({
+      ping: defineAction()
+        // @ts-expect-error schema-bound policy keys must exist on the collection document
+        .policy(seeded)
+        .handler(() => null),
+    }));
   };
   void checkActionPickKeys;
 });
@@ -924,7 +923,7 @@ test("execution context keys are application-owned across resolve, stub, and pol
       return context.namespace.get(context.namespace.idFromName(resolved.clinic.slug));
     },
   });
-  takibi.collections({
+  takibi.defineCollections({
     posts: {
       schema: z.object({ title: z.string() }),
       accessPolicy({ clinic, actor }) {
@@ -942,15 +941,17 @@ test("ClientOf matches createClient and rejects collection maps", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const handler = context.collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy: fullAccess,
+  const handler = context
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
 
   type FromAlias = ClientOf<typeof handler>;
   type FromFactory = ReturnType<typeof createClient<typeof handler>>;
@@ -968,15 +969,17 @@ test("list options can be projected from a public collection method", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const handler = context.collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string(), published: z.boolean() }),
-        accessPolicy: fullAccess,
+  const handler = context
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({ title: z.string(), published: z.boolean() }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    { memory: true },
-  );
+      { memory: true },
+    )
+    .actions({});
   const client = createClient<typeof handler>("http://fire.test");
   type PostListOptions = NonNullable<Parameters<typeof client.posts.list>[0]>;
   expectTypeOf<PostListOptions>().toHaveProperty("limit");
@@ -1000,13 +1003,14 @@ test("with({ memory: true }) keeps ClientOf collection action names", () => {
   const posts = context.defineCollection({
     schema: z.object({ title: z.string() }),
     accessPolicy: fullAccess,
-    actions: (defineAction) => ({
-      duplicate: defineAction()
-        .policy(fullAccess)
-        .handler(() => ({ copied: true as const })),
-    }),
   });
-  const handler = context.collections({ posts });
+  const app = context.defineCollections({ posts });
+  const postsActions = app.posts.actions((defineAction) => ({
+    duplicate: defineAction()
+      .policy(fullAccess)
+      .handler(() => ({ copied: true as const })),
+  }));
+  const handler = app.actions({ posts: postsActions });
   const forked = handler.with({ memory: true });
   const replaced = handler.with({
     memory: true,

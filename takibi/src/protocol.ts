@@ -36,9 +36,12 @@ export function decodeWireRequest(body: unknown): WireRequest {
   assertContext(r.context);
 
   if (r.kind === "action") {
-    assertExactKeys(r, ["kind", "scope", "name", "input", "context"]);
+    assertExactKeys(r, ["kind", "scope", "name", "id", "input", "context"]);
     if (typeof r.scope !== "string" || typeof r.name !== "string") {
       throw new BadRequestError("Invalid action wire request");
+    }
+    if ("id" in r && (typeof r.id !== "string" || r.id === "")) {
+      throw new BadRequestError("Invalid action id");
     }
     return r as ActionWireRequest;
   }

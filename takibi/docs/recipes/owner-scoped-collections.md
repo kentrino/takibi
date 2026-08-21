@@ -61,12 +61,14 @@ const noteOwnerPolicy = context.policy(
   },
 );
 
-const handler = context.collections({
-  notes: {
-    schema: noteSchema,
-    accessPolicy: noteOwnerPolicy,
-  },
-});
+const handler = context
+  .defineCollections({
+    notes: {
+      schema: noteSchema,
+      accessPolicy: noteOwnerPolicy,
+    },
+  })
+  .actions({});
 ```
 
 Clients must send `ownerId`; fire does not insert it. Trusted Durable Object

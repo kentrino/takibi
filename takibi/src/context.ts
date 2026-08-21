@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import {
   ActionRegistry,
   assertCollectionName,
-  createActionBuilder,
+  assertNoActionsOption,
+  createDocumentActionBuilder,
+  createRootActionBuilder,
   defineCollection as defineCollectionValue,
-  getCollectionActions,
   type ActionDefinitions,
-  type RootActionArgs,
 } from "./action";
 import { executeAction } from "./action-executor";
 import {
@@ -18,6 +18,8 @@ import {
   mergeLoggingOptions,
 } from "./context-runtime";
 import type {
+  ActionScopeMap,
+  AppDefinition,
   ContextConfig,
   ContextResolver,
   ContextStubResolver,
@@ -33,6 +35,7 @@ import {
   decodePublicHttp,
   decodePublicRoute,
   matchesPublicPrefix,
+  rawPathSegments,
   type PublicRequest,
 } from "./http";
 import { resolveLogging, withLoggedSpan, type LoggingOptions } from "./logging";
@@ -85,8 +88,7 @@ function buildContext<TInitial>(
   return {
     policy: createPolicyHelper(),
     defineCollection: defineCollectionValue,
-    collections(collections, options: InternalCollectionsOptions = {}) {
-      const registry = new ActionRegistry();
+    defineCollections(collections, options: InternalCollectionsOptions = {}) {
       if (typeof collections !== "object" || collections === null) {
         throw new TakibiError("INVALID_COLLECTION", "Collections must be an object", 500);
       }
@@ -94,7 +96,6 @@ function buildContext<TInitial>(
       if (prototype !== Object.prototype && prototype !== null) {
         throw new TakibiError("INVALID_COLLECTION", "Collections must be a plain object", 500);
       }
-      const collectionEntries: Array<[string, CollectionsDef<object>[string]]> = [];
       for (const propertyKey of Reflect.ownKeys(collections)) {
         if (typeof propertyKey !== "string") {
           throw new TakibiError("INVALID_COLLECTION", "Collection names must be strings", 500);
@@ -107,46 +108,95 @@ function buildContext<TInitial>(
             500,
           );
         }
-        collectionEntries.push([propertyKey, descriptor.value as CollectionsDef<object>[string]]);
+        const definition = descriptor.value as CollectionsDef<object>[string];
+        assertCollectionName(propertyKey);
+        assertNoActionsOption(definition);
+        assertCollectionMigrations(definition, propertyKey);
       }
-      const collectionNames = new Set(collectionEntries.map(([name]) => name));
-      for (const [name, definition] of collectionEntries) {
-        assertCollectionName(name);
-        assertCollectionMigrations(definition, name);
-        if (
-          Object.prototype.hasOwnProperty.call(definition, "actions") &&
-          getCollectionActions(definition) === null
-        ) {
-          throw new TakibiError(
-            "INVALID_COLLECTION",
-            `Collection actions require defineCollection(): ${name}`,
-            500,
-          );
-        }
-        const definitions = getCollectionActions(definition);
-        if (definitions) registry.registerCollectionActions(name, definitions);
-      }
-      return assembleHandler({
-        collections,
-        registry,
-        collectionNames,
+      return createAppDefinition({
+        collections: collections as CollectionsDef<object>,
         resolve,
         resolveStub,
         options: { ...defaults, ...options },
-      });
+      }) as never;
     },
   };
+}
+
+function createAppDefinition<TInitial>(args: {
+  collections: CollectionsDef<object>;
+  resolve: ContextResolver<object, TInitial>;
+  resolveStub?: ContextStubResolver<object, TInitial>;
+  options: InternalCollectionsOptions;
+}): AppDefinition<object, CollectionsDef<object>, TInitial> {
+  const { collections, resolve, resolveStub, options } = args;
+  const collectionNames = new Set(Object.keys(collections));
+  let assembled = false;
+
+  const app = Object.create(null) as Record<string, unknown>;
+  for (const name of collectionNames) {
+    app[name] = {
+      actions(define: (defineAction: () => unknown) => ActionDefinitions) {
+        return define(() => createDocumentActionBuilder(name));
+      },
+    };
+  }
+  app.defineAction = () => createRootActionBuilder();
+  app.actions = (map: ActionScopeMap) => {
+    if (assembled) {
+      throw new TakibiError("INVALID_ACTION", "app.actions() can only be called once", 500);
+    }
+    if (typeof map !== "object" || map === null) {
+      throw new TakibiError("INVALID_ACTION", "Action scope map must be an object", 500);
+    }
+    const mapPrototype = Object.getPrototypeOf(map);
+    if (mapPrototype !== Object.prototype && mapPrototype !== null) {
+      throw new TakibiError("INVALID_ACTION", "Action scope map must be a plain object", 500);
+    }
+    const registry = new ActionRegistry();
+    for (const scopeKey of Reflect.ownKeys(map)) {
+      if (typeof scopeKey !== "string") {
+        throw new TakibiError("INVALID_ACTION", "Action scopes must be strings", 500);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(map, scopeKey);
+      if (!descriptor?.enumerable || !("value" in descriptor)) {
+        throw new TakibiError(
+          "INVALID_ACTION",
+          `Action scopes must be enumerable data properties: ${scopeKey}`,
+          500,
+        );
+      }
+      const definitions = descriptor.value as ActionDefinitions;
+      if (scopeKey === "$") {
+        registry.registerRootActions(definitions, collectionNames);
+      } else if (collectionNames.has(scopeKey)) {
+        registry.registerCollectionActions(scopeKey, definitions);
+      } else {
+        throw new TakibiError("INVALID_ACTION", `Unknown action scope: ${scopeKey}`, 500);
+      }
+    }
+    assembled = true;
+    return assembleHandler({
+      collections,
+      registry,
+      actionMap: map,
+      resolve,
+      resolveStub,
+      options,
+    });
+  };
+  return app as unknown as AppDefinition<object, CollectionsDef<object>, TInitial>;
 }
 
 function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(args: {
   collections: TCollections;
   registry: ActionRegistry;
-  collectionNames: Set<string>;
+  actionMap: ActionScopeMap;
   resolve: ContextResolver<object, TInitial>;
   resolveStub?: ContextStubResolver<object, TInitial>;
   options: InternalCollectionsOptions;
 }): TakibiHandler<object, TCollections, TInitial> {
-  const { collections, registry, collectionNames, resolve, resolveStub, options } = args;
+  const { collections, registry, actionMap, resolve, resolveStub, options } = args;
   const memory = options.memory ?? false;
   const app = new Hono<{ Bindings: Record<string, unknown> }>();
   const logger = resolveLogging(options);
@@ -205,7 +255,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
       if (!resolveStub) {
         throw new TakibiError(
           "MISSING_STUB",
-          "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
+          "Durable Object mode requires stub on createTakibi()({ stub }) — or use defineCollections(..., { memory: true }) for tests",
           500,
         );
       }
@@ -292,16 +342,16 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     return tracer ? bindTracer(tracer, execute) : execute();
   };
 
-  const mountPublicRoute = (path: string, extra = false) => {
+  // Routes read the trailing raw path segments: action ids are split on the
+  // raw last colon before percent-decoding (Hono params decode too early).
+  const mountPublicRoute = (path: string, segmentCount: number, extra = false) => {
     app.all(path, async (c) => {
       const response = await serveDecoded(c.req.raw, {}, () =>
         extra
           ? Promise.reject(new NotFoundError())
           : decodePublicRoute(
               c.req.method,
-              [c.req.param("collection"), c.req.param("id")].filter(
-                (segment): segment is string => segment != null && segment !== "",
-              ),
+              rawPathSegments(new URL(c.req.url).pathname, segmentCount),
               new URL(c.req.url).searchParams,
               () => (c.req.raw.body === null ? Promise.resolve(undefined) : c.req.json()),
             ),
@@ -310,33 +360,26 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     });
   };
 
-  mountPublicRoute("/:collection");
-  mountPublicRoute("/:collection/:id");
-  mountPublicRoute("/:collection/:id/*", true);
+  mountPublicRoute("/:collection", 1);
+  mountPublicRoute("/:collection/:id", 2);
+  mountPublicRoute("/:collection/:id/*", 0, true);
   app.all("/", async (c) => {
     const response = await serveDecoded(c.req.raw, {}, () => decodePublicHttp(c.req.raw));
     return c.newResponse(response.body, response);
   });
 
   const DurableObjectClass = createDurableObjectClass(collections, registry, options, logger);
-  const rootActions = Object.create(null) as ActionDefinitions;
   const handler = app as TakibiHandler<object, TCollections, TInitial>;
   Object.defineProperty(handler, "~takibi", {
     value: {
       context: null as unknown as object,
       initial: null as unknown as TInitial,
       collections,
-      actions: rootActions,
+      actions: actionMap,
     },
     enumerable: false,
   });
   handler.DurableObject = DurableObjectClass as typeof handler.DurableObject;
-  handler.defineAction = () =>
-    createActionBuilder<object, "root", RootActionArgs<object, TCollections>>("root");
-  handler.actions = ((definitions: ActionDefinitions) => {
-    registry.registerRootActions(definitions, collectionNames);
-    return handler;
-  }) as typeof handler.actions;
   handler.handle = async (request, handleOptions) => {
     if (!matchesPublicPrefix(new URL(request.url).pathname, handleOptions.prefix)) {
       return { matched: false };
@@ -359,7 +402,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     assembleHandler({
       collections,
       registry: registry.clone(),
-      collectionNames,
+      actionMap,
       resolve: withOptions.resolve ?? resolve,
       options: { ...mergeLoggingOptions(options, withOptions), memory: true },
     })) as typeof handler.with;

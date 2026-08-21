@@ -10,15 +10,17 @@ type AppCtx = { tenantId: string };
 
 function createApp(options?: { memory?: boolean }) {
   const context = createTakibi()({ resolve: (): AppCtx => ({ tenantId: "tenant-a" }) });
-  return context.collections(
-    {
-      posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy: fullAccess,
+  return context
+    .defineCollections(
+      {
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+        },
       },
-    },
-    options,
-  );
+      options,
+    )
+    .actions({});
 }
 
 function clientOf(handler: ReturnType<typeof createApp>) {
