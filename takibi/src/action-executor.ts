@@ -6,6 +6,7 @@ import { withLoggedSpan, type InternalLogger } from "./logging";
 import { actionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import {
   allows,
+  denialReasonOf,
   evaluateAccessPolicy,
   isAccessGrant,
   isConstrainedPolicy,
@@ -114,7 +115,7 @@ export async function executeAction<TCtx extends object>(
         if (!isAccessGrant(grant)) {
           throw new TakibiError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
         }
-        return allows(grant, definition.permission);
+        return grant;
       },
     );
 
@@ -133,10 +134,12 @@ export async function executeAction<TCtx extends object>(
         permission: definition.permission,
         target: { id, doc },
       };
-      const allowed = await evaluateGate(gateContext, doc);
+      const grant = await evaluateGate(gateContext, doc);
       // The document is already loaded. Concealment (ADR 0015) applies to CRUD
       // get / update / delete / set, not to a gate that denied a found target.
-      if (!allowed) throw new ForbiddenError();
+      if (!allows(grant, definition.permission)) {
+        throw new ForbiddenError("Forbidden", denialReasonOf(grant, definition.permission));
+      }
       const input = await parseInput();
       return runHandler({ input, id, doc, ...scopedArgs(scopedStorage) });
     };
@@ -150,8 +153,10 @@ export async function executeAction<TCtx extends object>(
     invocation: { kind: "action", name: invocation.name },
     permission: definition.permission,
   };
-  const allowed = await evaluateGate(gateContext);
-  if (!allowed) throw new ForbiddenError();
+  const grant = await evaluateGate(gateContext);
+  if (!allows(grant, definition.permission)) {
+    throw new ForbiddenError("Forbidden", denialReasonOf(grant, definition.permission));
+  }
   const input = await parseInput();
   const run = async (scopedStorage: StorageDriver): Promise<JsonValue> =>
     runHandler({ input, ...scopedArgs(scopedStorage) });

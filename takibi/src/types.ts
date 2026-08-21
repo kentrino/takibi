@@ -133,6 +133,29 @@ export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | 
 export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
 
 declare const accessGrantBrand: unique symbol;
+declare const policyReasonCodeBrand: unique symbol;
+
+export type PolicyReason<TCode extends string = string> = {
+  /**
+   * Stable, machine-readable identifier for a public policy denial reason.
+   * Clients should branch on this value and map it to localized UI copy.
+   */
+  readonly code: TCode;
+  /**
+   * Optional, non-localized developer description. This value is serialized
+   * to clients, so it must be static and must not contain sensitive data.
+   */
+  readonly description?: string;
+};
+
+/** @internal Type-only carrier used to preserve policy reason literals. */
+export type PolicyReasonCodeCarrier<TCode extends string> = {
+  readonly [policyReasonCodeBrand]: TCode;
+};
+
+/** Extract the policy reason code union carried by a policy definition. */
+export type PolicyReasonCodeOf<T> =
+  T extends PolicyReasonCodeCarrier<infer TCode extends string> ? TCode : never;
 
 /** Opaque grant a policy returns. Build with `grant(...)` or a predefined grant. */
 export type AccessGrant = {
@@ -180,9 +203,11 @@ export type CollectionDefinition<
   // Default `any` keeps collection maps assignable regardless of concrete context.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional for assignability
   TCtx extends object = any,
+  TPolicy extends AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>> =
+    AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>,
 > = {
   schema: JsonDocumentSchema<TSchema>;
-  accessPolicy: AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>;
+  accessPolicy: TPolicy;
   migrations?: CollectionMigrations<StandardSchemaV1.InferInput<TSchema>>;
   /**
    * Initial documents keyed by document ID. Seeds are create-only: existing
@@ -238,16 +263,24 @@ export type TakibiValidationFailure = {
   issues: readonly ValidationIssue[];
 };
 
-export type TakibiOperationFailure = {
+type TakibiOperationFailureBase = {
   kind: "operation";
   code: string;
   message: string;
   status: number;
 };
 
-export type TakibiFailure = TakibiValidationFailure | TakibiOperationFailure;
+export type TakibiOperationFailure<TReasonCode extends string = never> =
+  TakibiOperationFailureBase &
+    ([TReasonCode] extends [never] ? object : { reason?: PolicyReason<TReasonCode> });
 
-export type TakibiResult<T> = { ok: true; data: T } | { ok: false; error: TakibiFailure };
+export type TakibiFailure<TReasonCode extends string = never> =
+  | TakibiValidationFailure
+  | TakibiOperationFailure<TReasonCode>;
+
+export type TakibiResult<T, TReasonCode extends string = never> =
+  | { ok: true; data: T }
+  | { ok: false; error: TakibiFailure<TReasonCode> };
 
 /** Throwing, server-side CRUD facade used by actions and trusted `$collections`. */
 export type CollectionApi<C> = {
@@ -270,26 +303,37 @@ export type CollectionsApi<TCollections> = {
 };
 
 /** Result-shaped CRUD facade used by the public HTTP client. */
+type CollectionPolicyReasonCode<C> = C extends { accessPolicy: infer TPolicy }
+  ? PolicyReasonCodeOf<TPolicy>
+  : never;
+
 export type ClientCollectionApi<C> = {
   add: (
     data: CollectionDataInput<C>,
     options?: { id?: DocumentId },
-  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
   set: (
     id: DocumentId,
     data: CollectionWriteInput<C>,
-  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
-  get: (id: DocumentId) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
+  get: (
+    id: DocumentId,
+  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
   update: (
     id: DocumentId,
     data: CollectionPatchInput<C>,
-  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
-  delete: (id: DocumentId) => Promise<TakibiResult<{ id: DocumentId }>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
+  delete: (
+    id: DocumentId,
+  ) => Promise<TakibiResult<{ id: DocumentId }, CollectionPolicyReasonCode<C>>>;
   list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<
-    TakibiResult<{
-      items: InferCollectionDoc<C>[];
-      nextCursor?: string;
-    }>
+    TakibiResult<
+      {
+        items: InferCollectionDoc<C>[];
+        nextCursor?: string;
+      },
+      CollectionPolicyReasonCode<C>
+    >
   >;
 };
 

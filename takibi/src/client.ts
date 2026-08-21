@@ -6,6 +6,7 @@ import { compileListOptions } from "./query";
 import type {
   ClientCollectionApi,
   CollectionOperation,
+  PolicyReasonCodeOf,
   TakibiResult,
   StorageListOptions,
 } from "./types";
@@ -48,14 +49,22 @@ type ActionOutput<TAction> = TAction extends {
   ? NormalizeActionOutput<Awaited<TResult>>
   : never;
 
+type ActionReasonCode<TAction> = TAction extends { readonly policy: infer TPolicy }
+  ? PolicyReasonCodeOf<TPolicy>
+  : never;
+
 type DetachedActionClientMethod<TAction> = TAction extends {
   readonly inputSchema: infer TSchema;
 }
   ? TSchema extends StandardSchemaV1
     ? undefined extends ActionInput<TAction>
-      ? (input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
-      : (input: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
-    : () => Promise<TakibiResult<ActionOutput<TAction>>>
+      ? (
+          input?: ActionInput<TAction>,
+        ) => Promise<TakibiResult<ActionOutput<TAction>, ActionReasonCode<TAction>>>
+      : (
+          input: ActionInput<TAction>,
+        ) => Promise<TakibiResult<ActionOutput<TAction>, ActionReasonCode<TAction>>>
+    : () => Promise<TakibiResult<ActionOutput<TAction>, ActionReasonCode<TAction>>>
   : never;
 
 type DocumentActionClientMethod<TAction> = TAction extends {
@@ -63,9 +72,15 @@ type DocumentActionClientMethod<TAction> = TAction extends {
 }
   ? TSchema extends StandardSchemaV1
     ? undefined extends ActionInput<TAction>
-      ? (id: string, input?: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
-      : (id: string, input: ActionInput<TAction>) => Promise<TakibiResult<ActionOutput<TAction>>>
-    : (id: string) => Promise<TakibiResult<ActionOutput<TAction>>>
+      ? (
+          id: string,
+          input?: ActionInput<TAction>,
+        ) => Promise<TakibiResult<ActionOutput<TAction>, ActionReasonCode<TAction>>>
+      : (
+          id: string,
+          input: ActionInput<TAction>,
+        ) => Promise<TakibiResult<ActionOutput<TAction>, ActionReasonCode<TAction>>>
+    : (id: string) => Promise<TakibiResult<ActionOutput<TAction>, ActionReasonCode<TAction>>>
   : never;
 
 type ActionClientMethod<TAction> = TAction extends { readonly target: "document" }

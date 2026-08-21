@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
-import { decodeWireRequest } from "../src/protocol";
+import { decodeWireRequest, isWireResponse } from "../src/protocol";
 
 const context = { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
 
@@ -174,4 +174,65 @@ test("decodeWireRequest normalizes list queries and rejects malformed AST", () =
       },
     }),
   ).toThrow(BadRequestError);
+});
+
+test("isWireResponse accepts valid policy reasons and rejects malformed reasons", () => {
+  const valid = {
+    ok: false,
+    error: {
+      kind: "operation",
+      code: "FORBIDDEN",
+      message: "Forbidden",
+      status: 403,
+      reason: {
+        code: "LOCKED_ITEM",
+        description: "Locked items cannot be changed.",
+      },
+    },
+  };
+  expect(isWireResponse(valid)).toBe(true);
+  expect(
+    isWireResponse({
+      ...valid,
+      error: {
+        ...valid.error,
+        reason: { code: "LOCKED_ITEM" },
+      },
+    }),
+  ).toBe(true);
+
+  for (const reason of [
+    null,
+    "LOCKED_ITEM",
+    {},
+    { code: 42 },
+    { code: "LOCKED_ITEM", description: 42 },
+    { code: "LOCKED_ITEM", private: true },
+  ]) {
+    expect(
+      isWireResponse({
+        ...valid,
+        error: { ...valid.error, reason },
+      }),
+    ).toBe(false);
+  }
+  expect(
+    isWireResponse({
+      ...valid,
+      error: { ...valid.error, code: "NOT_FOUND" },
+    }),
+  ).toBe(false);
+  expect(
+    isWireResponse({
+      ...valid,
+      error: {
+        kind: "validation",
+        code: "VALIDATION",
+        message: "Invalid",
+        status: 400,
+        issues: [],
+        reason: { code: "LOCKED_ITEM" },
+      },
+    }),
+  ).toBe(false);
 });

@@ -16,4 +16,4 @@ export {
   UnauthorizedError,
 } from "./errors";
 
-export type { TakibiResult } from "./types";
+export type { PolicyReason, TakibiResult } from "./types";

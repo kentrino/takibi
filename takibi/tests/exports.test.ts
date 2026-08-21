@@ -23,6 +23,7 @@ import type {
   LogEvent,
   LogLevel,
   LoggingOptions,
+  PolicyReason,
   PrettyConsoleLoggerOptions,
   QueryBuilder,
   QueryExpr,
@@ -152,6 +153,7 @@ test("public annotation types use the collection/action vocabulary", () => {
     LogEvent: LogEvent;
     LogLevel: LogLevel;
     LoggingOptions: LoggingOptions;
+    PolicyReason: PolicyReason<"POLICY_DENIED">;
     PrettyConsoleLoggerOptions: PrettyConsoleLoggerOptions;
     QueryBuilder: QueryBuilder<Record<string, string>>;
     QueryExpr: QueryExpr;
@@ -426,6 +428,9 @@ test("createClient lives on the browser entry, not the Worker root", () => {
   expectTypeOf(TakibiClient.StaleWriteError).toBeConstructibleWith();
   expectTypeOf<TakibiClient.ClientOf<TakibiHandler>>().not.toBeNever();
   expectTypeOf<TakibiClient.CreateClientOptions>().toMatchTypeOf<CreateClientOptions>();
+  expectTypeOf<TakibiClient.PolicyReason<"POLICY_DENIED">>().toEqualTypeOf<
+    PolicyReason<"POLICY_DENIED">
+  >();
   expectTypeOf<TakibiClient.TakibiResult<unknown>>().toEqualTypeOf<TakibiResult<unknown>>();
 
   const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")) as {

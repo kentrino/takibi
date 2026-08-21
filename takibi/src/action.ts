@@ -164,6 +164,7 @@ export type ActionDefinition<
   TOutput extends JsonValue | void = JsonValue | void,
   TBaseArgs = unknown,
   TTarget extends ActionTarget = ActionTarget,
+  TPolicy = ActionGatePolicy<never, never>,
 > = {
   readonly [actionDefinitionBrand]: true;
   readonly kind: TKind;
@@ -173,7 +174,7 @@ export type ActionDefinition<
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
-  readonly policy: ActionGatePolicy<never, never>;
+  readonly policy: TPolicy;
   readonly handler: (
     args: TBaseArgs & { input: ParsedInput<TSchema> },
   ) => TOutput | Promise<TOutput>;
@@ -221,11 +222,12 @@ export type ActionHandlerBuilder<
   TBaseArgs,
   TSchema extends MaybeSchema,
   TTarget extends ActionTarget = "detached",
+  TPolicy = ActionGatePolicy<never, never>,
 > = {
   handler<TOutput extends JsonValue | void>(
     handler: (args: TBaseArgs & { input: ParsedInput<TSchema> }) => TOutput | Promise<TOutput>,
-  ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs, TTarget>;
-  atomic(): ActionHandlerBuilder<TKind, TBaseArgs, TSchema, TTarget>;
+  ): ActionDefinition<TKind, TSchema, TOutput, TBaseArgs, TTarget, TPolicy>;
+  atomic(): ActionHandlerBuilder<TKind, TBaseArgs, TSchema, TTarget, TPolicy>;
 };
 
 /**
@@ -250,18 +252,18 @@ export type DocumentActionBuilder<
   atomic(): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>;
   detached(): DetachedActionBuilder<TCtx, TDetachedArgs, TSchema>;
   policy: {
-    (
-      policy: AccessGrant | ContextPolicy<TCtx>,
-    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document">;
+    <const TPolicy extends AccessGrant | ContextPolicy<TCtx>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document", TPolicy>;
     // Inline gate callbacks must be tried before ConstrainedPolicy: that type
     // is an unbranded generic function, so it would contextually swallow bare
     // arrows and hide `target` from them.
-    (
-      policy: DocumentGatePolicyFn<TCtx, TDoc>,
-    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document">;
-    (
-      policy: DocumentConstrainedGate<TCtx extends object ? TCtx : object, TDoc>,
-    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document">;
+    <const TPolicy extends DocumentGatePolicyFn<TCtx, TDoc>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document", TPolicy>;
+    <const TPolicy extends DocumentConstrainedGate<TCtx extends object ? TCtx : object, TDoc>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"collection", TDocArgs, TSchema, "document", TPolicy>;
   };
 };
 
@@ -272,12 +274,12 @@ export type DetachedActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema =
   requires(permission: AccessPermission): DetachedActionBuilder<TCtx, TBaseArgs, TSchema>;
   atomic(): DetachedActionBuilder<TCtx, TBaseArgs, TSchema>;
   policy: {
-    (
-      policy: AccessGrant | ContextPolicy<TCtx>,
-    ): ActionHandlerBuilder<"collection", TBaseArgs, TSchema, "detached">;
-    (
-      policy: DetachedGatePolicyFn<TCtx>,
-    ): ActionHandlerBuilder<"collection", TBaseArgs, TSchema, "detached">;
+    <const TPolicy extends AccessGrant | ContextPolicy<TCtx>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"collection", TBaseArgs, TSchema, "detached", TPolicy>;
+    <const TPolicy extends DetachedGatePolicyFn<TCtx>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"collection", TBaseArgs, TSchema, "detached", TPolicy>;
   };
 };
 
@@ -288,12 +290,12 @@ export type RootActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema = und
   requires(permission: AccessPermission): RootActionBuilder<TCtx, TBaseArgs, TSchema>;
   atomic(): RootActionBuilder<TCtx, TBaseArgs, TSchema>;
   policy: {
-    (
-      policy: AccessGrant | ContextPolicy<TCtx>,
-    ): ActionHandlerBuilder<"root", TBaseArgs, TSchema, "detached">;
-    (
-      policy: DetachedGatePolicyFn<TCtx>,
-    ): ActionHandlerBuilder<"root", TBaseArgs, TSchema, "detached">;
+    <const TPolicy extends AccessGrant | ContextPolicy<TCtx>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"root", TBaseArgs, TSchema, "detached", TPolicy>;
+    <const TPolicy extends DetachedGatePolicyFn<TCtx>>(
+      policy: TPolicy,
+    ): ActionHandlerBuilder<"root", TBaseArgs, TSchema, "detached", TPolicy>;
   };
 };
 
@@ -309,7 +311,13 @@ type BuilderState = {
 function createHandlerBuilder(
   state: BuilderState,
   policy: ActionGatePolicy<unknown, unknown>,
-): ActionHandlerBuilder<ActionKind, unknown, MaybeSchema, ActionTarget> {
+): ActionHandlerBuilder<
+  ActionKind,
+  unknown,
+  MaybeSchema,
+  ActionTarget,
+  ActionGatePolicy<unknown, unknown>
+> {
   return {
     atomic() {
       return createHandlerBuilder({ ...state, atomic: true }, policy);
@@ -328,7 +336,13 @@ function createHandlerBuilder(
       };
       return Object.freeze(definition) as never;
     },
-  } as ActionHandlerBuilder<ActionKind, unknown, MaybeSchema, ActionTarget>;
+  } as ActionHandlerBuilder<
+    ActionKind,
+    unknown,
+    MaybeSchema,
+    ActionTarget,
+    ActionGatePolicy<unknown, unknown>
+  >;
 }
 
 function createBuilder(state: BuilderState): Record<string, unknown> {
@@ -375,18 +389,29 @@ export function createRootActionBuilder<TCtx, TBaseArgs>(): RootActionBuilder<TC
   }) as unknown as RootActionBuilder<TCtx, TBaseArgs>;
 }
 
-export type CollectionDefinitionInput<TSchema extends StandardSchemaV1, TCtx extends object> = {
+export type CollectionDefinitionInput<
+  TSchema extends StandardSchemaV1,
+  TCtx extends object,
+  TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"] = CollectionDefinition<
+    TSchema,
+    TCtx
+  >["accessPolicy"],
+> = {
   schema: CollectionDefinition<TSchema, TCtx>["schema"];
-  accessPolicy: CollectionDefinition<TSchema, TCtx>["accessPolicy"];
+  accessPolicy: TPolicy;
   migrations?: CollectionDefinition<TSchema, TCtx>["migrations"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];
 };
 
-export function defineCollection<TCtx extends object, TSchema extends StandardSchemaV1>(
-  definition: CollectionDefinitionInput<TSchema, TCtx>,
-): CollectionDefinition<TSchema, TCtx> {
+export function defineCollection<
+  TCtx extends object,
+  TSchema extends StandardSchemaV1,
+  const TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"],
+>(
+  definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy>,
+): CollectionDefinition<TSchema, TCtx, TPolicy> {
   assertNoActionsOption(definition);
-  return definition as CollectionDefinition<TSchema, TCtx>;
+  return definition as CollectionDefinition<TSchema, TCtx, TPolicy>;
 }
 
 export function assertNoActionsOption(definition: object): void {

@@ -14,7 +14,7 @@ export type WireRequest = CollectionWireRequest | ActionWireRequest;
 export type WireSuccess = { ok: true; data: unknown };
 export type WireFailure = {
   ok: false;
-  error: TakibiFailure;
+  error: TakibiFailure<string>;
 };
 export type WireResponse = WireSuccess | WireFailure;
 
@@ -128,8 +128,23 @@ export function isWireResponse(value: unknown): value is WireResponse {
     return false;
   }
   if (e.kind === "validation") {
-    return e.code === "VALIDATION" && e.status === 400 && Array.isArray(e.issues);
+    return (
+      !("reason" in e) && e.code === "VALIDATION" && e.status === 400 && Array.isArray(e.issues)
+    );
   }
-  if (e.kind === "operation") return true;
+  if (e.kind === "operation") {
+    if (!("reason" in e)) return true;
+    return e.code === "FORBIDDEN" && isPolicyReason(e.reason);
+  }
   return false;
+}
+
+function isPolicyReason(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.some((key) => key !== "code" && key !== "description")) return false;
+  return (
+    typeof value.code === "string" &&
+    (!("description" in value) || typeof value.description === "string")
+  );
 }

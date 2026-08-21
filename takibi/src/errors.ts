@@ -1,3 +1,5 @@
+import type { PolicyReason } from "./types";
+
 export class TakibiError extends Error {
   readonly code: string;
   readonly status: number;
@@ -17,10 +19,13 @@ export class UnauthorizedError extends TakibiError {
   }
 }
 
-export class ForbiddenError extends TakibiError {
-  constructor(message = "Forbidden") {
+export class ForbiddenError<TCode extends string = string> extends TakibiError {
+  readonly reason?: PolicyReason<TCode>;
+
+  constructor(message = "Forbidden", reason?: PolicyReason<TCode>) {
     super("FORBIDDEN", message, 403);
     this.name = "ForbiddenError";
+    this.reason = reason;
   }
 }
 
