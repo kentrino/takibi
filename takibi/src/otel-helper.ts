@@ -34,6 +34,7 @@ export const TAKIBI_SPAN = {
   action: "takibi.action",
   executor: "takibi.executor",
   policy: "takibi.policy",
+  request: "takibi.request",
   resolve: "takibi.resolve",
   schema: "takibi.schema",
   storage: "takibi.storage",

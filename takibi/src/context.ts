@@ -54,6 +54,7 @@ import {
   internalTracerKey,
   resolveTracer,
   tracedStorage,
+  withSpan,
   type SpanContext,
   type TakibiTracer,
 } from "./tracing";
@@ -373,102 +374,99 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     request: Request,
     initial: unknown,
     invocation: PublicRequest,
+    tracer: TakibiTracer | undefined,
   ): Promise<Response> => {
-    const tracer = resolveTracer(options);
-    const execute = async (): Promise<Response> => {
-      try {
-        await memoryReady;
-        const input = { request, context: initial as TInitial };
-        let resolveSpan: SpanContext | undefined;
-        const ctx = await withLoggedSpan(
-          logger,
-          { name: TAKIBI_SPAN.resolve, kind: "internal" },
-          { event: "takibi.resolve" },
-          async () => {
-            resolveSpan = activeSpanContext();
-            const resolved = await resolve(input);
-            assertSerializableContext(resolved);
-            return resolved;
-          },
-        );
+    try {
+      await memoryReady;
+      const input = { request, context: initial as TInitial };
+      let resolveSpan: SpanContext | undefined;
+      const ctx = await withLoggedSpan(
+        logger,
+        { name: TAKIBI_SPAN.resolve, kind: "internal" },
+        { event: "takibi.resolve" },
+        async () => {
+          resolveSpan = activeSpanContext();
+          const resolved = await resolve(input);
+          assertSerializableContext(resolved);
+          return resolved;
+        },
+      );
 
-        if (memoryDriver) {
-          const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
-          const data = await withLoggedSpan(
-            logger,
-            {
-              name: TAKIBI_SPAN.executor,
-              kind: "internal",
-              attributes: invocationSpanAttributes(invocation),
-            },
-            { event: "takibi.executor", ...debugInvocationFields(invocation) },
-            () =>
-              invocation.kind === "action"
-                ? executeAction(registry, collections, driver, ctx, invocation, logger)
-                : executeOperation(collections, driver, ctx, invocation, logger),
-            resolveSpan,
-          );
-          return Response.json({ ok: true, data } satisfies WireResponse);
-        }
-
-        if (!resolveStub) {
-          throw new TakibiError(
-            "MISSING_STUB",
-            "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
-            500,
-          );
-        }
-
-        const doStub = await resolveStub({ ...input, resolved: ctx });
-        if (!doStub || typeof doStub.fetch !== "function") {
-          throw new TakibiError(
-            "MISSING_STUB",
-            "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
-            500,
-          );
-        }
-
-        const wire: WireRequest = {
-          ...invocation,
-          context: ctx,
-        };
-
-        const json = await withLoggedSpan(
+      if (memoryDriver) {
+        const driver = tracer ? tracedStorage(memoryDriver) : memoryDriver;
+        const data = await withLoggedSpan(
           logger,
           {
-            name: TAKIBI_SPAN.wire,
-            kind: "client",
+            name: TAKIBI_SPAN.executor,
+            kind: "internal",
             attributes: invocationSpanAttributes(invocation),
           },
-          { event: "takibi.wire", ...debugInvocationFields(invocation) },
-          async () => {
-            const headers = new Headers({ "content-type": "application/json" });
-            injectTraceparent(headers);
-            const res = await doStub.fetch(
-              new Request("https://takibi.internal/", {
-                method: "POST",
-                headers,
-                body: JSON.stringify(wire),
-              }),
-            );
-            const body: unknown = await res.json();
-            if (!isWireResponse(body)) {
-              throw new TakibiError(
-                "INVALID_DO_RESPONSE",
-                "Invalid response from Durable Object",
-                500,
-              );
-            }
-            return body;
-          },
+          { event: "takibi.executor", ...debugInvocationFields(invocation) },
+          () =>
+            invocation.kind === "action"
+              ? executeAction(registry, collections, driver, ctx, invocation, logger)
+              : executeOperation(collections, driver, ctx, invocation, logger),
           resolveSpan,
         );
-        return Response.json(json, { status: json.ok ? 200 : json.error.status });
-      } catch (err) {
-        return errorResponse(err, logger, invocation);
+        return Response.json({ ok: true, data } satisfies WireResponse);
       }
-    };
-    return tracer ? bindTracer(tracer, execute) : execute();
+
+      if (!resolveStub) {
+        throw new TakibiError(
+          "MISSING_STUB",
+          "Durable Object mode requires stub on createTakibi()({ stub }) — or use collections(..., { memory: true }) for tests",
+          500,
+        );
+      }
+
+      const doStub = await resolveStub({ ...input, resolved: ctx });
+      if (!doStub || typeof doStub.fetch !== "function") {
+        throw new TakibiError(
+          "MISSING_STUB",
+          "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
+          500,
+        );
+      }
+
+      const wire: WireRequest = {
+        ...invocation,
+        context: ctx,
+      };
+
+      const json = await withLoggedSpan(
+        logger,
+        {
+          name: TAKIBI_SPAN.wire,
+          kind: "client",
+          attributes: invocationSpanAttributes(invocation),
+        },
+        { event: "takibi.wire", ...debugInvocationFields(invocation) },
+        async () => {
+          const headers = new Headers({ "content-type": "application/json" });
+          injectTraceparent(headers);
+          const res = await doStub.fetch(
+            new Request("https://takibi.internal/", {
+              method: "POST",
+              headers,
+              body: JSON.stringify(wire),
+            }),
+          );
+          const body: unknown = await res.json();
+          if (!isWireResponse(body)) {
+            throw new TakibiError(
+              "INVALID_DO_RESPONSE",
+              "Invalid response from Durable Object",
+              500,
+            );
+          }
+          return body;
+        },
+        resolveSpan,
+      );
+      return Response.json(json, { status: json.ok ? 200 : json.error.status });
+    } catch (err) {
+      return errorResponse(err, logger, invocation);
+    }
   };
 
   const serveDecoded = async (
@@ -476,37 +474,43 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     initial: unknown,
     decode: () => Promise<PublicRequest>,
   ): Promise<Response> => {
-    let invocation: PublicRequest | undefined;
-    try {
-      invocation = await decode();
-      const startedAt = performance.now();
-      logger?.emit({
-        level: "info",
-        event: "takibi.request",
-        message: "started",
-        ...invocationFields(invocation),
+    const tracer = resolveTracer(options);
+    const execute = () =>
+      withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, async () => {
+        const startedAt = performance.now();
+        let invocation: PublicRequest | undefined;
+        let response: Response;
+        try {
+          invocation = await decode();
+          logger?.emit({
+            level: "info",
+            event: "takibi.request",
+            message: "started",
+            ...invocationFields(invocation),
+          });
+          response = await run(request, initial, invocation, tracer);
+        } catch (err) {
+          response = errorResponse(err, logger, invocation);
+        }
+        logger?.emit({
+          level: "info",
+          event: "takibi.request",
+          message: "completed",
+          ...(invocation === undefined ? {} : invocationFields(invocation)),
+          durationMs: performance.now() - startedAt,
+          status: response.status,
+        });
+        return response;
       });
-      const response = await run(request, initial, invocation);
-      logger?.emit({
-        level: "info",
-        event: "takibi.request",
-        message: "completed",
-        ...invocationFields(invocation),
-        durationMs: performance.now() - startedAt,
-        status: response.status,
-      });
-      return response;
-    } catch (err) {
-      return errorResponse(err, logger, invocation);
-    }
+    return tracer ? bindTracer(tracer, execute) : execute();
   };
 
   const mountPublicRoute = (path: string, extra = false) => {
     app.all(path, async (c) => {
-      const response = extra
-        ? errorResponse(new NotFoundError(), logger)
-        : await serveDecoded(c.req.raw, {}, () =>
-            decodePublicRoute(
+      const response = await serveDecoded(c.req.raw, {}, () =>
+        extra
+          ? Promise.reject(new NotFoundError())
+          : decodePublicRoute(
               c.req.method,
               [c.req.param("collection"), c.req.param("id")].filter(
                 (segment): segment is string => segment != null && segment !== "",
@@ -514,7 +518,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
               new URL(c.req.url).searchParams,
               () => (c.req.raw.body === null ? Promise.resolve(undefined) : c.req.json()),
             ),
-          );
+      );
       return c.newResponse(response.body, response);
     });
   };
@@ -613,18 +617,18 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
     async fetch(request: Request): Promise<Response> {
       const tracer = resolveTracer(options);
       const execute = async (): Promise<Response> => {
-        let invocation: PublicRequest | undefined;
-        try {
-          const body = decodeWireRequest(await request.json());
-          const { context, ...decodedInvocation } = body;
-          invocation = decodedInvocation;
-          assertTenantMatchesDurableObjectName(this.#state.id.name, context);
-          await this.#ready;
-          const ctx = context;
-          const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-          const extracted = extractTraceContext(request.headers);
-          const executeWithSpan = () =>
-            withLoggedSpan(
+        const extracted = extractTraceContext(request.headers);
+        const executeWithContext = async (): Promise<Response> => {
+          let invocation: PublicRequest | undefined;
+          try {
+            const body = decodeWireRequest(await request.json());
+            const { context, ...decodedInvocation } = body;
+            invocation = decodedInvocation;
+            assertTenantMatchesDurableObjectName(this.#state.id.name, context);
+            await this.#ready;
+            const ctx = context;
+            const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
+            const data = await withLoggedSpan(
               logger,
               {
                 name: TAKIBI_SPAN.executor,
@@ -651,13 +655,14 @@ function createDurableObjectClass<TCollections extends CollectionsDef>(
                     ),
               extracted?.span,
             );
-          const data = await (extracted
-            ? extracted.runWithActiveContext(executeWithSpan)
-            : executeWithSpan());
-          return Response.json({ ok: true, data } satisfies WireResponse);
-        } catch (err) {
-          return errorResponse(err, logger, invocation);
-        }
+            return Response.json({ ok: true, data } satisfies WireResponse);
+          } catch (err) {
+            return errorResponse(err, logger, invocation);
+          }
+        };
+        return extracted
+          ? extracted.runWithActiveContext(executeWithContext)
+          : executeWithContext();
       };
       return tracer ? bindTracer(tracer, execute) : execute();
     }
