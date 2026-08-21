@@ -134,8 +134,9 @@ export async function executeAction<TCtx extends object>(
         target: { id, doc },
       };
       const allowed = await evaluateGate(gateContext, doc);
-      // Denial conceals existence: same error as a missing document (ADR 0015).
-      if (!allowed) throw new NotFoundError(`Document not found: ${id}`);
+      // The document is already loaded. Concealment (ADR 0015) applies to CRUD
+      // get / update / delete / set, not to a gate that denied a found target.
+      if (!allowed) throw new ForbiddenError();
       const input = await parseInput();
       return runHandler({ input, id, doc, ...scopedArgs(scopedStorage) });
     };

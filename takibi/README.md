@@ -234,7 +234,7 @@ tooling, or guarantee when inactive tenants finish migrating.
 | set                      | saved value if present, else absent | validated replace candidate  |
 | invoke (document action) | target document (gate)              | —                            |
 
-Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying get / update / delete / **set** also returns `NOT_FOUND` so IDs are not leaked — `set` uses the same code for a new id and an existing id. Denying create (`add`) / list returns `FORBIDDEN`.
+Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying get / update / delete / **set** also returns `NOT_FOUND` so IDs are not leaked — `set` uses the same code for a new id and an existing id. Denying create (`add`) / list returns `FORBIDDEN`. Denying a document-action gate returns `FORBIDDEN` when the document exists; a missing id is `NOT_FOUND`.
 
 ### Grants: `fullAccess` / `write` / `read` / `none` / `grant(...)`
 
@@ -378,8 +378,9 @@ Every action has a mandatory gate policy. A document action's `.policy()`
 accepts the same schema-bound policy as that collection's `accessPolicy` and
 evaluates it **with the target document**
 (`{ operation: "invoke", permission, doc }`), so document-attribute rules work
-in the gate. A gate callback receives `target: { id, doc }`. Gate denial is
-concealed as `NOT_FOUND`, like get / update / delete.
+in the gate. A gate callback receives `target: { id, doc }`. A missing document
+is `NOT_FOUND`. Gate denial on a found document is `FORBIDDEN` — existence
+concealment stays on CRUD get / update / delete / set.
 
 Detached and root actions have no target document: their gate takes a grant, a
 context-only policy, or a gate callback (without `target`) — schema-bound

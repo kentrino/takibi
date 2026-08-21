@@ -61,7 +61,7 @@ function createActionApp() {
   const app = context.defineCollections({ posts, audits }, { memory: true });
 
   const postsActions = app.posts.actions((defineAction) => ({
-    // Document action gated by a schema-bound policy: secret docs are concealed.
+    // Document action gated by a schema-bound policy: secret docs deny invoke.
     duplicate: defineAction()
       .input(z.object({ title: z.string().min(1) }))
       .policy(postGate)
@@ -243,8 +243,11 @@ test("document actions reuse a schema-bound accessPolicy as a doc-aware gate", a
     fetch: (input, init) => handler.request(input, init),
   });
   expect(await member.posts.touch("open")).toEqual({ ok: true, data: { touched: "open" } });
-  // Gate denial on a secret seed document conceals existence (ADR 0015).
   expect(await member.posts.touch("hidden")).toMatchObject({
+    ok: false,
+    error: { code: "FORBIDDEN", status: 403 },
+  });
+  expect(await member.posts.touch("missing")).toMatchObject({
     ok: false,
     error: { code: "NOT_FOUND", status: 404 },
   });
@@ -255,7 +258,7 @@ test("document actions reuse a schema-bound accessPolicy as a doc-aware gate", a
   });
   expect(await denied.posts.touch("open")).toMatchObject({
     ok: false,
-    error: { code: "NOT_FOUND", status: 404 },
+    error: { code: "FORBIDDEN", status: 403 },
   });
 });
 
@@ -672,11 +675,10 @@ test("normal action CRUD enforces accessPolicy and trusted doc access is local",
     data: { id: "secret", title: "secret", secret: true },
   });
 
-  // The schema-bound gate sees the secret target doc and conceals it.
   const duplicate = await client.posts.duplicate("secret", { title: "copy" });
   expect(duplicate).toMatchObject({
     ok: false,
-    error: { code: "NOT_FOUND", status: 404 },
+    error: { code: "FORBIDDEN", status: 403 },
   });
 });
 
