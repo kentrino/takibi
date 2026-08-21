@@ -1,4 +1,3 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import {
   ActionRegistry,
@@ -6,279 +5,71 @@ import {
   createActionBuilder,
   defineCollection as defineCollectionValue,
   getCollectionActions,
+  type ActionDefinitions,
+  type RootActionArgs,
 } from "./action";
+import { executeAction } from "./action-executor";
+import {
+  assertSerializableContext,
+  applyStorageLogging,
+  debugInvocationFields,
+  errorResponse,
+  invocationFields,
+  mergeLoggingOptions,
+} from "./context-runtime";
 import type {
-  ActionBuilder,
-  ActionDefinitions,
-  CollectionDefinitionInput,
-  InvalidPublicKeys,
-  ReservedPublicName,
-  RootActionArgs,
-} from "./action";
-import { executeAction, type ActionInvocation } from "./action-executor";
-import { ForbiddenError, TakibiError, NotFoundError } from "./errors";
-import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
+  ContextConfig,
+  ContextResolver,
+  ContextStubResolver,
+  CreateContextBuilder,
+  CreateContextFn,
+  InternalCollectionsOptions,
+  TakibiHandler,
+} from "./context-types";
+import { createDurableObjectClass, seedCollections } from "./durable-object";
+import { NotFoundError, TakibiError } from "./errors";
+import { executeOperation } from "./executor";
 import {
   decodePublicHttp,
   decodePublicRoute,
   matchesPublicPrefix,
   type PublicRequest,
 } from "./http";
-import {
-  emitFailure,
-  loggedStorage,
-  resolveLogging,
-  withLoggedSpan,
-  type InternalLogger,
-  type LoggingOptions,
-} from "./logging";
+import { resolveLogging, withLoggedSpan, type LoggingOptions } from "./logging";
+import { assertCollectionMigrations, createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { createPolicyHelper } from "./policy";
-import type { PolicyHelper } from "./policy";
-import {
-  decodeWireRequest,
-  isWireResponse,
-  type WireFailure,
-  type WireRequest,
-  type WireResponse,
-} from "./protocol";
-import { assertCollectionMigrations, createMigratingStorage } from "./migrations";
-import { toTakibiFailure } from "./result";
-import { SchemaValidationError } from "./schema";
-import { createDurableObjectStorage, createMemoryStorage } from "./storage";
+import { isWireResponse, type WireRequest, type WireResponse } from "./protocol";
+import { createMemoryStorage } from "./storage";
 import {
   activeSpanContext,
   bindTracer,
-  extractTraceContext,
   injectTraceparent,
-  internalTracerKey,
   resolveTracer,
   tracedStorage,
   withSpan,
   type SpanContext,
   type TakibiTracer,
 } from "./tracing";
-import { storageAdd } from "./typed-storage";
-import { collectionActionsBrand } from "./types";
-import type {
-  CollectionDefinition,
-  CollectionsApi,
-  CollectionsDef,
-  ReservedDocumentSchemaConstraint,
-  StorageDriver,
-} from "./types";
+import type { CollectionsDef } from "./types";
 
-/**
- * Application-owned trust boundary: verify credentials, authorize the selected
- * storage partition, and return a complete context. The library treats the
- * result as trusted Worker-side values and never overlays request body / client
- * headers.
- *
- * Mirrors oRPC's initial vs execution context:
- * - input `context` (`TInitial`) — supplied at `handler.handle(..., { context })`
- * - returned `TCtx` — forwarded unchanged to policies, actions, and `stub.resolved`
- *
- * @see https://orpc.dev/docs/context
- */
-export type ContextResolverInput<TInitial = Record<string, never>> = {
-  request: Request;
-  context: TInitial;
-};
-
-export type ContextResolver<TCtx extends object, TInitial = Record<string, never>> = (
-  input: ContextResolverInput<TInitial>,
-) => TCtx | Promise<TCtx>;
-
-/**
- * Resolve a Durable Object **stub** for this request (after `resolve`).
- * `resolved` is the complete application-owned execution context.
- *
- * Name the object with `idFromName(resolved.tenantId)` — the same string as
- * `tenantId`, with no prefix. `fetch` on the generated class is for this stub
- * only; do not route public HTTP to it. Identity stays whatever `resolve`
- * returned; the Durable Object does not re-verify the caller.
- *
- * @example
- * stub: ({ context, resolved }) => {
- *   const ns = context.env.TENANT_STORE;
- *   return ns.get(ns.idFromName(resolved.tenantId));
- * }
- */
-export type ContextStubResolverInput<
-  TCtx extends object,
-  TInitial = Record<string, never>,
-> = ContextResolverInput<TInitial> & { resolved: TCtx };
-
-export type ContextStubResolver<TCtx extends object, TInitial = Record<string, never>> = (
-  input: ContextStubResolverInput<TCtx, TInitial>,
-) => DurableObjectStub | Promise<DurableObjectStub>;
-
-export type ContextConfig<TCtx extends object, TInitial = Record<string, never>> = {
-  resolve: ContextResolver<TCtx, TInitial>;
-  /** Required for Durable Object mode (omit when using `{ memory: true }`). */
-  stub?: ContextStubResolver<TCtx, TInitial>;
-} & LoggingOptions;
-
-export type CollectionsOptions = LoggingOptions & {
-  /** In-memory mode for tests / demos (skips Durable Object). */
-  memory?: boolean;
-};
-
-type InternalCollectionsOptions = CollectionsOptions & {
-  [internalTracerKey]?: TakibiTracer;
-};
-
-export type HandleOptions<TInitial> = {
-  /**
-   * Path prefix for REST routes (e.g. `/api/takibi` matches `/api/takibi/posts`
-   * and `/api/takibi/posts/{id}`, but not `/api/takibihose`). Omit to read
-   * collection / id from the whole pathname.
-   */
-  prefix?: string;
-} & (Record<string, never> extends TInitial ? { context?: TInitial } : { context: TInitial });
-
-export type HandleResult =
-  | { matched: true; response: Response }
-  | { matched: false; response?: undefined };
-
-export type TakibiBrand<
-  TCtx extends object,
-  TCollections,
-  TInitial = Record<string, never>,
-  TRootActions extends ActionDefinitions = Record<never, never>,
-> = {
-  readonly "~takibi": {
-    context: TCtx;
-    initial: TInitial;
-    collections: TCollections;
-    actions: TRootActions;
-  };
-  DurableObject: new (
-    state: DurableObjectState,
-    env: unknown,
-  ) => DurableObject & { $collections: CollectionsApi<TCollections> };
-  defineAction(): ActionBuilder<TCtx, "root", RootActionArgs<TCtx, TCollections>>;
-  actions<const TActions extends ActionDefinitions>(
-    definitions: TActions &
-      Record<
-        | Extract<keyof TActions, keyof TCollections | keyof TRootActions | ReservedPublicName>
-        | InvalidPublicKeys<TActions>,
-        never
-      >,
-  ): TakibiHandler<TCtx, TCollections, TInitial, TRootActions & TActions>;
-  /**
-   * oRPC-style entry: pass framework deps as typed initial `context`.
-   * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
-   */
-  handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
-  /**
-   * Fork a handler for tests: same collections / actions, new memory store,
-   * optional `resolve` override. The original handler is unchanged.
-   */
-  with(
-    options: LoggingOptions & {
-      memory: true;
-      resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
-    },
-  ): TakibiHandler<TCtx, TCollections, TInitial, TRootActions>;
-};
-
-export type TakibiHandler<
-  TCtx extends object = Record<string, unknown>,
-  TCollections = CollectionsDef<TCtx>,
-  TInitial = Record<string, never>,
-  TRootActions extends ActionDefinitions = Record<never, never>,
-> = Hono<{ Bindings: Record<string, unknown> }> &
-  TakibiBrand<TCtx, TCollections, TInitial, TRootActions>;
-
-/**
- * Per-key public constraint. Depends on each entry's own type so `const`
- * inference is not forced to a shared `CollectionDefinition<any>`. The action
- * brand is omitted so `defineCollection()` brands stay on those entries only.
- */
-type PublicCollectionConstraint<C, TCtx extends object> = C extends {
-  schema: infer S extends StandardSchemaV1;
-}
-  ? {
-      schema: CollectionDefinition<S, TCtx>["schema"];
-      accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
-      migrations?: CollectionDefinition<S, TCtx>["migrations"];
-      seed?: CollectionDefinition<S, TCtx>["seed"];
-    } & ReservedDocumentSchemaConstraint<S>
-  : {
-      schema: StandardSchemaV1;
-      accessPolicy: CollectionDefinition<StandardSchemaV1, TCtx>["accessPolicy"];
-    };
-
-type PublicCollectionsMap<TCollections, TCtx extends object> = {
-  [K in keyof TCollections]: PublicCollectionConstraint<TCollections[K], TCtx>;
-};
-
-/**
- * `CollectionsDef` uses `CollectionDefinition<any>`, which erases schema-bound
- * checks. Re-bind each collection's policy and migrations to that collection's
- * schema.
- */
-type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
-  [K in keyof TCollections]: TCollections[K] extends { schema: infer S extends StandardSchemaV1 }
-    ? Omit<TCollections[K], "schema" | "accessPolicy" | "migrations"> & {
-        schema: CollectionDefinition<S, TCtx>["schema"];
-        accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
-        migrations?: CollectionDefinition<S, TCtx>["migrations"];
-      } & ReservedDocumentSchemaConstraint<S>
-    : TCollections[K];
-};
-
-type CreateContextBuilder<TCtx extends object, TInitial> = {
-  /**
-   * Type-safe `accessPolicy`. Pass a schema to bind `doc` / `nextDoc`; omit it
-   * for rules that only use application context. Return a grant
-   * (`fullAccess` / `write` / `read` / `none` / `grant(...)`).
-   */
-  policy: PolicyHelper<TCtx>;
-  defineCollection<
-    TSchema extends StandardSchemaV1,
-    const TActions extends ActionDefinitions = Record<never, never>,
-  >(
-    definition: CollectionDefinitionInput<TSchema, TCtx, TActions>,
-  ): CollectionDefinition<TSchema, TCtx, TActions> & {
-    readonly [collectionActionsBrand]: TActions;
-  };
-  collections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
-    collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
-    options?: InternalCollectionsOptions,
-    ...invalidName: [
-      Extract<keyof TCollections, ReservedPublicName> | InvalidPublicKeys<TCollections>,
-    ] extends [never]
-      ? []
-      : ["Collection names must be safe TypeScript identifiers"]
-  ): TakibiHandler<TCtx, TCollections, TInitial>;
-};
-
-type CreateContextFn<TInitial> = <R extends object | Promise<object>>(config: {
-  resolve: (input: ContextResolverInput<TInitial>) => R;
-  /** Required for Durable Object mode (omit when using `{ memory: true }`). */
-  stub?: ContextStubResolver<Awaited<R>, TInitial>;
-  logger?: LoggingOptions["logger"];
-  logLevel?: LoggingOptions["logLevel"];
-}) => CreateContextBuilder<Awaited<R>, TInitial>;
+export type {
+  CollectionsOptions,
+  ContextConfig,
+  ContextResolver,
+  ContextResolverInput,
+  ContextStubResolver,
+  ContextStubResolverInput,
+  HandleOptions,
+  HandleResult,
+  TakibiBrand,
+  TakibiHandler,
+} from "./context-types";
 
 /**
  * Bind typed initial context (`handle(..., { context })` deps), then call the
  * returned factory with `{ resolve, stub? }`. Execution context is inferred
  * from `resolve`'s return type.
- *
- * @example
- * const takibi = createTakibi<Initial>()({
- *   resolve: async ({ request, context }): Promise<AppCtx> => {
- *     const principal = await context.di.getSession(request)
- *     return { tenantId: "acme", principal }
- *   },
- *   stub: ({ context, resolved }) => {
- *     const ns = context.env.TENANT_STORE
- *     return ns.get(ns.idFromName(resolved.tenantId))
- *   },
- * })
  */
 export function createTakibi<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
   return ((config) =>
@@ -428,11 +219,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         );
       }
 
-      const wire: WireRequest = {
-        ...invocation,
-        context: ctx,
-      };
-
+      const wire: WireRequest = { ...invocation, context: ctx };
       const json = await withLoggedSpan(
         logger,
         {
@@ -523,7 +310,6 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     });
   };
 
-  // Hono mount: empty initial. Prefer `handle` when AuthN / stub need deps.
   mountPublicRoute("/:collection");
   mountPublicRoute("/:collection/:id");
   mountPublicRoute("/:collection/:id/*", true);
@@ -533,7 +319,6 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   });
 
   const DurableObjectClass = createDurableObjectClass(collections, registry, options, logger);
-
   const rootActions = Object.create(null) as ActionDefinitions;
   const handler = app as TakibiHandler<object, TCollections, TInitial>;
   Object.defineProperty(handler, "~takibi", {
@@ -545,11 +330,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     },
     enumerable: false,
   });
-  handler.DurableObject = DurableObjectClass as TakibiHandler<
-    object,
-    TCollections,
-    TInitial
-  >["DurableObject"];
+  handler.DurableObject = DurableObjectClass as typeof handler.DurableObject;
   handler.defineAction = () =>
     createActionBuilder<object, "root", RootActionArgs<object, TCollections>>("root");
   handler.actions = ((definitions: ActionDefinitions) => {
@@ -560,7 +341,6 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     if (!matchesPublicPrefix(new URL(request.url).pathname, handleOptions.prefix)) {
       return { matched: false };
     }
-
     const initial =
       "context" in handleOptions && handleOptions.context !== undefined
         ? handleOptions.context
@@ -584,280 +364,4 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
       options: { ...mergeLoggingOptions(options, withOptions), memory: true },
     })) as typeof handler.with;
   return handler;
-}
-
-function createDurableObjectClass<TCollections extends CollectionsDef>(
-  collections: TCollections,
-  registry: ActionRegistry,
-  options: InternalCollectionsOptions,
-  logger: InternalLogger | undefined,
-) {
-  return class TakibiTenantObject implements DurableObject {
-    readonly #state: DurableObjectState;
-    readonly #driver: StorageDriver;
-    readonly #ready: Promise<void>;
-    readonly $collections: CollectionsApi<TCollections>;
-
-    constructor(state: DurableObjectState, _env: unknown) {
-      this.#state = state;
-      this.#driver = applyStorageLogging(
-        createMigratingStorage(collections, createDurableObjectStorage(state.storage), logger),
-        logger,
-      );
-      this.#ready = state.blockConcurrencyWhile(() =>
-        seedCollections(collections, this.#driver, logger),
-      );
-      this.$collections = createTrustedCollections(
-        collections,
-        afterInitialization(this.#driver, this.#ready),
-        logger,
-      );
-    }
-
-    async fetch(request: Request): Promise<Response> {
-      const tracer = resolveTracer(options);
-      const execute = async (): Promise<Response> => {
-        const extracted = extractTraceContext(request.headers);
-        const executeWithContext = async (): Promise<Response> => {
-          let invocation: PublicRequest | undefined;
-          try {
-            const body = decodeWireRequest(await request.json());
-            const { context, ...decodedInvocation } = body;
-            invocation = decodedInvocation;
-            assertTenantMatchesDurableObjectName(this.#state.id.name, context);
-            await this.#ready;
-            const ctx = context;
-            const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-            const data = await withLoggedSpan(
-              logger,
-              {
-                name: TAKIBI_SPAN.executor,
-                kind: "server",
-                attributes: invocationSpanAttributes(decodedInvocation),
-              },
-              { event: "takibi.executor", ...debugInvocationFields(decodedInvocation) },
-              () =>
-                decodedInvocation.kind === "action"
-                  ? executeAction(
-                      registry,
-                      collections,
-                      driver,
-                      ctx,
-                      decodedInvocation as ActionInvocation,
-                      logger,
-                    )
-                  : executeOperation(
-                      collections,
-                      driver,
-                      ctx,
-                      decodedInvocation as ExecuteRequest,
-                      logger,
-                    ),
-              extracted?.span,
-            );
-            return Response.json({ ok: true, data } satisfies WireResponse);
-          } catch (err) {
-            return errorResponse(err, logger, invocation);
-          }
-        };
-        return extracted
-          ? extracted.runWithActiveContext(executeWithContext)
-          : executeWithContext();
-      };
-      return tracer ? bindTracer(tracer, execute) : execute();
-    }
-  };
-}
-
-async function seedCollections(
-  collections: Record<string, CollectionDefinition>,
-  driver: StorageDriver,
-  logger?: InternalLogger,
-): Promise<void> {
-  for (const [collection, definition] of Object.entries(collections)) {
-    if (!definition.seed) continue;
-
-    const documents = await definition.seed();
-    for (const [id, data] of Object.entries(documents)) {
-      if (await driver.get(collection, id)) continue;
-      await storageAdd(definition, driver, collection, data, { id }, logger);
-    }
-  }
-}
-
-function afterInitialization(driver: StorageDriver, ready: Promise<void>): StorageDriver {
-  return {
-    async get(resource, id) {
-      await ready;
-      return driver.get(resource, id);
-    },
-    async put(resource, doc) {
-      await ready;
-      return driver.put(resource, doc);
-    },
-    async delete(resource, id) {
-      await ready;
-      return driver.delete(resource, id);
-    },
-    async list(resource, options, plan) {
-      await ready;
-      return driver.list(resource, options, plan);
-    },
-    async transaction(callback) {
-      await ready;
-      return driver.transaction(callback);
-    },
-  };
-}
-
-function assertTenantMatchesDurableObjectName(
-  name: string | undefined,
-  context: Record<string, unknown>,
-): void {
-  if (typeof name === "string" && name.length > 0 && name !== context.tenantId) {
-    throw new ForbiddenError("Tenant mismatch");
-  }
-}
-
-function applyStorageLogging(
-  driver: StorageDriver,
-  logger: InternalLogger | undefined,
-): StorageDriver {
-  return logger ? loggedStorage(driver, logger) : driver;
-}
-
-function mergeLoggingOptions(base: LoggingOptions, override: LoggingOptions): LoggingOptions {
-  const merged = { ...base };
-  if (Object.prototype.hasOwnProperty.call(override, "logger")) {
-    merged.logger = override.logger;
-  }
-  if (Object.prototype.hasOwnProperty.call(override, "logLevel")) {
-    merged.logLevel = override.logLevel;
-  }
-  return merged;
-}
-
-function invocationFields(invocation: PublicRequest): {
-  collection?: string;
-  operation: string;
-  documentId?: string;
-} {
-  return invocation.kind === "action"
-    ? {
-        ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
-        operation: invocation.name,
-      }
-    : {
-        collection: invocation.collection,
-        operation: invocation.operation,
-        ...(invocation.id === undefined ? {} : { documentId: invocation.id }),
-      };
-}
-
-function debugInvocationFields(invocation: PublicRequest): ReturnType<typeof invocationFields> & {
-  query?: NonNullable<ExecuteRequest["list"]>["where"];
-} {
-  return {
-    ...invocationFields(invocation),
-    ...(invocation.kind === "collection" && invocation.list?.where !== undefined
-      ? { query: invocation.list.where }
-      : {}),
-  };
-}
-
-function errorResponse(
-  error: unknown,
-  logger: InternalLogger | undefined,
-  invocation?: PublicRequest,
-): Response {
-  const wire = toWireError(error);
-  emitFailure(logger, wire.error, invocation === undefined ? {} : invocationFields(invocation));
-  return Response.json(wire, { status: statusOf(error) });
-}
-
-function toWireError(err: unknown): WireFailure {
-  if (err instanceof SchemaValidationError || err instanceof TakibiError) {
-    return { ok: false, error: toTakibiFailure(err) };
-  }
-  return {
-    ok: false,
-    error: {
-      kind: "operation",
-      code: "INTERNAL",
-      message: err instanceof Error ? err.message : String(err),
-      status: 500,
-    },
-  };
-}
-
-function statusOf(err: unknown): number {
-  if (err instanceof TakibiError) return err.status;
-  if (err instanceof SchemaValidationError) return 400;
-  return 500;
-}
-
-function assertSerializableContext(value: unknown): asserts value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TakibiError("INVALID_CONTEXT", "Resolved context must be a plain object", 500);
-  }
-  assertSerializableValue(value, new Set<object>());
-}
-
-function assertSerializableValue(value: unknown, seen: Set<object>): void {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  ) {
-    return;
-  }
-  if (typeof value !== "object" || seen.has(value)) {
-    throw new TakibiError("INVALID_CONTEXT", "Resolved context must be JSON-safe", 500);
-  }
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (!descriptor?.enumerable || !("value" in descriptor)) {
-        throw new TakibiError("INVALID_CONTEXT", "Resolved context arrays must contain data", 500);
-      }
-      assertSerializableValue(descriptor.value, seen);
-    }
-    for (const key of Reflect.ownKeys(value)) {
-      if (key === "length") continue;
-      if (
-        typeof key !== "string" ||
-        !/^(0|[1-9][0-9]*)$/.test(key) ||
-        Number(key) >= value.length
-      ) {
-        throw new TakibiError(
-          "INVALID_CONTEXT",
-          "Resolved context arrays must not have custom properties",
-          500,
-        );
-      }
-    }
-    seen.delete(value);
-    return;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new TakibiError("INVALID_CONTEXT", "Resolved context must use plain objects", 500);
-  }
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== "string") {
-      throw new TakibiError("INVALID_CONTEXT", "Resolved context must not contain symbols", 500);
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor?.enumerable || !("value" in descriptor)) {
-      throw new TakibiError(
-        "INVALID_CONTEXT",
-        "Resolved context must contain only enumerable data properties",
-        500,
-      );
-    }
-    assertSerializableValue(descriptor.value, seen);
-  }
-  seen.delete(value);
 }

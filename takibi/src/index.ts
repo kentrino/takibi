@@ -6,7 +6,12 @@ export type {
 } from "./client";
 
 export { createTakibi } from "./context";
-export type { CollectionsOptions, TakibiHandler, HandleOptions, HandleResult } from "./context";
+export type {
+  CollectionsOptions,
+  TakibiHandler,
+  HandleOptions,
+  HandleResult,
+} from "./context-types";
 export { createPrettyConsoleLogger } from "./logging";
 export type {
   Logger,
