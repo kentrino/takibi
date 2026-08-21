@@ -315,17 +315,13 @@ export type ClientCollectionApi<C> = {
   set: (
     id: DocumentId,
     data: CollectionWriteInput<C>,
-  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
-  get: (
-    id: DocumentId,
-  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  get: (id: DocumentId) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   update: (
     id: DocumentId,
     data: CollectionPatchInput<C>,
-  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
-  delete: (
-    id: DocumentId,
-  ) => Promise<TakibiResult<{ id: DocumentId }, CollectionPolicyReasonCode<C>>>;
+  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  delete: (id: DocumentId) => Promise<TakibiResult<{ id: DocumentId }>>;
   list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<
     TakibiResult<
       {

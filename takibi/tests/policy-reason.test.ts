@@ -9,6 +9,7 @@ import {
   none,
   or,
   type AccessContext,
+  type ClientOf,
   type PolicyReason,
 } from "../src/index";
 import { denialReasonOf, evaluateAccessPolicy } from "../src/policy";
@@ -168,6 +169,21 @@ function createReasonHandler() {
   }));
   return app.actions({ items: actions });
 }
+
+test("generated CRUD clients expose reasons only on add and list", () => {
+  type Client = ClientOf<ReturnType<typeof createReasonHandler>>;
+  type AddFailure = Extract<
+    Extract<Awaited<ReturnType<Client["items"]["add"]>>, { ok: false }>["error"],
+    { kind: "operation" }
+  >;
+  type GetFailure = Extract<
+    Extract<Awaited<ReturnType<Client["items"]["get"]>>, { ok: false }>["error"],
+    { kind: "operation" }
+  >;
+
+  expectTypeOf<NonNullable<AddFailure["reason"]>["code"]>().toEqualTypeOf<"ADMIN_REQUIRED">();
+  expectTypeOf<GetFailure>().not.toHaveProperty("reason");
+});
 
 test("public failures serialize reason only on unconcealed FORBIDDEN paths", async () => {
   const handler = createReasonHandler();
