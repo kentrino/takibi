@@ -2,7 +2,7 @@ import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient } from "@takibi/takibi/client";
-import { and, createTakibi, fullAccess, none } from "../src/index";
+import { and, createTakibi, fullAccess, none, UnauthorizedError } from "../src/index";
 import type { RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {
@@ -554,6 +554,73 @@ test("detached() is unavailable after input() and absent from root builders", ()
     }));
   };
   void checkDetachedOrdering;
+});
+
+test("use() refines handler and gate ctx; later chaining rejects use()", () => {
+  type AuthedCtx = { tenantId: string; user: User };
+  const requireUser = (ctx: AppCtx): AuthedCtx => {
+    if (ctx.user == null) throw new UnauthorizedError("Sign in required");
+    return { tenantId: ctx.tenantId, user: ctx.user };
+  };
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const app = context.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+
+  app.posts.actions((defineAction) => ({
+    accept: defineAction()
+      .use(requireUser)
+      .policy(({ ctx, target }) => {
+        expectTypeOf(ctx).toEqualTypeOf<AuthedCtx>();
+        expectTypeOf(ctx.user).toEqualTypeOf<User>();
+        expectTypeOf(target.doc.title).toEqualTypeOf<string>();
+        return ctx.user.role === "admin" ? fullAccess : none;
+      })
+      .handler(({ ctx, id }) => {
+        expectTypeOf(ctx).toEqualTypeOf<AuthedCtx>();
+        expectTypeOf(ctx.user.id).toEqualTypeOf<string>();
+        return { id, by: ctx.user.id };
+      }),
+    publicPing: defineAction()
+      .detached()
+      .policy(({ ctx }) => {
+        expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
+        return fullAccess;
+      })
+      .handler(({ ctx }) => {
+        expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
+        return { ok: true as const };
+      }),
+  }));
+
+  app
+    .defineAction()
+    .use(requireUser)
+    .policy(({ ctx }) => {
+      expectTypeOf(ctx).toEqualTypeOf<AuthedCtx>();
+      return fullAccess;
+    })
+    .handler(({ ctx }) => {
+      expectTypeOf(ctx.user.role).toEqualTypeOf<"admin" | "member">();
+      return null;
+    });
+
+  const checkUseOrdering = () => {
+    app.posts.actions((defineAction) => ({
+      late: defineAction()
+        .input(z.object({ title: z.string() }))
+        // @ts-expect-error use() must be called immediately after defineAction()
+        .use(requireUser)
+        .policy(fullAccess)
+        .handler(() => null),
+    }));
+    const afterPolicy = app.defineAction().policy(fullAccess);
+    // @ts-expect-error use() is unavailable after policy()
+    afterPolicy.use(requireUser);
+  };
+  void checkUseOrdering;
 });
 
 test("action gate callbacks infer ctx, scope, invocation, permission, and target", () => {
