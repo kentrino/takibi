@@ -1,4 +1,9 @@
-import { ActionRegistry, type ActionGateContext, type RuntimeActionDefinition } from "./action";
+import {
+  ActionRegistry,
+  type ActionGateContext,
+  type ActionGuardFn,
+  type RuntimeActionDefinition,
+} from "./action";
 import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
@@ -53,6 +58,10 @@ export async function executeAction<TCtx extends object>(
     throw new BadRequestError(`Action does not take a document id: ${invocation.name}`);
   }
 
+  // Guards run before document load and gate evaluation so auth failures do
+  // not reveal whether a target id exists.
+  const actionCtx = (await applyGuards(definition.guards, ctx)) as TCtx;
+
   const spanAttributes = actionSpanAttributes(invocation.name, invocation.scope);
   const logFields = {
     ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
@@ -72,10 +81,15 @@ export async function executeAction<TCtx extends object>(
   };
 
   const scopedArgs = (scopedStorage: StorageDriver) => {
-    const policyCollections = createPolicyCollections(collections, scopedStorage, ctx, logger);
+    const policyCollections = createPolicyCollections(
+      collections,
+      scopedStorage,
+      actionCtx,
+      logger,
+    );
     const trustedCollections = createTrustedCollections(collections, scopedStorage, logger);
     const args: Record<string, unknown> = {
-      ctx,
+      ctx: actionCtx,
       collections: policyCollections,
       $collections: trustedCollections,
     };
@@ -111,7 +125,7 @@ export async function executeAction<TCtx extends object>(
       { name: TAKIBI_SPAN.policy, kind: "internal", attributes: spanAttributes },
       { event: "takibi.policy", ...logFields },
       async () => {
-        const grant = await resolveGateGrant(definition, ctx, invocation, gateContext, doc);
+        const grant = await resolveGateGrant(definition, actionCtx, invocation, gateContext, doc);
         if (!isAccessGrant(grant)) {
           throw new TakibiError("INVALID_POLICY", "Action policy must return an AccessGrant", 500);
         }
@@ -128,7 +142,7 @@ export async function executeAction<TCtx extends object>(
       const doc = await scopedStorage.get(invocation.scope, id);
       if (!doc) throw new NotFoundError(`Document not found: ${id}`);
       const gateContext: ActionGateContext<TCtx> = {
-        ctx,
+        ctx: actionCtx,
         scope: { kind: "collection", name: invocation.scope },
         invocation: { kind: "action", name: invocation.name },
         permission: definition.permission,
@@ -147,7 +161,7 @@ export async function executeAction<TCtx extends object>(
   }
 
   const gateContext: ActionGateContext<TCtx> = {
-    ctx,
+    ctx: actionCtx,
     scope:
       invocation.scope === "$" ? { kind: "root" } : { kind: "collection", name: invocation.scope },
     invocation: { kind: "action", name: invocation.name },
@@ -161,6 +175,14 @@ export async function executeAction<TCtx extends object>(
   const run = async (scopedStorage: StorageDriver): Promise<JsonValue> =>
     runHandler({ input, ...scopedArgs(scopedStorage) });
   return definition.atomic ? storage.transaction(run) : run(storage);
+}
+
+async function applyGuards(guards: readonly ActionGuardFn[], ctx: unknown): Promise<unknown> {
+  let current = ctx;
+  for (const guard of guards) {
+    current = await guard(current);
+  }
+  return current;
 }
 
 async function resolveGateGrant<TCtx extends object>(

@@ -24,7 +24,13 @@ Do **not** trust client-declared identity or tenant headers (for example
 `x-user` / `x-tenant-id`). The library never parses those and does not reserve
 `tenantId`, `user`, or any other execution-context key. Throw
 `UnauthorizedError` from `resolve` when authentication or partition selection
-fails.
+fails for the whole request.
+
+When some actions must accept anonymous callers, `resolve` may return a nullable
+identity (for example `user: User | null`) instead of throwing. Protect
+authenticated actions with `.use()` on the action builder so AuthN failures stay
+`UNAUTHORIZED` / 401 and role checks stay in the gate as `FORBIDDEN` / 403 — see
+[Anonymous and protected actions](./docs/recipes/anonymous-protected-actions.md).
 
 Identity is whatever `resolve` returns. The Durable Object does not re-resolve
 or re-verify the caller. Its `fetch` is only for the same Worker's `stub`
@@ -350,8 +356,12 @@ accessPolicy({ user, operation, where }) {
 ```
 
 Throw `UnauthorizedError` (or return only after membership checks) from `resolve`
-when AuthN or storage-partition authorization fails. Takibi validates that the
-resolved context is a JSON-safe object but does not interpret its keys.
+when AuthN or storage-partition authorization fails for the whole request. When
+anonymous actions share the same handler, return a nullable identity from
+`resolve` and use action `.use()` for per-action AuthN — see
+[Anonymous and protected actions](./docs/recipes/anonymous-protected-actions.md).
+Takibi validates that the resolved context is a JSON-safe object but does not
+interpret its keys.
 
 ### Actions
 
@@ -366,6 +376,13 @@ existing document, the client passes the target id as the first argument, and
 the handler receives `{ id, doc }` without re-fetching. Call `.detached()`
 (before `.input()` / `.policy()`) for actions that are not bound to one
 existing document — creation, aggregation, no-target pings.
+
+Call `.use(fn)` only immediately after `defineAction()` (or another `.use()`)
+to refine the handler and gate context — typically to require a signed-in user
+when `resolve` returns a nullable identity. Guards run before document load and
+gate evaluation; thrown `UnauthorizedError` becomes `UNAUTHORIZED` / 401.
+Public actions omit `.use()` and name an explicit invoke grant. See
+[Anonymous and protected actions](./docs/recipes/anonymous-protected-actions.md).
 
 ```ts
 const posts = context.defineCollection({

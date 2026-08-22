@@ -158,6 +158,14 @@ type ParsedInput<TSchema extends MaybeSchema> = TSchema extends StandardSchemaV1
   ? StandardSchemaV1.InferOutput<TSchema>
   : undefined;
 
+/** Middleware that refines action context before the gate and handler run. */
+export type ActionGuard<TCtx, TNext> = (ctx: TCtx) => TNext | Promise<TNext>;
+
+export type ActionGuardFn = (ctx: unknown) => unknown;
+
+/** Replace `ctx` on handler / gate args after a `use` guard. */
+type WithRefinedCtx<TArgs, TCtx> = Omit<TArgs, "ctx"> & { ctx: TCtx };
+
 export type ActionDefinition<
   TKind extends ActionKind = ActionKind,
   TSchema extends MaybeSchema = MaybeSchema,
@@ -174,6 +182,7 @@ export type ActionDefinition<
   readonly inputSchema: TSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
+  readonly guards: readonly ActionGuardFn[];
   readonly policy: TPolicy;
   readonly handler: (
     args: TBaseArgs & { input: ParsedInput<TSchema> },
@@ -190,6 +199,7 @@ export type RuntimeActionDefinition = {
   readonly inputSchema: MaybeSchema;
   readonly permission: AccessPermission;
   readonly atomic: boolean;
+  readonly guards: readonly ActionGuardFn[];
   readonly policy: ActionGatePolicy<unknown, unknown>;
   readonly handler: (args: unknown) => unknown;
 };
@@ -235,6 +245,9 @@ export type ActionHandlerBuilder<
  * receives `{ id, doc }` and the gate sees the target document); call
  * `.detached()` before `.input()` / `.policy()` for actions that are not
  * bound to one existing document (creation, aggregation, no-target pings).
+ *
+ * `.use(fn)` may only appear immediately after `defineAction()` (or another
+ * `.use()`); it refines the context type for the gate and handler.
  */
 export type DocumentActionBuilder<
   TCtx,
@@ -243,13 +256,25 @@ export type DocumentActionBuilder<
   TDoc,
   TSchema extends MaybeSchema = undefined,
 > = {
+  use<TNext>(
+    fn: ActionGuard<TCtx, TNext>,
+  ): DocumentActionBuilder<
+    TNext,
+    WithRefinedCtx<TDocArgs, TNext>,
+    WithRefinedCtx<TDetachedArgs, TNext>,
+    TDoc,
+    TSchema
+  >;
   input<TNextSchema extends StandardSchemaV1>(
     schema: JsonInputSchema<TNextSchema>,
-  ): Omit<DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TNextSchema>, "detached">;
+  ): Omit<
+    DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TNextSchema>,
+    "detached" | "use"
+  >;
   requires(
     permission: AccessPermission,
-  ): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>;
-  atomic(): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>;
+  ): Omit<DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>, "use">;
+  atomic(): Omit<DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc, TSchema>, "use">;
   detached(): DetachedActionBuilder<TCtx, TDetachedArgs, TSchema>;
   policy: {
     <const TPolicy extends AccessGrant | ContextPolicy<TCtx>>(
@@ -284,11 +309,14 @@ export type DetachedActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema =
 };
 
 export type RootActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema = undefined> = {
+  use<TNext>(
+    fn: ActionGuard<TCtx, TNext>,
+  ): RootActionBuilder<TNext, WithRefinedCtx<TBaseArgs, TNext>, TSchema>;
   input<TNextSchema extends StandardSchemaV1>(
     schema: JsonInputSchema<TNextSchema>,
-  ): RootActionBuilder<TCtx, TBaseArgs, TNextSchema>;
-  requires(permission: AccessPermission): RootActionBuilder<TCtx, TBaseArgs, TSchema>;
-  atomic(): RootActionBuilder<TCtx, TBaseArgs, TSchema>;
+  ): Omit<RootActionBuilder<TCtx, TBaseArgs, TNextSchema>, "use">;
+  requires(permission: AccessPermission): Omit<RootActionBuilder<TCtx, TBaseArgs, TSchema>, "use">;
+  atomic(): Omit<RootActionBuilder<TCtx, TBaseArgs, TSchema>, "use">;
   policy: {
     <const TPolicy extends AccessGrant | ContextPolicy<TCtx>>(
       policy: TPolicy,
@@ -306,6 +334,7 @@ type BuilderState = {
   inputSchema: MaybeSchema;
   permission: AccessPermission;
   atomic: boolean;
+  guards: ActionGuardFn[];
 };
 
 function createHandlerBuilder(
@@ -331,6 +360,7 @@ function createHandlerBuilder(
         inputSchema: state.inputSchema,
         permission: state.permission,
         atomic: state.atomic,
+        guards: Object.freeze([...state.guards]),
         policy: policy as ActionGatePolicy<never, never>,
         handler,
       };
@@ -347,6 +377,9 @@ function createHandlerBuilder(
 
 function createBuilder(state: BuilderState): Record<string, unknown> {
   return {
+    use(fn: ActionGuardFn) {
+      return createBuilder({ ...state, guards: [...state.guards, fn] });
+    },
     input(schema: StandardSchemaV1) {
       return createBuilder({ ...state, inputSchema: schema });
     },
@@ -375,6 +408,7 @@ export function createDocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>
     inputSchema: undefined,
     permission: "invoke",
     atomic: false,
+    guards: [],
   }) as unknown as DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>;
 }
 
@@ -386,6 +420,7 @@ export function createRootActionBuilder<TCtx, TBaseArgs>(): RootActionBuilder<TC
     inputSchema: undefined,
     permission: "invoke",
     atomic: false,
+    guards: [],
   }) as unknown as RootActionBuilder<TCtx, TBaseArgs>;
 }
 
@@ -564,6 +599,12 @@ function assertActionContract(name: string, definition: AuthoredAction): void {
   if (typeof definition.atomic !== "boolean") {
     throw new TakibiError("INVALID_ACTION", `Invalid action atomic flag: ${name}`, 500);
   }
+  if (
+    !Array.isArray(definition.guards) ||
+    definition.guards.some((guard) => typeof guard !== "function")
+  ) {
+    throw new TakibiError("INVALID_ACTION", `Invalid action guards: ${name}`, 500);
+  }
   if (typeof definition.policy !== "function" && !isAccessGrant(definition.policy)) {
     throw new TakibiError("INVALID_ACTION", `Action policy is required: ${name}`, 500);
   }
@@ -599,6 +640,7 @@ function eraseForRegistry(name: string, definition: AuthoredAction): RuntimeActi
     inputSchema: definition.inputSchema,
     permission: definition.permission,
     atomic: definition.atomic,
+    guards: definition.guards,
     policy: definition.policy as RuntimeActionDefinition["policy"],
     handler: definition.handler as RuntimeActionDefinition["handler"],
   };
