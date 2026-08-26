@@ -1,4 +1,4 @@
-import { ForbiddenError, NotFoundError, StaleWriteError } from "./errors";
+import { ForbiddenError, NotFoundError } from "./errors";
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
@@ -15,6 +15,7 @@ import {
 } from "./typed-storage";
 import type {
   AccessContext,
+  AccessGrant,
   AccessPermission,
   CollectionApi,
   CollectionDefinition,
@@ -72,8 +73,8 @@ async function assertAccess(
   accessCtx: AccessContext<any, any>,
   options: { conceal: boolean; id?: string },
   logger?: InternalLogger,
-): Promise<void> {
-  await withLoggedSpan(
+): Promise<AccessGrant> {
+  return withLoggedSpan(
     logger,
     {
       name: TAKIBI_SPAN.policy,
@@ -89,13 +90,22 @@ async function assertAccess(
     },
     async () => {
       const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
-      if (allows(granted, accessCtx.permission)) return;
+      if (allows(granted, accessCtx.permission)) return granted;
       if (options.conceal) {
         throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
       }
       throw new ForbiddenError("Forbidden", denialReasonOf(granted, accessCtx.permission));
     },
   );
+}
+
+/** Writes collate `update`/`create`. The stored document is only returned when the same grant includes `get`. */
+function writeResult(
+  doc: WithMetadata<Record<string, unknown>>,
+  granted: AccessGrant,
+): unknown {
+  if (allows(granted, "get")) return doc;
+  return { id: doc.id, updatedAt: doc.updatedAt, rev: doc.rev };
 }
 
 /**
@@ -125,8 +135,9 @@ export async function executeOperation<TCtx extends object>(
         permission: "create",
         nextDoc,
       };
-      await assertAccess(def, accessCtx, { conceal: false }, logger);
-      return commitAddDoc(storage, req.collection, nextDoc);
+      const granted = await assertAccess(def, accessCtx, { conceal: false }, logger);
+      await commitAddDoc(storage, req.collection, nextDoc);
+      return writeResult(nextDoc, granted);
     }
     case "set": {
       if (!req.id) throw new NotFoundError("Missing id");
@@ -142,14 +153,17 @@ export async function executeOperation<TCtx extends object>(
       try {
         nextDoc = await prepareSetDoc(def, req.id, req.input, existing, logger);
       } catch (error) {
-        if (error instanceof StaleWriteError) {
-          await assertAccess(def, accessCtxBase, { conceal: true, id: req.id }, logger);
-        }
+        await assertAccess(def, accessCtxBase, { conceal: true, id: req.id }, logger);
         throw error;
       }
-      await assertAccess(def, { ...accessCtxBase, nextDoc }, { conceal: true, id: req.id }, logger);
+      const granted = await assertAccess(
+        def,
+        { ...accessCtxBase, nextDoc },
+        { conceal: true, id: req.id },
+        logger,
+      );
       await storage.put(req.collection, nextDoc);
-      return nextDoc;
+      return writeResult(nextDoc, granted);
     }
     case "get": {
       if (!req.id) throw new NotFoundError("Missing id");
@@ -169,37 +183,28 @@ export async function executeOperation<TCtx extends object>(
       if (!req.id) throw new NotFoundError("Missing id");
       const doc = await storage.get(req.collection, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
-      let nextDoc: WithMetadata<Record<string, unknown>>;
-      try {
-        nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc, logger);
-      } catch (error) {
-        if (error instanceof StaleWriteError) {
-          await assertAccess(
-            def,
-            {
-              ...ctx,
-              collection: req.collection,
-              operation: "update",
-              permission: "update",
-              doc,
-            },
-            { conceal: true, id: req.id },
-            logger,
-          );
-        }
-        throw error;
-      }
-      const accessCtx: AccessContext<TCtx> = {
+      const accessCtxBase: AccessContext<TCtx> = {
         ...ctx,
         collection: req.collection,
         operation: "update",
         permission: "update",
         doc,
-        nextDoc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
+      let nextDoc: WithMetadata<Record<string, unknown>>;
+      try {
+        nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc, logger);
+      } catch (error) {
+        await assertAccess(def, accessCtxBase, { conceal: true, id: req.id }, logger);
+        throw error;
+      }
+      const granted = await assertAccess(
+        def,
+        { ...accessCtxBase, nextDoc },
+        { conceal: true, id: req.id },
+        logger,
+      );
       await storage.put(req.collection, nextDoc);
-      return nextDoc;
+      return writeResult(nextDoc, granted);
     }
     case "delete": {
       if (!req.id) throw new NotFoundError("Missing id");
