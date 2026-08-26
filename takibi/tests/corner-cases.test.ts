@@ -62,8 +62,9 @@ test("memory storage get returns an independent snapshot, not a live reference",
   await storage.put("posts", meta({ id: "p1", title: "original", tags: ["a"] }) as StoredDocument);
 
   const first = await storage.get("posts", "p1");
-  (first as { title: string }).title = "mutated";
-  ((first as { tags: string[] }).tags).push("b");
+  const mutable = first as unknown as { title: string; tags: string[] };
+  mutable.title = "mutated";
+  mutable.tags.push("b");
 
   const second = await storage.get("posts", "p1");
   expect(second?.title).toBe("original");
@@ -85,9 +86,7 @@ test("memory and DO SQLite agree on list order for non-BMP ids", async () => {
 
   const memoryPage = await memory.list("posts", undefined);
   const durablePage = await durable.list("posts", undefined);
-  expect(durablePage.items.map((item) => item.id)).toEqual(
-    memoryPage.items.map((item) => item.id),
-  );
+  expect(durablePage.items.map((item) => item.id)).toEqual(memoryPage.items.map((item) => item.id));
 });
 
 // 5. `encodeCursor` spreads every byte into `String.fromCharCode(...bytes)`.
@@ -131,7 +130,7 @@ test("set rejects a primitive input instead of wiping the document", async () =>
 // — optimistic locking silently turns itself off.
 test("set keeps revisions strictly increasing at the 2^53 boundary", async () => {
   const existing = meta({ id: "p1", title: "old" });
-  (existing as { rev: number }).rev = Number.MAX_SAFE_INTEGER + 1;
+  (existing as unknown as { rev: number }).rev = Number.MAX_SAFE_INTEGER + 1;
 
   const next = await prepareSetDoc(def, "p1", { title: "new" }, existing);
   expect(next.rev as number).toBeGreaterThan(Number.MAX_SAFE_INTEGER + 1);
@@ -147,13 +146,18 @@ test("revision precondition must not leak document existence to denied callers",
   await storage.put("posts", meta({ id: "hidden", title: "s" }) as StoredDocument);
 
   const setWithRev = (id: string) =>
-    executeOperation(collections, storage, {}, {
-      kind: "collection",
-      collection: "posts",
-      operation: "set",
-      id,
-      input: { title: "probe", rev: 1 },
-    });
+    executeOperation(
+      collections,
+      storage,
+      {},
+      {
+        kind: "collection",
+        collection: "posts",
+        operation: "set",
+        id,
+        input: { title: "probe", rev: 1 },
+      },
+    );
 
   // Existing doc: concealed as NOT_FOUND (works today).
   await expect(setWithRev("hidden")).rejects.toBeInstanceOf(NotFoundError);

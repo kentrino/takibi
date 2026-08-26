@@ -88,7 +88,7 @@ function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): S
   return {
     async get(resource, id) {
       const document = table(resource).get(id);
-      return document === undefined ? null : withDocumentRevision(document);
+      return document === undefined ? null : withDocumentRevision(structuredClone(document));
     },
     async put(resource, doc) {
       await coordinate(() => {
@@ -102,12 +102,17 @@ function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): S
       const prepared = prepareList(resource, opts);
       const items = [...table(resource).values()]
         .sort((a, b) => compareIds(a.id, b.id))
-        .map((document) => ({ id: document.id, document: withDocumentRevision(document) }));
+        .map((document) => ({
+          id: document.id,
+          document: withDocumentRevision(structuredClone(document)),
+        }));
       return paginate(
         prepared,
         async (startAfter, limit) => {
           const start =
-            startAfter === undefined ? 0 : items.findIndex((item) => item.id > startAfter);
+            startAfter === undefined
+              ? 0
+              : items.findIndex((item) => compareIds(item.id, startAfter) > 0);
           return start < 0 ? [] : items.slice(start, start + limit);
         },
         plan,
@@ -137,6 +142,7 @@ function cloneMemoryTables(
 
 export function createDurableObjectStorage(storage: DurableObjectStorage): StorageDriver {
   initializeStorageLayout(storage);
+  let transactionDepth = 0;
 
   const driver: StorageDriver = {
     async get(resource, id) {
@@ -188,7 +194,17 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
       return paginate(prepared, createSqlChunkReader(storage.sql, resource, prepared, plan), plan);
     },
     transaction(callback) {
-      return storage.transaction(() => callback(driver));
+      if (transactionDepth > 0) {
+        return callback(driver);
+      }
+      return storage.transaction(async () => {
+        transactionDepth += 1;
+        try {
+          return await callback(driver);
+        } finally {
+          transactionDepth -= 1;
+        }
+      });
     },
   };
   return driver;
@@ -394,7 +410,14 @@ async function paginate(
 }
 
 function compareIds(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = leftBytes[index]! - rightBytes[index]!;
+    if (delta !== 0) return delta;
+  }
+  return leftBytes.length - rightBytes.length;
 }
 
 function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | undefined): boolean {
@@ -409,7 +432,11 @@ function encodeCursor(collection: string, where: QueryExpr | undefined, id: stri
     id,
   };
   const bytes = new TextEncoder().encode(JSON.stringify(cursor));
-  const binary = String.fromCharCode(...bytes);
+  const chunkSize = 8192;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
