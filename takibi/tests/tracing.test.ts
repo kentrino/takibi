@@ -203,8 +203,15 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
     (span) =>
       span.name === "takibi.storage" && span.attributes["takibi.storage.operation"] === "put",
   );
+  const transaction = recording.spans.find(
+    (span) =>
+      span.name === "takibi.storage" &&
+      span.attributes["takibi.storage.operation"] === "transaction",
+  );
   expect(storage).toBeDefined();
-  expect(storage!.parentSpanId).toBe(executor.spanId);
+  expect(transaction).toBeDefined();
+  expect(transaction!.parentSpanId).toBe(executor.spanId);
+  expect(storage!.parentSpanId).toBe(transaction!.spanId);
   expect(new Set(recording.spans.map((span) => span.traceId)).size).toBe(1);
   expect(recording.spans.every((span) => span.ended)).toBe(true);
   expect(request).toMatchObject({

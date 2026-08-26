@@ -1,3 +1,4 @@
+import { StaleWriteError, TakibiError } from "./errors";
 import { SchemaValidationError } from "./schema";
 import { TAKIBI_REVISION_KEY } from "./types";
 
@@ -6,6 +7,27 @@ export function documentRevision(document: object | null | undefined): number {
   const rev = document.rev;
   if (typeof rev === "number" && Number.isInteger(rev) && rev >= 1) return rev;
   return 1;
+}
+
+/** Advance `rev` so the result is strictly greater as an IEEE-754 number. */
+export function nextDocumentRevision(current: number): number {
+  const incremented = current + 1;
+  if (incremented > current && Number.isFinite(incremented)) return incremented;
+  const exponent = Math.floor(Math.log2(current));
+  const ulp = 2 ** Math.max(exponent - 52, 0);
+  const next = current + ulp;
+  if (next > current && Number.isFinite(next)) return next;
+  throw new TakibiError("INVALID_DOCUMENT", "Document revision cannot advance", 500);
+}
+
+export function assertRevisionPrecondition(
+  existing: object | null | undefined,
+  expectedRev: number | undefined,
+): void {
+  if (expectedRev === undefined) return;
+  if (!existing || documentRevision(existing) !== expectedRev) {
+    throw new StaleWriteError();
+  }
 }
 
 export function withDocumentRevision<T extends Record<string, unknown>>(

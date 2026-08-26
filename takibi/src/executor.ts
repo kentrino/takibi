@@ -1,4 +1,4 @@
-import { ForbiddenError, NotFoundError } from "./errors";
+import { ForbiddenError, NotFoundError, StaleWriteError } from "./errors";
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
@@ -131,16 +131,23 @@ export async function executeOperation<TCtx extends object>(
     case "set": {
       if (!req.id) throw new NotFoundError("Missing id");
       const existing = await storage.get(req.collection, req.id);
-      const nextDoc = await prepareSetDoc(def, req.id, req.input, existing, logger);
-      const accessCtx: AccessContext<TCtx> = {
+      const accessCtxBase: AccessContext<TCtx> = {
         ...ctx,
         collection: req.collection,
         operation: "set",
         permission: resolvePermission("set", existing),
         ...(existing ? { doc: existing } : {}),
-        nextDoc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
+      let nextDoc: WithMetadata<Record<string, unknown>>;
+      try {
+        nextDoc = await prepareSetDoc(def, req.id, req.input, existing, logger);
+      } catch (error) {
+        if (error instanceof StaleWriteError) {
+          await assertAccess(def, accessCtxBase, { conceal: true, id: req.id }, logger);
+        }
+        throw error;
+      }
+      await assertAccess(def, { ...accessCtxBase, nextDoc }, { conceal: true, id: req.id }, logger);
       await storage.put(req.collection, nextDoc);
       return nextDoc;
     }
@@ -162,7 +169,26 @@ export async function executeOperation<TCtx extends object>(
       if (!req.id) throw new NotFoundError("Missing id");
       const doc = await storage.get(req.collection, req.id);
       if (!doc) throw new NotFoundError(`Document not found: ${req.id}`);
-      const nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc, logger);
+      let nextDoc: WithMetadata<Record<string, unknown>>;
+      try {
+        nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc, logger);
+      } catch (error) {
+        if (error instanceof StaleWriteError) {
+          await assertAccess(
+            def,
+            {
+              ...ctx,
+              collection: req.collection,
+              operation: "update",
+              permission: "update",
+              doc,
+            },
+            { conceal: true, id: req.id },
+            logger,
+          );
+        }
+        throw error;
+      }
       const accessCtx: AccessContext<TCtx> = {
         ...ctx,
         collection: req.collection,

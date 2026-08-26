@@ -1,8 +1,13 @@
-import { AlreadyExistsError, NotFoundError, StaleWriteError, TakibiError } from "./errors";
+import { AlreadyExistsError, NotFoundError, TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
 import type { InternalLogger } from "./logging";
 import { compileListOptions } from "./query";
-import { documentRevision, takeRevisionPrecondition } from "./revision";
+import {
+  assertRevisionPrecondition,
+  documentRevision,
+  nextDocumentRevision,
+  takeRevisionPrecondition,
+} from "./revision";
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
 import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
@@ -60,7 +65,10 @@ function resolveDocumentId(id: unknown): DocumentId {
 }
 
 function asDataObject(input: unknown): Record<string, unknown> {
-  return typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new SchemaValidationError([{ message: "document data must be a plain object" }]);
+  }
+  return input as Record<string, unknown>;
 }
 
 function domainDataFromExisting(
@@ -99,12 +107,14 @@ export async function commitAddDoc(
   collection: string,
   doc: WithMetadata<Record<string, unknown>>,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing = await storage.get(collection, doc.id);
-  if (existing) {
-    throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
-  }
-  await storage.put(collection, doc);
-  return doc;
+  return storage.transaction(async (tx) => {
+    const existing = await tx.get(collection, doc.id);
+    if (existing) {
+      throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
+    }
+    await tx.put(collection, doc);
+    return doc;
+  });
 }
 
 /** Build the document that would be stored for `set`, without put. */
@@ -128,7 +138,7 @@ export async function prepareSetDoc(
     id,
     createdAt,
     updatedAt: now,
-    rev: existing ? documentRevision(existing) + 1 : 1,
+    rev: existing ? nextDocumentRevision(documentRevision(existing)) : 1,
   };
 }
 
@@ -156,18 +166,8 @@ export async function prepareUpdateDoc(
     id,
     createdAt: existing.createdAt,
     updatedAt: now,
-    rev: documentRevision(existing) + 1,
+    rev: nextDocumentRevision(documentRevision(existing)),
   };
-}
-
-function assertRevisionPrecondition(
-  existing: WithMetadata<Record<string, unknown>> | null,
-  expectedRev: number | undefined,
-): void {
-  if (expectedRev === undefined) return;
-  if (!existing || documentRevision(existing) !== expectedRev) {
-    throw new StaleWriteError();
-  }
 }
 
 /** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
@@ -192,11 +192,13 @@ export async function storageSet(
   options?: { existing?: WithMetadata<Record<string, unknown>> | null },
   logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing =
-    options && "existing" in options ? options.existing : await storage.get(collection, id);
-  const doc = await prepareSetDoc(def, id, input, existing ?? null, logger);
-  await storage.put(collection, doc);
-  return doc;
+  return storage.transaction(async (tx) => {
+    const existing =
+      options && "existing" in options ? options.existing : await tx.get(collection, id);
+    const doc = await prepareSetDoc(def, id, input, existing ?? null, logger);
+    await tx.put(collection, doc);
+    return doc;
+  });
 }
 
 export async function storageUpdate(
@@ -207,11 +209,13 @@ export async function storageUpdate(
   input: unknown,
   logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing = await storage.get(collection, id);
-  if (!existing) throw new NotFoundError(`Document not found: ${id}`);
-  const doc = await prepareUpdateDoc(def, id, input, existing, logger);
-  await storage.put(collection, doc);
-  return doc;
+  return storage.transaction(async (tx) => {
+    const existing = await tx.get(collection, id);
+    if (!existing) throw new NotFoundError(`Document not found: ${id}`);
+    const doc = await prepareUpdateDoc(def, id, input, existing, logger);
+    await tx.put(collection, doc);
+    return doc;
+  });
 }
 
 export async function storageDelete(

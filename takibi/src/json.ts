@@ -1,5 +1,8 @@
 import type { JsonValue } from "./types";
 
+/** Nesting cap so validation fails cleanly instead of overflowing the isolate stack. */
+export const JSON_MAX_DEPTH = 64;
+
 export type JsonValidationOptions = {
   subject: string;
   error: (message: string) => Error;
@@ -9,7 +12,7 @@ export function assertJsonValue(
   value: unknown,
   options: JsonValidationOptions,
 ): asserts value is JsonValue {
-  visitJsonValue(value, options, new Set<object>());
+  visitJsonValue(value, options, new Set<object>(), 0);
 }
 
 export function assertJsonObject(
@@ -23,10 +26,18 @@ export function assertJsonObject(
   if (prototype !== Object.prototype && prototype !== null) {
     throw options.error(`${options.subject} must be a plain JSON object`);
   }
-  visitJsonValue(value, options, new Set<object>());
+  visitJsonValue(value, options, new Set<object>(), 0);
 }
 
-function visitJsonValue(value: unknown, options: JsonValidationOptions, seen: Set<object>): void {
+function visitJsonValue(
+  value: unknown,
+  options: JsonValidationOptions,
+  seen: Set<object>,
+  depth: number,
+): void {
+  if (depth > JSON_MAX_DEPTH) {
+    throw options.error(`${options.subject} exceeds maximum nesting depth of ${JSON_MAX_DEPTH}`);
+  }
   if (
     value === null ||
     typeof value === "string" ||
@@ -49,7 +60,7 @@ function visitJsonValue(value: unknown, options: JsonValidationOptions, seen: Se
       if (!descriptor?.enumerable || !("value" in descriptor)) {
         throw options.error(`${options.subject} arrays must contain only data elements`);
       }
-      visitJsonValue(descriptor.value, options, seen);
+      visitJsonValue(descriptor.value, options, seen, depth + 1);
     }
     for (const key of Reflect.ownKeys(value)) {
       if (key === "length") continue;
@@ -77,7 +88,7 @@ function visitJsonValue(value: unknown, options: JsonValidationOptions, seen: Se
     if (!descriptor?.enumerable || !("value" in descriptor)) {
       throw options.error(`${options.subject} must contain only enumerable data properties`);
     }
-    visitJsonValue(descriptor.value, options, seen);
+    visitJsonValue(descriptor.value, options, seen, depth + 1);
   }
   seen.delete(value);
 }
