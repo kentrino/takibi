@@ -2,7 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { NotFoundError, StaleWriteError, TakibiError } from "../src/errors";
 import { executeOperation } from "../src/executor";
-import { fullAccess, none } from "../src/index";
+import { fullAccess, none, write } from "../src/index";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
 import { prepareSetDoc, storageAdd, storageSet, storageUpdate } from "../src/typed-storage";
 import type { StoredDocument, WithMetadata } from "../src/types";
@@ -176,4 +176,51 @@ test("storing a deeply nested document fails with a clean TakibiError, not a sta
   await expect(
     durable.put("posts", meta({ id: "deep", tree }) as StoredDocument),
   ).rejects.toBeInstanceOf(TakibiError);
+});
+
+// 11. `update` collates the grant against `update` only, then returns the full
+// merged document. The permission model separates read from write — the
+// exported `write` grant is create / update / delete with no get / list — so a
+// caller whose `get` is concealed as NOT_FOUND still reads every field by
+// PATCHing an empty body. The read needs no schema knowledge and leaves the
+// document content unchanged, so it is invisible to the owner.
+test("update must not return document fields to a caller denied get", async () => {
+  const storage = createMemoryStorage();
+  const Note = z.object({ title: z.string(), ssn: z.string() });
+  const collections = { notes: { schema: Note, accessPolicy: write } };
+  await storage.put("notes", meta({ id: "n1", title: "t", ssn: "123-45-6789" }) as StoredDocument);
+
+  const run = (operation: "get" | "update") =>
+    executeOperation(collections, storage, {}, {
+      kind: "collection",
+      collection: "notes",
+      operation,
+      id: "n1",
+      ...(operation === "update" ? { input: {} } : {}),
+    });
+
+  await expect(run("get")).rejects.toBeInstanceOf(NotFoundError);
+  expect(await run("update")).not.toHaveProperty("ssn");
+});
+
+// 12. Concealment is bypassed again: `update` validates the merged document
+// before the access policy. A denied caller sending a type-wrong patch gets
+// VALIDATION for an existing id and NOT_FOUND for a missing one — an existence
+// oracle that needs no valid payload and no `rev`.
+test("schema validation must not leak document existence to denied callers", async () => {
+  const storage = createMemoryStorage();
+  const collections = { posts: { schema: Post, accessPolicy: none } };
+  await storage.put("posts", meta({ id: "hidden", title: "s" }) as StoredDocument);
+
+  const updateInvalid = (id: string) =>
+    executeOperation(collections, storage, {}, {
+      kind: "collection",
+      collection: "posts",
+      operation: "update",
+      id,
+      input: { title: 12345 },
+    });
+
+  await expect(updateInvalid("hidden")).rejects.toBeInstanceOf(NotFoundError);
+  await expect(updateInvalid("missing")).rejects.toBeInstanceOf(NotFoundError);
 });
