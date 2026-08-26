@@ -184,3 +184,97 @@ test("CRUD writes require a JSON body", async () => {
     await expect(decodePublicHttp(request)).rejects.toBeInstanceOf(BadRequestError);
   }
 });
+
+test("decodePublicHttp maps POST /_batch to a read-only batch request", async () => {
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/api/fire/_batch", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "batch",
+          items: [
+            { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+            {
+              kind: "collection",
+              collection: "posts",
+              operation: "list",
+              list: { limit: 2 },
+            },
+          ],
+        }),
+      }),
+      "/api/fire",
+    ),
+  ).resolves.toEqual({
+    kind: "batch",
+    items: [
+      { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+      { kind: "collection", collection: "posts", operation: "list", list: { limit: 2 } },
+    ],
+  });
+});
+
+test("decodePublicHttp rejects non-POST, empty, oversized, nested, write, and action batches", async () => {
+  await expect(decodePublicHttp(new Request("http://fire.test/_batch"))).rejects.toBeInstanceOf(
+    MethodNotAllowedError,
+  );
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/_batch", {
+        method: "POST",
+        body: JSON.stringify({ kind: "batch", items: [] }),
+      }),
+    ),
+  ).rejects.toBeInstanceOf(BadRequestError);
+
+  const tooMany = Array.from({ length: 21 }, (_, index) => ({
+    kind: "collection",
+    collection: "posts",
+    operation: "get",
+    id: `p${index}`,
+  }));
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/_batch", {
+        method: "POST",
+        body: JSON.stringify({ kind: "batch", items: tooMany }),
+      }),
+    ),
+  ).rejects.toBeInstanceOf(BadRequestError);
+
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/_batch", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "batch",
+          items: [{ kind: "batch", items: [] }],
+        }),
+      }),
+    ),
+  ).rejects.toBeInstanceOf(BadRequestError);
+
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/_batch", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "batch",
+          items: [{ kind: "collection", collection: "posts", operation: "delete", id: "p1" }],
+        }),
+      }),
+    ),
+  ).rejects.toBeInstanceOf(BadRequestError);
+
+  await expect(
+    decodePublicHttp(
+      new Request("http://fire.test/_batch", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "batch",
+          items: [{ kind: "action", scope: "posts", name: "ping" }],
+        }),
+      }),
+    ),
+  ).rejects.toBeInstanceOf(BadRequestError);
+});

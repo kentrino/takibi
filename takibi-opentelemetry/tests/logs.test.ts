@@ -93,6 +93,7 @@ test("logs adapter preserves event fields and active OpenTelemetry context", () 
       event: "takibi.request",
       message: "completed",
       status: 200,
+      batchSize: 2,
     });
 
     expect(records[0]).toMatchObject({
@@ -114,6 +115,11 @@ test("logs adapter preserves event fields and active OpenTelemetry context", () 
       },
     });
     expect(trace.getSpanContext(records[0]!.context!)).toEqual(spanContext);
+    expect(records[1]?.attributes).toMatchObject({
+      "takibi.event.name": "takibi.request",
+      "takibi.response.status": 200,
+      "takibi.batch.size": 2,
+    });
     expect(trace.getSpanContext(records[1]!.context!)).toBeUndefined();
     expectTypeOf(createOtelLogger).returns.toHaveProperty("log");
   } finally {

@@ -1,6 +1,11 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
-import { decodeWireRequest, isWireResponse } from "../src/protocol";
+import {
+  decodeWireRequest,
+  isBatchWireResponse,
+  isWireResponse,
+  MAX_BATCH_ITEMS,
+} from "../src/protocol";
 
 const context = { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
 
@@ -234,5 +239,75 @@ test("isWireResponse accepts valid policy reasons and rejects malformed reasons"
         reason: { code: "LOCKED_ITEM" },
       },
     }),
+  ).toBe(false);
+});
+
+test("decodeWireRequest accepts a shared-context read batch and rejects writes", () => {
+  expect(MAX_BATCH_ITEMS).toBe(20);
+  expect(
+    decodeWireRequest({
+      kind: "batch",
+      items: [
+        { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+        { kind: "collection", collection: "posts", operation: "list" },
+      ],
+      context,
+    }),
+  ).toEqual({
+    kind: "batch",
+    items: [
+      { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+      { kind: "collection", collection: "posts", operation: "list" },
+    ],
+    context,
+  });
+
+  expect(() =>
+    decodeWireRequest({
+      kind: "batch",
+      items: [{ kind: "collection", collection: "posts", operation: "delete", id: "p1" }],
+      context,
+    }),
+  ).toThrow(BadRequestError);
+  expect(() =>
+    decodeWireRequest({
+      kind: "batch",
+      items: [{ kind: "action", scope: "$", name: "exportAll" }],
+      context,
+    }),
+  ).toThrow(BadRequestError);
+  expect(() =>
+    decodeWireRequest({
+      kind: "batch",
+      items: [],
+      context,
+    }),
+  ).toThrow(BadRequestError);
+});
+
+test("isBatchWireResponse requires the same number of item envelopes", () => {
+  const items = [
+    { ok: true as const, data: { id: "p1" } },
+    {
+      ok: false as const,
+      error: {
+        kind: "operation" as const,
+        code: "NOT_FOUND",
+        message: "Not found",
+        status: 404,
+      },
+    },
+  ];
+  expect(isBatchWireResponse({ ok: true, data: items }, 2)).toBe(true);
+  expect(isBatchWireResponse({ ok: true, data: items }, 1)).toBe(false);
+  expect(isBatchWireResponse({ ok: true, data: [{ id: "p1" }] }, 1)).toBe(false);
+  expect(
+    isBatchWireResponse(
+      {
+        ok: false,
+        error: { kind: "operation", code: "BAD_REQUEST", message: "bad", status: 400 },
+      },
+      2,
+    ),
   ).toBe(false);
 });

@@ -4,14 +4,31 @@ import { seedCollections } from "../durable-object";
 import { TakibiError } from "../errors";
 import { executeOperation } from "../executor";
 import type { PublicRequest } from "../http";
-import { withLoggedSpan, type InternalLogger } from "../logging";
+import { emitFailure, withLoggedSpan, type InternalLogger } from "../logging";
 import { createMigratingStorage } from "../migrations";
-import { invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
-import { isWireResponse, type WireRequest, type WireResponse } from "../protocol";
+import { batchSpanAttributes, invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
+import {
+  isBatchWireResponse,
+  isWireResponse,
+  type CollectionReadRequest,
+  type WireRequest,
+  type WireResponse,
+} from "../protocol";
 import { createMemoryStorage } from "../storage";
-import { injectTraceparent, tracedStorage, type SpanContext, type TakibiTracer } from "../tracing";
-import type { CollectionsDef } from "../types";
-import { applyStorageLogging, debugInvocationFields } from "./runtime";
+import {
+  injectTraceparent,
+  tracedStorage,
+  type SpanContext,
+  type SpanKind,
+  type TakibiTracer,
+} from "../tracing";
+import type { CollectionsDef, StorageDriver } from "../types";
+import {
+  applyStorageLogging,
+  debugInvocationFields,
+  invocationFields,
+  toWireFailure,
+} from "./runtime";
 import type { ContextStubResolver } from "./types";
 
 export type ExecutorInput = {
@@ -45,6 +62,17 @@ export function createMemoryExecutor(
   return async ({ ctx, invocation, tracer, resolveSpan }) => {
     await ready;
     const storage = tracer ? tracedStorage(driver) : driver;
+    if (invocation.kind === "batch") {
+      return executeBatchReads({
+        collections,
+        storage,
+        ctx,
+        items: invocation.items,
+        logger,
+        resolveSpan,
+        spanKind: "internal",
+      });
+    }
     const data = await withLoggedSpan(
       logger,
       {
@@ -84,15 +112,27 @@ export function createStubExecutor<TInitial>(
       );
     }
 
-    const wire: WireRequest = { ...invocation, context: ctx };
+    const wire: WireRequest =
+      invocation.kind === "batch"
+        ? { kind: "batch", items: invocation.items, context: ctx }
+        : { ...invocation, context: ctx };
+    const itemCount = invocation.kind === "batch" ? invocation.items.length : undefined;
     return withLoggedSpan(
       logger,
       {
         name: TAKIBI_SPAN.wire,
         kind: "client",
-        attributes: invocationSpanAttributes(invocation),
+        attributes:
+          invocation.kind === "batch"
+            ? batchSpanAttributes(invocation.items.length)
+            : invocationSpanAttributes(invocation),
       },
-      { event: "takibi.wire", ...debugInvocationFields(invocation) },
+      {
+        event: "takibi.wire",
+        ...(invocation.kind === "batch"
+          ? { batchSize: invocation.items.length }
+          : debugInvocationFields(invocation)),
+      },
       async () => {
         const headers = new Headers({ "content-type": "application/json" });
         injectTraceparent(headers);
@@ -104,6 +144,17 @@ export function createStubExecutor<TInitial>(
           }),
         );
         const body: unknown = await res.json();
+        if (itemCount !== undefined) {
+          if (isWireResponse(body) && !body.ok) return body;
+          if (!isBatchWireResponse(body, itemCount)) {
+            throw new TakibiError(
+              "INVALID_DO_RESPONSE",
+              "Invalid response from Durable Object",
+              500,
+            );
+          }
+          return body;
+        }
         if (!isWireResponse(body)) {
           throw new TakibiError("INVALID_DO_RESPONSE", "Invalid response from Durable Object", 500);
         }
@@ -112,4 +163,51 @@ export function createStubExecutor<TInitial>(
       resolveSpan,
     );
   };
+}
+
+async function executeBatchReads(args: {
+  collections: CollectionsDef<object>;
+  storage: StorageDriver;
+  ctx: Record<string, unknown>;
+  items: CollectionReadRequest[];
+  logger: InternalLogger | undefined;
+  resolveSpan: SpanContext | undefined;
+  spanKind: SpanKind;
+}): Promise<WireResponse> {
+  const results: WireResponse[] = [];
+  for (const item of args.items) {
+    results.push(await executeReadItem(args, item));
+  }
+  return { ok: true, data: results };
+}
+
+async function executeReadItem(
+  args: {
+    collections: CollectionsDef<object>;
+    storage: StorageDriver;
+    ctx: Record<string, unknown>;
+    logger: InternalLogger | undefined;
+    resolveSpan: SpanContext | undefined;
+    spanKind: SpanKind;
+  },
+  item: CollectionReadRequest,
+): Promise<WireResponse> {
+  try {
+    const data = await withLoggedSpan(
+      args.logger,
+      {
+        name: TAKIBI_SPAN.executor,
+        kind: args.spanKind,
+        attributes: invocationSpanAttributes(item),
+      },
+      { event: "takibi.executor", ...debugInvocationFields(item) },
+      () => executeOperation(args.collections, args.storage, args.ctx, item, args.logger),
+      args.resolveSpan,
+    );
+    return { ok: true, data };
+  } catch (error) {
+    const wire = toWireFailure(error);
+    emitFailure(args.logger, wire.error, invocationFields(item));
+    return wire;
+  }
 }

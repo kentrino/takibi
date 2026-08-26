@@ -7,9 +7,32 @@ import type { StorageListOptions } from "./types";
 
 type WireContext = Record<string, unknown>;
 
+export const MAX_BATCH_ITEMS = 20;
+
+export const COLLECTION_READ_OPERATIONS = ["get", "list"] as const;
+export type CollectionReadOperation = (typeof COLLECTION_READ_OPERATIONS)[number];
+
+export function isCollectionReadOperation(operation: string): operation is CollectionReadOperation {
+  return operation === "get" || operation === "list";
+}
+
+export type CollectionReadRequest = {
+  kind: "collection";
+  collection: string;
+  operation: CollectionReadOperation;
+  id?: string;
+  list?: StorageListOptions;
+};
+
+export type PublicBatchRequest = {
+  kind: "batch";
+  items: CollectionReadRequest[];
+};
+
 export type CollectionWireRequest = ExecuteRequest & { context: WireContext };
 export type ActionWireRequest = ActionInvocation & { context: WireContext };
-export type WireRequest = CollectionWireRequest | ActionWireRequest;
+export type BatchWireRequest = PublicBatchRequest & { context: WireContext };
+export type WireRequest = CollectionWireRequest | ActionWireRequest | BatchWireRequest;
 
 export type WireSuccess = { ok: true; data: unknown };
 export type WireFailure = {
@@ -44,6 +67,11 @@ export function decodeWireRequest(body: unknown): WireRequest {
       throw new BadRequestError("Invalid action id");
     }
     return r as ActionWireRequest;
+  }
+
+  if (r.kind === "batch") {
+    assertExactKeys(r, ["kind", "items", "context"]);
+    return { kind: "batch", items: decodeBatchItems(r.items), context: r.context };
   }
 
   if (r.kind !== "collection") throw new BadRequestError("Invalid wire request kind");
@@ -84,6 +112,55 @@ export function decodeWireRequest(body: unknown): WireRequest {
   return r as CollectionWireRequest;
 }
 
+export function decodePublicBatch(body: unknown): PublicBatchRequest {
+  if (!isRecord(body)) throw new BadRequestError("Invalid batch request");
+  assertExactKeys(body, ["kind", "items"]);
+  if (body.kind !== "batch") throw new BadRequestError("Invalid batch request");
+  return { kind: "batch", items: decodeBatchItems(body.items) };
+}
+
+export function decodeBatchItems(value: unknown): CollectionReadRequest[] {
+  if (!Array.isArray(value)) throw new BadRequestError("Invalid batch items");
+  if (value.length === 0) throw new BadRequestError("Empty batch");
+  if (value.length > MAX_BATCH_ITEMS) throw new BadRequestError("Batch too large");
+  return value.map(decodeCollectionReadRequest);
+}
+
+export function decodeCollectionReadRequest(value: unknown): CollectionReadRequest {
+  if (!isRecord(value)) throw new BadRequestError("Invalid batch item");
+  if (value.kind !== "collection") throw new BadRequestError("Invalid batch item kind");
+  if (typeof value.collection !== "string" || typeof value.operation !== "string") {
+    throw new BadRequestError("Invalid CRUD wire request");
+  }
+  if (!isCollectionReadOperation(value.operation)) {
+    throw new BadRequestError("Batch items must be collection reads");
+  }
+  if (value.operation === "get") {
+    assertExactKeys(value, ["kind", "collection", "operation", "id"]);
+    if (typeof value.id !== "string" || value.id === "") {
+      throw new BadRequestError("Invalid CRUD id");
+    }
+    return {
+      kind: "collection",
+      collection: value.collection,
+      operation: "get",
+      id: value.id,
+    };
+  }
+  assertExactKeys(value, ["kind", "collection", "operation", "list"]);
+  try {
+    const list = normalizeList(value.list);
+    return {
+      kind: "collection",
+      collection: value.collection,
+      operation: "list",
+      ...(list === undefined ? {} : { list }),
+    };
+  } catch (error) {
+    throw new BadRequestError(error instanceof Error ? error.message : "Invalid list options");
+  }
+}
+
 function assertContext(value: unknown): asserts value is WireContext {
   if (!isRecord(value)) throw new BadRequestError("Invalid wire context");
 }
@@ -122,6 +199,15 @@ function assertListLimit(value: unknown): asserts value is number {
 
 function isHttpStatus(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+}
+
+export function isBatchWireResponse(
+  value: unknown,
+  itemCount: number,
+): value is WireSuccess & { data: WireResponse[] } {
+  if (!isWireResponse(value) || value.ok !== true) return false;
+  if (!Array.isArray(value.data) || value.data.length !== itemCount) return false;
+  return value.data.every((item) => isWireResponse(item));
 }
 
 export function isWireResponse(value: unknown): value is WireResponse {
