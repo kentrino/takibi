@@ -54,21 +54,21 @@ export function decodeWireRequest(body: unknown): WireRequest {
     case "add":
       assertExactKeys(r, ["kind", "collection", "operation", "id", "input", "context"]);
       if (!("input" in r)) throw new BadRequestError("Invalid CRUD wire request");
-      if (r.id !== undefined && typeof r.id !== "string") {
+      if (r.id !== undefined && (typeof r.id !== "string" || r.id === "")) {
         throw new BadRequestError("Invalid CRUD id");
       }
       break;
     case "set":
     case "update":
       assertExactKeys(r, ["kind", "collection", "operation", "id", "input", "context"]);
-      if (typeof r.id !== "string" || !("input" in r)) {
+      if (typeof r.id !== "string" || r.id === "" || !("input" in r)) {
         throw new BadRequestError("Invalid CRUD wire request");
       }
       break;
     case "get":
     case "delete":
       assertExactKeys(r, ["kind", "collection", "operation", "id", "context"]);
-      if (typeof r.id !== "string") throw new BadRequestError("Invalid CRUD id");
+      if (typeof r.id !== "string" || r.id === "") throw new BadRequestError("Invalid CRUD id");
       break;
     case "list":
       try {
@@ -92,9 +92,7 @@ function normalizeList(value: unknown): StorageListOptions | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new BadRequestError("Invalid list options");
   assertExactKeys(value, ["limit", "cursor", "where"]);
-  if (value.limit !== undefined && typeof value.limit !== "number") {
-    throw new BadRequestError("Invalid list limit");
-  }
+  if (value.limit !== undefined) assertListLimit(value.limit);
   if (value.cursor !== undefined && typeof value.cursor !== "string") {
     throw new BadRequestError("Invalid list cursor");
   }
@@ -116,6 +114,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function assertListLimit(value: unknown): asserts value is number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new BadRequestError("Invalid list limit");
+  }
+}
+
+function isHttpStatus(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+}
+
 export function isWireResponse(value: unknown): value is WireResponse {
   if (!value || typeof value !== "object") return false;
   const r = value as Record<string, unknown>;
@@ -124,7 +132,7 @@ export function isWireResponse(value: unknown): value is WireResponse {
   const error = r.error;
   if (!error || typeof error !== "object") return false;
   const e = error as Record<string, unknown>;
-  if (typeof e.code !== "string" || typeof e.message !== "string" || typeof e.status !== "number") {
+  if (typeof e.code !== "string" || typeof e.message !== "string" || !isHttpStatus(e.status)) {
     return false;
   }
   if (e.kind === "validation") {

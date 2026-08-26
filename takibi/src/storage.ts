@@ -346,11 +346,18 @@ function prepareList(resource: string, opts: StorageListOptions | undefined): Pr
     throw new BadRequestError("Cursor does not match this collection and query");
   }
 
+  if (
+    opts?.limit !== undefined &&
+    (typeof opts.limit !== "number" || !Number.isInteger(opts.limit) || opts.limit < 1)
+  ) {
+    throw new BadRequestError("Invalid list limit");
+  }
+
   return {
     collection: resource,
     where,
     startAfter: cursor?.id,
-    limit: Math.min(Math.max(opts?.limit ?? 50, 1), 200),
+    limit: Math.min(opts?.limit ?? 50, 200),
   };
 }
 
