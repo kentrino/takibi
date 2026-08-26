@@ -37,7 +37,7 @@ import {
 } from "../http";
 import { requestLogFields, resolveLogging, withLoggedSpan, type LoggingOptions } from "../logging";
 import { assertCollectionMigrations } from "../migrations";
-import { TAKIBI_SPAN } from "../otel-helper";
+import { batchSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import { createPolicyHelper } from "../policy";
 import {
   activeSpanContext,
@@ -171,10 +171,18 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   ): Promise<Response> => {
     try {
       let resolveSpan: SpanContext | undefined;
+      const batchSize = invocation.kind === "batch" ? invocation.items.length : undefined;
       const ctx = await withLoggedSpan(
         logger,
-        { name: TAKIBI_SPAN.resolve, kind: "internal" },
-        { event: "takibi.resolve" },
+        {
+          name: TAKIBI_SPAN.resolve,
+          kind: "internal",
+          ...(batchSize === undefined ? {} : { attributes: batchSpanAttributes(batchSize) }),
+        },
+        {
+          event: "takibi.resolve",
+          ...(batchSize === undefined ? {} : { batchSize }),
+        },
         async () => {
           resolveSpan = activeSpanContext();
           const resolved = await resolve({ request, context: initial as TInitial });
@@ -246,6 +254,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     });
   };
 
+  mountPublicRoute("/_batch", 1);
   mountPublicRoute("/:collection", 1);
   mountPublicRoute("/:collection/:id", 2);
   mountPublicRoute("/:collection/:id/*", 0, true);

@@ -17,6 +17,9 @@ const takibiAttributes = {
   document: {
     id: "takibi.document.id",
   },
+  batch: {
+    size: "takibi.batch.size",
+  },
   operation: {
     name: "takibi.operation.name",
   },
@@ -58,6 +61,10 @@ export function collectionSpanAttributes(
     [TAKIBI_ATTR.operation.name]: operation,
     ...(id === undefined ? {} : { [TAKIBI_ATTR.document.id]: id }),
   };
+}
+
+export function batchSpanAttributes(size: number): SpanAttributes {
+  return { [TAKIBI_ATTR.batch.size]: size };
 }
 
 export function invocationSpanAttributes(

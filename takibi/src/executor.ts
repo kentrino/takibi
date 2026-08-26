@@ -100,10 +100,7 @@ async function assertAccess(
 }
 
 /** Writes collate `update`/`create`. The stored document is only returned when the same grant includes `get`. */
-function writeResult(
-  doc: WithMetadata<Record<string, unknown>>,
-  granted: AccessGrant,
-): unknown {
+function writeResult(doc: WithMetadata<Record<string, unknown>>, granted: AccessGrant): unknown {
   if (allows(granted, "get")) return doc;
   return { id: doc.id, updatedAt: doc.updatedAt, rev: doc.rev };
 }

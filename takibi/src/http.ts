@@ -1,6 +1,7 @@
 import { BadRequestError, TakibiError, NotFoundError } from "./errors";
 import type { ActionInvocation } from "./action-executor";
 import type { ExecuteRequest } from "./executor";
+import { decodePublicBatch, type PublicBatchRequest } from "./protocol";
 import { normalizeQueryExpr } from "./query";
 import type { StorageListOptions } from "./types";
 
@@ -47,7 +48,7 @@ export function rawPathSegments(pathname: string, count: number): string[] {
   return segments.slice(Math.max(0, segments.length - count));
 }
 
-export type PublicRequest = ExecuteRequest | ActionInvocation;
+export type PublicRequest = ExecuteRequest | ActionInvocation | PublicBatchRequest;
 
 export async function decodePublicHttp(request: Request, prefix?: string): Promise<PublicRequest> {
   const url = new URL(request.url);
@@ -90,6 +91,12 @@ export async function decodePublicRoute(
 ): Promise<PublicRequest> {
   if (rawSegments.length === 0 || rawSegments.some((segment) => segment === "")) {
     throw new BadRequestError("Missing collection");
+  }
+  if (rawSegments[0] === "_batch") {
+    if (rawSegments.length !== 1) throw new BadRequestError("Invalid batch path");
+    if (method !== "POST") throw new MethodNotAllowedError();
+    assertNoQuery(searchParams, "Query parameters are not allowed on batch");
+    return decodePublicBatch(await readJsonBody(readBody));
   }
   if (rawSegments.length > 2) {
     throw new NotFoundError();

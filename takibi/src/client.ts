@@ -1,7 +1,15 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { unsafeClientPropertyNames } from "./action";
 import type { TakibiHandler } from "./context/types";
-import { isWireResponse, type WireResponse } from "./protocol";
+import {
+  isBatchWireResponse,
+  isCollectionReadOperation,
+  isWireResponse,
+  MAX_BATCH_ITEMS,
+  type CollectionReadOperation,
+  type CollectionReadRequest,
+  type WireResponse,
+} from "./protocol";
 import { compileListOptions } from "./query";
 import type {
   ClientCollectionApi,
@@ -108,19 +116,31 @@ export type CreateClientOptions = {
   /** Static headers or a getter (e.g. attach tenant / auth tokens). */
   headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
+  /** Opt-in fixed-window batching for collection reads. */
+  batch?: {
+    /** Extra wait after the first queued read. `0` waits until the next timer task. */
+    maxWaitMs: number;
+  };
 };
 
 export function createClient<H extends TakibiHandlerCarrier>(
   baseUrl: string,
   options: CreateClientOptions = {},
 ): ClientOf<H> {
+  if (options.batch !== undefined) {
+    assertMaxWaitMs(options.batch.maxWaitMs);
+  }
+  const batcher =
+    options.batch === undefined
+      ? undefined
+      : createReadBatcher(baseUrl, options, options.batch.maxWaitMs);
   const members = new Map<string, unknown>();
   const client = new Proxy(Object.create(null) as object, {
     get(_target, name: string | symbol) {
       if (typeof name !== "string" || unsafeClientPropertyNames.has(name)) return undefined;
       let member = members.get(name);
       if (!member) {
-        member = createRootMember(baseUrl, name, options);
+        member = createRootMember(baseUrl, name, options, batcher);
         members.set(name, member);
       }
       return member;
@@ -129,8 +149,111 @@ export function createClient<H extends TakibiHandlerCarrier>(
   return client as ClientOf<H>;
 }
 
-function createRootMember(baseUrl: string, name: string, options: CreateClientOptions): unknown {
-  const collection = createCollectionClient(baseUrl, name, options);
+function assertMaxWaitMs(value: number): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError("batch.maxWaitMs must be a finite number >= 0");
+  }
+}
+
+type PendingRead = {
+  item: CollectionReadRequest;
+  resolve: (result: TakibiResult<unknown>) => void;
+  reject: (error: unknown) => void;
+};
+
+type ReadBatcher = {
+  enqueue(item: CollectionReadRequest): Promise<TakibiResult<unknown>>;
+};
+
+function createReadBatcher(
+  baseUrl: string,
+  options: CreateClientOptions,
+  maxWaitMs: number,
+): ReadBatcher {
+  let queue: PendingRead[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const flush = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    const pending = queue;
+    queue = [];
+    if (pending.length === 0) return;
+    void sendReadBatch(baseUrl, options, pending);
+  };
+
+  return {
+    enqueue(item) {
+      assertJsonInput(item);
+      return new Promise((resolve, reject) => {
+        queue.push({ item, resolve, reject });
+        if (queue.length === 1) {
+          timer = setTimeout(flush, maxWaitMs);
+        }
+        if (queue.length >= MAX_BATCH_ITEMS) flush();
+      });
+    },
+  };
+}
+
+async function sendReadBatch(
+  baseUrl: string,
+  options: CreateClientOptions,
+  pending: PendingRead[],
+): Promise<void> {
+  try {
+    const headers = new Headers(
+      typeof options.headers === "function" ? await options.headers() : (options.headers ?? {}),
+    );
+    if (!headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+    const prefix = baseUrl.replace(/\/$/, "");
+    const fetchImpl = options.fetch ?? globalThis.fetch;
+    const response = await fetchImpl(`${prefix}/_batch`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        kind: "batch",
+        items: pending.map(({ item }) => item),
+      }),
+    });
+
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Failed to decode response JSON");
+    }
+    if (!isWireResponse(json)) throw new Error("Invalid response envelope");
+    if (!json.ok) {
+      const result: TakibiResult<unknown> = { ok: false, error: json.error };
+      for (const item of pending) item.resolve(result);
+      return;
+    }
+    if (!isBatchWireResponse(json, pending.length)) {
+      throw new Error("Invalid batch response");
+    }
+    for (let index = 0; index < pending.length; index += 1) {
+      const wire = json.data[index]!;
+      pending[index]!.resolve(
+        wire.ok ? { ok: true, data: wire.data } : { ok: false, error: wire.error },
+      );
+    }
+  } catch (error) {
+    for (const item of pending) item.reject(error);
+  }
+}
+
+function createRootMember(
+  baseUrl: string,
+  name: string,
+  options: CreateClientOptions,
+  batcher: ReadBatcher | undefined,
+): unknown {
+  const collection = createCollectionClient(baseUrl, name, options, batcher);
   const rootAction = (...args: unknown[]) =>
     callEndpoint<unknown>(baseUrl, options, {
       method: "POST",
@@ -149,6 +272,7 @@ function createCollectionClient(
   baseUrl: string,
   collection: string,
   options: CreateClientOptions,
+  batcher: ReadBatcher | undefined,
 ): ClientCollectionApi<{ schema: never }> {
   const call = async <T>(
     operation: CollectionOperation,
@@ -156,6 +280,12 @@ function createCollectionClient(
   ): Promise<TakibiResult<T>> => {
     if (parts.id === "") {
       return Promise.resolve(emptyIdFailure());
+    }
+
+    if (batcher && isCollectionReadOperation(operation)) {
+      return batcher.enqueue(buildCollectionReadItem(collection, operation, parts)) as Promise<
+        TakibiResult<T>
+      >;
     }
 
     const request = buildPublicRequest(collection, operation, parts);
@@ -256,6 +386,22 @@ function buildPublicRequest(
       return _exhaustive;
     }
   }
+}
+
+function buildCollectionReadItem(
+  collection: string,
+  operation: CollectionReadOperation,
+  parts: { id?: string; list?: StorageListOptions },
+): CollectionReadRequest {
+  if (operation === "get") {
+    return { kind: "collection", collection, operation: "get", id: parts.id! };
+  }
+  return {
+    kind: "collection",
+    collection,
+    operation: "list",
+    ...(parts.list === undefined ? {} : { list: parts.list }),
+  };
 }
 
 async function callEndpoint<T>(

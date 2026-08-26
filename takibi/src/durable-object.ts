@@ -1,11 +1,17 @@
 import type { ActionRegistry } from "./action";
 import { executeAction, type ActionInvocation } from "./action-executor";
-import { applyStorageLogging, debugInvocationFields, errorResponse } from "./context/runtime";
+import {
+  applyStorageLogging,
+  debugInvocationFields,
+  errorResponse,
+  invocationFields,
+  toWireFailure,
+} from "./context/runtime";
 import type { InternalCollectionsOptions } from "./context/types";
 import { ForbiddenError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import type { PublicRequest } from "./http";
-import { withLoggedSpan, type InternalLogger } from "./logging";
+import { withLoggedSpan, emitFailure, type InternalLogger } from "./logging";
 import { createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { decodeWireRequest, type WireResponse } from "./protocol";
@@ -55,6 +61,34 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
           let invocation: PublicRequest | undefined;
           try {
             const body = decodeWireRequest(await request.json());
+            if (body.kind === "batch") {
+              invocation = { kind: "batch", items: body.items };
+              assertTenantMatchesDurableObjectName(this.#state.id.name, body.context);
+              await this.#ready;
+              const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
+              const results: WireResponse[] = [];
+              for (const item of body.items) {
+                try {
+                  const data = await withLoggedSpan(
+                    logger,
+                    {
+                      name: TAKIBI_SPAN.executor,
+                      kind: "server",
+                      attributes: invocationSpanAttributes(item),
+                    },
+                    { event: "takibi.executor", ...debugInvocationFields(item) },
+                    () => executeOperation(collections, driver, body.context, item, logger),
+                    extracted?.span,
+                  );
+                  results.push({ ok: true, data });
+                } catch (error) {
+                  const wire = toWireFailure(error);
+                  emitFailure(logger, wire.error, invocationFields(item));
+                  results.push(wire);
+                }
+              }
+              return Response.json({ ok: true, data: results } satisfies WireResponse);
+            }
             const { context, ...decodedInvocation } = body;
             invocation = decodedInvocation;
             assertTenantMatchesDurableObjectName(this.#state.id.name, context);

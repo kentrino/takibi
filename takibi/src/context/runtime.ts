@@ -36,9 +36,13 @@ export function mergeLoggingOptions(
 
 export function invocationFields(invocation: PublicRequest): {
   collection?: string;
-  operation: string;
+  operation?: string;
   documentId?: string;
+  batchSize?: number;
 } {
+  if (invocation.kind === "batch") {
+    return { batchSize: invocation.items.length };
+  }
   return invocation.kind === "action"
     ? {
         ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
@@ -71,7 +75,7 @@ export function errorResponse(
   invocation?: PublicRequest,
   request?: Request,
 ): Response {
-  const wire = toWireError(error);
+  const wire = toWireFailure(error);
   emitFailure(logger, wire.error, {
     ...(invocation === undefined ? {} : invocationFields(invocation)),
     ...(request === undefined ? {} : requestLogFields(request)),
@@ -79,7 +83,7 @@ export function errorResponse(
   return Response.json(wire, { status: statusOf(error) });
 }
 
-function toWireError(err: unknown): WireFailure {
+export function toWireFailure(err: unknown): WireFailure {
   if (err instanceof SchemaValidationError || err instanceof TakibiError) {
     return { ok: false, error: toTakibiFailure(err) };
   }

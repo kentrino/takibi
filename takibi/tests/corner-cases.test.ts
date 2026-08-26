@@ -191,13 +191,18 @@ test("update must not return document fields to a caller denied get", async () =
   await storage.put("notes", meta({ id: "n1", title: "t", ssn: "123-45-6789" }) as StoredDocument);
 
   const run = (operation: "get" | "update") =>
-    executeOperation(collections, storage, {}, {
-      kind: "collection",
-      collection: "notes",
-      operation,
-      id: "n1",
-      ...(operation === "update" ? { input: {} } : {}),
-    });
+    executeOperation(
+      collections,
+      storage,
+      {},
+      {
+        kind: "collection",
+        collection: "notes",
+        operation,
+        id: "n1",
+        ...(operation === "update" ? { input: {} } : {}),
+      },
+    );
 
   await expect(run("get")).rejects.toBeInstanceOf(NotFoundError);
   expect(await run("update")).not.toHaveProperty("ssn");
@@ -213,13 +218,18 @@ test("schema validation must not leak document existence to denied callers", asy
   await storage.put("posts", meta({ id: "hidden", title: "s" }) as StoredDocument);
 
   const updateInvalid = (id: string) =>
-    executeOperation(collections, storage, {}, {
-      kind: "collection",
-      collection: "posts",
-      operation: "update",
-      id,
-      input: { title: 12345 },
-    });
+    executeOperation(
+      collections,
+      storage,
+      {},
+      {
+        kind: "collection",
+        collection: "posts",
+        operation: "update",
+        id,
+        input: { title: 12345 },
+      },
+    );
 
   await expect(updateInvalid("hidden")).rejects.toBeInstanceOf(NotFoundError);
   await expect(updateInvalid("missing")).rejects.toBeInstanceOf(NotFoundError);

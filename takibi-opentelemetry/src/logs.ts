@@ -40,5 +40,6 @@ function eventAttributes(event: LogEvent): LogAttributes {
     ...(event.status === undefined ? {} : { "takibi.response.status": event.status }),
     ...(event.durationMs === undefined ? {} : { "takibi.duration.ms": event.durationMs }),
     ...(event.query === undefined ? {} : { "takibi.query": JSON.stringify(event.query) }),
+    ...(event.batchSize === undefined ? {} : { "takibi.batch.size": event.batchSize }),
   };
 }

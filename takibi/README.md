@@ -517,6 +517,29 @@ not an RPC wire.
 `GET` / `DELETE` have no body. Worker→Durable Object forwarding stays an internal
 JSON POST and is not part of the public HTTP contract.
 
+Opt-in batching of collection reads coalesces nearby `get` / `list` calls into one
+`POST {baseUrl}/_batch`. The first queued read starts a fixed window of
+`maxWaitMs` extra wait; later reads in that window do not extend the deadline.
+`0` waits only until the next timer task. Writes and actions skip the queue and
+go to their existing endpoints immediately. They neither flush a pending read
+batch nor change its deadline, and Takibi does not guarantee ordering between a
+read batch and those immediate requests — wait for the earlier Promise if the
+next call depends on it. All items in a batch share the headers captured at
+flush, the resolved context, and the tenant. One item's operation failure is
+returned to that Promise and does not reject the others. At most 20 reads share
+a batch.
+
+```ts
+const client = createClient<Handler>("https://localhost:3000/foo", {
+  batch: { maxWaitMs: 10 },
+  headers: () => ({
+    Authorization: `Bearer ${getAccessToken()}`,
+  }),
+});
+```
+
+Omit `batch` to keep one REST fetch per call.
+
 Success and failure use the envelope `{ ok: true, data }` / `{ ok: false, error }`.
 HTTP status matches `error.status` on failure (200 on success). This envelope is
 the public HTTP response contract.
@@ -772,9 +795,10 @@ policy, schema, storage, and actions. A failure log uses the public error
 message (not a generic "request failed") and includes the HTTP method and
 path so decode-time errors are diagnosable without opening a trace. Events
 can contain only operation metadata: collection, operation, document ID,
-HTTP method/path, duration, error code/status, and the normalized list query
-AST. They never contain documents, action input or output, resolved context,
-request/response bodies or headers, cookies, credentials, stubs, or bindings.
+HTTP method/path, duration, error code/status, the normalized list query
+AST, and batch size for batched reads. They never contain documents, action
+input or output, resolved context, request/response bodies or headers, cookies,
+credentials, stubs, or bindings.
 A query comparison value can still be a name, phone number, or other personal
 data. Restrict access to debug logs and retain them only briefly.
 
@@ -792,7 +816,8 @@ client span, a Durable Object `takibi.executor` is a server span, and local
 executor, policy, schema, storage, and action work is internal. Relevant spans
 carry only operation metadata: `takibi.collection.name`,
 `takibi.operation.name`, `takibi.action.name`, `takibi.action.scope`,
-`takibi.storage.operation`, and, when available, `takibi.document.id`. They do
+`takibi.storage.operation`, `takibi.batch.size` on batched reads, and, when
+available, `takibi.document.id`. They do
 not include document contents, resolved context, request headers, or action
 input/output. Core also decides exception normalization and error status; the
 integration package only maps that structural contract to OpenTelemetry.

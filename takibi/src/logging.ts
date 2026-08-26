@@ -22,6 +22,7 @@ export type LogEvent = {
   documentId?: string;
   method?: string;
   path?: string;
+  batchSize?: number;
   errorCode?: string;
   status?: number;
   query?: QueryExpr;
@@ -102,6 +103,7 @@ export function createPrettyConsoleLogger(options: PrettyConsoleLoggerOptions = 
         event.collection === undefined ? undefined : `collection=${event.collection}`,
         event.operation === undefined ? undefined : `operation=${event.operation}`,
         event.documentId === undefined ? undefined : `documentId=${event.documentId}`,
+        event.batchSize === undefined ? undefined : `batchSize=${event.batchSize}`,
         event.durationMs === undefined
           ? undefined
           : `durationMs=${formatDuration(event.durationMs)}`,
@@ -240,12 +242,13 @@ async function withStorageLog<T>(
 
 function copyEventFields(
   event: Omit<LogEvent, "level" | "message" | "event" | "durationMs">,
-): Pick<LogEvent, "collection" | "operation" | "documentId" | "query"> {
+): Pick<LogEvent, "collection" | "operation" | "documentId" | "query" | "batchSize"> {
   return {
     ...(event.collection === undefined ? {} : { collection: event.collection }),
     ...(event.operation === undefined ? {} : { operation: event.operation }),
     ...(event.documentId === undefined ? {} : { documentId: event.documentId }),
     ...(event.query === undefined ? {} : { query: cloneQuery(event.query) }),
+    ...(event.batchSize === undefined ? {} : { batchSize: event.batchSize }),
   };
 }
 
