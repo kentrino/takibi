@@ -225,7 +225,11 @@ function parseListQuery(searchParams: URLSearchParams): StorageListOptions | und
     if (!/^[0-9]+$/.test(raw)) {
       throw new BadRequestError("Invalid limit");
     }
-    list.limit = Number(raw);
+    const limit = Number(raw);
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new BadRequestError("Invalid limit");
+    }
+    list.limit = limit;
   }
   if (searchParams.has("cursor")) {
     list.cursor = searchParams.get("cursor") ?? "";

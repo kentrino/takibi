@@ -16,10 +16,12 @@ export function normalizeValidationIssues(
   return issues.map((issue) => {
     const path = issue.path
       ?.map((segment): string | number | undefined => {
-        if (typeof segment === "string" || typeof segment === "number") return segment;
+        if (typeof segment === "string") return segment;
+        if (typeof segment === "number" && Number.isFinite(segment)) return segment;
         if (segment && typeof segment === "object" && "key" in segment) {
           const key = (segment as { key: PropertyKey }).key;
-          if (typeof key === "string" || typeof key === "number") return key;
+          if (typeof key === "string") return key;
+          if (typeof key === "number" && Number.isFinite(key)) return key;
         }
         return undefined;
       })
