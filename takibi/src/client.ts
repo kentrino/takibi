@@ -120,6 +120,8 @@ export type CreateClientOptions = {
   batch?: {
     /** Extra wait after the first queued read. `0` waits until the next timer task. */
     maxWaitMs: number;
+    /** Reads per request before an immediate flush. Defaults to the protocol maximum. */
+    maxSize?: number;
   };
 };
 
@@ -129,11 +131,17 @@ export function createClient<H extends TakibiHandlerCarrier>(
 ): ClientOf<H> {
   if (options.batch !== undefined) {
     assertMaxWaitMs(options.batch.maxWaitMs);
+    assertMaxSize(options.batch.maxSize);
   }
   const batcher =
     options.batch === undefined
       ? undefined
-      : createReadBatcher(baseUrl, options, options.batch.maxWaitMs);
+      : createReadBatcher(
+          baseUrl,
+          options,
+          options.batch.maxWaitMs,
+          options.batch.maxSize ?? MAX_BATCH_ITEMS,
+        );
   const members = new Map<string, unknown>();
   const client = new Proxy(Object.create(null) as object, {
     get(_target, name: string | symbol) {
@@ -155,6 +163,12 @@ function assertMaxWaitMs(value: number): void {
   }
 }
 
+function assertMaxSize(value: number | undefined): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > MAX_BATCH_ITEMS)) {
+    throw new TypeError(`batch.maxSize must be an integer between 1 and ${MAX_BATCH_ITEMS}`);
+  }
+}
+
 type PendingRead = {
   item: CollectionReadRequest;
   resolve: (result: TakibiResult<unknown>) => void;
@@ -169,6 +183,7 @@ function createReadBatcher(
   baseUrl: string,
   options: CreateClientOptions,
   maxWaitMs: number,
+  maxSize: number,
 ): ReadBatcher {
   let queue: PendingRead[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -192,7 +207,7 @@ function createReadBatcher(
         if (queue.length === 1) {
           timer = setTimeout(flush, maxWaitMs);
         }
-        if (queue.length >= MAX_BATCH_ITEMS) flush();
+        if (queue.length >= maxSize) flush();
       });
     },
   };
