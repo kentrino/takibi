@@ -109,6 +109,7 @@ test("public root exports collection/action entry points", () => {
   expectTypeOf(Takibi.fullAccess).toEqualTypeOf<AccessGrant>();
   expectTypeOf(Takibi).toHaveProperty("AlreadyExistsError");
   expectTypeOf(Takibi).toHaveProperty("StaleWriteError");
+  expectTypeOf(Takibi).toHaveProperty("ListAllLimitError");
   expectTypeOf<AccessGrant>().not.toHaveProperty("has");
   expectTypeOf<AccessGrant>().not.toHaveProperty("size");
   expectTypeOf<AccessGrant>().not.toMatchTypeOf<ReadonlySet<AccessPermission>>();
@@ -134,6 +135,14 @@ test("StaleWriteError is the STALE_WRITE 409 class", () => {
   expect(error.status).toBe(409);
   expect(error.message).toBe("Stale write");
   expect(error.name).toBe("StaleWriteError");
+});
+
+test("ListAllLimitError is the LIST_ALL_LIMIT 400 class", () => {
+  const error = new Takibi.ListAllLimitError(10);
+  expect(error.code).toBe("LIST_ALL_LIMIT");
+  expect(error.status).toBe(400);
+  expect(error.message).toBe("listAll exceeded the maximum of 10 documents");
+  expect(error.name).toBe("ListAllLimitError");
 });
 
 test("public annotation types use the collection/action vocabulary", () => {
@@ -432,6 +441,7 @@ test("createClient lives on the browser entry, not the Worker root", () => {
   expectTypeOf(TakibiClient.BadRequestError).toBeConstructibleWith("bad");
   expectTypeOf(TakibiClient.AlreadyExistsError).toBeConstructibleWith();
   expectTypeOf(TakibiClient.StaleWriteError).toBeConstructibleWith();
+  expectTypeOf(TakibiClient.ListAllLimitError).toBeConstructibleWith(1);
   expectTypeOf<TakibiClient.ClientOf<TakibiHandler>>().not.toBeNever();
   expectTypeOf<TakibiClient.CreateClientOptions>().toMatchTypeOf<CreateClientOptions>();
   expectTypeOf<TakibiClient.PolicyReason<"POLICY_DENIED">>().toEqualTypeOf<

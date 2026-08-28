@@ -56,3 +56,10 @@ export class StaleWriteError extends TakibiError {
     this.name = "StaleWriteError";
   }
 }
+
+export class ListAllLimitError extends TakibiError {
+  constructor(maxItems: number) {
+    super("LIST_ALL_LIMIT", `listAll exceeded the maximum of ${maxItems} documents`, 400);
+    this.name = "ListAllLimitError";
+  }
+}

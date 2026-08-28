@@ -11,6 +11,12 @@ import {
   type WireResponse,
 } from "./protocol";
 import { compileListOptions } from "./query";
+import {
+  LIST_ALL_MAX_ITEMS_DEFAULT,
+  LIST_ALL_PAGE_SIZE_DEFAULT,
+  assertListAllConfig,
+  bindResultListAll,
+} from "./list-all";
 import type {
   ClientCollectionApi,
   CollectionOperation,
@@ -123,6 +129,14 @@ export type CreateClientOptions = {
     /** Reads per request before an immediate flush. Defaults to the protocol maximum. */
     maxSize?: number;
   };
+  /**
+   * Caps for `listAll`. `pageSize` defaults to 200 (the per-`list` maximum).
+   * `maxItems` defaults to 10_000. Call-site values may only be smaller.
+   */
+  listAll?: {
+    maxItems?: number;
+    pageSize?: number;
+  };
 };
 
 export function createClient<H extends TakibiHandlerCarrier>(
@@ -133,6 +147,7 @@ export function createClient<H extends TakibiHandlerCarrier>(
     assertMaxWaitMs(options.batch.maxWaitMs);
     assertMaxSize(options.batch.maxSize);
   }
+  const listAllCap = resolveClientListAllCap(options.listAll);
   const batcher =
     options.batch === undefined
       ? undefined
@@ -148,7 +163,7 @@ export function createClient<H extends TakibiHandlerCarrier>(
       if (typeof name !== "string" || unsafeClientPropertyNames.has(name)) return undefined;
       let member = members.get(name);
       if (!member) {
-        member = createRootMember(baseUrl, name, options, batcher);
+        member = createRootMember(baseUrl, name, options, batcher, listAllCap);
         members.set(name, member);
       }
       return member;
@@ -167,6 +182,18 @@ function assertMaxSize(value: number | undefined): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > MAX_BATCH_ITEMS)) {
     throw new TypeError(`batch.maxSize must be an integer between 1 and ${MAX_BATCH_ITEMS}`);
   }
+}
+
+function resolveClientListAllCap(value: CreateClientOptions["listAll"]): {
+  pageSize: number;
+  maxItems: number;
+} {
+  const cap = {
+    pageSize: value?.pageSize ?? LIST_ALL_PAGE_SIZE_DEFAULT,
+    maxItems: value?.maxItems ?? LIST_ALL_MAX_ITEMS_DEFAULT,
+  };
+  assertListAllConfig(cap);
+  return cap;
 }
 
 type PendingRead = {
@@ -267,8 +294,9 @@ function createRootMember(
   name: string,
   options: CreateClientOptions,
   batcher: ReadBatcher | undefined,
+  listAllCap: { pageSize: number; maxItems: number },
 ): unknown {
-  const collection = createCollectionClient(baseUrl, name, options, batcher);
+  const collection = createCollectionClient(baseUrl, name, options, batcher, listAllCap);
   const rootAction = (...args: unknown[]) =>
     callEndpoint<unknown>(baseUrl, options, {
       method: "POST",
@@ -288,6 +316,7 @@ function createCollectionClient(
   collection: string,
   options: CreateClientOptions,
   batcher: ReadBatcher | undefined,
+  listAllCap: { pageSize: number; maxItems: number },
 ): ClientCollectionApi<{ schema: never }> {
   const call = async <T>(
     operation: CollectionOperation,
@@ -314,6 +343,10 @@ function createCollectionClient(
     update: (id, data) => call("update", { id, input: data }),
     delete: (id) => call("delete", { id }),
     list: (opts) => call("list", { list: compileListOptions(opts) }),
+    listAll: bindResultListAll(
+      (opts) => call("list", { list: compileListOptions(opts) }),
+      listAllCap,
+    ),
   };
   const actions = new Map<string, unknown>();
   return new Proxy(crud, {

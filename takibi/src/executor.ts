@@ -3,6 +3,7 @@ import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
+import { bindThrowingListAll } from "./list-all";
 import {
   commitAddDoc,
   prepareAddDoc,
@@ -246,7 +247,7 @@ export function createPolicyCollections<
 ): CollectionsApi<TCollections> {
   const api = Object.create(null) as CollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
-    api[name] = {
+    const collectionApi = {
       add: (input, options) =>
         executeOperation(
           collections,
@@ -329,6 +330,8 @@ export function createPolicyCollections<
           logger,
         ),
     } as CollectionApi<TCollections[typeof name]>;
+    collectionApi.listAll = bindThrowingListAll(collectionApi.list);
+    api[name] = collectionApi;
   }
   return api;
 }
@@ -341,7 +344,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   const api = Object.create(null) as CollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
     const definition = collections[name]!;
-    api[name] = {
+    const collectionApi = {
       add: (input, options) => storageAdd(definition, storage, name, input, options, logger),
       set: (id, input) => storageSet(definition, storage, name, id, input, undefined, logger),
       async get(id) {
@@ -353,6 +356,8 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       delete: (id) => storageDelete(storage, name, id),
       list: (options) => storage.list(name, compileListOptions(options)),
     } as CollectionApi<TCollections[typeof name]>;
+    collectionApi.listAll = bindThrowingListAll(collectionApi.list);
+    api[name] = collectionApi;
   }
   return api;
 }

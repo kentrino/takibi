@@ -9,6 +9,7 @@ export type {
 export {
   AlreadyExistsError,
   StaleWriteError,
+  ListAllLimitError,
   BadRequestError,
   TakibiError,
   ForbiddenError,
