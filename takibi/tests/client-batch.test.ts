@@ -129,6 +129,22 @@ test("maxWaitMs 0 batches synchronous reads into the next timer task", async () 
   await expect(Promise.all([first, second])).resolves.toHaveLength(2);
 });
 
+test("maxSize 1 flushes every read immediately", async () => {
+  const { calls, fetch } = captureFetch(okBatch);
+  const client = createClient<ReturnType<typeof memoryHandler>>("http://fire.test", {
+    batch: { maxWaitMs: 0, maxSize: 1 },
+    fetch,
+  });
+
+  const first = client.posts.get("p1");
+  const second = client.posts.list();
+
+  expect(calls).toHaveLength(2);
+  expect((calls[0]!.body as { items: unknown[] }).items).toHaveLength(1);
+  expect((calls[1]!.body as { items: unknown[] }).items).toHaveLength(1);
+  await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+});
+
 test("writes and actions bypass the queue without changing a pending read deadline", async () => {
   const { calls, fetch } = captureFetch((call) =>
     call.url.endsWith("/_batch") ? okBatch(call) : okSingle(),
@@ -375,9 +391,22 @@ test("createClient rejects non-finite maxWaitMs", () => {
   }
 });
 
-test("README documents opt-in maxWaitMs, read-only batching, and no cross-kind ordering", () => {
+test("createClient rejects maxSize outside the protocol limit", () => {
+  const { fetch } = captureFetch(okSingle);
+  for (const maxSize of [0, 1.5, MAX_BATCH_ITEMS + 1, Number.NaN]) {
+    expect(() =>
+      createClient<ReturnType<typeof memoryHandler>>("http://fire.test", {
+        batch: { maxWaitMs: 0, maxSize },
+        fetch,
+      }),
+    ).toThrow(TypeError);
+  }
+});
+
+test("README documents batch limits, read-only batching, and no cross-kind ordering", () => {
   const readme = readFileSync(join(import.meta.dirname, "../README.md"), "utf8");
   expect(readme).toContain("maxWaitMs");
+  expect(readme).toContain("maxSize");
   expect(readme).toMatch(/collection read/i);
   expect(readme).toMatch(/write/i);
   expect(readme).toMatch(/action/i);

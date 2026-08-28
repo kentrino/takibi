@@ -527,11 +527,12 @@ read batch and those immediate requests — wait for the earlier Promise if the
 next call depends on it. All items in a batch share the headers captured at
 flush, the resolved context, and the tenant. One item's operation failure is
 returned to that Promise and does not reject the others. At most 20 reads share
-a batch.
+a batch by default. Set `maxSize` from 1 through 20 to flush earlier; `1`
+sends every read immediately in its own batch request.
 
 ```ts
 const client = createClient<Handler>("https://localhost:3000/foo", {
-  batch: { maxWaitMs: 10 },
+  batch: { maxWaitMs: 10, maxSize: 20 },
   headers: () => ({
     Authorization: `Bearer ${getAccessToken()}`,
   }),
