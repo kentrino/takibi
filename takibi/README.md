@@ -513,6 +513,13 @@ not an RPC wire.
 | `delete`  | `DELETE {baseUrl}/{collection}/{id}`                                                 |
 | `list`    | `GET {baseUrl}/{collection}?limit=&cursor=&where=`                                   |
 
+`listAll` is a client convenience over repeated `list` calls, not a new HTTP
+operation or policy permission. It reuses `list` (and its grant) page by page,
+follows `nextCursor`, and returns the concatenated documents. Configure the
+safety cap on `createClient`; the call site may only lower `pageSize` and
+`maxItems`. Remaining documents after `maxItems` fail with `LIST_ALL_LIMIT`
+instead of truncating.
+
 `POST` / `PUT` / `PATCH` bodies are the document input (not an internal wire request).
 `GET` / `DELETE` have no body. Worker→Durable Object forwarding stays an internal
 JSON POST and is not part of the public HTTP contract.
@@ -640,6 +647,10 @@ only the normalized expression to the server:
 const page = await client.posts.list({
   where: (query) => query.and(query.ownerId.eq(currentUser.id), query.createdAt.gte(yesterday)),
   limit: 50,
+});
+
+const published = await client.posts.listAll({
+  where: (query) => query.published.eq(true),
 });
 ```
 
@@ -842,6 +853,9 @@ operation failure.
   Keep embedded arrays small and bounded.
 - `list` returns full documents in id order and supports typed `where`,
   `limit`, and an opaque query-bound `cursor`. It does not offer `orderBy`,
-  offset, or projection.
+  offset, or projection. Each page defaults to **50** documents and is capped
+  at **200**. `listAll` walks those pages (default page size 200) and stops at
+  a client safety cap of **10_000** documents unless `createClient({ listAll })`
+  or the call site sets a smaller `maxItems`.
 - `where` is currently unindexed. SQLite evaluates its predicate and only candidate
   rows cross into JavaScript; adding field indexes remains a future optimization.

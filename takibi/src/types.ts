@@ -296,6 +296,7 @@ export type CollectionApi<C> = {
     items: InferCollectionDoc<C>[];
     nextCursor?: string;
   }>;
+  listAll: (opts?: ListAllOptions<InferCollectionDoc<C>>) => Promise<InferCollectionDoc<C>[]>;
 };
 
 export type CollectionsApi<TCollections> = {
@@ -331,6 +332,9 @@ export type ClientCollectionApi<C> = {
       CollectionPolicyReasonCode<C>
     >
   >;
+  listAll: (
+    opts?: ListAllOptions<InferCollectionDoc<C>>,
+  ) => Promise<TakibiResult<InferCollectionDoc<C>[], CollectionPolicyReasonCode<C>>>;
 };
 
 export type ClientCollectionsApi<TCollections> = {
@@ -341,6 +345,18 @@ export type ListOptions<TDoc = WithMetadata<Record<string, QueryScalar>>> = {
   limit?: number;
   cursor?: string;
   where?: (query: QueryBuilder<TDoc>) => QueryExpr;
+};
+
+/** Client / server convenience over repeated `list` pages. Not a policy permission. */
+export type ListAllOptions<TDoc = WithMetadata<Record<string, QueryScalar>>> = {
+  where?: ListOptions<TDoc>["where"];
+  /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */
+  pageSize?: number;
+  /**
+   * Safety cap across all pages. If matching documents remain after this many
+   * items, `listAll` fails with `LIST_ALL_LIMIT` instead of truncating.
+   */
+  maxItems?: number;
 };
 
 export type StorageListOptions = {

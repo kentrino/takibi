@@ -9,6 +9,11 @@ import {
   takeRevisionPrecondition,
 } from "./revision";
 import { asTakibiResult } from "./result";
+import {
+  bindResultListAll,
+  LIST_ALL_MAX_ITEMS_DEFAULT,
+  LIST_ALL_PAGE_SIZE_DEFAULT,
+} from "./list-all";
 import { SchemaValidationError, parseSchema } from "./schema";
 import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
 import type {
@@ -257,6 +262,10 @@ export function createTypedStorage<TCollections extends Record<string, Collectio
       delete: (id) => asTakibiResult(() => storageDelete(driver, name, id)),
       list: (opts?: ListOptions) =>
         asTakibiResult(() => driver.list(name, compileListOptions(opts))),
+      listAll: bindResultListAll(
+        (opts?: ListOptions) => asTakibiResult(() => driver.list(name, compileListOptions(opts))),
+        { pageSize: LIST_ALL_PAGE_SIZE_DEFAULT, maxItems: LIST_ALL_MAX_ITEMS_DEFAULT },
+      ),
     } as ClientCollectionsApi<TCollections>[typeof name];
   }
   return api;

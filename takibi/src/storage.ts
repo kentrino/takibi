@@ -1,3 +1,4 @@
+import { LIST_PAGE_DEFAULT, LIST_PAGE_MAX } from "./list-all";
 import { BadRequestError, TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
 import { matchesQuery, normalizeQueryExpr } from "./query";
@@ -373,7 +374,7 @@ function prepareList(resource: string, opts: StorageListOptions | undefined): Pr
     collection: resource,
     where,
     startAfter: cursor?.id,
-    limit: Math.min(opts?.limit ?? 50, 200),
+    limit: Math.min(opts?.limit ?? LIST_PAGE_DEFAULT, LIST_PAGE_MAX),
   };
 }
 

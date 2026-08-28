@@ -87,6 +87,18 @@ test("collection schemas type CRUD clients without handler $collections", () => 
   expectTypeOf<
     DurableInstance["$collections"]["posts"]["get"]
   >().returns.resolves.not.toHaveProperty("ok");
+  expectTypeOf<
+    DurableInstance["$collections"]["posts"]["listAll"]
+  >().returns.resolves.toMatchTypeOf<
+    {
+      id: string;
+      title: string;
+      published: boolean;
+      createdAt: string;
+      updatedAt: string;
+      rev: number;
+    }[]
+  >();
 
   const checkListQueries = () => {
     void client.posts.list({
@@ -107,6 +119,13 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     void client.posts.list({
       // @ts-expect-error equality values follow the schema output type
       where: (query) => query.title.eq(42),
+    });
+    void client.posts.listAll({
+      where: (query) => query.published.eq(true),
+    });
+    void client.posts.listAll({
+      // @ts-expect-error cursor is not a listAll option
+      cursor: "page-2",
     });
   };
   void checkListQueries;
@@ -1052,6 +1071,15 @@ test("list options can be projected from a public collection method", () => {
   expectTypeOf<PostListOptions>().toHaveProperty("limit");
   expectTypeOf<PostListOptions>().toHaveProperty("cursor");
   expectTypeOf<PostListOptions>().toHaveProperty("where");
+  type PostListAllOptions = NonNullable<Parameters<typeof client.posts.listAll>[0]>;
+  expectTypeOf<PostListAllOptions>().toHaveProperty("where");
+  expectTypeOf<PostListAllOptions>().toHaveProperty("pageSize");
+  expectTypeOf<PostListAllOptions>().toHaveProperty("maxItems");
+  expectTypeOf<PostListAllOptions>().not.toHaveProperty("limit");
+  expectTypeOf<PostListAllOptions>().not.toHaveProperty("cursor");
+  expectTypeOf<Awaited<ReturnType<typeof client.posts.listAll>>>().toMatchTypeOf<
+    TakibiResult<{ id: string; title: string; published: boolean }[]>
+  >();
   const byTitle: NonNullable<PostListOptions["where"]> = (query) => query.title.eq("hello");
   const byPublished: NonNullable<PostListOptions["where"]> = (query) => query.published.eq(true);
   const byMissing: NonNullable<PostListOptions["where"]> = (query) => {
