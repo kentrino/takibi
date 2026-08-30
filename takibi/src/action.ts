@@ -206,25 +206,29 @@ export type RuntimeActionDefinition = {
   readonly handler: (args: unknown) => unknown;
 };
 
-export type RootActionArgs<TCtx, TCollections> = {
+export type RootActionArgs<TCtx, TCollections, TServices = Record<never, never>> = {
   ctx: TCtx;
   collections: CollectionsApi<TCollections>;
   $collections: CollectionsApi<TCollections>;
+  services: TServices;
 };
 
-export type CollectionActionArgs<TCtx, TCollections, TCollection> = RootActionArgs<
+export type CollectionActionArgs<
   TCtx,
-  TCollections
-> & {
+  TCollections,
+  TCollection,
+  TServices = Record<never, never>,
+> = RootActionArgs<TCtx, TCollections, TServices> & {
   collection: CollectionApi<TCollection>;
   $collection: CollectionApi<TCollection>;
 };
 
-export type DocumentActionArgs<TCtx, TCollections, TCollection> = CollectionActionArgs<
+export type DocumentActionArgs<
   TCtx,
   TCollections,
-  TCollection
-> & {
+  TCollection,
+  TServices = Record<never, never>,
+> = CollectionActionArgs<TCtx, TCollections, TCollection, TServices> & {
   id: string;
   doc: InferCollectionDoc<TCollection>;
 };

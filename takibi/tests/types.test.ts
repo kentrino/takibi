@@ -1296,3 +1296,87 @@ test("with({ memory: true }) keeps ClientOf collection action names", () => {
   // @ts-expect-error memory is required
   handler.with({ resolve: (): AppCtx => ({ tenantId: "acme", user: null }) });
 });
+
+test("services factory return type reaches action handler args", () => {
+  type Env = { FLAG: string };
+  const takibi = createTakibi<Record<string, never>, Env>()({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+    services: ({ env }) => ({ flag: env.FLAG, send: (to: string) => to }),
+  });
+  const app = takibi.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+  app
+    .defineAction()
+    .policy(fullAccess)
+    .handler(({ services }) => {
+      expectTypeOf(services.flag).toEqualTypeOf<string>();
+      expectTypeOf(services.send).toEqualTypeOf<(to: string) => string>();
+      return { flag: services.flag };
+    });
+  app.posts.actions((defineAction) => ({
+    ping: defineAction()
+      .detached()
+      .policy(fullAccess)
+      .handler(({ services }) => {
+        expectTypeOf(services.flag).toEqualTypeOf<string>();
+        return { flag: services.flag };
+      }),
+    publish: defineAction()
+      .policy(fullAccess)
+      .handler(({ services }) => {
+        expectTypeOf(services.flag).toEqualTypeOf<string>();
+        return { flag: services.flag };
+      }),
+  }));
+  const handler = app.actions({});
+  expectTypeOf<ConstructorParameters<typeof handler.DurableObject>[1]>().toEqualTypeOf<Env>();
+});
+
+test("unconfigured services reject property access", () => {
+  const takibi = createTakibi()({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const app = takibi.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+  const check = () => {
+    app
+      .defineAction()
+      .policy(fullAccess)
+      .handler(({ services }) => {
+        // @ts-expect-error unconfigured services have no properties
+        return { x: services.flag };
+      });
+  };
+  void check;
+});
+
+test("non-empty services require a memory services value", () => {
+  const takibi = createTakibi()({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+    services: () => ({ flag: "x" }),
+  });
+  const checkDefine = () => {
+    takibi.defineCollections(
+      { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
+      // @ts-expect-error memory mode requires services when TServices is non-empty
+      { memory: true },
+    );
+  };
+  const app = takibi.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
+  const handler = app.actions({});
+  const checkWith = () => {
+    // @ts-expect-error .with memory requires services when TServices is non-empty
+    handler.with({ memory: true });
+  };
+  void checkDefine;
+  void checkWith;
+  handler.with({ memory: true, services: { flag: "from-test" } });
+  takibi.defineCollections(
+    { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
+    { memory: true, services: { flag: "from-test" } },
+  );
+});

@@ -30,14 +30,17 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
   registry: ActionRegistry,
   options: InternalCollectionsOptions,
   logger: InternalLogger | undefined,
+  createServices?: (input: { env: unknown }) => unknown,
 ): DurableObjectClass<TCollections> {
   return class TakibiTenantObject implements DurableObject {
     readonly #state: DurableObjectState;
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
+    readonly #services: unknown;
     readonly $collections: CollectionsApi<TCollections>;
 
-    constructor(state: DurableObjectState, _env: unknown) {
+    constructor(state: DurableObjectState, env: unknown) {
+      this.#services = createServices ? createServices({ env }) : {};
       this.#state = state;
       this.#driver = applyStorageLogging(
         createMigratingStorage(collections, createDurableObjectStorage(state.storage), logger),
@@ -111,6 +114,7 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
                       context,
                       decodedInvocation as ActionInvocation,
                       logger,
+                      this.#services,
                     )
                   : executeOperation(
                       collections,

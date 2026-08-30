@@ -52,6 +52,7 @@ export function createMemoryExecutor(
   collections: CollectionsDef<object>,
   registry: ActionRegistry,
   logger: InternalLogger | undefined,
+  services: unknown = {},
 ): Executor {
   const driver = applyStorageLogging(
     createMigratingStorage(collections, createMemoryStorage(), logger),
@@ -83,7 +84,7 @@ export function createMemoryExecutor(
       { event: "takibi.executor", ...debugInvocationFields(invocation) },
       () =>
         invocation.kind === "action"
-          ? executeAction(registry, collections, storage, ctx, invocation, logger)
+          ? executeAction(registry, collections, storage, ctx, invocation, logger, services)
           : executeOperation(collections, storage, ctx, invocation, logger),
       resolveSpan,
     );

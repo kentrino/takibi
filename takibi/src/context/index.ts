@@ -67,18 +67,21 @@ export type {
 
 /**
  * Bind typed initial context (`handle(..., { context })` deps), then call the
- * returned factory with `{ resolve, stub? }`. Execution context is inferred
- * from `resolve`'s return type.
+ * returned factory with `{ resolve, stub?, services? }`. Execution context is
+ * inferred from `resolve`'s return type; `services` from its factory return.
  */
-export function createTakibi<TInitial = Record<string, never>>(): CreateContextFn<TInitial> {
-  return ((config) =>
-    buildContext(config as ContextConfig<object, TInitial>)) as CreateContextFn<TInitial>;
+export function createTakibi<TInitial = Record<string, never>, TEnv = unknown>(): CreateContextFn<
+  TInitial,
+  TEnv
+> {
+  return ((config: ContextConfig<object, TInitial, TEnv>) =>
+    buildContext(config)) as CreateContextFn<TInitial, TEnv>;
 }
 
-function buildContext<TInitial>(
-  config: ContextConfig<object, TInitial>,
+function buildContext<TInitial, TEnv>(
+  config: ContextConfig<object, TInitial, TEnv>,
 ): CreateContextBuilder<object, TInitial> {
-  const { resolve, stub: resolveStub } = config;
+  const { resolve, stub: resolveStub, services: createServices } = config;
   const defaults = mergeLoggingOptions({}, config);
 
   return {
@@ -104,6 +107,7 @@ function buildContext<TInitial>(
         collections: collections as CollectionsDef<object>,
         resolve,
         resolveStub,
+        createServices: createServices as ((input: { env: unknown }) => unknown) | undefined,
         options: { ...defaults, ...options },
       }) as never;
     },
@@ -114,9 +118,10 @@ function createAppDefinition<TInitial>(args: {
   collections: CollectionsDef<object>;
   resolve: ContextResolver<object, TInitial>;
   resolveStub?: ContextStubResolver<object, TInitial>;
+  createServices?: (input: { env: unknown }) => unknown;
   options: InternalCollectionsOptions;
 }): AppDefinition<object, CollectionsDef<object>, TInitial> {
-  const { collections, resolve, resolveStub, options } = args;
+  const { collections, resolve, resolveStub, createServices, options } = args;
   const collectionNames = new Set(Object.keys(collections));
 
   const app = Object.create(null) as Record<string, unknown>;
@@ -148,6 +153,7 @@ function createAppDefinition<TInitial>(args: {
       actionMap: map,
       resolve,
       resolveStub,
+      createServices,
       options,
     });
   };
@@ -160,15 +166,28 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   actionMap: ActionScopeMap;
   resolve: ContextResolver<object, TInitial>;
   resolveStub?: ContextStubResolver<object, TInitial>;
+  createServices?: (input: { env: unknown }) => unknown;
   options: InternalCollectionsOptions;
 }): TakibiHandler<object, TCollections, TInitial> {
-  const { collections, registry, actionMap, resolve, resolveStub, options } = args;
+  const { collections, registry, actionMap, resolve, resolveStub, createServices, options } = args;
   const memory = options.memory ?? false;
+  if (memory && createServices != null && !("services" in options)) {
+    throw new TakibiError(
+      "MISSING_SERVICES",
+      "Memory mode requires services when createTakibi()({ services }) is configured — pass .with({ memory: true, services }) or defineCollections(..., { memory: true, services })",
+      500,
+    );
+  }
+  const services = memory
+    ? "services" in options && options.services !== undefined
+      ? options.services
+      : {}
+    : undefined;
   const app = new Hono<{ Bindings: Record<string, unknown> }>();
   const logger = resolveLogging(options);
 
   const execute = memory
-    ? createMemoryExecutor(collections, registry, logger)
+    ? createMemoryExecutor(collections, registry, logger, services ?? {})
     : createStubExecutor(resolveStub, logger);
 
   const run = async (
@@ -271,7 +290,13 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     return c.newResponse(response.body, response);
   });
 
-  const DurableObjectClass = createDurableObjectClass(collections, registry, options, logger);
+  const DurableObjectClass = createDurableObjectClass(
+    collections,
+    registry,
+    options,
+    logger,
+    createServices,
+  );
   const handler = app as TakibiHandler<object, TCollections, TInitial>;
   Object.defineProperty(handler, "~takibi", {
     value: {
@@ -300,6 +325,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     withOptions: LoggingOptions & {
       memory: true;
       resolve?: ContextResolver<object, TInitial>;
+      services?: unknown;
     },
   ) =>
     assembleHandler({
@@ -307,7 +333,12 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
       registry: registry.clone(),
       actionMap,
       resolve: withOptions.resolve ?? resolve,
-      options: { ...mergeLoggingOptions(options, withOptions), memory: true },
+      createServices,
+      options: {
+        ...mergeLoggingOptions(options, withOptions),
+        memory: true,
+        ...("services" in withOptions ? { services: withOptions.services } : {}),
+      } as InternalCollectionsOptions,
     })) as typeof handler.with;
   return handler;
 }
