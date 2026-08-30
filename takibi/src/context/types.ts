@@ -18,10 +18,12 @@ import type { PolicyHelper } from "../policy";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
 import type {
   CollectionDefinition,
+  CollectionUniqueConstraints,
   CollectionsApi,
   CollectionsDef,
   InferCollectionDoc,
   ReservedDocumentSchemaConstraint,
+  UniqueConstraintDeclaration,
 } from "../types";
 
 export type ContextResolverInput<TInitial = Record<string, never>> = {
@@ -167,6 +169,12 @@ export type AppDefinition<TCtx extends object, TCollections, TInitial> = {
   ): TakibiHandler<TCtx, TCollections, TInitial, TMap>;
 };
 
+type PublicCollectionUniqueConstraint<C, TSchema extends StandardSchemaV1> = C extends {
+  unique: infer TUnique;
+}
+  ? { unique: TUnique & UniqueConstraintDeclaration<TSchema, TUnique> }
+  : { unique?: CollectionDefinition<TSchema>["unique"] };
+
 type PublicCollectionConstraint<C, TCtx extends object> = C extends {
   schema: infer S extends StandardSchemaV1;
 }
@@ -175,7 +183,8 @@ type PublicCollectionConstraint<C, TCtx extends object> = C extends {
       accessPolicy: CollectionDefinition<S, TCtx>["accessPolicy"];
       migrations?: CollectionDefinition<S, TCtx>["migrations"];
       seed?: CollectionDefinition<S, TCtx>["seed"];
-    } & ReservedDocumentSchemaConstraint<S>
+    } & PublicCollectionUniqueConstraint<C, S> &
+      ReservedDocumentSchemaConstraint<S>
   : {
       schema: StandardSchemaV1;
       accessPolicy: CollectionDefinition<StandardSchemaV1, TCtx>["accessPolicy"];
@@ -202,8 +211,10 @@ export type CreateContextBuilder<TCtx extends object, TInitial> = {
   defineCollection<
     TSchema extends StandardSchemaV1,
     const TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"],
+    const TUnique extends CollectionUniqueConstraints<TSchema> =
+      CollectionUniqueConstraints<TSchema>,
   >(
-    definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy> &
+    definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy, TUnique> &
       ReservedDocumentSchemaConstraint<TSchema>,
   ): CollectionDefinition<TSchema, TCtx, TPolicy>;
   defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(

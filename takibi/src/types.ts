@@ -96,6 +96,48 @@ export type QueryValueOperator = "eq" | "gt" | "gte" | "lt" | "lte";
 
 export type QueryOperator = QueryValueOperator | "present";
 
+type UniqueFieldKeys<TSchema extends StandardSchemaV1> = {
+  [K in keyof StandardSchemaV1.InferOutput<TSchema> & string]-?: IsAny<
+    StandardSchemaV1.InferOutput<TSchema>[K]
+  > extends true
+    ? never
+    : unknown extends StandardSchemaV1.InferOutput<TSchema>[K]
+      ? never
+      : Exclude<StandardSchemaV1.InferOutput<TSchema>[K], null | undefined> extends Exclude<
+            QueryScalar,
+            null
+          >
+        ? [Exclude<StandardSchemaV1.InferOutput<TSchema>[K], null | undefined>] extends [never]
+          ? never
+          : K
+        : never;
+}[keyof StandardSchemaV1.InferOutput<TSchema> & string];
+
+export type CollectionUniqueConstraints<TSchema extends StandardSchemaV1> = Readonly<
+  Record<string, readonly [UniqueFieldKeys<TSchema>, ...UniqueFieldKeys<TSchema>[]]>
+>;
+
+type HasDuplicateTupleMember<T extends readonly unknown[]> = T extends readonly [
+  infer Head,
+  ...infer Tail,
+]
+  ? Head extends Tail[number]
+    ? true
+    : HasDuplicateTupleMember<Tail>
+  : false;
+
+/** @internal Validates inferred literal constraint tuples without widening them. */
+export type UniqueConstraintDeclaration<TSchema extends StandardSchemaV1, TUnique> =
+  TUnique extends CollectionUniqueConstraints<TSchema>
+    ? {
+        [K in keyof TUnique]: TUnique[K] extends readonly unknown[]
+          ? HasDuplicateTupleMember<TUnique[K]> extends true
+            ? never
+            : TUnique[K]
+          : never;
+      }
+    : never;
+
 export type QueryExpr =
   | { readonly field: string; readonly op: QueryValueOperator; readonly value: QueryScalar }
   | { readonly field: string; readonly op: "present" }
@@ -211,6 +253,12 @@ export type CollectionDefinition<
 > = {
   schema: JsonDocumentSchema<TSchema>;
   accessPolicy: TPolicy;
+  /**
+   * Named top-level scalar key tuples that must be unique within this
+   * collection. A tuple containing a missing or null value does not
+   * participate in the constraint.
+   */
+  unique?: CollectionUniqueConstraints<TSchema>;
   migrations?: CollectionMigrations<StandardSchemaV1.InferInput<TSchema>>;
   /**
    * Initial documents keyed by document ID. Seeds are create-only: existing

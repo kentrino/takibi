@@ -10,9 +10,11 @@ import {
   type CollectionDefinition,
   type CollectionsDef,
   type StorageDriver,
+  type StorageListPlan,
   type StoredDocument,
   type WithMetadata,
 } from "./types";
+import { assertUniqueDocument } from "./unique";
 
 export function assertCollectionMigrations(
   definition: CollectionDefinition,
@@ -51,7 +53,17 @@ export function createMigratingStorage(
     },
     async put(collection, document) {
       const definition = definitionFor(collection);
-      await storage.put(collection, withCurrentVersion(definition, document));
+      const current = withCurrentVersion(definition, document);
+      await storage.transaction(async (scoped) => {
+        await assertUniqueDocument(
+          definition,
+          scoped,
+          collection,
+          current,
+          currentDocumentReadPlan(definition, logger),
+        );
+        await scoped.put(collection, current);
+      });
     },
     delete(collection, id) {
       return storage.delete(collection, id);
@@ -81,10 +93,45 @@ async function migrateDocument(
   stored: StoredDocument,
   logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
+  const storedVersion = readStoredVersion(stored);
+  const targetVersion = currentVersion(definition);
+
+  if (storedVersion === targetVersion) return withoutVersion(stored);
+
+  const migrated = await migrateStoredDocument(definition, stored, logger);
+  await storage.transaction(async (scoped) => {
+    await assertUniqueDocument(
+      definition,
+      scoped,
+      collection,
+      migrated,
+      currentDocumentReadPlan(definition, logger),
+    );
+    await scoped.put(collection, migrated);
+  });
+  return withoutVersion(migrated);
+}
+
+function currentDocumentReadPlan(
+  definition: CollectionDefinition,
+  logger?: InternalLogger,
+): StorageListPlan {
+  return {
+    currentVersion: currentVersion(definition),
+    transform: async (stored) =>
+      withoutVersion(await migrateStoredDocument(definition, stored, logger)),
+  };
+}
+
+async function migrateStoredDocument(
+  definition: CollectionDefinition,
+  stored: StoredDocument,
+  logger?: InternalLogger,
+): Promise<StoredDocument> {
   const migrations = definition.migrations;
   const base = migrations?.base ?? 0;
   const steps = migrations?.steps ?? [];
-  const currentVersion = base + steps.length;
+  const targetVersion = base + steps.length;
   const storedVersion = readStoredVersion(stored);
 
   if (storedVersion < base) {
@@ -94,17 +141,17 @@ async function migrateDocument(
       500,
     );
   }
-  if (storedVersion > currentVersion) {
+  if (storedVersion > targetVersion) {
     throw new TakibiError(
       "MIGRATION_VERSION",
-      `Document version ${storedVersion} is newer than collection version ${currentVersion}`,
+      `Document version ${storedVersion} is newer than collection version ${targetVersion}`,
       500,
     );
   }
-  if (storedVersion === currentVersion) return withoutVersion(stored);
+  if (storedVersion === targetVersion) return stored;
 
   let data: unknown = domainData(stored);
-  for (let version = storedVersion; version < currentVersion; version += 1) {
+  for (let version = storedVersion; version < targetVersion; version += 1) {
     const step = steps[version - base];
     if (!step) {
       throw new TakibiError(
@@ -125,16 +172,14 @@ async function migrateDocument(
     error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),
   });
   assertNoReservedOutput(parsed);
-  const migrated: StoredDocument = {
+  return {
     ...parsed,
     id: stored.id,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
     rev: documentRevision(stored),
-    [TAKIBI_VERSION_KEY]: currentVersion,
+    [TAKIBI_VERSION_KEY]: targetVersion,
   };
-  await storage.put(collection, migrated);
-  return withoutVersion(migrated);
 }
 
 function currentVersion(definition: CollectionDefinition): number {

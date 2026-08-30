@@ -278,6 +278,116 @@ test("duplicate add returns ALREADY_EXISTS as an operation failure", async () =>
   });
 });
 
+test("named unique constraints cover public and trusted writes atomically", async () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const records = context.defineCollection({
+    schema: z.object({
+      key: z.string(),
+      ownerId: z.string(),
+      externalId: z.string().nullable().optional(),
+    }),
+    accessPolicy: fullAccess,
+    unique: {
+      byKey: ["key"],
+      byOwnerExternalId: ["ownerId", "externalId"],
+    },
+  });
+  const app = context.defineCollections({ records }, { memory: true });
+  const trustedCreate = app.records.actions((defineAction) => ({
+    trustedCreate: defineAction()
+      .detached()
+      .input(z.object({ key: z.string(), ownerId: z.string() }))
+      .policy(fullAccess)
+      .handler(({ input, $collection }) => $collection.add(input)),
+  }));
+  const handler = app.actions({ records: trustedCreate });
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  expect(
+    await client.records.add(
+      { key: "first", ownerId: "owner", externalId: "external" },
+      { id: "r1" },
+    ),
+  ).toMatchObject({ ok: true });
+  expect(
+    await client.records.set("r1", {
+      key: "first",
+      ownerId: "owner",
+      externalId: "external",
+    }),
+  ).toMatchObject({ ok: true });
+  expect(
+    await client.records.add(
+      { key: "second", ownerId: "owner", externalId: "external" },
+      { id: "r2" },
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: {
+      code: "ALREADY_EXISTS",
+      message: "Unique constraint violated: records.byOwnerExternalId",
+      status: 409,
+    },
+  });
+  expect(
+    await client.records.add(
+      { key: "third", ownerId: "other", externalId: "external" },
+      { id: "r3" },
+    ),
+  ).toMatchObject({ ok: true });
+  expect(await client.records.update("r3", { key: "first" })).toMatchObject({
+    ok: false,
+    error: { code: "ALREADY_EXISTS", message: "Unique constraint violated: records.byKey" },
+  });
+  expect(await client.records.trustedCreate({ key: "first", ownerId: "trusted" })).toMatchObject({
+    ok: false,
+    error: { code: "ALREADY_EXISTS", message: "Unique constraint violated: records.byKey" },
+  });
+
+  expect(
+    await client.records.add(
+      { key: "null-1", ownerId: "owner", externalId: null },
+      { id: "null-1" },
+    ),
+  ).toMatchObject({ ok: true });
+  expect(
+    await client.records.add({ key: "null-2", ownerId: "owner" }, { id: "null-2" }),
+  ).toMatchObject({ ok: true });
+
+  const concurrent = await Promise.all([
+    client.records.add({ key: "race", ownerId: "one" }, { id: "race-1" }),
+    client.records.add({ key: "race", ownerId: "two" }, { id: "race-2" }),
+  ]);
+  expect(concurrent.filter((result) => result.ok)).toHaveLength(1);
+  expect(concurrent.filter((result) => !result.ok).map((result) => result.error.code)).toEqual([
+    "ALREADY_EXISTS",
+  ]);
+});
+
+test("collection registration rejects malformed unique declarations at runtime", () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const definition = {
+    schema: Post,
+    accessPolicy: fullAccess,
+  };
+
+  for (const unique of [
+    { empty: [] },
+    { duplicate: ["title", "title"] },
+    { invalid: [""] },
+    { "not-safe": ["title"] },
+  ]) {
+    expect(() =>
+      context.defineCollections({
+        posts: { ...definition, unique } as never,
+      }),
+    ).toThrow(/unique constraint/);
+  }
+});
+
 test("action input is validated and client routes document actions by id", async () => {
   const { handler } = createActionApp();
   const calls: { method: string; url: string; body?: unknown }[] = [];
