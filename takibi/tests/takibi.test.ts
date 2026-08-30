@@ -1706,6 +1706,189 @@ test("original handle still requires stub after with()", async () => {
   });
 });
 
+test("action handler receives assembled memory services", async () => {
+  const context = createTakibi()({
+    resolve: resolveTestContext,
+    services: () => ({ stamp: "from-factory" }),
+  });
+  const app = context.defineCollections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { memory: true, services: { stamp: "from-memory" } },
+  );
+  const handler = app.actions({
+    $: {
+      ping: app
+        .defineAction()
+        .policy(fullAccess)
+        .handler(({ services }) => ({ stamp: services.stamp })),
+    },
+  });
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+  await expect(client.ping()).resolves.toMatchObject({
+    ok: true,
+    data: { stamp: "from-memory" },
+  });
+});
+
+test("MISSING_SERVICES is thrown at memory assembly when factory is configured", () => {
+  const context = createTakibi()({
+    resolve: resolveTestContext,
+    services: () => ({ stamp: "x" }),
+  });
+  const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const production = app.actions({});
+  expect(() =>
+    // @ts-expect-error memory fork requires services
+    production.with({ memory: true }),
+  ).toThrow(
+    expect.objectContaining({
+      code: "MISSING_SERVICES",
+    }),
+  );
+  expect(() =>
+    context
+      // @ts-expect-error memory defineCollections requires services
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .actions({}),
+  ).toThrow(
+    expect.objectContaining({
+      code: "MISSING_SERVICES",
+    }),
+  );
+});
+
+test("with() memory forks isolate services from each other", async () => {
+  const context = createTakibi()({
+    resolve: resolveTestContext,
+    services: () => ({ stamp: "unused" }),
+  });
+  const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const production = app.actions({
+    $: {
+      ping: app
+        .defineAction()
+        .policy(fullAccess)
+        .handler(({ services }) => ({ stamp: services.stamp })),
+    },
+  });
+  const first = production.with({ memory: true, services: { stamp: "alpha" } });
+  const second = production.with({ memory: true, services: { stamp: "beta" } });
+  const clientA = createClient<typeof production>("http://fire.test", {
+    headers,
+    fetch: (input, init) => first.request(input, init),
+  });
+  const clientB = createClient<typeof production>("http://fire.test", {
+    headers,
+    fetch: (input, init) => second.request(input, init),
+  });
+  await expect(clientA.ping()).resolves.toMatchObject({ ok: true, data: { stamp: "alpha" } });
+  await expect(clientB.ping()).resolves.toMatchObject({ ok: true, data: { stamp: "beta" } });
+});
+
+test("wire request body does not carry services", async () => {
+  let captured: unknown;
+  const context = createTakibi()({
+    resolve: resolveTestContext,
+    services: () => ({ secret: "not-on-wire" }),
+    stub: () =>
+      ({
+        fetch: async (request: Request) => {
+          captured = await request.json();
+          return Response.json({ ok: true, data: { seen: true } });
+        },
+      }) as unknown as DurableObjectStub,
+  });
+  const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const handler = app.actions({
+    $: {
+      ping: app
+        .defineAction()
+        .policy(fullAccess)
+        .handler(({ services }) => ({ secret: services.secret })),
+    },
+  });
+
+  const response = await handler.request("http://fire.test/$:ping", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...Object.fromEntries(headers()) },
+  });
+  expect(response.status).toBe(200);
+  expect(captured).toMatchObject({
+    kind: "action",
+    scope: "$",
+    name: "ping",
+    context: { tenantId: "tenant-a" },
+  });
+  expect(captured).not.toHaveProperty("services");
+  expect(JSON.stringify(captured)).not.toContain("not-on-wire");
+});
+
+test("services factory exception fails Durable Object construction", () => {
+  const handler = createTakibi()({
+    resolve: resolveTestContext,
+    services: () => {
+      throw new Error("binding missing");
+    },
+  })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
+    .actions({});
+  expect(
+    () =>
+      new handler.DurableObject(
+        createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+        {},
+      ),
+  ).toThrow("binding missing");
+});
+
+test("generated Durable Object action reads instance services from env", async () => {
+  type Env = { LABEL: string };
+  const context = createTakibi<Record<string, never>, Env>()({
+    resolve: () => ({ tenantId: "tenant-a" }),
+    services: ({ env }) => ({ label: env.LABEL }),
+  });
+  const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
+  const handler = app.actions({
+    $: {
+      ping: app
+        .defineAction()
+        .policy(fullAccess)
+        .handler(({ services }) => ({ label: services.label })),
+    },
+  });
+  const objectA = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+    { LABEL: "alpha" },
+  );
+  const objectB = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+    { LABEL: "beta" },
+  );
+  const invoke = (object: InstanceType<typeof handler.DurableObject>) =>
+    object.fetch(
+      new Request("https://takibi.internal", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "action",
+          scope: "$",
+          name: "ping",
+          context: { tenantId: "tenant-a" },
+        } satisfies WireRequest),
+      }),
+    );
+  await expect((await invoke(objectA)).json()).resolves.toEqual({
+    ok: true,
+    data: { label: "alpha" },
+  });
+  await expect((await invoke(objectB)).json()).resolves.toEqual({
+    ok: true,
+    data: { label: "beta" },
+  });
+});
+
 test("handlers expose no post-hoc action registration surface", () => {
   const production = createProductionPostsHandler();
   const forked = production.with({ memory: true, resolve: resolveTestContext });

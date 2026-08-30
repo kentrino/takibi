@@ -44,20 +44,38 @@ export type ContextStubResolver<TCtx extends object, TInitial = Record<string, n
   input: ContextStubResolverInput<TCtx, TInitial>,
 ) => DurableObjectStub | Promise<DurableObjectStub>;
 
-export type ContextConfig<TCtx extends object, TInitial = Record<string, never>> = {
+export type ServicesFactory<TEnv, TServices> = (input: { env: TEnv }) => TServices;
+
+/**
+ * Empty `TServices` (`Record<never, never>`) keeps `services` optional — the same
+ * emptiness check as `HandleOptions.context`.
+ */
+export type MemoryServicesOption<TServices> =
+  Record<string, never> extends TServices ? { services?: TServices } : { services: TServices };
+
+export type ContextConfig<
+  TCtx extends object,
+  TInitial = Record<string, never>,
+  TEnv = unknown,
+  TServices = Record<never, never>,
+> = {
   resolve: ContextResolver<TCtx, TInitial>;
   /** Required for Durable Object mode (omit when using `{ memory: true }`). */
   stub?: ContextStubResolver<TCtx, TInitial>;
+  /**
+   * Per-instance factory for non-serializable runtime deps. Runs in the Durable
+   * Object constructor with `{ env }`. Memory mode takes the value, not this factory.
+   */
+  services?: ServicesFactory<TEnv, TServices>;
 } & LoggingOptions;
 
-export type CollectionsOptions = LoggingOptions & {
-  /** In-memory mode for tests / demos (skips Durable Object). */
-  memory?: boolean;
-};
+export type CollectionsOptions<TServices = Record<never, never>> = LoggingOptions &
+  ({ memory?: false } | ({ memory: true } & MemoryServicesOption<TServices>));
 
-export type InternalCollectionsOptions = CollectionsOptions & {
-  [internalTracerKey]?: TakibiTracer;
-};
+export type InternalCollectionsOptions<TServices = Record<never, never>> =
+  CollectionsOptions<TServices> & {
+    [internalTracerKey]?: TakibiTracer;
+  };
 
 export type HandleOptions<TInitial> = {
   /**
@@ -85,6 +103,8 @@ export type TakibiBrand<
   TCollections,
   TInitial = Record<string, never>,
   TActionMap extends ActionScopeMap = Record<never, never>,
+  TServices = Record<never, never>,
+  TEnv = unknown,
 > = {
   readonly "~takibi": {
     context: TCtx;
@@ -94,7 +114,7 @@ export type TakibiBrand<
   };
   DurableObject: new (
     state: DurableObjectState,
-    env: unknown,
+    env: TEnv,
   ) => DurableObject & { $collections: CollectionsApi<TCollections> };
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
@@ -109,8 +129,8 @@ export type TakibiBrand<
     options: LoggingOptions & {
       memory: true;
       resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
-    },
-  ): TakibiHandler<TCtx, TCollections, TInitial, TActionMap>;
+    } & MemoryServicesOption<TServices>,
+  ): TakibiHandler<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv>;
 };
 
 export type TakibiHandler<
@@ -118,8 +138,10 @@ export type TakibiHandler<
   TCollections = CollectionsDef<TCtx>,
   TInitial = Record<string, never>,
   TActionMap extends ActionScopeMap = Record<never, never>,
+  TServices = Record<never, never>,
+  TEnv = unknown,
 > = Hono<{ Bindings: Record<string, unknown> }> &
-  TakibiBrand<TCtx, TCollections, TInitial, TActionMap>;
+  TakibiBrand<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv>;
 
 type RootActionsConstraint<TActions, TCollections> = Record<
   Extract<keyof TActions, keyof TCollections | ReservedPublicName> | InvalidPublicKeys<TActions>,
@@ -139,7 +161,13 @@ type ActionsMapConstraint<TMap, TCollections> = {
  * (`app.<collection>.actions(cb)` / `app.defineAction()`), then obtain the
  * handler with a single `app.actions({ ... })` call.
  */
-export type AppDefinition<TCtx extends object, TCollections, TInitial> = {
+export type AppDefinition<
+  TCtx extends object,
+  TCollections,
+  TInitial,
+  TServices = Record<never, never>,
+  TEnv = unknown,
+> = {
   [K in keyof TCollections & string]: {
     /**
      * Define this collection's actions. `defineAction()` starts a document
@@ -150,15 +178,15 @@ export type AppDefinition<TCtx extends object, TCollections, TInitial> = {
       define: (
         defineAction: () => DocumentActionBuilder<
           TCtx,
-          DocumentActionArgs<TCtx, TCollections, TCollections[K]>,
-          CollectionActionArgs<TCtx, TCollections, TCollections[K]>,
+          DocumentActionArgs<TCtx, TCollections, TCollections[K], TServices>,
+          CollectionActionArgs<TCtx, TCollections, TCollections[K], TServices>,
           InferCollectionDoc<TCollections[K]>
         >,
       ) => TActions & ActionNameConstraint<TActions>,
     ): ScopedActions<K, TActions>;
   };
 } & {
-  defineAction(): RootActionBuilder<TCtx, RootActionArgs<TCtx, TCollections>>;
+  defineAction(): RootActionBuilder<TCtx, RootActionArgs<TCtx, TCollections, TServices>>;
   /**
    * Register every action map and assemble a handler. Each call returns a
    * new handler; it does not mutate a previous one. Apps without actions
@@ -166,7 +194,7 @@ export type AppDefinition<TCtx extends object, TCollections, TInitial> = {
    */
   actions<const TMap extends ActionScopeMap>(
     map: TMap & ActionsMapConstraint<TMap, TCollections>,
-  ): TakibiHandler<TCtx, TCollections, TInitial, TMap>;
+  ): TakibiHandler<TCtx, TCollections, TInitial, TMap, TServices, TEnv>;
 };
 
 type PublicCollectionUniqueConstraint<C, TSchema extends StandardSchemaV1> = C extends {
@@ -206,7 +234,12 @@ type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
 
 type ReservedCollectionName = ReservedPublicName | "defineAction" | "actions";
 
-export type CreateContextBuilder<TCtx extends object, TInitial> = {
+export type CreateContextBuilder<
+  TCtx extends object,
+  TInitial,
+  TServices = Record<never, never>,
+  TEnv = unknown,
+> = {
   policy: PolicyHelper<TCtx>;
   defineCollection<
     TSchema extends StandardSchemaV1,
@@ -219,19 +252,27 @@ export type CreateContextBuilder<TCtx extends object, TInitial> = {
   ): CollectionDefinition<TSchema, TCtx, TPolicy>;
   defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
     collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
-    options?: InternalCollectionsOptions,
+    options?: InternalCollectionsOptions<TServices>,
     ...invalidName: [
       Extract<keyof TCollections, ReservedCollectionName> | InvalidPublicKeys<TCollections>,
     ] extends [never]
       ? []
       : ["Collection names must be safe TypeScript identifiers"]
-  ): AppDefinition<TCtx, TCollections, TInitial>;
+  ): AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv>;
 };
 
-export type CreateContextFn<TInitial> = <R extends object | Promise<object>>(config: {
-  resolve: (input: ContextResolverInput<TInitial>) => R;
-  /** Required for Durable Object mode (omit when using `{ memory: true }`). */
-  stub?: ContextStubResolver<Awaited<R>, TInitial>;
-  logger?: LoggingOptions["logger"];
-  logLevel?: LoggingOptions["logLevel"];
-}) => CreateContextBuilder<Awaited<R>, TInitial>;
+export type CreateContextFn<TInitial, TEnv = unknown> = {
+  <R extends object | Promise<object>, TServices>(config: {
+    resolve: (input: ContextResolverInput<TInitial>) => R;
+    stub?: ContextStubResolver<Awaited<R>, TInitial>;
+    services: ServicesFactory<TEnv, TServices>;
+    logger?: LoggingOptions["logger"];
+    logLevel?: LoggingOptions["logLevel"];
+  }): CreateContextBuilder<Awaited<R>, TInitial, TServices, TEnv>;
+  <R extends object | Promise<object>>(config: {
+    resolve: (input: ContextResolverInput<TInitial>) => R;
+    stub?: ContextStubResolver<Awaited<R>, TInitial>;
+    logger?: LoggingOptions["logger"];
+    logLevel?: LoggingOptions["logLevel"];
+  }): CreateContextBuilder<Awaited<R>, TInitial, Record<never, never>, TEnv>;
+};

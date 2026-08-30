@@ -45,12 +45,21 @@ name (`idFromString` and similar) skip that check.
 
 Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
 deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
-`createTakibi<Initial>()`, then call the returned factory with `{ resolve, stub? }`.
-`TCtx` is inferred from `resolve`'s return (annotate with `Promise<AppCtx>` when
-you want a named / wider type). `stub` receives the same input plus the complete
-application-owned context as `resolved` and returns a Durable Object stub — no
-library-side `env` / `bindings` option.
-Empty initial uses `createTakibi()` (no type argument).
+`createTakibi<Initial, Env>()`, then call the returned factory with
+`{ resolve, stub?, services? }`. `TCtx` is inferred from `resolve`'s return
+(annotate with `Promise<AppCtx>` when you want a named / wider type). `stub`
+receives the same input plus the complete application-owned context as
+`resolved` and returns a Durable Object stub — no library-side `env` /
+`bindings` option. Empty initial uses `createTakibi()` (no type argument).
+
+`services` is a synchronous factory `({ env }) => TServices` that runs once per
+Durable Object instance in the generated constructor. Action handlers receive
+the result as `services` — wire-crossing data stays on `ctx`, side-effect ports
+stay on `services`. The factory never sees `request` or resolved `ctx`.
+`services` is not placed on the Worker → Durable Object wire body, is not
+JSON-safe-checked, and is invisible to collection `accessPolicy`, action
+`.policy()` gates, and `.use()` guards. Omit `services` and handler
+`services.foo` is a compile error.
 
 ```ts
 import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "@takibi/takibi";
@@ -149,6 +158,14 @@ const client = createClient<typeof takibiHandler>("https://fire.test", {
 call `handle(request, { context })` with a fake session. `handler.request` has
 an empty initial context, so apps whose production `resolve` needs session
 deps should pass a test `resolve`.
+
+When `createTakibi()({ services })` is configured, memory assembly takes the
+services **value** (not the factory): `.with({ memory: true, services })` and
+`defineCollections(..., { memory: true, services })`. The value is required
+when `TServices` is non-empty. Omitting it is a compile error and throws
+`MISSING_SERVICES` at assembly (not at request time). Each `.with()` fork
+keeps its own services. Durable Object mode never reads this value — the
+constructor factory is the only production path.
 
 ### Collection seeds
 

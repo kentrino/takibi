@@ -41,6 +41,7 @@ export async function executeAction<TCtx extends object>(
   ctx: TCtx,
   invocation: ActionInvocation,
   logger?: InternalLogger,
+  services: unknown = {},
 ): Promise<JsonValue> {
   const registered = registry.get(invocation.scope, invocation.name);
   if (!registered) {
@@ -92,6 +93,7 @@ export async function executeAction<TCtx extends object>(
       ctx: actionCtx,
       collections: policyCollections,
       $collections: trustedCollections,
+      services,
     };
     if (invocation.scope !== "$") {
       const collection = policyCollections[invocation.scope];
