@@ -48,6 +48,7 @@ import {
   type TakibiTracer,
 } from "../tracing";
 import type { CollectionsDef } from "../types";
+import { assertCollectionUniqueConstraints } from "../unique";
 import { createMemoryExecutor, createStubExecutor } from "./executors";
 import { ownStringEntries } from "./own-entries";
 
@@ -82,7 +83,10 @@ function buildContext<TInitial>(
 
   return {
     policy: createPolicyHelper(),
-    defineCollection: defineCollectionValue,
+    defineCollection: defineCollectionValue as CreateContextBuilder<
+      object,
+      TInitial
+    >["defineCollection"],
     defineCollections(collections, options: InternalCollectionsOptions = {}) {
       for (const [propertyKey, definition] of ownStringEntries(collections, "INVALID_COLLECTION", {
         subject: "Collections",
@@ -91,6 +95,10 @@ function buildContext<TInitial>(
         assertCollectionName(propertyKey);
         assertNoActionsOption(definition as CollectionsDef<object>[string]);
         assertCollectionMigrations(definition as CollectionsDef<object>[string], propertyKey);
+        assertCollectionUniqueConstraints(
+          definition as CollectionsDef<object>[string],
+          propertyKey,
+        );
       }
       return createAppDefinition({
         collections: collections as CollectionsDef<object>,

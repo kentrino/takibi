@@ -184,6 +184,93 @@ test("list migrates each scanned document before current-schema filtering", asyn
   expect(await backing.read("posts", "b")).toMatchObject({ slug: "other", $schemaVersion: 1 });
 });
 
+test("unique constraints compare current-schema values during lazy migration", async () => {
+  const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
+  const handler = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ slug: z.string() }),
+        migrations: {
+          steps: [
+            (data) => ({
+              slug: (data as { title: string }).title.trim().toLowerCase(),
+            }),
+          ],
+        },
+        unique: { bySlug: ["slug"] },
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
+  const backing = createInspectableDurableObjectStorage();
+  await backing.seed("posts", legacy("a", { title: " Same " }));
+  await backing.seed("posts", legacy("b", { title: "same" }));
+  const object = new handler.DurableObject(createState(backing.storage), {});
+
+  const result = await invoke(object, {
+    kind: "collection",
+    collection: "posts",
+    operation: "get",
+    id: "a",
+  });
+
+  expect(result).toMatchObject({
+    status: 409,
+    body: {
+      ok: false,
+      error: {
+        code: "ALREADY_EXISTS",
+        message: "Unique constraint violated: posts.bySlug",
+      },
+    },
+  });
+  expect(await backing.read("posts", "a")).toMatchObject({ title: " Same " });
+  expect(await backing.read("posts", "b")).toMatchObject({ title: "same" });
+});
+
+test("unique constraints reject current-schema duplicates in Durable Object storage", async () => {
+  const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
+  const handler = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ slug: z.string() }),
+        unique: { bySlug: ["slug"] },
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
+  const backing = createInspectableDurableObjectStorage();
+  const object = new handler.DurableObject(createState(backing.storage), {});
+
+  const first = await invoke(object, {
+    kind: "collection",
+    collection: "posts",
+    operation: "add",
+    id: "a",
+    input: { slug: "same" },
+  });
+  const duplicate = await invoke(object, {
+    kind: "collection",
+    collection: "posts",
+    operation: "add",
+    id: "b",
+    input: { slug: "same" },
+  });
+
+  expect(first).toMatchObject({ status: 200, body: { ok: true } });
+  expect(duplicate).toMatchObject({
+    status: 409,
+    body: {
+      ok: false,
+      error: {
+        code: "ALREADY_EXISTS",
+        message: "Unique constraint violated: posts.bySlug",
+      },
+    },
+  });
+  expect(await backing.read("posts", "b")).toBeUndefined();
+});
+
 test("get, set, update, and delete policies only see migrated existing documents", async () => {
   for (const operation of ["get", "set", "update", "delete"] as const) {
     const observed: unknown[] = [];

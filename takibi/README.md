@@ -180,6 +180,39 @@ to the returned record creates that default on the next activation. Seed values
 are validated by the collection schema and bypass `accessPolicy`, like trusted
 `$collections` operations.
 
+### Unique constraints
+
+Declare named top-level scalar key tuples with `unique`. Takibi checks them in
+the same transaction as every `add`, `set`, and `update`, including public CRUD,
+policy-bound collection calls, trusted `$collections`, seeds, and lazy
+migration writes:
+
+```ts
+const members = context.defineCollection({
+  schema: z.object({
+    tenantId: z.string(),
+    email: z.string().nullable().optional(),
+  }),
+  unique: {
+    byTenantEmail: ["tenantId", "email"],
+  },
+  accessPolicy: fullAccess,
+});
+```
+
+Constraint fields must be distinct top-level string, finite-number, or boolean
+fields. A tuple containing a missing or `null` value does not participate, so
+multiple documents may omit `email` in the example. Empty strings do
+participate. Updates automatically exclude their own document ID. Status fields
+have no special meaning: archived documents remain constrained unless status is
+part of the tuple. Violations return `ALREADY_EXISTS` (409) and name the
+constraint.
+
+Unique checks currently scan the collection inside the write transaction; they
+do not depend on a declared read index. Adding a constraint does not eagerly
+audit untouched existing documents, so clean up historical duplicates before
+deploying it.
+
 ### Lazy document migrations
 
 Use `migrations` when a collection schema changes incompatibly. Each step

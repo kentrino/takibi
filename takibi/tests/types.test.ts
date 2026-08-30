@@ -210,6 +210,67 @@ test("collection schemas require plain JSON object outputs", () => {
   void checkInvalidSchemas;
 });
 
+test("collection unique constraints accept named scalar tuples", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const schema = z.object({
+    slug: z.string(),
+    ownerId: z.string(),
+    externalId: z.string().nullable().optional(),
+    nested: z.object({ value: z.string() }),
+    labels: z.array(z.string()),
+  });
+
+  context.defineCollection({
+    schema,
+    accessPolicy: fullAccess,
+    unique: {
+      bySlug: ["slug"],
+      byOwnerExternalId: ["ownerId", "externalId"],
+    },
+  });
+  context.defineCollections({
+    records: {
+      schema,
+      accessPolicy: fullAccess,
+      unique: { bySlug: ["slug"] },
+    },
+  });
+
+  const checkInvalidConstraints = () => {
+    context.defineCollection({
+      schema,
+      accessPolicy: fullAccess,
+      unique: {
+        // @ts-expect-error unique tuples must not be empty
+        empty: [],
+      },
+    });
+    context.defineCollection({
+      schema,
+      accessPolicy: fullAccess,
+      unique: {
+        // @ts-expect-error unique fields must be top-level scalars
+        nested: ["nested"],
+        // @ts-expect-error arrays are not unique scalar fields
+        labels: ["labels"],
+        // @ts-expect-error unknown fields cannot be constrained
+        missing: ["missing"],
+      },
+    });
+    context.defineCollection({
+      schema,
+      accessPolicy: fullAccess,
+      unique: {
+        // @ts-expect-error a field cannot occur twice in one constraint
+        duplicate: ["slug", "slug"],
+      },
+    });
+  };
+  void checkInvalidConstraints;
+});
+
 test("collection migrations accept unknown intermediate data and constrain the final step", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),

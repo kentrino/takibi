@@ -8,9 +8,11 @@ import type {
   AccessPermission,
   CollectionApi,
   CollectionDefinition,
+  CollectionUniqueConstraints,
   CollectionsApi,
   InferCollectionDoc,
   JsonValue,
+  UniqueConstraintDeclaration,
 } from "./types";
 
 const actionDefinitionBrand: unique symbol = Symbol("fire.actionDefinition");
@@ -431,9 +433,11 @@ export type CollectionDefinitionInput<
     TSchema,
     TCtx
   >["accessPolicy"],
+  TUnique extends CollectionUniqueConstraints<TSchema> = CollectionUniqueConstraints<TSchema>,
 > = {
   schema: CollectionDefinition<TSchema, TCtx>["schema"];
   accessPolicy: TPolicy;
+  unique?: TUnique & UniqueConstraintDeclaration<TSchema, TUnique>;
   migrations?: CollectionDefinition<TSchema, TCtx>["migrations"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];
 };
@@ -442,8 +446,9 @@ export function defineCollection<
   TCtx extends object,
   TSchema extends StandardSchemaV1,
   const TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"],
+  const TUnique extends CollectionUniqueConstraints<TSchema> = CollectionUniqueConstraints<TSchema>,
 >(
-  definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy>,
+  definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy, TUnique>,
 ): CollectionDefinition<TSchema, TCtx, TPolicy> {
   assertNoActionsOption(definition);
   return definition as CollectionDefinition<TSchema, TCtx, TPolicy>;
