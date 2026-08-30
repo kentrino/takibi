@@ -16,6 +16,7 @@ import type {
   TakibiResult,
   InferCollectionDoc,
   InferHandlerCollections,
+  NarrowCollectionDoc,
 } from "../src/index";
 import type { StorageDriver } from "../src/types";
 
@@ -132,6 +133,110 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     });
   };
   void checkListQueries;
+});
+
+test("union collection add/set accept each variant and narrow the return", () => {
+  const holdSchema = z.object({
+    kind: z.literal("hold"),
+    slot: z.string(),
+    requestId: z.string(),
+  });
+  const bookedSchema = z.object({
+    kind: z.literal("booked"),
+    slot: z.string(),
+    seat: z.string(),
+  });
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const tickets = context.defineCollection({
+    schema: z.union([holdSchema, bookedSchema]),
+    accessPolicy: fullAccess,
+  });
+  const posts = context.defineCollection({
+    schema: z.object({ title: z.string(), published: z.boolean().default(false) }),
+    accessPolicy: fullAccess,
+  });
+  const app = context.defineCollections({ tickets, posts }, { memory: true });
+  const ticketsActions = app.tickets.actions((defineAction) => ({
+    hold: defineAction()
+      .detached()
+      .input(holdSchema)
+      .policy(fullAccess)
+      .handler(({ input, $collection }) => $collection.add(input)),
+    book: defineAction()
+      .detached()
+      .input(bookedSchema)
+      .policy(fullAccess)
+      .handler(({ input, $collection }) => $collection.set("t1", input)),
+  }));
+  const handler = app.actions({ tickets: ticketsActions });
+  const client = createClient<typeof handler>("http://fire.test");
+
+  const holdInput = { kind: "hold" as const, slot: "10:00", requestId: "req-1" };
+  const bookedInput = { kind: "booked" as const, slot: "10:00", seat: "A1" };
+
+  type TicketDoc = InferCollectionDoc<typeof tickets>;
+  type HoldDoc = NarrowCollectionDoc<typeof tickets, typeof holdInput>;
+  type BookedDoc = NarrowCollectionDoc<typeof tickets, typeof bookedInput>;
+  type WideDoc = NarrowCollectionDoc<typeof tickets, CollectionDataInput<typeof tickets>>;
+  type PostDoc = InferCollectionDoc<typeof posts>;
+
+  expectTypeOf<HoldDoc["kind"]>().toEqualTypeOf<"hold">();
+  expectTypeOf<HoldDoc>().toHaveProperty("requestId");
+  expectTypeOf<HoldDoc>().not.toHaveProperty("seat");
+  expectTypeOf<BookedDoc["kind"]>().toEqualTypeOf<"booked">();
+  expectTypeOf<BookedDoc>().toHaveProperty("seat");
+  expectTypeOf<BookedDoc>().not.toHaveProperty("requestId");
+  expectTypeOf<WideDoc>().toEqualTypeOf<TicketDoc>();
+
+  const checkUnionWrites = () => {
+    void client.tickets.add({ kind: "hold", slot: "10:00", requestId: "req-1" });
+    void client.tickets.add({ kind: "booked", slot: "10:00", seat: "A1" });
+  };
+  void checkUnionWrites;
+
+  type HoldAdd = Extract<
+    Awaited<ReturnType<typeof client.tickets.add<typeof holdInput>>>,
+    { ok: true }
+  >["data"];
+  type BookedSet = Extract<
+    Awaited<ReturnType<typeof client.tickets.set<typeof bookedInput>>>,
+    { ok: true }
+  >["data"];
+  const addWide = (data: CollectionDataInput<typeof tickets>) => client.tickets.add(data);
+  type WideAdd = Extract<Awaited<ReturnType<typeof addWide>>, { ok: true }>["data"];
+  type HoldAction = Extract<Awaited<ReturnType<typeof client.tickets.hold>>, { ok: true }>["data"];
+  type BookedAction = Extract<
+    Awaited<ReturnType<typeof client.tickets.book>>,
+    { ok: true }
+  >["data"];
+
+  expectTypeOf<HoldAdd>().toEqualTypeOf<HoldDoc>();
+  expectTypeOf<BookedSet>().toEqualTypeOf<BookedDoc>();
+  expectTypeOf<WideAdd>().toEqualTypeOf<TicketDoc>();
+  expectTypeOf<HoldAction>().toEqualTypeOf<HoldDoc>();
+  expectTypeOf<BookedAction>().toEqualTypeOf<BookedDoc>();
+  expectTypeOf<Awaited<ReturnType<typeof client.tickets.get>>>().toEqualTypeOf<
+    TakibiResult<TicketDoc>
+  >();
+  expectTypeOf<Awaited<ReturnType<typeof client.tickets.update>>>().toEqualTypeOf<
+    TakibiResult<TicketDoc>
+  >();
+  expectTypeOf<Awaited<ReturnType<typeof client.tickets.list>>>().toEqualTypeOf<
+    TakibiResult<{ items: TicketDoc[]; nextCursor?: string }>
+  >();
+
+  const addPost = (title: string) => client.posts.add({ title });
+  const setPost = (title: string) => client.posts.set("p1", { title });
+  expectTypeOf<Awaited<ReturnType<typeof addPost>>>().toEqualTypeOf<TakibiResult<PostDoc>>();
+  expectTypeOf<Awaited<ReturnType<typeof setPost>>>().toEqualTypeOf<TakibiResult<PostDoc>>();
+
+  type DurableInstance = InstanceType<typeof handler.DurableObject>;
+  const addHold = (api: DurableInstance["$collections"]["tickets"]) => api.add(holdInput);
+  const setBooked = (api: DurableInstance["$collections"]["tickets"]) => api.set("t1", bookedInput);
+  expectTypeOf<Awaited<ReturnType<typeof addHold>>>().toEqualTypeOf<HoldDoc>();
+  expectTypeOf<Awaited<ReturnType<typeof setBooked>>>().toEqualTypeOf<BookedDoc>();
 });
 
 test("collection schemas require plain JSON object outputs", () => {

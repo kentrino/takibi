@@ -291,15 +291,92 @@ export type InferCollectionInput<C> = C extends { schema: infer S extends Standa
   ? StandardSchemaV1.InferInput<S>
   : never;
 
-export type CollectionDataInput<C> = Omit<InferCollectionInput<C>, ReservedDocumentDataKey>;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+type DistributivePartial<T> = T extends unknown ? Partial<T> : never;
+
+export type CollectionDataInput<C> = DistributiveOmit<
+  InferCollectionInput<C>,
+  ReservedDocumentDataKey
+>;
 
 export type CollectionWriteInput<C> = CollectionDataInput<C> & {
   [TAKIBI_REVISION_KEY]?: number;
 };
 
-export type CollectionPatchInput<C> = Partial<CollectionDataInput<C>> & {
+export type CollectionPatchInput<C> = DistributivePartial<CollectionDataInput<C>> & {
   [TAKIBI_REVISION_KEY]?: number;
 };
+
+type IsLiteralPrimitive<T> = [T] extends [string]
+  ? [string] extends [T]
+    ? false
+    : true
+  : [T] extends [number]
+    ? [number] extends [T]
+      ? false
+      : true
+    : [T] extends [boolean]
+      ? [boolean] extends [T]
+        ? false
+        : true
+      : false;
+
+type DiscriminantKeys<T> = {
+  [K in keyof T]-?: IsLiteralPrimitive<NonNullable<T[K]>> extends true ? K & string : never;
+}[keyof T];
+
+type SharedDiscriminantKeys<TData, D> = Extract<DiscriminantKeys<TData>, keyof D & string>;
+
+type MatchesDiscriminants<TData, D> =
+  SharedDiscriminantKeys<TData, D> extends infer K
+    ? [K] extends [never]
+      ? true
+      : K extends string
+        ? {
+            [P in K]: NonNullable<TData[P & keyof TData]> extends D[P & keyof D] ? true : false;
+          }[K] extends true
+          ? true
+          : false
+        : false
+    : false;
+
+type CollectionDocMembers<C> = C extends { schema: infer S extends StandardSchemaV1 }
+  ? StandardSchemaV1.InferOutput<S> extends infer O
+    ? O extends unknown
+      ? WithMetadata<O> & { [TAKIBI_REVISION_KEY]: number }
+      : never
+    : never
+  : never;
+
+type NarrowDocMembers<TDoc, TData> = TDoc extends unknown
+  ? MatchesDiscriminants<TData, TDoc> extends true
+    ? TDoc
+    : never
+  : never;
+
+type ForbidKeys<T, K extends PropertyKey> =
+  Extract<keyof T, K> extends never ? unknown : { [P in Extract<keyof T, K>]?: never };
+
+/**
+ * Document produced by `add` / `set` for the given write payload.
+ *
+ * Members of the collection document union are kept when every discriminant
+ * key they share with `TData` is assignable. Discriminant keys are those
+ * whose `TData` value is a string, number, or boolean literal; optional
+ * keys are treated as their `NonNullable` literal. If no member remains,
+ * the result falls back to `InferCollectionDoc<C>` so a miss stays wide
+ * instead of becoming `never`.
+ *
+ * Narrowing assumes schema transforms only normalize within the same
+ * variant. A transform that rewrites a discriminant onto another variant
+ * is not reflected in this type.
+ */
+export type NarrowCollectionDoc<C, TData> = [
+  NarrowDocMembers<CollectionDocMembers<C>, TData>,
+] extends [never]
+  ? InferCollectionDoc<C>
+  : NarrowDocMembers<CollectionDocMembers<C>, TData>;
 
 export type ValidationIssue = {
   message: string;
@@ -335,11 +412,14 @@ export type TakibiResult<T, TReasonCode extends string = never> =
 
 /** Throwing, server-side CRUD facade used by actions and trusted `$collections`. */
 export type CollectionApi<C> = {
-  add: (
-    data: CollectionDataInput<C>,
+  add: <TData extends CollectionDataInput<C>>(
+    data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
     options?: { id?: DocumentId },
-  ) => Promise<InferCollectionDoc<C>>;
-  set: (id: DocumentId, data: CollectionWriteInput<C>) => Promise<InferCollectionDoc<C>>;
+  ) => Promise<NarrowCollectionDoc<C, TData>>;
+  set: <TData extends CollectionWriteInput<C>>(
+    id: DocumentId,
+    data: TData & ForbidKeys<TData, Exclude<ReservedDocumentDataKey, typeof TAKIBI_REVISION_KEY>>,
+  ) => Promise<NarrowCollectionDoc<C, TData>>;
   get: (id: DocumentId) => Promise<InferCollectionDoc<C>>;
   update: (id: DocumentId, data: CollectionPatchInput<C>) => Promise<InferCollectionDoc<C>>;
   delete: (id: DocumentId) => Promise<{ id: DocumentId }>;
@@ -360,14 +440,14 @@ type CollectionPolicyReasonCode<C> = C extends { accessPolicy: infer TPolicy }
   : never;
 
 export type ClientCollectionApi<C> = {
-  add: (
-    data: CollectionDataInput<C>,
+  add: <TData extends CollectionDataInput<C>>(
+    data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
     options?: { id?: DocumentId },
-  ) => Promise<TakibiResult<InferCollectionDoc<C>, CollectionPolicyReasonCode<C>>>;
-  set: (
+  ) => Promise<TakibiResult<NarrowCollectionDoc<C, TData>, CollectionPolicyReasonCode<C>>>;
+  set: <TData extends CollectionWriteInput<C>>(
     id: DocumentId,
-    data: CollectionWriteInput<C>,
-  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+    data: TData & ForbidKeys<TData, Exclude<ReservedDocumentDataKey, typeof TAKIBI_REVISION_KEY>>,
+  ) => Promise<TakibiResult<NarrowCollectionDoc<C, TData>>>;
   get: (id: DocumentId) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   update: (
     id: DocumentId,
