@@ -8,6 +8,7 @@ type Item = {
   score: number;
   active: boolean;
   nullable: string | null;
+  details?: { label: string };
 };
 
 test("query builder compiles immutable recursive expressions", () => {
@@ -138,6 +139,26 @@ test("query evaluation uses strict scalar types and ordinary boolean logic", () 
       compile((query) => query.score.eq(10)),
     ),
   ).toBe(false);
+});
+
+test("present distinguishes missing fields from stored null values", () => {
+  const present = compileWhere<Item>((query) => query.nullable.present());
+  const absentStatus = compileWhere<Item>((query) => query.not(query.status.present()));
+  const detailsPresent = compileWhere<Item>((query) => query.details.present());
+
+  expect(present).toEqual({ field: "nullable", op: "present" });
+  expect(absentStatus).toEqual({
+    op: "not",
+    operand: { field: "status", op: "present" },
+  });
+  expect(matchesQuery({ nullable: null }, present)).toBe(true);
+  expect(matchesQuery({}, present)).toBe(false);
+  expect(matchesQuery({}, absentStatus)).toBe(true);
+  expect(matchesQuery({ status: "open" }, absentStatus)).toBe(false);
+  expect(matchesQuery({ details: { label: "nested" } }, detailsPresent)).toBe(true);
+  expect(() => normalizeQueryExpr({ field: "status", op: "present", value: "unexpected" })).toThrow(
+    /unexpected/,
+  );
 });
 
 test("owner equality implication is conservative across boolean structure", () => {

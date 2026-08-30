@@ -109,6 +109,9 @@ test("collection schemas type CRUD clients without handler $collections", () => 
         ),
     });
     void client.posts.list({
+      where: (query) => query.not(query.title.present()),
+    });
+    void client.posts.list({
       // @ts-expect-error unknown fields are not queryable
       where: (query) => query.missing.eq("value"),
     });

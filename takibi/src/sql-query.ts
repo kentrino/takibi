@@ -1,4 +1,4 @@
-import type { QueryExpr, QueryOperator, QueryScalar } from "./types";
+import type { QueryExpr, QueryScalar, QueryValueOperator } from "./types";
 
 export type SqlBinding = string | number | null;
 
@@ -7,7 +7,7 @@ export type SqlPredicate = {
   bindings: SqlBinding[];
 };
 
-const SQL_OPERATORS: Record<QueryOperator, string> = {
+const SQL_OPERATORS: Record<QueryValueOperator, string> = {
   eq: "=",
   gt: ">",
   gte: ">=",
@@ -22,7 +22,11 @@ const METADATA_COLUMNS: Readonly<Record<string, string>> = {
 };
 
 export function compileQueryToSql(expression: QueryExpr): SqlPredicate {
-  if ("field" in expression) return compileLeaf(expression.field, expression.op, expression.value);
+  if ("field" in expression) {
+    return expression.op === "present"
+      ? compilePresent(expression.field)
+      : compileValueLeaf(expression.field, expression.op, expression.value);
+  }
 
   if (expression.op === "not") {
     const operand = compileQueryToSql(expression.operand);
@@ -36,7 +40,22 @@ export function compileQueryToSql(expression: QueryExpr): SqlPredicate {
   };
 }
 
-function compileLeaf(field: string, operator: QueryOperator, value: QueryScalar): SqlPredicate {
+function compilePresent(field: string): SqlPredicate {
+  const metadataColumn = METADATA_COLUMNS[field];
+  if (metadataColumn !== undefined) {
+    return { sql: `(${metadataColumn} IS NOT NULL)`, bindings: [] };
+  }
+  return {
+    sql: "EXISTS (SELECT 1 FROM json_each(data) AS takibi_field WHERE takibi_field.key = ?)",
+    bindings: [field],
+  };
+}
+
+function compileValueLeaf(
+  field: string,
+  operator: QueryValueOperator,
+  value: QueryScalar,
+): SqlPredicate {
   const metadataColumn = METADATA_COLUMNS[field];
   if (metadataColumn !== undefined) {
     return compileMetadataLeaf(metadataColumn, operator, value);
@@ -76,7 +95,7 @@ function compileLeaf(field: string, operator: QueryOperator, value: QueryScalar)
 
 function compileMetadataLeaf(
   column: string,
-  operator: QueryOperator,
+  operator: QueryValueOperator,
   value: QueryScalar,
 ): SqlPredicate {
   if (typeof value !== "string") return { sql: "0", bindings: [] };

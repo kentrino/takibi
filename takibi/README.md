@@ -654,6 +654,9 @@ const published = await client.posts.listAll({
 });
 ```
 
+Every top-level field supports `present()`, which tests whether the document has
+that key; a stored JSON `null` value is present. Use
+`query.not(query.optionalField.present())` to match a missing optional field.
 Top-level scalar fields support `eq`; string and number fields also support
 `gt`, `gte`, `lt`, and `lte`. Compose expressions with `and`, `or`, and `not`.
 Results are always ordered by document id, and filtering happens before
