@@ -67,6 +67,9 @@ test("actual SQLite-backed DO matches memory query semantics and stores no docum
       { field: "unicode", op: "lt", value: "\uE000" },
       { field: "missing", op: "eq", value: "anything" },
       { op: "not", operand: { field: "missing", op: "eq", value: "anything" } },
+      { field: "nullable", op: "present" },
+      { op: "not", operand: { field: "nullable", op: "present" } },
+      { field: "nested", op: "present" },
       {
         op: "and",
         operands: [

@@ -2,8 +2,8 @@ import type {
   ListOptions,
   QueryBuilder,
   QueryExpr,
-  QueryOperator,
   QueryScalar,
+  QueryValueOperator,
   StorageListOptions,
 } from "./types";
 import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
@@ -11,7 +11,7 @@ import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
 export const QUERY_MAX_NODES = 32;
 export const QUERY_MAX_DEPTH = 8;
 
-const LEAF_OPERATORS = new Set<QueryOperator>(["eq", "gt", "gte", "lt", "lte"]);
+const VALUE_OPERATORS = new Set<QueryValueOperator>(["eq", "gt", "gte", "lt", "lte"]);
 
 export function compileListOptions<TDoc>(
   options: ListOptions<TDoc> | undefined,
@@ -60,11 +60,12 @@ function createQueryBuilder<TDoc>(expressions: WeakSet<object>): QueryBuilder<TD
     let methods = fields.get(field);
     if (methods) return methods;
 
-    const leaf = (op: QueryOperator, value: unknown): QueryExpr => {
+    const leaf = (op: QueryValueOperator, value: unknown): QueryExpr => {
       assertQueryValue(op, value);
       return register({ field, op, value });
     };
     methods = Object.freeze({
+      present: () => register({ field, op: "present" }),
       eq: (value: unknown) => leaf("eq", value),
       gt: (value: unknown) => leaf("gt", value),
       gte: (value: unknown) => leaf("gte", value),
@@ -127,18 +128,17 @@ export function normalizeQueryExpr(value: unknown): QueryExpr {
 
     const op = input.op;
     let normalized: QueryExpr;
-    if (typeof op === "string" && LEAF_OPERATORS.has(op as QueryOperator)) {
+    if (op === "present") {
+      assertExactKeys(input, ["field", "op"]);
+      assertQueryableField(input.field);
+      normalized = Object.freeze({ field: input.field, op });
+    } else if (typeof op === "string" && VALUE_OPERATORS.has(op as QueryValueOperator)) {
       assertExactKeys(input, ["field", "op", "value"]);
-      if (typeof input.field !== "string" || input.field.length === 0) {
-        throw new TypeError("Query field must be a non-empty string");
-      }
-      if (input.field === TAKIBI_VERSION_KEY || input.field === TAKIBI_REVISION_KEY) {
-        throw new TypeError(`${input.field} is reserved and cannot be queried`);
-      }
-      assertQueryValue(op as QueryOperator, input.value);
+      assertQueryableField(input.field);
+      assertQueryValue(op as QueryValueOperator, input.value);
       normalized = Object.freeze({
         field: input.field,
-        op: op as QueryOperator,
+        op: op as QueryValueOperator,
         value: input.value,
       });
     } else if (op === "and" || op === "or") {
@@ -169,7 +169,9 @@ export function matchesQuery(
   expression: QueryExpr,
 ): boolean {
   if ("field" in expression) {
-    if (!Object.prototype.hasOwnProperty.call(document, expression.field)) return false;
+    const present = Object.prototype.hasOwnProperty.call(document, expression.field);
+    if (expression.op === "present") return present;
+    if (!present) return false;
     const actual = document[expression.field];
     if (actual === null || expression.value === null) {
       return expression.op === "eq" && actual === expression.value;
@@ -234,7 +236,7 @@ export function queryImpliesEquality(
   return false;
 }
 
-function assertQueryValue(op: QueryOperator, value: unknown): asserts value is QueryScalar {
+function assertQueryValue(op: QueryValueOperator, value: unknown): asserts value is QueryScalar {
   const scalar =
     value === null ||
     typeof value === "string" ||
@@ -243,6 +245,15 @@ function assertQueryValue(op: QueryOperator, value: unknown): asserts value is Q
   if (!scalar) throw new TypeError("Query value must be a JSON scalar with finite numbers");
   if (op !== "eq" && typeof value !== "string" && typeof value !== "number") {
     throw new TypeError(`${op} requires a string or finite number`);
+  }
+}
+
+function assertQueryableField(value: unknown): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError("Query field must be a non-empty string");
+  }
+  if (value === TAKIBI_VERSION_KEY || value === TAKIBI_REVISION_KEY) {
+    throw new TypeError(`${value} is reserved and cannot be queried`);
   }
 }
 

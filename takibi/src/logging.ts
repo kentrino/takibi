@@ -254,7 +254,9 @@ function copyEventFields(
 
 function cloneQuery(query: QueryExpr): QueryExpr {
   if ("field" in query) {
-    return { field: query.field, op: query.op, value: query.value };
+    return query.op === "present"
+      ? { field: query.field, op: query.op }
+      : { field: query.field, op: query.op, value: query.value };
   }
   if (query.op === "not") {
     return { op: "not", operand: cloneQuery(query.operand) };

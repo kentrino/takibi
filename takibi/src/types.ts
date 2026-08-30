@@ -92,17 +92,20 @@ export type CollectionMigrations<TCurrentInput> = {
 
 export type QueryScalar = string | number | boolean | null;
 
-export type QueryOperator = "eq" | "gt" | "gte" | "lt" | "lte";
+export type QueryValueOperator = "eq" | "gt" | "gte" | "lt" | "lte";
+
+export type QueryOperator = QueryValueOperator | "present";
 
 export type QueryExpr =
-  | { readonly field: string; readonly op: QueryOperator; readonly value: QueryScalar }
+  | { readonly field: string; readonly op: QueryValueOperator; readonly value: QueryScalar }
+  | { readonly field: string; readonly op: "present" }
   | { readonly op: "and" | "or"; readonly operands: readonly QueryExpr[] }
   | { readonly op: "not"; readonly operand: QueryExpr };
 
 type QueryEqValue<T> = Extract<Exclude<T, undefined>, QueryScalar>;
 type QueryComparableValue<T> = Extract<Exclude<T, undefined | null>, string | number>;
 
-export type QueryField<T> = ([QueryEqValue<T>] extends [never]
+export type QueryField<T> = { present(): QueryExpr } & ([QueryEqValue<T>] extends [never]
   ? object
   : { eq(value: QueryEqValue<T>): QueryExpr }) &
   ([QueryComparableValue<T>] extends [never]
