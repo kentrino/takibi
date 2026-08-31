@@ -14,6 +14,7 @@ import {
   type StoredDocument,
   type WithMetadata,
 } from "./types";
+import { assertDocumentIndexFields } from "./indexes";
 import { assertUniqueDocument } from "./unique";
 
 export function assertCollectionMigrations(
@@ -54,6 +55,7 @@ export function createMigratingStorage(
     async put(collection, document) {
       const definition = definitionFor(collection);
       const current = withCurrentVersion(definition, document);
+      assertDocumentIndexFields(definition, collection, current);
       await storage.transaction(async (scoped) => {
         await assertUniqueDocument(
           definition,
@@ -99,6 +101,7 @@ async function migrateDocument(
   if (storedVersion === targetVersion) return withoutVersion(stored);
 
   const migrated = await migrateStoredDocument(definition, stored, logger);
+  assertDocumentIndexFields(definition, collection, migrated);
   await storage.transaction(async (scoped) => {
     await assertUniqueDocument(
       definition,

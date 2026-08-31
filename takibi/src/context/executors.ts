@@ -5,6 +5,8 @@ import { TakibiError } from "../errors";
 import { executeOperation } from "../executor";
 import type { PublicRequest } from "../http";
 import { emitFailure, withLoggedSpan, type InternalLogger } from "../logging";
+import { compileIndexRegistry } from "../indexes";
+import { backfillIndexedCollections } from "../index-reconcile";
 import { createMigratingStorage } from "../migrations";
 import { batchSpanAttributes, invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import {
@@ -54,11 +56,15 @@ export function createMemoryExecutor(
   logger: InternalLogger | undefined,
   services: unknown = {},
 ): Executor {
+  const indexRegistry = compileIndexRegistry(collections);
   const driver = applyStorageLogging(
-    createMigratingStorage(collections, createMemoryStorage(), logger),
+    createMigratingStorage(collections, createMemoryStorage(indexRegistry), logger),
     logger,
   );
-  const ready = seedCollections(collections, driver, logger);
+  const ready = (async () => {
+    await backfillIndexedCollections(collections, driver, logger);
+    await seedCollections(collections, driver, logger);
+  })();
 
   return async ({ ctx, invocation, tracer, resolveSpan }) => {
     await ready;
