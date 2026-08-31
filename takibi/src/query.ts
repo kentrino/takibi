@@ -1,5 +1,7 @@
 import type {
   ListOptions,
+  OrderBuilder,
+  OrderExpr,
   QueryBuilder,
   QueryExpr,
   QueryScalar,
@@ -13,16 +15,75 @@ export const QUERY_MAX_DEPTH = 8;
 
 const VALUE_OPERATORS = new Set<QueryValueOperator>(["eq", "gt", "gte", "lt", "lte"]);
 
-export function compileListOptions<TDoc>(
-  options: ListOptions<TDoc> | undefined,
-): StorageListOptions | undefined {
+export function compileListOptions<
+  TDoc,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+>(options: ListOptions<TDoc, TIndexes> | undefined): StorageListOptions | undefined {
   if (!options) return undefined;
+  const index = "index" in options ? options.index : undefined;
+  const orderBy = "orderBy" in options ? options.orderBy : undefined;
+  if (orderBy !== undefined && (index === undefined || index === "")) {
+    throw new TypeError("orderBy requires index");
+  }
   const compiled: StorageListOptions = {
     ...(options.limit !== undefined ? { limit: options.limit } : {}),
     ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
     ...(options.where !== undefined ? { where: compileWhere(options.where) } : {}),
+    ...(typeof index === "string" ? { index } : {}),
+    ...(orderBy !== undefined ? { orderBy: compileOrderBy(orderBy) } : {}),
   };
   return Object.keys(compiled).length === 0 ? undefined : compiled;
+}
+
+export function compileOrderBy(
+  callback: (query: OrderBuilder<readonly string[]>) => OrderExpr,
+): OrderExpr {
+  if (typeof callback !== "function") {
+    throw new TypeError("orderBy must be an order builder callback");
+  }
+
+  const expressions = new WeakSet<object>();
+  const query = createOrderBuilder(expressions);
+  const result = callback(query);
+  if (!isRecord(result) || !expressions.has(result)) {
+    throw new TypeError("orderBy callback must return an expression created by its query builder");
+  }
+  return normalizeOrderBy(result);
+}
+
+export function normalizeOrderBy(value: unknown): OrderExpr {
+  if (!isRecord(value)) throw new TypeError("Order expression must be an object");
+  assertExactKeys(value, ["field", "direction"]);
+  if (typeof value.field !== "string" || value.field.length === 0) {
+    throw new TypeError("Order field must be a non-empty string");
+  }
+  if (value.direction !== "asc" && value.direction !== "desc") {
+    throw new TypeError("Order direction must be asc or desc");
+  }
+  return Object.freeze({ field: value.field, direction: value.direction });
+}
+
+function createOrderBuilder(expressions: WeakSet<object>): OrderBuilder<readonly string[]> {
+  const fields = new Map<string, object>();
+  const register = (expression: OrderExpr): OrderExpr => {
+    const frozen = Object.freeze(expression);
+    expressions.add(frozen);
+    return frozen;
+  };
+
+  return new Proxy(Object.create(null) as OrderBuilder<readonly string[]>, {
+    get(_target, property: string | symbol) {
+      if (typeof property !== "string") return undefined;
+      let methods = fields.get(property);
+      if (methods) return methods;
+      methods = Object.freeze({
+        asc: () => register({ field: property, direction: "asc" }),
+        desc: () => register({ field: property, direction: "desc" }),
+      });
+      fields.set(property, methods);
+      return methods;
+    },
+  });
 }
 
 export function compileWhere<TDoc>(callback: (query: QueryBuilder<TDoc>) => QueryExpr): QueryExpr {

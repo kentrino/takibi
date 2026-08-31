@@ -59,6 +59,27 @@ test("decodePublicHttp parses and normalizes list where JSON", async () => {
   });
 });
 
+test("decodePublicHttp parses indexed list query parameters", async () => {
+  const where = { field: "ownerId", op: "eq", value: "u1" };
+  const orderBy = { field: "createdAt", direction: "desc" };
+  const params = new URLSearchParams({
+    index: "byOwner",
+    where: JSON.stringify(where),
+    orderBy: JSON.stringify(orderBy),
+  });
+  await expect(
+    decodePublicHttp(new Request(`http://fire.test/posts?${params.toString()}`)),
+  ).resolves.toEqual({
+    kind: "collection",
+    collection: "posts",
+    operation: "list",
+    list: { index: "byOwner", where, orderBy },
+  });
+  await expect(
+    decodePublicHttp(new Request("http://fire.test/posts?orderBy=%7B%7D")),
+  ).rejects.toThrow(/orderBy requires index/);
+});
+
 test("decodePublicHttp rejects malformed and excessive list queries", async () => {
   const leaf = { field: "score", op: "eq", value: 1 };
   let tooDeep: unknown = leaf;

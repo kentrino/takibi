@@ -18,10 +18,12 @@ import type { PolicyHelper } from "../policy";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
 import type {
   CollectionDefinition,
+  CollectionIndexes,
   CollectionUniqueConstraints,
   CollectionsApi,
   CollectionsDef,
   InferCollectionDoc,
+  IndexDeclaration,
   ReservedDocumentSchemaConstraint,
   UniqueConstraintDeclaration,
 } from "../types";
@@ -206,6 +208,12 @@ type PublicCollectionUniqueConstraint<C, TSchema extends StandardSchemaV1> = C e
   ? { unique: TUnique & UniqueConstraintDeclaration<TSchema, TUnique> }
   : { unique?: CollectionDefinition<TSchema>["unique"] };
 
+type PublicCollectionIndexConstraint<C, TSchema extends StandardSchemaV1> = C extends {
+  indexes: infer TIndexes;
+}
+  ? { indexes: TIndexes & IndexDeclaration<TSchema, TIndexes> }
+  : { indexes?: CollectionDefinition<TSchema>["indexes"] };
+
 type PublicCollectionConstraint<C, TCtx extends object> = C extends {
   schema: infer S extends StandardSchemaV1;
 }
@@ -215,6 +223,7 @@ type PublicCollectionConstraint<C, TCtx extends object> = C extends {
       migrations?: CollectionDefinition<S, TCtx>["migrations"];
       seed?: CollectionDefinition<S, TCtx>["seed"];
     } & PublicCollectionUniqueConstraint<C, S> &
+      PublicCollectionIndexConstraint<C, S> &
       ReservedDocumentSchemaConstraint<S>
   : {
       schema: StandardSchemaV1;
@@ -249,10 +258,14 @@ export type CreateContextBuilder<
     const TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"],
     const TUnique extends CollectionUniqueConstraints<TSchema> =
       CollectionUniqueConstraints<TSchema>,
+    const TIndexes extends CollectionIndexes<TSchema> | Record<string, never> = Record<
+      string,
+      never
+    >,
   >(
-    definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy, TUnique> &
+    definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy, TUnique, TIndexes> &
       ReservedDocumentSchemaConstraint<TSchema>,
-  ): CollectionDefinition<TSchema, TCtx, TPolicy>;
+  ): CollectionDefinition<TSchema, TCtx, TPolicy, TIndexes>;
   defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
     collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
     options?: InternalCollectionsOptions<TServices>,

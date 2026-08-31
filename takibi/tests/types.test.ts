@@ -376,6 +376,116 @@ test("collection unique constraints accept named scalar tuples", () => {
   void checkInvalidConstraints;
 });
 
+test("collection indexes accept required scalar tuples and reach ClientOf", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
+  });
+  const postSchema = z.object({
+    ownerId: z.string(),
+    createdAt: z.string().optional(),
+    status: z.string(),
+    updatedAt: z.number(),
+    published: z.boolean(),
+    optionalTitle: z.string().optional(),
+    nullableNote: z.string().nullable(),
+    nested: z.object({ value: z.string() }),
+    labels: z.array(z.string()),
+  });
+
+  const posts = context.defineCollection({
+    schema: postSchema.omit({ createdAt: true, updatedAt: true }),
+    accessPolicy: fullAccess,
+    indexes: {
+      byOwner: ["ownerId", "createdAt"],
+      byStatus: ["status", "updatedAt"],
+    },
+  });
+  const handler = context
+    .defineCollections(
+      {
+        posts,
+        notes: {
+          schema: z.object({ ownerId: z.string(), title: z.string() }),
+          accessPolicy: fullAccess,
+          indexes: {
+            byOwner: ["ownerId", "createdAt"],
+          },
+        },
+      },
+      { memory: true },
+    )
+    .actions({});
+  const client = createClient<typeof handler>("http://fire.test");
+  type Client = ClientOf<typeof handler>;
+
+  const byOwner: NonNullable<Parameters<Client["posts"]["list"]>[0]> = {
+    index: "byOwner",
+    where: (query) => query.ownerId.eq("u1"),
+    orderBy: (query) => query.createdAt.desc(),
+    limit: 20,
+  };
+  const notesByOwner: NonNullable<Parameters<typeof client.notes.list>[0]> = {
+    index: "byOwner",
+    where: (query) => query.ownerId.eq("u1"),
+    orderBy: (query) => query.createdAt.asc(),
+  };
+  void byOwner;
+  void notesByOwner;
+
+  const checkInvalidIndexes = () => {
+    context.defineCollection({
+      schema: postSchema.omit({ createdAt: true, updatedAt: true }),
+      accessPolicy: fullAccess,
+      indexes: {
+        // @ts-expect-error index tuples must not be empty
+        empty: [],
+      },
+    });
+    context.defineCollection({
+      schema: postSchema.omit({ createdAt: true, updatedAt: true }),
+      accessPolicy: fullAccess,
+      indexes: {
+        // @ts-expect-error optional fields cannot be indexed
+        optional: ["optionalTitle"],
+        // @ts-expect-error nullable fields cannot be indexed
+        nullable: ["nullableNote"],
+        // @ts-expect-error boolean fields cannot be indexed
+        published: ["published"],
+        // @ts-expect-error nested fields cannot be indexed
+        nested: ["nested"],
+        // @ts-expect-error arrays cannot be indexed
+        labels: ["labels"],
+      },
+    });
+    context.defineCollection({
+      schema: postSchema.omit({ createdAt: true, updatedAt: true }),
+      accessPolicy: fullAccess,
+      indexes: {
+        // @ts-expect-error a field cannot occur twice in one index
+        duplicate: ["ownerId", "ownerId"],
+      },
+    });
+    const invalidList: NonNullable<Parameters<Client["posts"]["list"]>[0]> = {
+      // @ts-expect-error unknown indexes are not selectable
+      index: "missing",
+    };
+    const invalidOrder: NonNullable<Parameters<Client["posts"]["list"]>[0]> = {
+      index: "byOwner",
+      orderBy: (query) =>
+        // @ts-expect-error selected index fields only
+        query.status.desc(),
+    };
+    const orderWithoutIndex: NonNullable<Parameters<Client["posts"]["list"]>[0]> = {
+      // @ts-expect-error orderBy requires index
+      orderBy: (query: { createdAt: { desc(): unknown } }) => query.createdAt.desc(),
+    };
+    void invalidList;
+    void invalidOrder;
+    void orderWithoutIndex;
+  };
+  void checkInvalidIndexes;
+});
+
 test("collection migrations accept unknown intermediate data and constrain the final step", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),

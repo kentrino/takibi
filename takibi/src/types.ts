@@ -138,6 +138,70 @@ export type UniqueConstraintDeclaration<TSchema extends StandardSchemaV1, TUniqu
       }
     : never;
 
+export const INDEXABLE_METADATA_FIELDS = ["id", "createdAt", "updatedAt"] as const;
+
+type RequiredIndexableDomainKeys<TSchema extends StandardSchemaV1> = {
+  [K in keyof StandardSchemaV1.InferOutput<TSchema> & string]: IsAny<
+    StandardSchemaV1.InferOutput<TSchema>[K]
+  > extends true
+    ? never
+    : unknown extends StandardSchemaV1.InferOutput<TSchema>[K]
+      ? never
+      : undefined extends StandardSchemaV1.InferOutput<TSchema>[K]
+        ? never
+        : null extends StandardSchemaV1.InferOutput<TSchema>[K]
+          ? never
+          : [StandardSchemaV1.InferOutput<TSchema>[K]] extends [string]
+            ? K
+            : [StandardSchemaV1.InferOutput<TSchema>[K]] extends [number]
+              ? K
+              : never;
+}[keyof StandardSchemaV1.InferOutput<TSchema> & string];
+
+export type IndexableFieldKeys<TSchema extends StandardSchemaV1> =
+  | RequiredIndexableDomainKeys<TSchema>
+  | (typeof INDEXABLE_METADATA_FIELDS)[number];
+
+export type CollectionIndexes<TSchema extends StandardSchemaV1> = Readonly<
+  Record<string, readonly [IndexableFieldKeys<TSchema>, ...IndexableFieldKeys<TSchema>[]]>
+>;
+
+/** @internal Validates inferred literal index tuples without widening them. */
+export type IndexDeclaration<TSchema extends StandardSchemaV1, TIndexes> =
+  TIndexes extends CollectionIndexes<TSchema>
+    ? {
+        [K in keyof TIndexes]: TIndexes[K] extends readonly unknown[]
+          ? HasDuplicateTupleMember<TIndexes[K]> extends true
+            ? never
+            : TIndexes[K]
+          : never;
+      }
+    : never;
+
+export type InferCollectionIndexes<C> = C extends { indexes?: infer I }
+  ? [I] extends [undefined]
+    ? Record<string, never>
+    : NonNullable<I> extends Record<string, readonly string[]>
+      ? string extends keyof NonNullable<I>
+        ? Record<string, never>
+        : NonNullable<I>
+      : Record<string, never>
+  : Record<string, never>;
+
+export type OrderDirection = "asc" | "desc";
+
+export type OrderExpr = {
+  readonly field: string;
+  readonly direction: OrderDirection;
+};
+
+export type OrderBuilder<TFields extends readonly string[]> = {
+  [K in TFields[number]]: {
+    asc(): OrderExpr;
+    desc(): OrderExpr;
+  };
+};
+
 export type QueryExpr =
   | { readonly field: string; readonly op: QueryValueOperator; readonly value: QueryScalar }
   | { readonly field: string; readonly op: "present" }
@@ -250,6 +314,7 @@ export type CollectionDefinition<
   TCtx extends object = any,
   TPolicy extends AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>> =
     AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>,
+  TIndexes extends CollectionIndexes<TSchema> | Record<string, never> = Record<string, never>,
 > = {
   schema: JsonDocumentSchema<TSchema>;
   accessPolicy: TPolicy;
@@ -259,6 +324,11 @@ export type CollectionDefinition<
    * participate in the constraint.
    */
   unique?: CollectionUniqueConstraints<TSchema>;
+  /**
+   * Named composite indexes. Field order is the public scan and result-order
+   * contract for `list({ index })`.
+   */
+  indexes?: TIndexes extends Record<string, never> ? CollectionIndexes<TSchema> : TIndexes;
   migrations?: CollectionMigrations<StandardSchemaV1.InferInput<TSchema>>;
   /**
    * Initial documents keyed by document ID. Seeds are create-only: existing
@@ -423,11 +493,13 @@ export type CollectionApi<C> = {
   get: (id: DocumentId) => Promise<InferCollectionDoc<C>>;
   update: (id: DocumentId, data: CollectionPatchInput<C>) => Promise<InferCollectionDoc<C>>;
   delete: (id: DocumentId) => Promise<{ id: DocumentId }>;
-  list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<{
+  list: (opts?: ListOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>) => Promise<{
     items: InferCollectionDoc<C>[];
     nextCursor?: string;
   }>;
-  listAll: (opts?: ListAllOptions<InferCollectionDoc<C>>) => Promise<InferCollectionDoc<C>[]>;
+  listAll: (
+    opts?: ListAllOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<InferCollectionDoc<C>[]>;
 };
 
 export type CollectionsApi<TCollections> = {
@@ -454,7 +526,7 @@ export type ClientCollectionApi<C> = {
     data: CollectionPatchInput<C>,
   ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
   delete: (id: DocumentId) => Promise<TakibiResult<{ id: DocumentId }>>;
-  list: (opts?: ListOptions<InferCollectionDoc<C>>) => Promise<
+  list: (opts?: ListOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>) => Promise<
     TakibiResult<
       {
         items: InferCollectionDoc<C>[];
@@ -464,7 +536,7 @@ export type ClientCollectionApi<C> = {
     >
   >;
   listAll: (
-    opts?: ListAllOptions<InferCollectionDoc<C>>,
+    opts?: ListAllOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
   ) => Promise<TakibiResult<InferCollectionDoc<C>[], CollectionPolicyReasonCode<C>>>;
 };
 
@@ -472,28 +544,60 @@ export type ClientCollectionsApi<TCollections> = {
   [K in keyof TCollections]: ClientCollectionApi<TCollections[K]>;
 };
 
-export type ListOptions<TDoc = WithMetadata<Record<string, QueryScalar>>> = {
+type UnindexedListOptions<TDoc> = {
   limit?: number;
   cursor?: string;
   where?: (query: QueryBuilder<TDoc>) => QueryExpr;
 };
 
+type IndexedListOptions<TDoc, TIndexes extends Record<string, readonly string[]>> = {
+  [K in keyof TIndexes & string]: {
+    index: K;
+    limit?: number;
+    cursor?: string;
+    where?: (query: QueryBuilder<TDoc>) => QueryExpr;
+    orderBy?: (query: OrderBuilder<TIndexes[K]>) => OrderExpr;
+  };
+}[keyof TIndexes & string];
+
+export type ListOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = [keyof TIndexes] extends [never]
+  ? UnindexedListOptions<TDoc>
+  :
+      | (UnindexedListOptions<TDoc> & { index?: never; orderBy?: never })
+      | IndexedListOptions<TDoc, TIndexes>;
+
+type ListAllFromList<T> = T extends unknown
+  ? Omit<T, "limit" | "cursor"> & {
+      /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */
+      pageSize?: number;
+      /**
+       * Safety cap across all pages. If matching documents remain after this many
+       * items, `listAll` fails with `LIST_ALL_LIMIT` instead of truncating.
+       */
+      maxItems?: number;
+    }
+  : never;
+
 /** Client / server convenience over repeated `list` pages. Not a policy permission. */
-export type ListAllOptions<TDoc = WithMetadata<Record<string, QueryScalar>>> = {
-  where?: ListOptions<TDoc>["where"];
-  /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */
-  pageSize?: number;
-  /**
-   * Safety cap across all pages. If matching documents remain after this many
-   * items, `listAll` fails with `LIST_ALL_LIMIT` instead of truncating.
-   */
-  maxItems?: number;
+export type ListAllOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = ListAllFromList<ListOptions<TDoc, TIndexes>>;
+
+export type StorageOrderBy = {
+  field: string;
+  direction: OrderDirection;
 };
 
 export type StorageListOptions = {
   limit?: number;
   cursor?: string;
   where?: QueryExpr;
+  index?: string;
+  orderBy?: StorageOrderBy;
 };
 
 export type StorageReadTransform = (

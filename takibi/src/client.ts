@@ -427,6 +427,10 @@ function buildPublicRequest(
       if (parts.list?.limit !== undefined) params.set("limit", String(parts.list.limit));
       if (parts.list?.cursor !== undefined) params.set("cursor", parts.list.cursor);
       if (parts.list?.where !== undefined) params.set("where", JSON.stringify(parts.list.where));
+      if (parts.list?.index !== undefined) params.set("index", parts.list.index);
+      if (parts.list?.orderBy !== undefined) {
+        params.set("orderBy", JSON.stringify(parts.list.orderBy));
+      }
       return { method: "GET", path: encodedCollection, query: params };
     }
     default: {

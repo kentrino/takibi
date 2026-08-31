@@ -150,6 +150,40 @@ test("decodeWireRequest accepts application-owned context keys and requires an o
   }
 });
 
+test("decodeWireRequest accepts indexed list options and rejects invalid orderBy", () => {
+  const request = {
+    kind: "collection",
+    collection: "posts",
+    operation: "list",
+    list: {
+      index: "byOwner",
+      orderBy: { field: "createdAt", direction: "desc" },
+      where: { field: "ownerId", op: "eq", value: "u1" },
+    },
+    context,
+  };
+  expect(decodeWireRequest(request)).toEqual(request);
+
+  expect(() =>
+    decodeWireRequest({
+      ...request,
+      list: { orderBy: { field: "createdAt", direction: "desc" } },
+    }),
+  ).toThrow(/orderBy requires index/);
+  expect(() =>
+    decodeWireRequest({
+      ...request,
+      list: { index: "byOwner", orderBy: { field: "createdAt", direction: "sideways" } },
+    }),
+  ).toThrow(BadRequestError);
+  expect(() =>
+    decodeWireRequest({
+      ...request,
+      list: { index: "byOwner", extra: true },
+    }),
+  ).toThrow(/Unexpected wire field/);
+});
+
 test("decodeWireRequest normalizes list queries and rejects malformed AST", () => {
   const request = {
     kind: "collection",
