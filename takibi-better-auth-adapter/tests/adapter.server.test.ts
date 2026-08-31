@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { admin, bearer } from "better-auth/plugins";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { takibiAdapter, type BetterAuthModelMap } from "../src/adapter.server.ts";
 import { createTestCollection } from "./test-collection.server";
@@ -365,6 +365,36 @@ test("transactions retain the options of the adapter instance that created them"
       where: [{ field: "id", value: "captured-options" }],
     }),
   ).resolves.toMatchObject({ role: "admin" });
+});
+
+test("transaction-bound factories reuse the root schema compatibility probe", async () => {
+  const validateUser = vi.fn((value: unknown) => schemas.user["~standard"].validate(value));
+  const countingModels = {
+    ...MODELS,
+    user: {
+      ...MODELS.user,
+      schema: {
+        "~standard": {
+          ...schemas.user["~standard"],
+          validate: validateUser,
+        },
+      },
+    },
+  };
+  const { adapter } = createHarness(countingModels);
+
+  await createUser(adapter, "schema-cache", "schema-cache@example.com");
+  const rootProbeCalls = validateUser.mock.calls.length;
+  expect(rootProbeCalls).toBeGreaterThan(0);
+
+  await adapter.transaction(async (transaction) => {
+    await transaction.findOne({
+      model: "user",
+      where: [{ field: "id", value: "schema-cache" }],
+    });
+  });
+
+  expect(validateUser).toHaveBeenCalledTimes(rootProbeCalls);
 });
 
 test("filters, sorting, offset, count, and bulk mutations follow the adapter contract", async () => {
