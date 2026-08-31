@@ -133,10 +133,10 @@ converted to ISO 8601 strings, Better Auth's missing-or-null equality is
 preserved, `findOne` uses `list({ limit: 1 })`, counts use Takibi `count`, and
 conditional writes use the trusted atomic mutation methods.
 
-Case-insensitive matching, arbitrary sort fields, offset, joins, and filters
-that exceed Takibi's query bounds still use a bounded server-side fallback
-scan. The default limit is 10,000 documents and can be lowered with
-`maxScanItems`.
+Case-insensitive matching, arbitrary sort fields, offset, unbounded joins, and
+filters that exceed Takibi's query bounds still use a bounded server-side
+fallback scan. Bounded joins use a limited Takibi query instead. The default
+scan limit is 10,000 documents and can be lowered with `maxScanItems`.
 
 Use `onFallbackScan` for metadata-only observability:
 
