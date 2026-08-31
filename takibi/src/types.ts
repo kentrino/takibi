@@ -1,5 +1,11 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { KeysMatching } from "./type-util";
+import type {
+  DistributiveOmit,
+  ForbidKeys,
+  HasDuplicateTupleMember,
+  IsAny,
+  StringKeysMatching,
+} from "./type-util";
 
 export type JsonValue =
   | string
@@ -10,8 +16,6 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export type JsonObject = { [key: string]: JsonValue };
-
-type IsAny<T> = 0 extends 1 & T ? true : false;
 
 type JsonDocumentSchema<TSchema extends StandardSchemaV1> =
   IsAny<TSchema> extends true
@@ -99,31 +103,19 @@ export type QueryStringOperator = "contains" | "startsWith" | "endsWith";
 
 export type QueryOperator = QueryValueOperator | QueryStringOperator | "in" | "present";
 
-type UniqueFieldKeys<TSchema extends StandardSchemaV1> = Extract<
-  KeysMatching<
-    {
-      [K in keyof StandardSchemaV1.InferOutput<TSchema>]: Exclude<
-        StandardSchemaV1.InferOutput<TSchema>[K],
-        null | undefined
-      >;
-    },
-    Exclude<QueryScalar, null>
-  >,
-  string
+type UniqueFieldKeys<TSchema extends StandardSchemaV1> = StringKeysMatching<
+  {
+    [K in keyof StandardSchemaV1.InferOutput<TSchema>]: Exclude<
+      StandardSchemaV1.InferOutput<TSchema>[K],
+      null | undefined
+    >;
+  },
+  Exclude<QueryScalar, null>
 >;
 
 export type CollectionUniqueConstraints<TSchema extends StandardSchemaV1> = Readonly<
   Record<string, readonly [UniqueFieldKeys<TSchema>, ...UniqueFieldKeys<TSchema>[]]>
 >;
-
-type HasDuplicateTupleMember<T extends readonly unknown[]> = T extends readonly [
-  infer Head,
-  ...infer Tail,
-]
-  ? Head extends Tail[number]
-    ? true
-    : HasDuplicateTupleMember<Tail>
-  : false;
 
 /** @internal Validates inferred literal constraint tuples without widening them. */
 export type UniqueConstraintDeclaration<TSchema extends StandardSchemaV1, TUnique> =
@@ -140,8 +132,8 @@ export type UniqueConstraintDeclaration<TSchema extends StandardSchemaV1, TUniqu
 export const INDEXABLE_METADATA_FIELDS = ["id", "createdAt", "updatedAt"] as const;
 
 type RequiredIndexableDomainKeys<TSchema extends StandardSchemaV1> =
-  | Extract<KeysMatching<StandardSchemaV1.InferOutput<TSchema>, string>, string>
-  | Extract<KeysMatching<StandardSchemaV1.InferOutput<TSchema>, number>, string>;
+  | StringKeysMatching<StandardSchemaV1.InferOutput<TSchema>, string>
+  | StringKeysMatching<StandardSchemaV1.InferOutput<TSchema>, number>;
 
 export type IndexableFieldKeys<TSchema extends StandardSchemaV1> =
   | RequiredIndexableDomainKeys<TSchema>
@@ -367,8 +359,6 @@ export type InferCollectionInput<C> = C extends { schema: infer S extends Standa
   ? StandardSchemaV1.InferInput<S>
   : never;
 
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-
 type DistributivePartial<T> = T extends unknown ? Partial<T> : never;
 
 export type CollectionDataInput<C> = DistributiveOmit<
@@ -430,9 +420,6 @@ type NarrowDocMembers<TDoc, TData> = TDoc extends unknown
     ? TDoc
     : never
   : never;
-
-type ForbidKeys<T, K extends PropertyKey> =
-  Extract<keyof T, K> extends never ? unknown : { [P in Extract<keyof T, K>]?: never };
 
 /**
  * Document produced by `add` / `set` for the given write payload.
@@ -644,17 +631,15 @@ export type ListOptions<
       | (UnindexedListOptions<TDoc> & { index?: never; orderBy?: never })
       | IndexedListOptions<TDoc, TIndexes>;
 
-type ListAllFromList<T> = T extends unknown
-  ? Omit<T, "limit" | "cursor"> & {
-      /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */
-      pageSize?: number;
-      /**
-       * Safety cap across all pages. If matching documents remain after this many
-       * items, `listAll` fails with `LIST_ALL_LIMIT` instead of truncating.
-       */
-      maxItems?: number;
-    }
-  : never;
+type ListAllFromList<T> = DistributiveOmit<T, "limit" | "cursor"> & {
+  /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */
+  pageSize?: number;
+  /**
+   * Safety cap across all pages. If matching documents remain after this many
+   * items, `listAll` fails with `LIST_ALL_LIMIT` instead of truncating.
+   */
+  maxItems?: number;
+};
 
 /** Client / server convenience over repeated `list` pages. Not a policy permission. */
 export type ListAllOptions<
@@ -662,7 +647,7 @@ export type ListAllOptions<
   TIndexes extends Record<string, readonly string[]> = Record<string, never>,
 > = ListAllFromList<ListOptions<TDoc, TIndexes>>;
 
-type CountFromList<T> = T extends unknown ? Omit<T, "limit" | "cursor" | "orderBy"> : never;
+type CountFromList<T> = DistributiveOmit<T, "limit" | "cursor" | "orderBy">;
 
 /** Server-only aggregate over the same query and index selection as `list`. */
 export type CountOptions<

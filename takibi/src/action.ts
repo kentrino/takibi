@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { TakibiError } from "./errors";
 import { isAccessGrant, isConstrainedPolicy, permissionsOf } from "./policy";
 import type { ConstrainedPolicy, ContextPolicy } from "./policy";
+import type { IsAny } from "./type-util";
 import type {
   AccessContext,
   AccessGrant,
@@ -134,8 +135,6 @@ export type ActionNameConstraint<TActions> = Record<
   Extract<keyof TActions, CrudName | ReservedPublicName> | InvalidPublicKeys<TActions>,
   never
 >;
-
-type IsAny<T> = 0 extends 1 & T ? true : false;
 
 type JsonInputSchema<TSchema extends StandardSchemaV1> =
   unknown extends StandardSchemaV1.InferInput<TSchema>
