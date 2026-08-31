@@ -63,7 +63,8 @@
   },
   "peerDependencies": {
     "@takibi/takibi": "workspace:^",
-    "better-auth": "^1.6.26"
+    "better-auth": "^1.6.26",
+    "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=22.18.0"

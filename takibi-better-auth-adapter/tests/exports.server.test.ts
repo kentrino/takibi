@@ -1,9 +1,14 @@
-import { defineBetterAuthCollections, takibiAdapter } from "@takibi/takibi-better-auth-adapter";
+import {
+  createZodBetterAuthBaseSchemas,
+  defineBetterAuthCollections,
+  takibiAdapter,
+} from "@takibi/takibi-better-auth-adapter";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 
 test("package root exports adapter and collection helpers", () => {
   expect(takibiAdapter).toBeTypeOf("function");
+  expect(createZodBetterAuthBaseSchemas).toBeTypeOf("function");
 
   const collections = defineBetterAuthCollections({
     user: z.object({
