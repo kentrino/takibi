@@ -103,18 +103,18 @@ trace.setGlobalTracerProvider(provider);
 context.setGlobalContextManager(new AsyncLocalContextManager());
 new TakibiInstrumentation().enable();
 
+declare const tenantStore: DurableObjectNamespace;
+
 const app = createTakibi()({
   resolve: () => ({ tenantId: "demo" }),
+  stub: ({ resolved }) => tenantStore.getByName(resolved.tenantId),
 })
-  .defineCollections(
-    {
-      posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy: fullAccess,
-      },
+  .defineCollections({
+    posts: {
+      schema: z.object({ title: z.string() }),
+      accessPolicy: fullAccess,
     },
-    { memory: true },
-  )
+  })
   .actions({});
 
 export default {
