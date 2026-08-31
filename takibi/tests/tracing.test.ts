@@ -4,6 +4,7 @@ import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { createTakibi, fullAccess, none } from "../src/index";
 import {
   bindTracer,
@@ -16,7 +17,7 @@ import {
 } from "../src/tracing";
 import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
 import { createRecordingTracer, type RecordedSpan } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "./sqlite";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { WireResponse } from "../src/protocol";
 
 /**
@@ -84,11 +85,12 @@ test("A baseline records no internal spans", async () => {
   expectTypeOf(recording).not.toHaveProperty("forceFlush");
   expect(recording.tracer).not.toHaveProperty("forceFlush");
   expect(recording).not.toHaveProperty("forceFlush");
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
   })
-    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const added = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -98,16 +100,17 @@ test("A baseline records no internal spans", async () => {
   expect(recording.spans).toEqual([]);
 });
 
-test("public request span encloses the memory lifecycle and inherits an active parent", async () => {
+test("public request span encloses the SQLite lifecycle and inherits an active parent", async () => {
   const recording = createRecordingTracer();
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
   })
     .defineCollections(
       { posts: { schema: Post, accessPolicy: fullAccess } },
-      { memory: true, [internalTracerKey]: recording.tracer },
+      { [internalTracerKey]: recording.tracer },
     )
     .actions({});
+  const handler = withSqliteTestBackend(production);
 
   const response = await bindTracer(recording.tracer, () =>
     withSpan({ name: "caller", kind: "server" }, async () =>
@@ -144,14 +147,15 @@ test("public request span encloses the memory lifecycle and inherits an active p
 
 test("decode failure creates and ends one root request span", async () => {
   const recording = createRecordingTracer();
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
   })
     .defineCollections(
       { posts: { schema: Post, accessPolicy: fullAccess } },
-      { memory: true, [internalTracerKey]: recording.tracer },
+      { [internalTracerKey]: recording.tracer },
     )
     .actions({});
+  const handler = withSqliteTestBackend(production);
 
   const response = await handler.request("http://fire.test/posts", {
     method: "POST",
@@ -269,11 +273,12 @@ test("global tracing registration uses a shared symbol-backed config", () => {
 test("B global registration matches C span names without collections options", async () => {
   const recording = createRecordingTracer();
   registerGlobalTracer(recording.tracer);
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
   })
-    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -557,12 +562,9 @@ test("injected failures record error on the failed interval and still end", asyn
       : testCase.context!();
     const app = builder.defineCollections(
       testCase.collections ?? { posts: { schema: Post, accessPolicy: fullAccess } },
-      {
-        ...(testCase.name === "takibi.wire" || testCase.failStorage ? {} : { memory: true }),
-        [internalTracerKey]: recording.tracer,
-      },
+      { [internalTracerKey]: recording.tracer },
     );
-    const handler = testCase.action
+    const production = testCase.action
       ? app.actions({
           $: {
             boom: app
@@ -574,6 +576,10 @@ test("injected failures record error on the failed interval and still end", asyn
           },
         })
       : app.actions({});
+    const handler =
+      testCase.name === "takibi.wire" || testCase.failStorage
+        ? production
+        : withSqliteTestBackend(production);
     const object = testCase.failStorage
       ? new handler.DurableObject(
           createFakeDurableObjectState(createFailingDocumentWriteStorage(), { name: "t" }),
@@ -746,12 +752,13 @@ test("wire span treats a valid non-2xx failure envelope as a received remote res
 
 test("wire error conversion still identifies the failed interval", async () => {
   const recording = createRecordingTracer();
-  const handler = createTakibi()({ resolve: () => ({ tenantId: "t" }) })
+  const production = createTakibi()({ resolve: () => ({ tenantId: "t" }) })
     .defineCollections(
       { posts: { schema: Post, accessPolicy: none } },
-      { memory: true, [internalTracerKey]: recording.tracer },
+      { [internalTracerKey]: recording.tracer },
     )
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const response = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -827,11 +834,12 @@ test("withSpan keeps the request path when the tracer adapter throws", async () 
       return undefined;
     },
   });
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
   })
-    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const added = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -866,11 +874,12 @@ test("withSpan swallows adapter errors on success and failure paths", async () =
       return undefined;
     },
   });
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "t" }),
   })
-    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const added = await handler.request("http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },

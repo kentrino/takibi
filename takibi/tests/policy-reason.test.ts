@@ -1,4 +1,5 @@
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import {
@@ -156,18 +157,15 @@ function createReasonHandler() {
     },
     ({ doc }) => (doc?.locked ? grant("get", "list") : fullAccess),
   );
-  const app = createContext.defineCollections(
-    {
-      items: { schema: itemSchema, accessPolicy: guarded },
-    },
-    { memory: true },
-  );
+  const app = createContext.defineCollections({
+    items: { schema: itemSchema, accessPolicy: guarded },
+  });
   const actions = app.items.actions((defineAction) => ({
     archive: defineAction()
       .policy(and(guarded, locked))
       .handler(({ id }) => ({ id })),
   }));
-  return app.actions({ items: actions });
+  return withSqliteTestBackend(app.actions({ items: actions }));
 }
 
 test("generated CRUD clients expose reasons only on add and list", () => {

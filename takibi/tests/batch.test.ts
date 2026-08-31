@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { createTakibi, fullAccess, UnauthorizedError } from "../src/index";
 import {
   internalTracerKey,
@@ -13,7 +14,7 @@ import { TAKIBI_ATTR } from "../src/otel-helper";
 import type { LogEvent, Logger } from "../src/index";
 import type { WireRequest } from "../src/protocol";
 import { createRecordingTracer } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "./sqlite";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 
 const Post = z.object({ title: z.string(), secret: z.boolean().default(false) });
 
@@ -35,7 +36,7 @@ function fakeState(storage: DurableObjectStorage, id: { name?: string } = {}): D
   } as unknown as DurableObjectState;
 }
 
-function createMemoryHandler(
+function createSqliteHandler(
   options: {
     events?: LogEvent[];
     resolve?: () => { tenantId: string };
@@ -44,7 +45,7 @@ function createMemoryHandler(
 ) {
   let resolveCount = 0;
   const events = options.events ?? [];
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => {
       resolveCount += 1;
       return options.resolve?.() ?? { tenantId: "tenant-a" };
@@ -52,20 +53,18 @@ function createMemoryHandler(
     logger: options.events ? capturingLogger(events) : undefined,
     logLevel: options.events ? "debug" : undefined,
   })
-    .defineCollections(
-      {
-        posts: {
-          schema: Post,
-          accessPolicy: options.policy ?? fullAccess,
-          seed: () => ({
-            p1: { title: "one", secret: false },
-            p2: { title: "two", secret: false },
-          }),
-        },
+    .defineCollections({
+      posts: {
+        schema: Post,
+        accessPolicy: options.policy ?? fullAccess,
+        seed: () => ({
+          p1: { title: "one", secret: false },
+          p2: { title: "two", secret: false },
+        }),
       },
-      { memory: true },
-    )
+    })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   return { handler, resolveCount: () => resolveCount };
 }
 
@@ -77,8 +76,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("memory batch uses one public HTTP request, one resolve, and continues after item failure", async () => {
-  const { handler, resolveCount } = createMemoryHandler();
+test("SQLite test backend batch uses one public HTTP request, one resolve, and continues after item failure", async () => {
+  const { handler, resolveCount } = createSqliteHandler();
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: (input, init) => handler.request(input, init),
@@ -100,22 +99,20 @@ test("memory batch uses one public HTTP request, one resolve, and continues afte
 
 test("malformed public batches execute no items and return 400", async () => {
   let policyCalls = 0;
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
   })
-    .defineCollections(
-      {
-        posts: {
-          schema: Post,
-          accessPolicy: () => {
-            policyCalls += 1;
-            return fullAccess;
-          },
+    .defineCollections({
+      posts: {
+        schema: Post,
+        accessPolicy: () => {
+          policyCalls += 1;
+          return fullAccess;
         },
       },
-      { memory: true },
-    )
+    })
     .actions({});
+  const handler = withSqliteTestBackend(production);
 
   const rejected = await handler.request("http://fire.test/_batch", {
     method: "POST",
@@ -137,13 +134,14 @@ test("malformed public batches execute no items and return 400", async () => {
 });
 
 test("resolve failure is a top-level batch error and does not run items", async () => {
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => {
       throw new UnauthorizedError("Sign in required");
     },
   })
-    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: (input, init) => handler.request(input, init),
@@ -158,7 +156,7 @@ test("resolve failure is a top-level batch error and does not run items", async 
 
 test("batch logs request/resolve once with size and executor once per item", async () => {
   const events: LogEvent[] = [];
-  const { handler } = createMemoryHandler({ events });
+  const { handler } = createSqliteHandler({ events });
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: (input, init) => handler.request(input, init),
@@ -189,7 +187,7 @@ test("batch logs request/resolve once with size and executor once per item", asy
 
 test("single collection requests keep their HTTP status, envelope, and log fields", async () => {
   const events: LogEvent[] = [];
-  const { handler } = createMemoryHandler({ events });
+  const { handler } = createSqliteHandler({ events });
   const missing = await handler.request("http://fire.test/posts/missing");
   expect(missing.status).toBe(404);
   await expect(missing.json()).resolves.toMatchObject({

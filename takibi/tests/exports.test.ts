@@ -3,6 +3,7 @@ import { dirname, join, normalize } from "node:path";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import * as Takibi from "../src/index";
 import * as TakibiClient from "../src/client-entry";
+import * as TakibiTesting from "../src/testing.server";
 import type {
   AccessContext,
   AccessGrant,
@@ -182,6 +183,9 @@ test("removed resource/storage aliases and internal assembly APIs are not public
   expectTypeOf(Takibi).not.toHaveProperty("defineResource");
   expectTypeOf(Takibi).not.toHaveProperty("executeOperation");
   expectTypeOf(Takibi).not.toHaveProperty("createTypedStorage");
+  expectTypeOf(Takibi).not.toHaveProperty("createMemoryStorage");
+  expectTypeOf(Takibi).not.toHaveProperty("createMemoryExecutor");
+  expectTypeOf(Takibi).not.toHaveProperty("withSqliteTestBackend");
   expectTypeOf(Takibi).not.toHaveProperty("parseSchema");
   expectTypeOf(Takibi).not.toHaveProperty("ownedBy");
   expectTypeOf(Takibi).not.toHaveProperty("SchemaValidationError");
@@ -199,6 +203,9 @@ test("removed resource/storage aliases and internal assembly APIs are not public
     | "defineResource"
     | "executeOperation"
     | "createTypedStorage"
+    | "createMemoryStorage"
+    | "createMemoryExecutor"
+    | "withSqliteTestBackend"
     | "ownedBy"
     | "OwnedByOptions"
     | "FireError"
@@ -455,6 +462,12 @@ test("createClient lives on the browser entry, not the Worker root", () => {
   expect(pkg.exports["./client"]).toBe("./src/client-entry.ts");
 });
 
+test("withSqliteTestBackend lives on the Node-only testing entry", () => {
+  expectTypeOf(TakibiTesting.withSqliteTestBackend).toBeFunction();
+  expectTypeOf(TakibiTesting).not.toHaveProperty("createMemoryStorage");
+  expectTypeOf(TakibiTesting).not.toHaveProperty("createMemoryExecutor");
+});
+
 test("the browser entry static import graph stays off Worker modules", () => {
   const files = walkValueImports(join(srcDir, "client-entry.ts"));
   for (const name of forbiddenClientModules) {
@@ -468,4 +481,27 @@ test("the Worker root static import graph stays off Node compatibility modules",
   const files = walkValueImports(join(srcDir, "index.ts"));
   expect([...files].filter((file) => file.startsWith("node:"))).toEqual([]);
   expect([...files].filter((file) => file.startsWith("@opentelemetry/"))).toEqual([]);
+});
+
+test("production entry graphs cannot reach the Node-only testing backend", () => {
+  const testingEntry = normalize(join(srcDir, "testing.server.ts"));
+  const productionEntries = [
+    ["main", "index.ts"],
+    ["client", "client-entry.ts"],
+    ["instrumentation", "instrumentation.ts"],
+  ] as const;
+
+  for (const [name, entry] of productionEntries) {
+    const files = walkValueImports(join(srcDir, entry));
+    expect(files.has(testingEntry), `${name} reaches testing.server.ts`).toBe(false);
+    expect(files.has("node:sqlite"), `${name} reaches node:sqlite`).toBe(false);
+  }
+});
+
+test("testing entry intentionally owns the Node SQLite import graph", () => {
+  const files = walkValueImports(join(srcDir, "testing.server.ts"));
+
+  expect(files.has(normalize(join(srcDir, "testing.server.ts")))).toBe(true);
+  expect(files.has(normalize(join(srcDir, "testing/sqlite-storage.server.ts")))).toBe(true);
+  expect(files.has("node:sqlite")).toBe(true);
 });

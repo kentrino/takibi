@@ -3,4 +3,18 @@
   "name": "takibi-root-import-tests",
   "main": "./tests/worker.ts",
   "compatibility_date": "2026-08-03",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TAKIBI_STORAGE_TEST",
+        "class_name": "StorageTestObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["StorageTestObject"],
+    },
+  ],
 }

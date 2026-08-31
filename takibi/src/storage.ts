@@ -2,11 +2,7 @@ import { LIST_PAGE_DEFAULT, LIST_PAGE_MAX } from "./list-all";
 import { BadRequestError, TakibiError } from "./errors";
 import { compileIndexedScanSql, createIndexCatalogTableSql } from "./index-sql";
 import {
-  afterIndexCursor,
-  compareDocumentIndexOrder,
-  compareUtf8,
   extractIndexValues,
-  matchesIndexRange,
   resolveIndexedList,
   type IndexRegistry,
   type ResolvedIndexScan,
@@ -91,213 +87,104 @@ type DocumentRow = Record<string, SqlStorageValue> & {
   data: string;
 };
 
-export function createMemoryStorage(registry: IndexRegistry = EMPTY_INDEX_REGISTRY): StorageDriver {
-  const state: MemoryState = { tables: new Map() };
-  let writeQueue = Promise.resolve();
-  const coordinate: WriteCoordinator = (operation) => {
-    const result = writeQueue.then(operation, operation);
-    writeQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  };
-  return createMemoryDriver(state, coordinate, registry);
-}
-
-type MemoryState = {
-  tables: Map<string, Map<string, StoredDocument>>;
-};
-
-type WriteCoordinator = <T>(operation: () => T | Promise<T>) => Promise<T>;
-
-function createMemoryDriver(
-  state: MemoryState,
-  coordinate: WriteCoordinator,
-  registry: IndexRegistry,
-): StorageDriver {
-  const immediate: WriteCoordinator = async (operation) => operation();
-
-  const table = (resource: string) => {
-    let t = state.tables.get(resource);
-    if (!t) {
-      t = new Map();
-      state.tables.set(resource, t);
-    }
-    return t;
-  };
-
-  return {
-    async get(resource, id) {
-      const document = table(resource).get(id);
-      return document === undefined ? null : withDocumentRevision(structuredClone(document));
-    },
-    async put(resource, doc) {
-      await coordinate(() => {
-        table(resource).set(doc.id, structuredClone(doc));
-      });
-    },
-    async delete(resource, id) {
-      return coordinate(() => table(resource).delete(id));
-    },
-    async list(resource, opts, plan) {
-      const prepared = prepareList(resource, opts, registry);
-      const documents = [...table(resource).values()].map((document) =>
-        withDocumentRevision(structuredClone(document)),
-      );
-      if (prepared.scan.kind === "id") {
-        const items = documents
-          .sort((left, right) => compareIds(left.id, right.id))
-          .map((document) => ({ id: document.id, document }));
-        return paginate(
-          prepared,
-          async (startAfter, limit) => {
-            const start =
-              startAfter === undefined
-                ? 0
-                : items.findIndex((item) => compareIds(item.id, startAfter) > 0);
-            return start < 0 ? [] : items.slice(start, start + limit);
-          },
-          plan,
-        );
-      }
-
-      const scan = prepared.scan;
-      const items = documents
-        .filter((document) => matchesIndexRange(document, scan.resolved.range))
-        .sort((left, right) =>
-          compareDocumentIndexOrder(
-            left,
-            right,
-            scan.resolved.index.fields,
-            scan.resolved.direction,
-          ),
-        )
-        .map((document) => ({ id: document.id, document }));
-      return paginateIndex(
-        prepared,
-        scan.resolved,
-        (startAfter, limit) => {
-          const start = items.findIndex((item) => {
-            const values = extractIndexValues(item.document, scan.resolved.index.fields);
-            if (values === undefined) return false;
-            if (startAfter === undefined) return true;
-            return afterIndexCursor(
-              values,
-              item.id,
-              startAfter.values,
-              startAfter.id,
-              scan.resolved.direction,
-            );
-          });
-          return start < 0 ? [] : items.slice(start, start + limit);
-        },
-        plan,
-      );
-    },
-    transaction(callback) {
-      return coordinate(async () => {
-        const scopedState: MemoryState = { tables: cloneMemoryTables(state.tables) };
-        const result = await callback(createMemoryDriver(scopedState, immediate, registry));
-        state.tables = scopedState.tables;
-        return result;
-      });
-    },
-  };
-}
-
-function cloneMemoryTables(
-  tables: Map<string, Map<string, StoredDocument>>,
-): Map<string, Map<string, StoredDocument>> {
-  return new Map(
-    [...tables].map(([resource, documents]) => [
-      resource,
-      new Map([...documents].map(([id, document]) => [id, structuredClone(document)])),
-    ]),
-  );
-}
-
 export function createDurableObjectStorage(
   storage: DurableObjectStorage,
   registry: IndexRegistry = EMPTY_INDEX_REGISTRY,
 ): StorageDriver {
   initializeStorageLayout(storage);
-  let transactionDepth = 0;
+  let operationQueue = Promise.resolve();
+  const coordinate = <T>(operation: () => T | Promise<T>): Promise<T> => {
+    const result = operationQueue.then(operation, operation);
+    operationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
 
-  const driver: StorageDriver = {
-    async get(resource, id) {
-      const rows = storage.sql
-        .exec<DocumentRow>(
-          `SELECT id, created_at, updated_at, schema_version, revision, data
-           FROM takibi_documents
-           WHERE collection = ? AND id = ?`,
-          resource,
-          id,
-        )
-        .toArray();
-      return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
-    },
-    async put(resource, doc) {
-      const encoded = encodeDocument(doc);
-      storage.sql.exec(
-        `INSERT INTO takibi_documents
-           (collection, id, created_at, updated_at, schema_version, revision, data)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (collection, id) DO UPDATE SET
-           created_at = excluded.created_at,
-           updated_at = excluded.updated_at,
-           schema_version = excluded.schema_version,
-           revision = excluded.revision,
-           data = excluded.data`,
-        resource,
-        doc.id,
-        doc.createdAt,
-        doc.updatedAt,
-        encoded.schemaVersion,
-        encoded.revision,
-        encoded.data,
-      );
-    },
-    async delete(resource, id) {
-      return (
-        storage.sql
-          .exec<{ id: string }>(
-            `DELETE FROM takibi_documents
-             WHERE collection = ? AND id = ?
-             RETURNING id`,
+  const createDriver = (transactionBound: boolean): StorageDriver => {
+    const execute = <T>(operation: () => T | Promise<T>): Promise<T> =>
+      transactionBound ? Promise.resolve().then(operation) : coordinate(operation);
+    const driver: StorageDriver = {
+      get(resource, id) {
+        return execute(() => {
+          const rows = storage.sql
+            .exec<DocumentRow>(
+              `SELECT id, created_at, updated_at, schema_version, revision, data
+               FROM takibi_documents
+               WHERE collection = ? AND id = ?`,
+              resource,
+              id,
+            )
+            .toArray();
+          return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
+        });
+      },
+      put(resource, doc) {
+        return execute(() => {
+          const encoded = encodeDocument(doc);
+          storage.sql.exec(
+            `INSERT INTO takibi_documents
+               (collection, id, created_at, updated_at, schema_version, revision, data)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (collection, id) DO UPDATE SET
+               created_at = excluded.created_at,
+               updated_at = excluded.updated_at,
+               schema_version = excluded.schema_version,
+               revision = excluded.revision,
+               data = excluded.data`,
             resource,
-            id,
-          )
-          .toArray().length > 0
-      );
-    },
-    async list(resource, opts, plan) {
-      const prepared = prepareList(resource, opts, registry);
-      if (prepared.scan.kind === "index") {
-        return paginateIndex(
+            doc.id,
+            doc.createdAt,
+            doc.updatedAt,
+            encoded.schemaVersion,
+            encoded.revision,
+            encoded.data,
+          );
+        });
+      },
+      delete(resource, id) {
+        return execute(
+          () =>
+            storage.sql
+              .exec<{ id: string }>(
+                `DELETE FROM takibi_documents
+                 WHERE collection = ? AND id = ?
+                 RETURNING id`,
+                resource,
+                id,
+              )
+              .toArray().length > 0,
+        );
+      },
+      async list(resource, opts, plan) {
+        const prepared = prepareList(resource, opts, registry);
+        if (prepared.scan.kind === "index") {
+          const readChunk = createSqlIndexChunkReader(storage.sql, resource, prepared, plan);
+          return paginateIndex(
+            prepared,
+            prepared.scan.resolved,
+            (startAfter, limit) => execute(() => readChunk(startAfter, limit)),
+            plan,
+          );
+        }
+        const readChunk = createSqlChunkReader(storage.sql, resource, prepared, plan);
+        return paginate(
           prepared,
-          prepared.scan.resolved,
-          createSqlIndexChunkReader(storage.sql, resource, prepared, plan),
+          (startAfter, limit) => execute(() => readChunk(startAfter, limit)),
           plan,
         );
-      }
-      return paginate(prepared, createSqlChunkReader(storage.sql, resource, prepared, plan), plan);
-    },
-    transaction(callback) {
-      if (transactionDepth > 0) {
-        return callback(driver);
-      }
-      return storage.transaction(async () => {
-        transactionDepth += 1;
-        try {
-          return await callback(driver);
-        } finally {
-          transactionDepth -= 1;
+      },
+      transaction(callback) {
+        if (transactionBound) {
+          return callback(driver);
         }
-      });
-    },
+        return coordinate(() => storage.transaction(() => callback(createDriver(true))));
+      },
+    };
+    return driver;
   };
-  return driver;
+  return createDriver(false);
 }
 
 function initializeStorageLayout(storage: DurableObjectStorage): void {
@@ -706,10 +593,6 @@ async function paginateIndex(
   }
 
   return { items: page };
-}
-
-function compareIds(left: string, right: string): number {
-  return compareUtf8(left, right);
 }
 
 function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | undefined): boolean {

@@ -49,13 +49,6 @@ export type ContextStubResolver<TCtx extends object, TInitial = Record<string, n
 
 export type ServicesFactory<TEnv, TServices> = (input: { env: TEnv }) => TServices;
 
-/**
- * Empty `TServices` (`Record<never, never>`) keeps `services` optional — the same
- * emptiness check as `HandleOptions.context`.
- */
-export type MemoryServicesOption<TServices> =
-  Record<string, never> extends TServices ? { services?: TServices } : { services: TServices };
-
 export type ContextConfig<
   TCtx extends object,
   TInitial = Record<string, never>,
@@ -63,22 +56,17 @@ export type ContextConfig<
   TServices = Record<never, never>,
 > = {
   resolve: ContextResolver<TCtx, TInitial>;
-  /** Required for Durable Object mode (omit when using `{ memory: true }`). */
+  /** Resolves the tenant Durable Object used for production execution. */
   stub?: ContextStubResolver<TCtx, TInitial>;
-  /**
-   * Per-instance factory for non-serializable runtime deps. Runs in the Durable
-   * Object constructor with `{ env }`. Memory mode takes the value, not this factory.
-   */
+  /** Per-instance factory for non-serializable runtime dependencies. */
   services?: ServicesFactory<TEnv, TServices>;
 } & LoggingOptions;
 
-export type CollectionsOptions<TServices = Record<never, never>> = LoggingOptions &
-  ({ memory?: false } | ({ memory: true } & MemoryServicesOption<TServices>));
+export type CollectionsOptions = LoggingOptions;
 
-export type InternalCollectionsOptions<TServices = Record<never, never>> =
-  CollectionsOptions<TServices> & {
-    [internalTracerKey]?: TakibiTracer;
-  };
+export type InternalCollectionsOptions = CollectionsOptions & {
+  [internalTracerKey]?: TakibiTracer;
+};
 
 export type HandleOptions<TInitial> = {
   /**
@@ -114,6 +102,7 @@ export type TakibiBrand<
     initial: TInitial;
     collections: TCollections;
     actions: TActionMap;
+    services: TServices;
   };
   DurableObject: new (
     state: DurableObjectState,
@@ -127,16 +116,6 @@ export type TakibiBrand<
    * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
    */
   handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
-  /**
-   * Fork a handler for tests: same collections / actions, new memory store,
-   * optional `resolve` override. The original handler is unchanged.
-   */
-  with(
-    options: LoggingOptions & {
-      memory: true;
-      resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
-    } & MemoryServicesOption<TServices>,
-  ): TakibiHandler<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv>;
 };
 
 export type TakibiHandler<
@@ -269,7 +248,7 @@ export type CreateContextBuilder<
   ): CollectionDefinition<TSchema, TCtx, TPolicy, TIndexes>;
   defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
     collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
-    options?: InternalCollectionsOptions<TServices>,
+    options?: InternalCollectionsOptions,
     ...invalidName: [
       Extract<keyof TCollections, ReservedCollectionName> | InvalidPublicKeys<TCollections>,
     ] extends [never]

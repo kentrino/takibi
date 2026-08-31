@@ -6,6 +6,7 @@ export default defineConfig({
       index: "src/index.ts",
       client: "src/client-entry.ts",
       instrumentation: "src/instrumentation.ts",
+      testing: "src/testing.server.ts",
     },
     dts: {
       tsgo: true,

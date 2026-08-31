@@ -8,21 +8,24 @@ import type { StorageTestObject } from "./worker";
 
 const tenantId = "atomic-actions";
 const externalEffects: string[] = [];
+let concurrencyGate:
+  | {
+      entered(): void;
+      released: Promise<void>;
+    }
+  | undefined;
 const context = createTakibi()({ resolve: () => ({ tenantId }) });
 const RecordSchema = z.object({ value: z.string().min(1) });
 const orders = context.defineCollection({
   schema: RecordSchema,
   accessPolicy: fullAccess,
 });
-const app = context.defineCollections(
-  {
-    orders,
-    inventory: { schema: RecordSchema, accessPolicy: fullAccess },
-    events: { schema: RecordSchema, accessPolicy: fullAccess },
-    blocked: { schema: RecordSchema, accessPolicy: none },
-  },
-  { memory: true },
-);
+const app = context.defineCollections({
+  orders,
+  inventory: { schema: RecordSchema, accessPolicy: fullAccess },
+  events: { schema: RecordSchema, accessPolicy: fullAccess },
+  blocked: { schema: RecordSchema, accessPolicy: none },
+});
 const ordersActions = app.orders.actions((defineAction) => ({
   updateThenFail: defineAction()
     .input(z.object({ value: z.string() }))
@@ -92,8 +95,19 @@ const external = app
     externalEffects.push(input);
     throw new Error("external failed");
   });
+const waitThenFail = app
+  .defineAction()
+  .input(z.string())
+  .atomic()
+  .policy(fullAccess)
+  .handler(async ({ input, $collections }) => {
+    await $collections.orders.add({ value: "rolled back" }, { id: `${input}-rolled-back` });
+    concurrencyGate?.entered();
+    await concurrencyGate?.released;
+    throw new Error("concurrent rollback");
+  });
 const handler = app.actions({
-  $: { transact, invalidOutput, nonAtomic, external },
+  $: { transact, invalidOutput, nonAtomic, external, waitThenFail },
   orders: ordersActions,
 });
 
@@ -151,41 +165,7 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
   expect(externalEffects.filter((effect) => effect === effectPrefix)).toHaveLength(1);
 }
 
-test("atomic actions have matching memory and actual SQLite-backed DO semantics", async () => {
-  const memory: Backend = {
-    async invoke(scope, name, input, id) {
-      const path =
-        id === undefined ? `${scope}:${name}` : `${scope}/${encodeURIComponent(id)}:${name}`;
-      const response = await handler.request(`http://takibi.test/${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      return response.json<WireResponse>();
-    },
-    async list(collection) {
-      const response = await handler.request(`http://takibi.test/${collection}`);
-      const wire = await response.json<WireResponse>();
-      if (!wire.ok) throw new Error(wire.error.message);
-      return (wire.data as { items: Array<{ id: string }> }).items.map(({ id }) => id);
-    },
-    async addOrder(id, value) {
-      const response = await handler.request(`http://takibi.test/orders/${id}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value }),
-      });
-      expect(response.status).toBe(200);
-    },
-    async getOrder(id) {
-      const response = await handler.request(`http://takibi.test/orders/${id}`);
-      const wire = await response.json<WireResponse>();
-      if (!wire.ok) throw new Error(wire.error.message);
-      return (wire.data as { value: string }).value;
-    },
-  };
-  await exerciseAtomicActions(memory, "memory");
-
+test("atomic actions use actual SQLite-backed Durable Object transactions", async () => {
   const stub = env.TAKIBI_STORAGE_TEST.getByName(tenantId) as DurableObjectStub<StorageTestObject>;
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
@@ -220,6 +200,32 @@ test("atomic actions have matching memory and actual SQLite-backed DO semantics"
       },
     };
     await exerciseAtomicActions(durable, "durable");
+
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    concurrencyGate = { entered: enter, released };
+    const failing = durable.invoke("$", "waitThenFail", "concurrent");
+    await entered;
+    let concurrentSettled = false;
+    const concurrent = durable.addOrder("concurrent-preserved", "preserved").then(() => {
+      concurrentSettled = true;
+    });
+    await Promise.resolve();
+    expect(concurrentSettled).toBe(false);
+    release();
+    await expect(failing).resolves.toMatchObject({ ok: false });
+    await concurrent;
+    await expect(durable.getOrder("concurrent-rolled-back")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(durable.getOrder("concurrent-preserved")).resolves.toBe("preserved");
+    concurrencyGate = undefined;
 
     await object.$collections.$transaction(async ($collections) => {
       await $collections.orders.add({ value: "transaction" }, { id: "direct-transaction-order" });

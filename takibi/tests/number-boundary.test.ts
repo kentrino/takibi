@@ -3,7 +3,8 @@ import { BadRequestError } from "../src/errors";
 import { decodePublicHttp } from "../src/http";
 import { decodeWireRequest, isWireResponse } from "../src/protocol";
 import { normalizeValidationIssues } from "../src/result";
-import { createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { StoredDocument } from "../src/types";
 
 const context = { tenantId: "tenant-a" };
@@ -31,10 +32,10 @@ function operationFailure(status: number) {
 }
 
 async function seedPosts(count: number) {
-  const memory = createMemoryStorage();
+  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
   const ts = "2026-08-26T00:00:00.000Z";
   for (let index = 0; index < count; index += 1) {
-    await memory.put("posts", {
+    await storage.put("posts", {
       id: `p${String(index).padStart(3, "0")}`,
       title: `post-${index}`,
       createdAt: ts,
@@ -42,7 +43,7 @@ async function seedPosts(count: number) {
       rev: 1,
     } as StoredDocument);
   }
-  return memory;
+  return storage;
 }
 
 test("decodeWireRequest rejects a fractional list limit that JSON can carry", () => {
@@ -110,8 +111,8 @@ test("decodePublicHttp rejects a digit string that overflows to Infinity", async
 });
 
 test("list limit 1.5 must not disable pagination and return the whole collection", async () => {
-  const memory = await seedPosts(8);
-  await expect(memory.list("posts", { limit: 1.5 })).rejects.toBeInstanceOf(BadRequestError);
+  const storage = await seedPosts(8);
+  await expect(storage.list("posts", { limit: 1.5 })).rejects.toBeInstanceOf(BadRequestError);
 });
 
 test("normalizeValidationIssues drops non-finite numeric path segments", () => {

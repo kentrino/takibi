@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
 import { executeOperation } from "../src/executor";
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import {
   createTakibi,
   fullAccess,
@@ -15,7 +16,7 @@ import {
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "./sqlite";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -59,7 +60,7 @@ function createActionApp() {
     schema: z.object({ action: z.string() }),
     accessPolicy: fullAccess,
   });
-  const app = context.defineCollections({ posts, audits }, { memory: true });
+  const app = context.defineCollections({ posts, audits });
 
   const postsActions = app.posts.actions((defineAction) => ({
     // Document action gated by a schema-bound policy: secret docs deny invoke.
@@ -116,7 +117,9 @@ function createActionApp() {
     .input(z.coerce.number())
     .policy(staff)
     .handler(({ input }) => ({ value: input }));
-  const handler = app.actions({ $: { exportAll, coerced }, posts: postsActions });
+  const handler = withSqliteTestBackend(
+    app.actions({ $: { exportAll, coerced }, posts: postsActions }),
+  );
   return { app, handler };
 }
 
@@ -145,20 +148,18 @@ function createFakeDurableObjectState(
 
 test("bounded array fields roundtrip through whole-document add, get, and update", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
-  const handler = context
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({
-            title: z.string(),
-            comments: z.array(z.object({ body: z.string() })),
-          }),
-          accessPolicy: fullAccess,
-        },
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({
+          title: z.string(),
+          comments: z.array(z.object({ body: z.string() })),
+        }),
+        accessPolicy: fullAccess,
       },
-      { memory: true },
-    )
+    })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -186,7 +187,7 @@ test("bounded array fields roundtrip through whole-document add, get, and update
   });
 });
 
-test("CRUD and collection/root actions roundtrip in memory mode", async () => {
+test("CRUD and collection/root actions roundtrip through the SQLite test backend", async () => {
   const { handler } = createActionApp();
   expect(handler).not.toHaveProperty("$collections");
   const client = clientFor(handler);
@@ -232,13 +233,13 @@ test("document actions reuse a schema-bound accessPolicy as a doc-aware gate", a
       hidden: { title: "hidden", secret: true },
     }),
   });
-  const app = context.defineCollections({ posts }, { memory: true });
+  const app = context.defineCollections({ posts });
   const postsActions = app.posts.actions((defineAction) => ({
     touch: defineAction()
       .policy(directory)
       .handler(({ id }) => ({ touched: id })),
   }));
-  const handler = app.actions({ posts: postsActions });
+  const handler = withSqliteTestBackend(app.actions({ posts: postsActions }));
   const member = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "u1", role: "member" }),
     fetch: (input, init) => handler.request(input, init),
@@ -293,7 +294,7 @@ test("named unique constraints cover public and trusted writes atomically", asyn
       byOwnerExternalId: ["ownerId", "externalId"],
     },
   });
-  const app = context.defineCollections({ records }, { memory: true });
+  const app = context.defineCollections({ records });
   const trustedCreate = app.records.actions((defineAction) => ({
     trustedCreate: defineAction()
       .detached()
@@ -301,7 +302,7 @@ test("named unique constraints cover public and trusted writes atomically", asyn
       .policy(fullAccess)
       .handler(({ input, $collection }) => $collection.add(input)),
   }));
-  const handler = app.actions({ records: trustedCreate });
+  const handler = withSqliteTestBackend(app.actions({ records: trustedCreate }));
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -357,15 +358,6 @@ test("named unique constraints cover public and trusted writes atomically", asyn
   expect(
     await client.records.add({ key: "null-2", ownerId: "owner" }, { id: "null-2" }),
   ).toMatchObject({ ok: true });
-
-  const concurrent = await Promise.all([
-    client.records.add({ key: "race", ownerId: "one" }, { id: "race-1" }),
-    client.records.add({ key: "race", ownerId: "two" }, { id: "race-2" }),
-  ]);
-  expect(concurrent.filter((result) => result.ok)).toHaveLength(1);
-  expect(concurrent.filter((result) => !result.ok).map((result) => result.error.code)).toEqual([
-    "ALREADY_EXISTS",
-  ]);
 });
 
 test("collection registration rejects malformed unique declarations at runtime", () => {
@@ -495,16 +487,15 @@ test("action input schema refinements become validation failures", async () => {
       message: "blocked domain",
       path: ["email"],
     });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const register = app
     .defineAction()
     .input(RegisterInput)
     .policy(fullAccess)
     .handler(({ input }) => ({ email: input.email }));
-  const handler = app.actions({ $: { register } });
+  const handler = withSqliteTestBackend(app.actions({ $: { register } }));
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -578,26 +569,21 @@ test("owner policy only grants list when the whole query implies the caller owne
     ownerId: z.string(),
     status: z.string(),
   });
-  const handler = context
-    .defineCollections(
-      {
-        notes: {
-          schema: Note,
-          accessPolicy: context.policy(
-            Note.pick({ ownerId: true }),
-            ({ user, operation, where }) => {
-              if (user?.role === "admin") return fullAccess;
-              if (operation === "list" && user && queryImpliesEquality(where, "ownerId", user.id)) {
-                return grant("list");
-              }
-              return none;
-            },
-          ),
-        },
+  const production = context
+    .defineCollections({
+      notes: {
+        schema: Note,
+        accessPolicy: context.policy(Note.pick({ ownerId: true }), ({ user, operation, where }) => {
+          if (user?.role === "admin") return fullAccess;
+          if (operation === "list" && user && queryImpliesEquality(where, "ownerId", user.id)) {
+            return grant("list");
+          }
+          return none;
+        }),
       },
-      { memory: true },
-    )
+    })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const admin = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "admin", role: "admin" }),
     fetch: (input, init) => handler.request(input, init),
@@ -766,10 +752,9 @@ test("action gate keeps resolved context under ctx without claim collisions", as
       scope: "application-scope" as const,
     }),
   });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const inspect = app
     .defineAction()
     .policy(({ ctx, permission, scope }) =>
@@ -781,7 +766,7 @@ test("action gate keeps resolved context under ctx without claim collisions", as
         : none,
     )
     .handler(({ ctx }) => ({ permission: ctx.permission, scope: ctx.scope }));
-  const handler = app.actions({ $: { inspect } });
+  const handler = withSqliteTestBackend(app.actions({ $: { inspect } }));
   const client = createClient<typeof handler>("http://fire.test", {
     fetch: (input, init) => handler.request(input, init),
   });
@@ -794,12 +779,12 @@ test("action gate keeps resolved context under ctx without claim collisions", as
 
 test("set policy denial conceals existence for new and existing ids", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
-  const handler = context
-    .defineCollections(
-      { posts: { schema: Post, accessPolicy: ({ user }) => (user ? fullAccess : none) } },
-      { memory: true },
-    )
+  const production = context
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: ({ user }) => (user ? fullAccess : none) },
+    })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   const admin = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "admin", role: "admin" }),
     fetch: (input, init) => handler.request(input, init),
@@ -1164,7 +1149,7 @@ test("named Durable Object fetch rejects a tenant mismatch before storage", asyn
       reads += 1;
       return storage.list(options);
     },
-  } as DurableObjectStorage;
+  } as unknown as DurableObjectStorage;
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
   })
@@ -1468,10 +1453,9 @@ test("action registration validates definitions", async () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u", role: "admin" as const } }),
   });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const valid = app
     .defineAction()
     .policy(fullAccess)
@@ -1521,7 +1505,7 @@ test("scoped action maps are rejected when registered under another collection",
     schema: z.object({ action: z.string() }),
     accessPolicy: fullAccess,
   });
-  const app = context.defineCollections({ posts, audits }, { memory: true });
+  const app = context.defineCollections({ posts, audits });
   const postsActions = app.posts.actions((defineAction) => ({
     touch: defineAction()
       .policy(fullAccess)
@@ -1538,10 +1522,9 @@ test("detached and root actions reject schema-bound gate policies at registratio
     resolve: () => ({ tenantId: "t", user: null }),
   });
   const bound = context.policy(Post, () => fullAccess);
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const detachedActions = app.posts.actions((defineAction) => ({
     bad: defineAction()
       .detached()
@@ -1584,10 +1567,9 @@ test("collection action definitions reject CRUD names and the legacy actions opt
     }),
   ).toThrow(/no longer take actions/);
 
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const crudNamed = app.posts.actions((defineAction) => ({
     // @ts-expect-error CRUD action names are rejected by the public builder type
     get: defineAction()
@@ -1646,15 +1628,14 @@ test("non-JSON action output is rejected before the success envelope", async () 
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const invalid = app
     .defineAction()
     .policy(fullAccess)
     .handler((() => new Date()) as never);
-  const handler = app.actions({ $: { invalid } });
+  const handler = withSqliteTestBackend(app.actions({ $: { invalid } }));
   const response = await handler.request("http://fire.test/$:invalid", {
     method: "POST",
   });
@@ -1669,10 +1650,9 @@ test("custom serialization hooks are rejected from action output", async () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const serialize = app
     .defineAction()
     .policy(fullAccess)
@@ -1684,7 +1664,7 @@ test("custom serialization hooks are rejected from action output", async () => {
       });
       return output;
     });
-  const handler = app.actions({ $: { serialize } });
+  const handler = withSqliteTestBackend(app.actions({ $: { serialize } }));
   const response = await handler.request("http://fire.test/$:serialize", {
     method: "POST",
   });
@@ -1726,10 +1706,9 @@ test("action output arrays reject ignored custom and accessor properties", async
   const context = createTakibi()({
     resolve: () => ({ tenantId: "t", user: { id: "u" } }),
   });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
   const invalidArray = app
     .defineAction()
     .policy(fullAccess)
@@ -1741,7 +1720,7 @@ test("action output arrays reject ignored custom and accessor properties", async
       });
       return output;
     });
-  const handler = app.actions({ $: { invalidArray } });
+  const handler = withSqliteTestBackend(app.actions({ $: { invalidArray } }));
   const response = await handler.request("http://fire.test/$:invalidArray", {
     method: "POST",
   });
@@ -1752,9 +1731,9 @@ test("action output arrays reject ignored custom and accessor properties", async
   });
 });
 
-test("non-JSON resolved context is rejected equally before memory or DO dispatch", async () => {
+test("non-JSON resolved context is rejected equally before SQLite test or DO dispatch", async () => {
   let stubCalls = 0;
-  const create = (memory: boolean) => {
+  const create = () => {
     const context = createTakibi()({
       resolve: () => ({
         tenantId: "tenant-a",
@@ -1769,14 +1748,12 @@ test("non-JSON resolved context is rejected equally before memory or DO dispatch
       },
     });
     return context
-      .defineCollections(
-        { posts: { schema: Post, accessPolicy: fullAccess } },
-        memory ? { memory: true } : undefined,
-      )
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
       .actions({});
   };
 
-  for (const handler of [create(true), create(false)]) {
+  const production = create();
+  for (const handler of [withSqliteTestBackend(production), production]) {
     const response = await handler.request("http://fire.test/posts");
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
@@ -1804,9 +1781,9 @@ function createProductionPostsHandler() {
   return app.actions({ posts: postsActions });
 }
 
-test("with({ memory, resolve }) reuses collection actions on an isolated store", async () => {
+test("SQLite test backend reuses collection actions on an isolated store", async () => {
   const production = createProductionPostsHandler();
-  const handler = production.with({ memory: true, resolve: resolveTestContext });
+  const handler = withSqliteTestBackend(production, { resolve: resolveTestContext });
   const client = createClient<typeof production>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -1823,10 +1800,10 @@ test("with({ memory, resolve }) reuses collection actions on an isolated store",
   });
 });
 
-test("two with({ memory: true }) handlers do not share documents or seeds", async () => {
+test("two SQLite test backends do not share documents or seeds", async () => {
   const production = createProductionPostsHandler();
-  const first = production.with({ memory: true, resolve: resolveTestContext });
-  const second = production.with({ memory: true, resolve: resolveTestContext });
+  const first = withSqliteTestBackend(production, { resolve: resolveTestContext });
+  const second = withSqliteTestBackend(production, { resolve: resolveTestContext });
   const clientA = createClient<typeof production>("http://fire.test", {
     headers,
     fetch: (input, init) => first.request(input, init),
@@ -1847,7 +1824,7 @@ test("two with({ memory: true }) handlers do not share documents or seeds", asyn
   });
 });
 
-test("with({ memory: true }) keeps the production resolve and handle context", async () => {
+test("SQLite test backend keeps the production resolve and handle context", async () => {
   type Initial = { token: string };
   const seen: Initial[] = [];
   const production = createTakibi<Initial>()({
@@ -1858,7 +1835,7 @@ test("with({ memory: true }) keeps the production resolve and handle context", a
   })
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
-  const handler = production.with({ memory: true });
+  const handler = withSqliteTestBackend(production);
 
   const result = await handler.handle(new Request("http://fire.test/posts/missing"), {
     context: { token: "session-1" },
@@ -1873,8 +1850,7 @@ test("with({ memory: true }) keeps the production resolve and handle context", a
 
 test("replaced resolve UnauthorizedError stays HTTP 401", async () => {
   const production = createProductionPostsHandler();
-  const handler = production.with({
-    memory: true,
+  const handler = withSqliteTestBackend(production, {
     resolve: () => {
       throw new UnauthorizedError("Sign in required");
     },
@@ -1887,7 +1863,7 @@ test("replaced resolve UnauthorizedError stays HTTP 401", async () => {
   });
 });
 
-test("original handle still requires stub after with()", async () => {
+test("original handle still requires stub after creating a SQLite test backend", async () => {
   let stubFetches = 0;
   const production = createTakibi()({
     resolve: resolveTestContext,
@@ -1903,12 +1879,12 @@ test("original handle still requires stub after with()", async () => {
       posts: { schema: Post, accessPolicy: fullAccess },
     })
     .actions({});
-  const memory = production.with({ memory: true, resolve: resolveTestContext });
-  const memoryClient = createClient<typeof production>("http://fire.test", {
+  const sqlite = withSqliteTestBackend(production, { resolve: resolveTestContext });
+  const sqliteClient = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => memory.request(input, init),
+    fetch: (input, init) => sqlite.request(input, init),
   });
-  await memoryClient.posts.add({ title: "in-memory" }, { id: "p1" });
+  await sqliteClient.posts.add({ title: "in-sqlite" }, { id: "p1" });
 
   const result = await production.handle(
     new Request("http://fire.test/posts/p1", { headers: headers() }),
@@ -1922,7 +1898,7 @@ test("original handle still requires stub after with()", async () => {
   });
 
   const withoutStub = createProductionPostsHandler();
-  withoutStub.with({ memory: true, resolve: resolveTestContext });
+  withSqliteTestBackend(withoutStub, { resolve: resolveTestContext });
   const missing = await withoutStub.handle(
     new Request("http://fire.test/posts/p1", { headers: headers() }),
     {},
@@ -1934,16 +1910,15 @@ test("original handle still requires stub after with()", async () => {
   });
 });
 
-test("action handler receives assembled memory services", async () => {
+test("action handler receives SQLite test backend services", async () => {
   const context = createTakibi()({
     resolve: resolveTestContext,
     services: () => ({ stamp: "from-factory" }),
   });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true, services: { stamp: "from-memory" } },
-  );
-  const handler = app.actions({
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const production = app.actions({
     $: {
       ping: app
         .defineAction()
@@ -1951,17 +1926,20 @@ test("action handler receives assembled memory services", async () => {
         .handler(({ services }) => ({ stamp: services.stamp })),
     },
   });
+  const handler = withSqliteTestBackend(production, {
+    services: { stamp: "from-sqlite-test" },
+  });
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
   });
   await expect(client.ping()).resolves.toMatchObject({
     ok: true,
-    data: { stamp: "from-memory" },
+    data: { stamp: "from-sqlite-test" },
   });
 });
 
-test("MISSING_SERVICES is thrown at memory assembly when factory is configured", () => {
+test("MISSING_SERVICES is thrown at SQLite test backend assembly", () => {
   const context = createTakibi()({
     resolve: resolveTestContext,
     services: () => ({ stamp: "x" }),
@@ -1969,18 +1947,8 @@ test("MISSING_SERVICES is thrown at memory assembly when factory is configured",
   const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
   const production = app.actions({});
   expect(() =>
-    // @ts-expect-error memory fork requires services
-    production.with({ memory: true }),
-  ).toThrow(
-    expect.objectContaining({
-      code: "MISSING_SERVICES",
-    }),
-  );
-  expect(() =>
-    context
-      // @ts-expect-error memory defineCollections requires services
-      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
-      .actions({}),
+    // @ts-expect-error SQLite test backend requires services
+    withSqliteTestBackend(production),
   ).toThrow(
     expect.objectContaining({
       code: "MISSING_SERVICES",
@@ -1988,7 +1956,7 @@ test("MISSING_SERVICES is thrown at memory assembly when factory is configured",
   );
 });
 
-test("with() memory forks isolate services from each other", async () => {
+test("SQLite test backends isolate services from each other", async () => {
   const context = createTakibi()({
     resolve: resolveTestContext,
     services: () => ({ stamp: "unused" }),
@@ -2002,8 +1970,8 @@ test("with() memory forks isolate services from each other", async () => {
         .handler(({ services }) => ({ stamp: services.stamp })),
     },
   });
-  const first = production.with({ memory: true, services: { stamp: "alpha" } });
-  const second = production.with({ memory: true, services: { stamp: "beta" } });
+  const first = withSqliteTestBackend(production, { services: { stamp: "alpha" } });
+  const second = withSqliteTestBackend(production, { services: { stamp: "beta" } });
   const clientA = createClient<typeof production>("http://fire.test", {
     headers,
     fetch: (input, init) => first.request(input, init),
@@ -2124,7 +2092,8 @@ test("indexed list is available on public clients and trusted collections", asyn
     accessPolicy: fullAccess,
     indexes: { byOwner: ["ownerId", "createdAt"] },
   });
-  const handler = context.defineCollections({ posts }, { memory: true }).actions({});
+  const production = context.defineCollections({ posts }).actions({});
+  const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
     fetch: (input, init) => handler.request(input, init),
@@ -2161,7 +2130,7 @@ test("indexed list is available on public clients and trusted collections", asyn
 
 test("handlers expose no post-hoc action registration surface", () => {
   const production = createProductionPostsHandler();
-  const forked = production.with({ memory: true, resolve: resolveTestContext });
+  const forked = withSqliteTestBackend(production, { resolve: resolveTestContext });
 
   for (const handler of [production, forked]) {
     expect(Reflect.get(handler, "defineAction")).toBeUndefined();

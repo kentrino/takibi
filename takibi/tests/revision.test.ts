@@ -1,28 +1,27 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { createTakibi, fullAccess } from "../src/index";
 import { nextDocumentRevision } from "../src/revision";
-import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
 import { storageSet } from "../src/typed-storage";
 import type { StoredDocument } from "../src/types";
-import { createSqliteDurableObjectStorage } from "./sqlite";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 
 type AppCtx = { tenantId: string };
 
-function createApp(options?: { memory?: boolean }) {
+function createApp() {
   const context = createTakibi()({ resolve: (): AppCtx => ({ tenantId: "tenant-a" }) });
-  return context
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({ title: z.string() }),
-          accessPolicy: fullAccess,
-        },
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
       },
-      options,
-    )
+    })
     .actions({});
+  return withSqliteTestBackend(production);
 }
 
 function clientOf(handler: ReturnType<typeof createApp>) {
@@ -30,7 +29,7 @@ function clientOf(handler: ReturnType<typeof createApp>) {
 }
 
 test("add and create-via-set start at rev 1 and successful writes increment", async () => {
-  const client = clientOf(createApp({ memory: true }));
+  const client = clientOf(createApp());
   const created = await client.posts.add({ title: "one" });
   expect(created).toMatchObject({ ok: true, data: { title: "one", rev: 1 } });
   if (!created.ok) return;
@@ -43,7 +42,7 @@ test("add and create-via-set start at rev 1 and successful writes increment", as
 });
 
 test("a stale rev is rejected and leaves the document unchanged", async () => {
-  const client = clientOf(createApp({ memory: true }));
+  const client = clientOf(createApp());
   const created = await client.posts.add({ title: "one" }, { id: "p1" });
   expect(created.ok).toBe(true);
 
@@ -61,7 +60,7 @@ test("a stale rev is rejected and leaves the document unchanged", async () => {
 });
 
 test("rev on a missing document is a stale write", async () => {
-  const client = clientOf(createApp({ memory: true }));
+  const client = clientOf(createApp());
   const missing = await client.posts.set("missing", { title: "ghost", rev: 1 });
   expect(missing).toMatchObject({
     ok: false,
@@ -70,7 +69,7 @@ test("rev on a missing document is a stale write", async () => {
 });
 
 test("omitting rev is last-write-wins and still increments", async () => {
-  const client = clientOf(createApp({ memory: true }));
+  const client = clientOf(createApp());
   const created = await client.posts.add({ title: "one" }, { id: "p1" });
   expect(created.ok).toBe(true);
 
@@ -79,7 +78,7 @@ test("omitting rev is last-write-wins and still increments", async () => {
 });
 
 test("add rejects rev in input", async () => {
-  const client = clientOf(createApp({ memory: true }));
+  const client = clientOf(createApp());
   const added = await client.posts.add({ title: "one", rev: 1 } as { title: string });
   expect(added).toMatchObject({
     ok: false,
@@ -87,17 +86,13 @@ test("add rejects rev in input", async () => {
   });
 });
 
-test("documents stored without rev read as 1 and the next write stores 2", async () => {
-  const memory = createMemoryStorage();
+test("SQLite documents stored without rev read as revision 1", async () => {
   const legacy = {
     id: "legacy",
     title: "old",
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
   } as unknown as StoredDocument;
-  await memory.put("posts", legacy);
-  expect(await memory.get("posts", "legacy")).toMatchObject({ title: "old", rev: 1 });
-
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
   await durable.put("posts", legacy);
   expect(await durable.get("posts", "legacy")).toMatchObject({ title: "old", rev: 1 });

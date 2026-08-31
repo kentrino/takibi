@@ -1,13 +1,9 @@
 import type { ActionRegistry } from "../action";
 import { executeAction } from "../action-executor";
-import { seedCollections } from "../durable-object";
 import { TakibiError } from "../errors";
 import { executeOperation } from "../executor";
 import type { PublicRequest } from "../http";
 import { emitFailure, withLoggedSpan, type InternalLogger } from "../logging";
-import { compileIndexRegistry } from "../indexes";
-import { backfillIndexedCollections } from "../index-reconcile";
-import { createMigratingStorage } from "../migrations";
 import { batchSpanAttributes, invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import {
   isBatchWireResponse,
@@ -16,7 +12,6 @@ import {
   type WireRequest,
   type WireResponse,
 } from "../protocol";
-import { createMemoryStorage } from "../storage";
 import {
   injectTraceparent,
   tracedStorage,
@@ -25,12 +20,7 @@ import {
   type TakibiTracer,
 } from "../tracing";
 import type { CollectionsDef, StorageDriver } from "../types";
-import {
-  applyStorageLogging,
-  debugInvocationFields,
-  invocationFields,
-  toWireFailure,
-} from "./runtime";
+import { debugInvocationFields, invocationFields, toWireFailure } from "./runtime";
 import type { ContextStubResolver } from "./types";
 
 export type ExecutorInput = {
@@ -45,27 +35,19 @@ export type ExecutorInput = {
 };
 
 /**
- * Runs a decoded invocation against one storage backend (in-memory or a
- * Durable Object over the wire) and returns the wire-level result.
+ * Runs a decoded invocation against one storage backend and returns the
+ * wire-level result.
  */
 export type Executor = (input: ExecutorInput) => Promise<WireResponse>;
 
-export function createMemoryExecutor(
+export function createInProcessExecutor(
   collections: CollectionsDef<object>,
   registry: ActionRegistry,
   logger: InternalLogger | undefined,
-  services: unknown = {},
+  services: unknown,
+  driver: StorageDriver,
+  ready: Promise<void>,
 ): Executor {
-  const indexRegistry = compileIndexRegistry(collections);
-  const driver = applyStorageLogging(
-    createMigratingStorage(collections, createMemoryStorage(indexRegistry), logger),
-    logger,
-  );
-  const ready = (async () => {
-    await backfillIndexedCollections(collections, driver, logger);
-    await seedCollections(collections, driver, logger);
-  })();
-
   return async ({ ctx, invocation, tracer, resolveSpan }) => {
     await ready;
     const storage = tracer ? tracedStorage(driver) : driver;
@@ -106,7 +88,7 @@ export function createStubExecutor<TInitial>(
     if (!resolveStub) {
       throw new TakibiError(
         "MISSING_STUB",
-        "Durable Object mode requires stub on createTakibi()({ stub }) — or use defineCollections(..., { memory: true }) for tests",
+        "Durable Object mode requires stub on createTakibi()({ stub }); Node tests can use withSqliteTestBackend() from @takibi/takibi/testing",
         500,
       );
     }

@@ -128,19 +128,25 @@ app.all("/foo/*", async (c) => {
 export default app;
 ```
 
-When initial context is empty and you use `{ memory: true }`, you can still mount
-with `app.route("/foo", handler)` for simple demos and tests. Durable Object mode
-always needs `stub` (and usually `handle` so AuthN / env reach `resolve` / `stub`).
+Durable Object mode needs `stub` (and usually `handle` so AuthN / env reach
+`resolve` / `stub`).
 
-To exercise a production handler in tests, fork storage and AuthN with
-`.with({ memory: true, resolve })`. Collection maps, collection actions, and
-root actions stay the same references; each call gets its own memory store.
+## Node integration tests
+
+Use the Node-only `@takibi/takibi/testing` entry to exercise a production
+handler against an isolated `DatabaseSync(":memory:")` database. The helper
+reuses Takibi's production SQLite storage, migrations, index reconciliation,
+seeds, actions, logging, and tracing paths. Each call creates a separate
+database.
+
+The returned handler implements `Symbol.dispose`; use `using` or call the
+method from test teardown when a suite keeps handlers alive for a long time.
 
 ```ts
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 
-const handler = takibiHandler.with({
-  memory: true,
+const handler = withSqliteTestBackend(takibiHandler, {
   resolve: ({ request }) => {
     const raw = request.headers.get("x-test-user");
     const user = raw == null ? null : JSON.parse(raw);
@@ -154,18 +160,45 @@ const client = createClient<typeof takibiHandler>("https://fire.test", {
 });
 ```
 
-`.with({ memory: true })` keeps the production `resolve`. Use that when tests
-call `handle(request, { context })` with a fake session. `handler.request` has
-an empty initial context, so apps whose production `resolve` needs session
-deps should pass a test `resolve`.
+Omit `resolve` to keep the production resolver. Use that when tests call
+`handle(request, { context })` with fake application dependencies.
+`handler.request` has an empty initial context, so apps whose production
+resolver needs session dependencies should pass a test resolver.
 
-When `createTakibi()({ services })` is configured, memory assembly takes the
-services **value** (not the factory): `.with({ memory: true, services })` and
-`defineCollections(..., { memory: true, services })`. The value is required
-when `TServices` is non-empty. Omitting it is a compile error and throws
-`MISSING_SERVICES` at assembly (not at request time). Each `.with()` fork
-keeps its own services. Durable Object mode never reads this value — the
-constructor factory is the only production path.
+When `createTakibi()({ services })` is configured,
+`withSqliteTestBackend(handler, { services })` takes the test services
+**value**, not the production factory. The value is required when `TServices`
+is non-empty. Omitting it is a compile error. Each test handler keeps its own
+services.
+
+This entry imports `node:sqlite` and is for Node integration tests only. Do not
+import it from Worker or browser code. Workers tests must continue to use a real
+SQLite-backed Durable Object when they verify `blockConcurrencyWhile`, stub
+wiring, services factories, Durable Object concurrency, or other runtime
+behavior that Node SQLite does not provide.
+
+### Breaking migration from memory mode
+
+The `{ memory: true }` option, `.with({ memory: true })`, and
+`createMemoryStorage()` were removed without a compatibility overload. Migrate
+test forks as follows:
+
+```ts
+// Before
+const testHandler = productionHandler.with({ memory: true, resolve, services });
+
+// After
+const testHandler = withSqliteTestBackend(productionHandler, { resolve, services });
+```
+
+Import `withSqliteTestBackend` from `@takibi/takibi/testing`. Keep pure
+query, policy, and protocol tests storage-free; the helper is for tests that
+need storage-backed behavior.
+
+On 2026-08-31, five warm `vp test` runs on the same development machine had a
+0.77 s median before this migration and a 0.74 s median after it. The SQLite
+backend therefore introduced no wall-clock regression that requires shared
+databases or bypassing the production SQL path.
 
 ### Collection seeds
 
@@ -190,8 +223,8 @@ const handler = context
   .actions({});
 ```
 
-Seeds run before the Durable Object accepts requests and before memory-mode
-storage operations. They are create-only: an existing document is never
+Seeds run before the Durable Object accepts requests and before Node SQLite test
+backend storage operations. They are create-only: an existing document is never
 overwritten, including when a Durable Object is reactivated. Adding another ID
 to the returned record creates that default on the next activation. Seed values
 are validated by the collection schema and bypass `accessPolicy`, like trusted
@@ -765,12 +798,11 @@ until it succeeds. Writes still go only to `takibi_documents`; SQLite
 expression indexes maintain themselves and add write amplification on those
 columns. There is no unindexed `orderBy` and no automatic index selection.
 
-The memory implementation evaluates the AST in JavaScript and uses the same
-UTF-8 byte / numeric comparators as SQLite `BINARY`. The Durable Object
-implementation compiles predicates to parameterized SQL, uses the declared
-expression index for the chosen order, and performs a final JavaScript check
-to preserve the same missing / null / type semantics. Treat `nextCursor` as
-opaque; do not inspect, modify, or guess cursor values.
+The SQLite storage implementation compiles predicates to parameterized SQL,
+uses the declared expression index for the chosen order, and performs a final
+JavaScript check to preserve missing / null / type semantics. The Node test
+backend exercises this same storage path. Treat `nextCursor` as opaque; do not
+inspect, modify, or guess cursor values.
 
 ### Migrating from the previous throw / null API
 
@@ -932,11 +964,12 @@ Notes:
 ## Observability
 
 Logging and tracing are separate signals. Both are off by default. Configure a
-logger on `createTakibi()`, `defineCollections()`, or `.with()`; the more local
-setting wins field by field:
+logger on `createTakibi()`, `defineCollections()`, or
+`withSqliteTestBackend()`; the more local setting wins field by field:
 
 ```ts
 import { createPrettyConsoleLogger, createTakibi } from "@takibi/takibi";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 
 const takibi = createTakibi()({
   resolve,
@@ -947,7 +980,7 @@ const takibi = createTakibi()({
 
 const production = takibi.defineCollections(definitions, { logLevel: "info" }).actions({});
 const silent = takibi.defineCollections(definitions, { logger: false }).actions({});
-const captured = production.with({ memory: true, logger: testLogger });
+const captured = withSqliteTestBackend(production, { logger: testLogger });
 ```
 
 `logger: true` sends the `LogEvent` object directly to the matching
