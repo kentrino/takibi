@@ -820,6 +820,24 @@ test("actions execute inside the generated Durable Object", async () => {
   });
 });
 
+test("$resetStorage clears documents and restores collection seeds", async () => {
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  await object.$collections.posts.add({ title: "temporary", secret: false }, { id: "temporary" });
+
+  await object.$resetStorage();
+
+  await expect(object.$collections.posts.listAll()).resolves.toMatchObject([
+    {
+      id: "seeded",
+      title: "from-seed",
+    },
+  ]);
+});
+
 test("wire id is required for document actions and rejected elsewhere", async () => {
   const { handler } = createActionApp();
   const object = new handler.DurableObject(

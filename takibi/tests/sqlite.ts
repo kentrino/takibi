@@ -40,6 +40,19 @@ export function createSqliteDurableObjectStorage(): DurableObjectStorage {
 
   const storage = {
     sql,
+    async deleteAll(): Promise<void> {
+      const tables = database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all() as Array<{ name: string }>;
+      database.exec("PRAGMA foreign_keys = OFF");
+      try {
+        for (const { name } of tables) {
+          database.exec(`DROP TABLE "${name.replaceAll('"', '""')}"`);
+        }
+      } finally {
+        database.exec("PRAGMA foreign_keys = ON");
+      }
+    },
     transactionSync<T>(closure: () => T): T {
       database.exec("BEGIN");
       try {

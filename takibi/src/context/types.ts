@@ -115,7 +115,10 @@ export type TakibiBrand<
   DurableObject: new (
     state: DurableObjectState,
     env: TEnv,
-  ) => DurableObject & { $collections: CollectionsApi<TCollections> };
+  ) => DurableObject & {
+    $collections: CollectionsApi<TCollections>;
+    $resetStorage(): Promise<void>;
+  };
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
    * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
