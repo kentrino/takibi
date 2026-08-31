@@ -578,6 +578,26 @@ export type TrustedCollectionsApi<TCollections> = {
   ): Promise<T>;
 };
 
+export type SnapshotRestoreReport = {
+  formatVersion: 1;
+  documentsRestored: number;
+  seedsInserted: number;
+  collections: Record<
+    string,
+    {
+      documentsRestored: number;
+      seedsInserted: number;
+    }
+  >;
+};
+
+/** Owner-local facade available only on the generated Durable Object instance. */
+export type DurableObjectCollectionsApi<TCollections> = TrustedCollectionsApi<TCollections> & {
+  $exportSnapshot(): Promise<ReadableStream<Uint8Array>>;
+  $restoreSnapshot(source: ReadableStream<Uint8Array>): Promise<SnapshotRestoreReport>;
+  $resetAll(): Promise<void>;
+};
+
 /** Result-shaped CRUD facade used by the public HTTP client. */
 type CollectionPolicyReasonCode<C> = C extends { accessPolicy: infer TPolicy }
   ? PolicyReasonCodeOf<TPolicy>

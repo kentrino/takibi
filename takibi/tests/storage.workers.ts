@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
+import { createTakibi } from "../src/context";
 import { createMigratingStorage } from "../src/migrations";
 import { fullAccess } from "../src/policy";
 import { createDurableObjectStorage } from "../src/storage";
@@ -182,7 +183,7 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
           "layout_version",
         )
         .one().value,
-    ).toBe(3);
+    ).toBe(4);
 
     state.storage.sql.exec(
       "UPDATE takibi_metadata SET value = ? WHERE key = ?",
@@ -354,5 +355,47 @@ test("Workers SQLite round-trips revisions across numeric storage boundaries", a
         rev: revision,
       });
     }
+  });
+});
+
+test("Workers generated Durable Object streams and restores an owner snapshot", async () => {
+  const stub = storageStub("owner-snapshot-roundtrip");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const context = createTakibi()({
+      resolve: () => ({ tenantId: "owner-snapshot-roundtrip" }),
+    });
+    const handler = context
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+          seed: () => ({ seeded: { title: "seed" } }),
+        },
+      })
+      .actions({});
+    const object = new handler.DurableObject(state, {});
+    await object.$collections.posts.add({ title: "snapshot" }, { id: "p1" });
+    await state.storage.put("application-marker", "preserved");
+    const snapshot = await object.$collections.$exportSnapshot();
+    await expect(object.$collections.posts.get("p1")).rejects.toMatchObject({
+      code: "MAINTENANCE_LOCKED",
+    });
+    const encoded = await new Response(snapshot).text();
+
+    await object.$collections.$resetAll();
+    await expect(state.storage.get("application-marker")).resolves.toBe("preserved");
+    await expect(object.$collections.posts.get("p1")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      object.$collections.$restoreSnapshot(
+        new Blob([encoded]).stream() as ReadableStream<Uint8Array>,
+      ),
+    ).resolves.toMatchObject({ documentsRestored: 2, seedsInserted: 0 });
+    await expect(object.$collections.posts.get("p1")).resolves.toMatchObject({
+      title: "snapshot",
+    });
   });
 });

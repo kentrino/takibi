@@ -2,7 +2,7 @@ import { TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
 import type { InternalLogger } from "./logging";
 import { documentRevision } from "./revision";
-import { parseSchema, SchemaValidationError } from "./schema";
+import { parseSchema, parseSchemaUnobserved, SchemaValidationError } from "./schema";
 import {
   RESERVED_DOCUMENT_DATA_KEYS,
   TAKIBI_REVISION_KEY,
@@ -185,9 +185,63 @@ async function migrateStoredDocument(
   };
 }
 
-function currentVersion(definition: CollectionDefinition): number {
+export async function validateStoredDocumentForRestore(
+  definition: CollectionDefinition,
+  stored: StoredDocument,
+): Promise<StoredDocument> {
+  const migrations = definition.migrations;
+  const base = migrations?.base ?? 0;
+  const steps = migrations?.steps ?? [];
+  const targetVersion = base + steps.length;
+  const storedVersion = readStoredVersion(stored);
+  if (storedVersion < base || storedVersion > targetVersion) {
+    throw new TakibiError(
+      "MIGRATION_VERSION",
+      `Document version ${storedVersion} is outside the supported range ${base}..${targetVersion}`,
+      500,
+    );
+  }
+
+  let data: unknown = domainData(stored);
+  for (let version = storedVersion; version < targetVersion; version += 1) {
+    const step = steps[version - base];
+    if (!step) {
+      throw new TakibiError(
+        "MIGRATION_UNAVAILABLE",
+        `No migration step from document version ${version}`,
+        500,
+      );
+    }
+    data = step(data);
+    if (isPromiseLike(data)) {
+      throw new TakibiError("INVALID_MIGRATION", "Migration steps must be synchronous", 500);
+    }
+  }
+
+  const parsed = await parseSchemaUnobserved(definition.schema, data);
+  assertJsonObject(parsed, {
+    subject: "Collection document",
+    error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),
+  });
+  assertNoReservedOutput(parsed);
+  const migrated: StoredDocument = {
+    ...parsed,
+    id: stored.id,
+    createdAt: stored.createdAt,
+    updatedAt: stored.updatedAt,
+    rev: documentRevision(stored),
+    [TAKIBI_VERSION_KEY]: targetVersion,
+  };
+  return migrated;
+}
+
+export function currentCollectionVersion(definition: CollectionDefinition): number {
   const migrations = definition.migrations;
   return (migrations?.base ?? 0) + (migrations?.steps.length ?? 0);
+}
+
+function currentVersion(definition: CollectionDefinition): number {
+  return currentCollectionVersion(definition);
 }
 
 function withCurrentVersion(

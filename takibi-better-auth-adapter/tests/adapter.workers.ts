@@ -1,6 +1,11 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { createTakibi, fullAccess } from "@takibi/takibi";
+import {
+  createTakibi,
+  fullAccess,
+  type InferHandlerCollections,
+  type TrustedCollectionsApi,
+} from "@takibi/takibi";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { takibiAdapter } from "../src/adapter.server.ts";
@@ -51,6 +56,8 @@ const handler = context
     },
   })
   .actions({});
+type HandlerCollections = InferHandlerCollections<typeof handler>;
+type HandlerTrustedCollections = TrustedCollectionsApi<HandlerCollections>;
 
 const models = {
   user: {
@@ -81,9 +88,10 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
 
   await runInDurableObject(stub, async (_instance, state) => {
     const object = new handler.DurableObject(state, {});
+    const collections: HandlerTrustedCollections = object.$collections;
     const adapter = takibiAdapter({
-      collections: object.$collections,
-      transaction: (callback) => object.$collections.$transaction(callback),
+      collections,
+      transaction: (callback) => collections.$transaction(callback),
       models,
     })({
       emailAndPassword: { enabled: true },

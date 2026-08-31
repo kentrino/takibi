@@ -43,7 +43,7 @@ type ListCursorV3 = {
 type ListCursor = ListCursorV2 | ListCursorV3;
 
 const LIST_CHUNK_SIZE = 128;
-const STORAGE_LAYOUT_VERSION = 3;
+const STORAGE_LAYOUT_VERSION = 4;
 const EMPTY_INDEX_REGISTRY: IndexRegistry = {
   byCollection: new Map(),
   schemaVersions: new Map(),
@@ -216,6 +216,7 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
       if (version === 0) {
         createDocumentTable(storage.sql, "takibi_documents");
         createIndexCatalog(storage.sql);
+        createMaintenanceTables(storage.sql);
         version = STORAGE_LAYOUT_VERSION;
       } else if (version === 1) {
         migrateVersionOneToTwo(storage.sql);
@@ -223,6 +224,9 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
       } else if (version === 2) {
         createIndexCatalog(storage.sql);
         version = 3;
+      } else if (version === 3) {
+        createMaintenanceTables(storage.sql);
+        version = 4;
       } else {
         throw new TakibiError(
           "STORAGE_LAYOUT_VERSION",
@@ -243,6 +247,47 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
 
 function createIndexCatalog(sql: SqlStorage): void {
   sql.exec(createIndexCatalogTableSql());
+}
+
+function createMaintenanceTables(sql: SqlStorage): void {
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS takibi_maintenance_lease (
+      lease_key TEXT PRIMARY KEY CHECK (lease_key = 'global'),
+      owner_token TEXT NOT NULL CHECK (owner_token <> ''),
+      purpose TEXT NOT NULL CHECK (purpose IN ('export', 'restore', 'reset')),
+      acquired_at REAL NOT NULL,
+      expires_at REAL NOT NULL
+    ) WITHOUT ROWID`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS takibi_restore_staging_documents (
+      owner_token TEXT NOT NULL,
+      collection TEXT NOT NULL,
+      id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      revision REAL NOT NULL CHECK (
+        revision >= 1
+        AND (
+          revision >= 9007199254740992
+          OR revision = CAST(revision AS INTEGER)
+        )
+      ),
+      data TEXT NOT NULL CHECK (json_valid(data) AND json_type(data) = 'object'),
+      PRIMARY KEY (owner_token, collection, id)
+    ) WITHOUT ROWID`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS takibi_restore_staging_unique (
+      owner_token TEXT NOT NULL,
+      collection TEXT NOT NULL,
+      constraint_name TEXT NOT NULL,
+      value_key TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      PRIMARY KEY (owner_token, collection, constraint_name, value_key)
+    ) WITHOUT ROWID`,
+  );
 }
 
 function createDocumentTable(sql: SqlStorage, table: "takibi_documents" | "takibi_documents_v2") {

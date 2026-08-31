@@ -82,10 +82,28 @@ test("collection schemas type CRUD clients without handler $collections", () => 
   type DurableInstance = InstanceType<typeof handler.DurableObject>;
   expectTypeOf<DurableInstance>().toHaveProperty("$collections");
   expectTypeOf<DurableInstance["$collections"]>().toHaveProperty("$transaction");
+  expectTypeOf<DurableInstance["$collections"]>().toHaveProperty("$exportSnapshot");
+  expectTypeOf<DurableInstance["$collections"]>().toHaveProperty("$restoreSnapshot");
+  expectTypeOf<DurableInstance["$collections"]>().toHaveProperty("$resetAll");
   expectTypeOf(durableHandler.DurableObject).instance.toHaveProperty("$collections");
-  expectTypeOf<Parameters<DurableInstance["$collections"]["$transaction"]>[0]>()
-    .parameter(0)
-    .toEqualTypeOf<DurableInstance["$collections"]>();
+  type TransactionCollections = Parameters<
+    Parameters<DurableInstance["$collections"]["$transaction"]>[0]
+  >[0];
+  expectTypeOf<TransactionCollections>().toEqualTypeOf<
+    import("../src/index").TrustedCollectionsApi<typeof collections>
+  >();
+  expectTypeOf<TransactionCollections>().not.toHaveProperty("$exportSnapshot");
+  expectTypeOf<TransactionCollections>().not.toHaveProperty("$restoreSnapshot");
+  expectTypeOf<TransactionCollections>().not.toHaveProperty("$resetAll");
+  expectTypeOf<
+    Awaited<ReturnType<DurableInstance["$collections"]["$exportSnapshot"]>>
+  >().toEqualTypeOf<ReadableStream<Uint8Array>>();
+  expectTypeOf<
+    Awaited<ReturnType<DurableInstance["$collections"]["$restoreSnapshot"]>>
+  >().toEqualTypeOf<import("../src/index").SnapshotRestoreReport>();
+  expectTypeOf<
+    Awaited<ReturnType<DurableInstance["$collections"]["$resetAll"]>>
+  >().toEqualTypeOf<void>();
   expectTypeOf<DurableInstance["$collections"]["posts"]["add"]>().returns.resolves.toMatchTypeOf<{
     id: string;
     title: string;
@@ -633,6 +651,9 @@ test("document and detached action handler args and client signatures are inferr
         expectTypeOf(collection).toEqualTypeOf($collection);
         expectTypeOf(collections).toEqualTypeOf($collections);
         expectTypeOf(collections).toHaveProperty("posts");
+        expectTypeOf($collections).not.toHaveProperty("$exportSnapshot");
+        expectTypeOf($collections).not.toHaveProperty("$restoreSnapshot");
+        expectTypeOf($collections).not.toHaveProperty("$resetAll");
         return { length: input };
       }),
     optional: defineAction()
@@ -1094,6 +1115,27 @@ test("action and collection collisions are type errors", () => {
     // @ts-expect-error trusted facade members are reserved collection names
     context.defineCollections({
       $transaction: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    });
+    // @ts-expect-error owner snapshot members are reserved collection names
+    context.defineCollections({
+      $exportSnapshot: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    });
+    // @ts-expect-error owner snapshot members are reserved collection names
+    context.defineCollections({
+      $restoreSnapshot: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    });
+    // @ts-expect-error owner reset member is a reserved collection name
+    context.defineCollections({
+      $resetAll: {
         schema: z.object({ title: z.string() }),
         accessPolicy: fullAccess,
       },

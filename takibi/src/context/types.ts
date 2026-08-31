@@ -16,16 +16,15 @@ import type {
 import type { LoggingOptions } from "../logging";
 import type { PolicyHelper } from "../policy";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
-import { type TAKIBI_TRUSTED_RESET_STORAGE } from "../trusted.server";
 import type {
   CollectionDefinition,
   CollectionIndexes,
   CollectionUniqueConstraints,
   CollectionsDef,
+  DurableObjectCollectionsApi,
   InferCollectionDoc,
   IndexDeclaration,
   ReservedDocumentSchemaConstraint,
-  TrustedCollectionsApi,
   UniqueConstraintDeclaration,
 } from "../types";
 
@@ -108,8 +107,7 @@ export type TakibiBrand<
     state: DurableObjectState,
     env: TEnv,
   ) => DurableObject & {
-    $collections: TrustedCollectionsApi<TCollections>;
-    [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void>;
+    $collections: DurableObjectCollectionsApi<TCollections>;
   };
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
@@ -224,7 +222,14 @@ type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
     : TCollections[K];
 };
 
-type ReservedCollectionName = ReservedPublicName | "defineAction" | "actions" | "$transaction";
+type ReservedCollectionName =
+  | ReservedPublicName
+  | "defineAction"
+  | "actions"
+  | "$transaction"
+  | "$exportSnapshot"
+  | "$restoreSnapshot"
+  | "$resetAll";
 
 export type CreateContextBuilder<
   TCtx extends object,

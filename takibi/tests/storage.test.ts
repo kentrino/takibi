@@ -249,7 +249,7 @@ test("DO SQLite layout stores revision in a dedicated REAL column", async () => 
     backing.sql
       .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
       .one().value,
-  ).toBe(3);
+  ).toBe(4);
   expect(
     backing.sql
       .exec<{ name: string; type: string; notnull: number }>(
@@ -274,6 +274,39 @@ test("DO SQLite layout stores revision in a dedicated REAL column", async () => 
 
   createDurableObjectStorage(backing);
   await expect(durable.get("posts", "p1")).resolves.toEqual(document);
+});
+
+test("layout version 3 adds maintenance tables without changing documents", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const storage = createDurableObjectStorage(backing);
+  await storage.put("posts", meta({ id: "p1", title: "preserved" }));
+  backing.transactionSync(() => {
+    backing.sql.exec("DROP TABLE takibi_restore_staging_unique");
+    backing.sql.exec("DROP TABLE takibi_restore_staging_documents");
+    backing.sql.exec("DROP TABLE takibi_maintenance_lease");
+    backing.sql.exec("UPDATE takibi_metadata SET value = ? WHERE key = ?", 3, "layout_version");
+  });
+
+  const migrated = createDurableObjectStorage(backing);
+
+  await expect(migrated.get("posts", "p1")).resolves.toMatchObject({ title: "preserved" });
+  expect(
+    backing.sql
+      .exec<{ name: string }>(
+        `SELECT name FROM sqlite_master
+         WHERE type = 'table' AND name LIKE 'takibi_%'
+         ORDER BY name`,
+      )
+      .toArray()
+      .map(({ name }) => name),
+  ).toEqual([
+    "takibi_documents",
+    "takibi_index_catalog",
+    "takibi_maintenance_lease",
+    "takibi_metadata",
+    "takibi_restore_staging_documents",
+    "takibi_restore_staging_unique",
+  ]);
 });
 
 test("DO SQLite migrates version 1 revisions and normalizes legacy values", async () => {
