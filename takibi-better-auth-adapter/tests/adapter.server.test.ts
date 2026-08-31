@@ -635,10 +635,15 @@ test("experimental one-to-many joins use mapped related collections", async () =
     join: { session: { limit: 1 } },
   });
   expect(user?.session).toEqual([expect.objectContaining({ id: "s1", userId: "u1" })]);
-  expect(scanEvents).toContainEqual(
-    expect.objectContaining({ model: "session", operation: "findMany" }),
+  expect(scanEvents).toEqual([]);
+  expect(listCalls).toContainEqual(
+    expect.objectContaining({
+      collection: "authSessions",
+      operation: "list",
+      options: expect.objectContaining({ limit: 1, where: expect.any(Function) }),
+    }),
   );
-  expect(listCalls.some(({ operation }) => operation === "listAll")).toBe(true);
+  expect(listCalls.some(({ operation }) => operation === "listAll")).toBe(false);
 });
 
 test("email/password, bearer sessions, admin mutations, and password reset use Takibi", async () => {
