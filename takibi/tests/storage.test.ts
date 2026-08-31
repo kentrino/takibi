@@ -194,6 +194,35 @@ test("memory and DO filter before limit with query-bound cursors", async () => {
   ).rejects.toBeInstanceOf(BadRequestError);
 });
 
+test("memory and DO SQLite agree on in and case-sensitive string matching", async () => {
+  const memory = createMemoryStorage();
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const documents = [
+    meta({ id: "a", value: "YR Clinic" }),
+    meta({ id: "b", value: "yr clinic" }),
+    meta({ id: "c", value: null }),
+    meta({ id: "d", value: 1 }),
+    meta({ id: "e" }),
+  ];
+  for (const document of documents) {
+    await memory.put("items", document);
+    await durable.put("items", document);
+  }
+
+  const queries: QueryExpr[] = [
+    { field: "value", op: "in", values: ["YR Clinic", null] },
+    { op: "not", operand: { field: "value", op: "in", values: ["yr clinic"] } },
+    { field: "value", op: "contains", value: "Clinic" },
+    { field: "value", op: "startsWith", value: "YR" },
+    { field: "value", op: "endsWith", value: "" },
+  ];
+  for (const where of queries) {
+    await expect(durable.list("items", { where })).resolves.toEqual(
+      await memory.list("items", { where }),
+    );
+  }
+});
+
 test("DO SQLite list finds sparse matches across internal chunks", async () => {
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
 

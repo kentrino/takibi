@@ -349,7 +349,11 @@ function extractRangeBounds(
   const range: IndexRangeBound = {};
   let found = false;
   for (const part of parts) {
-    if (!("field" in part) || part.field !== field || part.op === "present" || part.op === "eq") {
+    if (
+      !("field" in part) ||
+      part.field !== field ||
+      (part.op !== "gt" && part.op !== "gte" && part.op !== "lt" && part.op !== "lte")
+    ) {
       continue;
     }
     if (part.op === "gt") range.gt = part.value;

@@ -254,9 +254,12 @@ function copyEventFields(
 
 function cloneQuery(query: QueryExpr): QueryExpr {
   if ("field" in query) {
-    return query.op === "present"
-      ? { field: query.field, op: query.op }
-      : { field: query.field, op: query.op, value: query.value };
+    if (query.op === "present") return { field: query.field, op: query.op };
+    if (query.op === "in") return { field: query.field, op: query.op, values: [...query.values] };
+    if (query.op === "contains" || query.op === "startsWith" || query.op === "endsWith") {
+      return { field: query.field, op: query.op, value: query.value };
+    }
+    return { field: query.field, op: query.op, value: query.value };
   }
   if (query.op === "not") {
     return { op: "not", operand: cloneQuery(query.operand) };

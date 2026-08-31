@@ -1,4 +1,4 @@
-import type { QueryExpr, QueryScalar, QueryValueOperator } from "./types";
+import type { QueryExpr, QueryScalar, QueryStringOperator, QueryValueOperator } from "./types";
 
 export type SqlBinding = string | number | null;
 
@@ -23,9 +23,24 @@ const METADATA_COLUMNS: Readonly<Record<string, string>> = {
 
 export function compileQueryToSql(expression: QueryExpr): SqlPredicate {
   if ("field" in expression) {
-    return expression.op === "present"
-      ? compilePresent(expression.field)
-      : compileValueLeaf(expression.field, expression.op, expression.value);
+    if (expression.op === "present") return compilePresent(expression.field);
+    if (expression.op === "in") {
+      const predicates = expression.values.map((value) =>
+        compileValueLeaf(expression.field, "eq", value),
+      );
+      return {
+        sql: `(${predicates.map(({ sql }) => sql).join(" OR ")})`,
+        bindings: predicates.flatMap(({ bindings }) => bindings),
+      };
+    }
+    if (
+      expression.op === "contains" ||
+      expression.op === "startsWith" ||
+      expression.op === "endsWith"
+    ) {
+      return compileStringLeaf(expression.field, expression.op, expression.value);
+    }
+    return compileValueLeaf(expression.field, expression.op, expression.value);
   }
 
   if (expression.op === "not") {
@@ -37,6 +52,49 @@ export function compileQueryToSql(expression: QueryExpr): SqlPredicate {
   return {
     sql: `(${compiled.map(({ sql }) => sql).join(` ${expression.op.toUpperCase()} `)})`,
     bindings: compiled.flatMap(({ bindings }) => bindings),
+  };
+}
+
+function compileStringLeaf(
+  field: string,
+  operator: QueryStringOperator,
+  value: string,
+): SqlPredicate {
+  const metadataColumn = METADATA_COLUMNS[field];
+  if (metadataColumn !== undefined) {
+    return compileStringPredicate(`(${metadataColumn})`, operator, value, []);
+  }
+
+  const prefix =
+    "EXISTS (SELECT 1 FROM json_each(data) AS takibi_field WHERE takibi_field.key = ? AND takibi_field.type = 'text' AND ";
+  const predicate = compileStringPredicate("takibi_field.atom", operator, value, [field]);
+  return {
+    sql: `(${prefix}${predicate.sql}))`,
+    bindings: predicate.bindings,
+  };
+}
+
+function compileStringPredicate(
+  expression: string,
+  operator: QueryStringOperator,
+  value: string,
+  prefixBindings: SqlBinding[],
+): SqlPredicate {
+  if (operator === "contains") {
+    return {
+      sql: `instr(${expression}, ?) > 0`,
+      bindings: [...prefixBindings, value],
+    };
+  }
+  if (operator === "startsWith") {
+    return {
+      sql: `substr(${expression}, 1, length(?)) = ?`,
+      bindings: [...prefixBindings, value, value],
+    };
+  }
+  return {
+    sql: `substr(${expression}, length(${expression}) - length(?) + 1) = ?`,
+    bindings: [...prefixBindings, value, value],
   };
 }
 
