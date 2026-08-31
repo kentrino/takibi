@@ -24,21 +24,58 @@ type Collection = {
   ): Promise<Document>;
   update(id: string, data: Record<string, unknown>): Promise<Document>;
   delete(id: string): Promise<{ id: string }>;
+  list(options?: {
+    index?: string;
+    limit?: number;
+    where?: (query: RuntimeQueryBuilder) => QueryExpr;
+  }): Promise<{ items: Document[]; nextCursor?: string }>;
   listAll(options?: {
     index?: string;
     maxItems?: number;
     where?: (query: RuntimeQueryBuilder) => QueryExpr;
   }): Promise<Document[]>;
+  count(options?: {
+    index?: string;
+    where?: (query: RuntimeQueryBuilder) => QueryExpr;
+  }): Promise<number>;
+  updateMany(
+    data: Record<string, unknown>,
+    options: {
+      index?: string;
+      where: (query: RuntimeQueryBuilder) => QueryExpr;
+    },
+  ): Promise<{ updated: number }>;
+  deleteMany(options: {
+    index?: string;
+    where: (query: RuntimeQueryBuilder) => QueryExpr;
+  }): Promise<{ deleted: number }>;
+  consumeOne(options: {
+    index?: string;
+    where: (query: RuntimeQueryBuilder) => QueryExpr;
+  }): Promise<Document | null>;
+  incrementOne(
+    increment: Record<string, number>,
+    options: {
+      index?: string;
+      where: (query: RuntimeQueryBuilder) => QueryExpr;
+      set?: Record<string, unknown>;
+    },
+  ): Promise<Document | null>;
 };
 
 type RuntimeCollections = Record<string, Collection>;
 
 type RuntimeQueryField = {
+  present(): QueryExpr;
   eq(value: string | number | boolean | null): QueryExpr;
+  in(values: readonly (string | number | boolean | null)[]): QueryExpr;
   gt(value: string | number): QueryExpr;
   gte(value: string | number): QueryExpr;
   lt(value: string | number): QueryExpr;
   lte(value: string | number): QueryExpr;
+  contains(value: string): QueryExpr;
+  startsWith(value: string): QueryExpr;
+  endsWith(value: string): QueryExpr;
 };
 
 type RuntimeQueryBuilder = Record<string, RuntimeQueryField> & {
@@ -183,65 +220,96 @@ export function takibiAdapter<TCollections>(
           return collection;
         };
 
-        const scan = async (
+        const readDocuments = async (
           collections: RuntimeCollections,
           model: string,
           where: CleanedWhere[] | undefined,
           method: AdapterMethod,
+          options: { limit?: number; forceFallback?: boolean } = {},
         ): Promise<Document[]> => {
           await assertSchemaCompatibility();
           const pushedWhere = compileTakibiWhere(where);
           const binding = bindingFor(model);
           const index = selectTakibiIndex(binding.indexes, where);
-          const documents = await collectionFor(collections, model).listAll({
-            maxItems: maxScanItems,
-            ...(pushedWhere ? { where: pushedWhere } : {}),
-            ...(index ? { index } : {}),
-          });
-          if (!pushedWhere || method !== "findOne") {
+          const collection = collectionFor(collections, model);
+          const requiresResidual = Boolean(where?.length) && pushedWhere === undefined;
+          if (requiresResidual || options.forceFallback) {
+            const documents = await collection.listAll({
+              maxItems: maxScanItems,
+              ...(pushedWhere ? { where: pushedWhere } : {}),
+              ...(index ? { index } : {}),
+            });
             adapterOptions.onFallbackScan?.({
               model: getDefaultModelName(model),
               operation: method,
               operators: [...new Set((where ?? []).map(({ operator }) => operator))],
               scannedCount: documents.length,
             });
+            return documents.filter((document) => matchesWhere(document, where));
           }
-          return documents.filter((document) => matchesWhere(document, where));
+
+          const page = await collection.list({
+            ...(pushedWhere ? { where: pushedWhere } : {}),
+            ...(index ? { index } : {}),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+          });
+          return page.items;
         };
 
-        const updateOne = async (
+        const conditionalSelector = (
+          model: string,
+          where: CleanedWhere[],
+        ):
+          | {
+              where: (query: RuntimeQueryBuilder) => QueryExpr;
+              index?: string;
+            }
+          | undefined => {
+          if (where.length === 0) return undefined;
+          const pushedWhere = compileTakibiWhere(where);
+          if (!pushedWhere) return undefined;
+          const index = selectTakibiIndex(bindingFor(model).indexes, where);
+          return { where: pushedWhere, ...(index ? { index } : {}) };
+        };
+
+        const fallbackUpdateOne = async (
           collections: RuntimeCollections,
           model: string,
           where: CleanedWhere[],
           update: Record<string, unknown>,
         ): Promise<Document | null> => {
-          if (where.length === 0) return null;
-          const target = (await scan(collections, model, where, "update"))[0];
+          const target = (
+            await readDocuments(collections, model, where, "update", { forceFallback: true })
+          )[0];
           if (!target) return null;
           return collectionFor(collections, model).update(target.id, writeData(update));
         };
 
-        const updateMany = async (
+        const fallbackUpdateMany = async (
           collections: RuntimeCollections,
           model: string,
           where: CleanedWhere[],
           update: Record<string, unknown>,
         ): Promise<number> => {
-          const targets = await scan(collections, model, where, "updateMany");
+          const targets = await readDocuments(collections, model, where, "updateMany", {
+            forceFallback: true,
+          });
           for (const target of targets) {
             await collectionFor(collections, model).update(target.id, writeData(update));
           }
           return targets.length;
         };
 
-        const deleteMany = async (
+        const fallbackDeleteMany = async (
           collections: RuntimeCollections,
           model: string,
           where: CleanedWhere[],
-          method: "deleteMany" | "consumeOne",
+          method: "delete" | "deleteMany" | "consumeOne",
           limit?: number,
         ): Promise<Document[]> => {
-          const targets = (await scan(collections, model, where, method)).slice(0, limit);
+          const targets = (
+            await readDocuments(collections, model, where, method, { forceFallback: true })
+          ).slice(0, limit);
           for (const target of targets) {
             await collectionFor(collections, model).delete(target.id);
           }
@@ -265,19 +333,27 @@ export function takibiAdapter<TCollections>(
           },
 
           async findOne({ model, where, join }) {
-            const document = (await scan(activeCollections, model, where, "findOne"))[0];
+            const document = (
+              await readDocuments(activeCollections, model, where, "findOne", {
+                limit: 1,
+              })
+            )[0];
             if (!document) return null;
             return applyJoins(
               document,
               join,
               activeCollections,
               collectionFor,
-              scan,
+              readDocuments,
             ) as Promise<never>;
           },
 
           async findMany({ model, where, limit, sortBy, offset, join, select }) {
-            let documents = await scan(activeCollections, model, where, "findMany");
+            const forceFallback = sortBy !== undefined || offset !== undefined;
+            let documents = await readDocuments(activeCollections, model, where, "findMany", {
+              limit,
+              forceFallback,
+            });
             if (sortBy) {
               documents = [...documents].sort((left, right) =>
                 compareValues(left[sortBy.field], right[sortBy.field], sortBy.direction),
@@ -288,7 +364,7 @@ export function takibiAdapter<TCollections>(
             return Promise.all(
               page.map(async (document) =>
                 projectDocument(
-                  await applyJoins(document, join, activeCollections, collectionFor, scan),
+                  await applyJoins(document, join, activeCollections, collectionFor, readDocuments),
                   select,
                   join,
                 ),
@@ -297,43 +373,111 @@ export function takibiAdapter<TCollections>(
           },
 
           async count({ model, where }) {
-            return (await scan(activeCollections, model, where, "count")).length;
+            await assertSchemaCompatibility();
+            const pushedWhere = compileTakibiWhere(where);
+            if (where?.length && !pushedWhere) {
+              return (await readDocuments(activeCollections, model, where, "count")).length;
+            }
+            const binding = bindingFor(model);
+            const index = selectTakibiIndex(binding.indexes, where);
+            return collectionFor(activeCollections, model).count({
+              ...(pushedWhere ? { where: pushedWhere } : {}),
+              ...(index ? { index } : {}),
+            });
           },
 
           update: ({ model, where, update }) =>
-            runTransaction((collections) =>
-              updateOne(collections, model, where, update as Record<string, unknown>),
-            ) as Promise<never>,
+            runTransaction(async (collections) => {
+              await assertSchemaCompatibility();
+              if (where.length === 0) return null;
+              const selector = conditionalSelector(model, where);
+              if (!selector) {
+                return fallbackUpdateOne(
+                  collections,
+                  model,
+                  where,
+                  update as Record<string, unknown>,
+                );
+              }
+              const target = (
+                await collectionFor(collections, model).list({ ...selector, limit: 1 })
+              ).items[0];
+              if (!target) return null;
+              return collectionFor(collections, model).update(
+                target.id,
+                writeData(update as Record<string, unknown>),
+              );
+            }) as Promise<never>,
 
           updateMany: ({ model, where, update }) =>
-            runTransaction((collections) => updateMany(collections, model, where, update)),
+            runTransaction(async (collections) => {
+              await assertSchemaCompatibility();
+              const selector = conditionalSelector(model, where);
+              if (!selector) {
+                return fallbackUpdateMany(collections, model, where, update);
+              }
+              return (
+                await collectionFor(collections, model).updateMany(writeData(update), selector)
+              ).updated;
+            }),
 
           async delete({ model, where }) {
             if (where.length === 0) return;
             await runTransaction(async (collections) => {
-              const target = (await scan(collections, model, where, "delete"))[0];
-              if (target) {
-                await collectionFor(collections, model).delete(target.id);
+              await assertSchemaCompatibility();
+              const selector = conditionalSelector(model, where);
+              if (!selector) {
+                await fallbackDeleteMany(collections, model, where, "delete", 1);
+                return;
               }
+              await collectionFor(collections, model).consumeOne(selector);
             });
           },
 
           deleteMany: ({ model, where }) =>
-            runTransaction((collections) =>
-              deleteMany(collections, model, where, "deleteMany").then(
-                (documents) => documents.length,
-              ),
-            ),
+            runTransaction(async (collections) => {
+              await assertSchemaCompatibility();
+              const selector = conditionalSelector(model, where);
+              if (!selector) {
+                return fallbackDeleteMany(collections, model, where, "deleteMany").then(
+                  (documents) => documents.length,
+                );
+              }
+              return (await collectionFor(collections, model).deleteMany(selector)).deleted;
+            }),
 
           consumeOne: ({ model, where }) =>
             runTransaction(async (collections) => {
-              const consumed = await deleteMany(collections, model, where, "consumeOne", 1);
-              return consumed[0] ?? null;
+              await assertSchemaCompatibility();
+              const selector = conditionalSelector(model, where);
+              if (!selector) {
+                const consumed = await fallbackDeleteMany(
+                  collections,
+                  model,
+                  where,
+                  "consumeOne",
+                  1,
+                );
+                return consumed[0] ?? null;
+              }
+              return collectionFor(collections, model).consumeOne(selector);
             }) as Promise<never>,
 
           incrementOne: ({ model, where, increment, set }) =>
             runTransaction(async (collections) => {
-              const target = (await scan(collections, model, where, "incrementOne"))[0];
+              await assertSchemaCompatibility();
+              const selector = conditionalSelector(model, where);
+              if (selector) {
+                return collectionFor(collections, model).incrementOne(increment, {
+                  ...selector,
+                  ...(set === undefined ? {} : { set: writeData(set) }),
+                });
+              }
+              const target = (
+                await readDocuments(collections, model, where, "incrementOne", {
+                  forceFallback: true,
+                })
+              )[0];
               if (!target) return null;
               const update: Record<string, unknown> = { ...set };
               for (const [field, delta] of Object.entries(increment)) {
@@ -354,18 +498,19 @@ async function applyJoins(
   join: JoinConfig | undefined,
   collections: RuntimeCollections,
   collectionFor: (collections: RuntimeCollections, model: string) => Collection,
-  scan: (
+  readDocuments: (
     collections: RuntimeCollections,
     model: string,
     where: CleanedWhere[] | undefined,
     method: AdapterMethod,
+    options?: { limit?: number; forceFallback?: boolean },
   ) => Promise<Document[]>,
 ): Promise<Document> {
   if (!join) return document;
   const output: Document = { ...document };
   for (const [model, config] of Object.entries(join)) {
     collectionFor(collections, model);
-    const related = await scan(
+    const related = await readDocuments(
       collections,
       model,
       [
@@ -378,6 +523,7 @@ async function applyJoins(
         },
       ],
       "findMany",
+      { forceFallback: true },
     );
     output[model] =
       config.relation === "one-to-one" ? (related[0] ?? null) : related.slice(0, config.limit);
@@ -414,7 +560,8 @@ function selectTakibiIndex(
         (clause) =>
           clause.operator === "eq" &&
           clause.mode === "sensitive" &&
-          !(clause.value instanceof Date),
+          clause.value !== null &&
+          isTakibiScalar(toTakibiScalar(clause.value)),
       )
       .map(({ field }) => field),
   );
@@ -429,9 +576,9 @@ function compileTakibiWhere(
   if (
     !where ||
     where.length === 0 ||
-    where.length > 6 ||
     !where.every(canPushClause) ||
-    estimateQueryNodes(where) > 32
+    estimateQueryShape(where).nodes > 32 ||
+    estimateQueryShape(where).depth > 8
   ) {
     return undefined;
   }
@@ -448,68 +595,69 @@ function compileTakibiWhere(
   };
 }
 
-function estimateQueryNodes(where: CleanedWhere[]): number {
-  return (
-    Math.max(where.length - 1, 0) +
-    where.reduce((nodes, clause) => {
-      if (clause.operator === "in" || clause.operator === "not_in") {
-        const values = clause.value as unknown[];
-        return (
-          nodes +
-          values.length +
-          (values.length > 1 ? 1 : 0) +
-          (clause.operator === "not_in" ? 1 : 0)
-        );
-      }
-      return nodes + (clause.operator === "ne" ? 2 : 1);
-    }, 0)
-  );
+function estimateQueryShape(where: CleanedWhere[]): { nodes: number; depth: number } {
+  let nodes = 0;
+  let depth = 0;
+  for (const clause of where) {
+    const leaf =
+      clause.operator === "eq" && clause.value === null
+        ? { nodes: 4, depth: 3 }
+        : clause.operator === "ne" && clause.value === null
+          ? { nodes: 5, depth: 4 }
+          : clause.operator === "ne" || clause.operator === "not_in"
+            ? { nodes: 2, depth: 2 }
+            : { nodes: 1, depth: 1 };
+    nodes += leaf.nodes + (depth === 0 ? 0 : 1);
+    depth = depth === 0 ? leaf.depth : Math.max(depth, leaf.depth) + 1;
+  }
+  return { nodes, depth };
 }
 
 function canPushClause(clause: CleanedWhere): boolean {
-  if (clause.mode === "insensitive" || clause.value instanceof Date || clause.value === null) {
-    return false;
-  }
-  if (clause.operator === "contains" || clause.operator === "starts_with") {
-    return false;
-  }
-  if (clause.operator === "ends_with") return false;
+  if (clause.mode === "insensitive") return false;
   if (clause.operator === "in" || clause.operator === "not_in") {
-    return Array.isArray(clause.value) && clause.value.length > 0 && clause.value.length <= 16;
+    return (
+      Array.isArray(clause.value) &&
+      clause.value.length > 0 &&
+      clause.value.length <= 32 &&
+      clause.value.every((value) => isTakibiScalar(toTakibiScalar(value)))
+    );
   }
-  if (
-    clause.operator !== "eq" &&
-    clause.operator !== "ne" &&
-    typeof clause.value !== "string" &&
-    typeof clause.value !== "number"
-  ) {
-    return false;
+  const value = toTakibiScalar(clause.value);
+  switch (clause.operator) {
+    case "eq":
+    case "ne":
+      return isTakibiScalar(value);
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte":
+      return typeof value === "string" || typeof value === "number";
+    case "contains":
+    case "starts_with":
+    case "ends_with":
+      return typeof value === "string";
+    default:
+      return false;
   }
-  return (
-    clause.value === null ||
-    typeof clause.value === "string" ||
-    typeof clause.value === "number" ||
-    typeof clause.value === "boolean"
-  );
 }
 
 function compileTakibiClause(query: RuntimeQueryBuilder, clause: CleanedWhere): QueryExpr {
   const field = query[clause.field]!;
-  const value = clause.value;
+  const value = toTakibiScalar(clause.value);
   if (clause.operator === "in" || clause.operator === "not_in") {
-    const values = value as Array<string | number>;
-    const equalities = values.map((entry) => field.eq(entry));
-    const expression =
-      equalities.length === 1
-        ? equalities[0]!
-        : query.or(equalities[0]!, equalities[1]!, ...equalities.slice(2));
+    const values = (clause.value as unknown[]).map(toTakibiScalar) as Array<
+      string | number | boolean | null
+    >;
+    const expression = field.in(values);
     return clause.operator === "not_in" ? query.not(expression) : expression;
   }
-  if (clause.operator === "ne") {
-    return query.not(field.eq(value as string | number | boolean | null));
-  }
-  if (clause.operator === "eq") {
-    return field.eq(value as string | number | boolean | null);
+  if (clause.operator === "eq" || clause.operator === "ne") {
+    const equality =
+      value === null
+        ? query.or(field.eq(null), query.not(field.present()))
+        : field.eq(value as string | number | boolean);
+    return clause.operator === "ne" ? query.not(equality) : equality;
   }
   const comparable = value as string | number;
   switch (clause.operator) {
@@ -521,9 +669,28 @@ function compileTakibiClause(query: RuntimeQueryBuilder, clause: CleanedWhere): 
       return field.lt(comparable);
     case "lte":
       return field.lte(comparable);
+    case "contains":
+      return field.contains(comparable as string);
+    case "starts_with":
+      return field.startsWith(comparable as string);
+    case "ends_with":
+      return field.endsWith(comparable as string);
     default:
-      throw new TypeError(`Unsupported Takibi query operator: ${clause.operator}`);
+      throw new TypeError("Unsupported Takibi query operator");
   }
+}
+
+function toTakibiScalar(value: unknown): unknown {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function isTakibiScalar(value: unknown): value is string | number | boolean | null {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
 }
 
 function matchesWhere(
@@ -542,7 +709,9 @@ function matchesWhere(
 
 function matchesClause(document: Readonly<Record<string, unknown>>, clause: CleanedWhere): boolean {
   const actual = document[clause.field];
-  const expected = clause.value;
+  const expected = Array.isArray(clause.value)
+    ? clause.value.map(toTakibiScalar)
+    : toTakibiScalar(clause.value);
   const insensitive =
     clause.mode === "insensitive" &&
     (typeof expected === "string" ||

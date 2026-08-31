@@ -2,6 +2,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { getAuthTables, type DBFieldAttribute } from "better-auth/db";
 import { z } from "zod";
 import { takibiAdapter, type BetterAuthModelMap } from "../src/adapter.server.ts";
+import { createTestCollection } from "./test-collection.server";
 
 type Row = Record<string, unknown> & {
   id: string;
@@ -20,51 +21,7 @@ export function createOfficialMemoryHarness() {
     Object.fromEntries(
       models.map((name) => {
         const table = () => (active.tables[name] ??= new Map());
-        return [
-          name,
-          {
-            async add(
-              data: Record<string, unknown>,
-              options?: {
-                id?: string;
-                createdAt?: string;
-                updatedAt?: string;
-              },
-            ) {
-              const id = options?.id ?? crypto.randomUUID();
-              if (table().has(id)) throw new Error("duplicate id");
-              const now = new Date().toISOString();
-              const row = structuredClone({
-                ...data,
-                id,
-                createdAt: options?.createdAt ?? now,
-                updatedAt: options?.updatedAt ?? now,
-              });
-              table().set(id, row);
-              return structuredClone(row);
-            },
-            async update(id: string, data: Record<string, unknown>) {
-              const existing = table().get(id);
-              if (!existing) throw new Error("missing row");
-              const row = structuredClone({
-                ...existing,
-                ...data,
-                id,
-                createdAt: existing.createdAt,
-                updatedAt: new Date().toISOString(),
-              });
-              table().set(id, row);
-              return structuredClone(row);
-            },
-            async delete(id: string) {
-              table().delete(id);
-              return { id };
-            },
-            async listAll() {
-              return [...table().values()].map((row) => structuredClone(row));
-            },
-          },
-        ];
+        return [name, createTestCollection(table)];
       }),
     );
 
