@@ -14,9 +14,9 @@ import { SeverityNumber, type LogRecord, type Logger as OtelLogger } from "@open
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { createTakibi, fullAccess } from "@takibi/takibi";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createSqliteDurableObjectStorage } from "../../takibi/tests/sqlite";
 import { TakibiInstrumentation } from "../src/index";
 import { createOtelLogger } from "../src/logs";
 
@@ -152,21 +152,19 @@ test("Takibi request and stage logs carry their active span", async () => {
   const instrumentation = new TakibiInstrumentation();
   instrumentation.enable();
   try {
-    const handler = createTakibi()({
+    const productionHandler = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logger: createOtelLogger(capturingOtelLogger(records)),
       logLevel: "debug",
     })
-      .defineCollections(
-        {
-          posts: {
-            schema: z.object({ title: z.string() }),
-            accessPolicy: fullAccess,
-          },
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
         },
-        { memory: true },
-      )
+      })
       .actions({});
+    const handler = withSqliteTestBackend(productionHandler);
     const response = await handler.request("https://takibi.test/posts/p1", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -193,7 +191,7 @@ test("Takibi request and stage logs carry their active span", async () => {
   }
 });
 
-test("worker and Durable Object failures correlate one error record to the request trace", async () => {
+test("request failures correlate one error record to the request trace", async () => {
   const records: LogRecord[] = [];
   const manager = new AsyncLocalContextManager();
   const provider = new BasicTracerProvider();
@@ -206,16 +204,16 @@ test("worker and Durable Object failures correlate one error record to the reque
   try {
     const cases: Array<{ name: string; request: () => Promise<Response> }> = [];
 
-    const decodeHandler = createTakibi()({
+    const decodeProductionHandler = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logger,
       logLevel: "info",
     })
-      .defineCollections(
-        { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-        { memory: true },
-      )
+      .defineCollections({
+        posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+      })
       .actions({});
+    const decodeHandler = withSqliteTestBackend(decodeProductionHandler);
     cases.push({
       name: "decode",
       request: async () =>
@@ -226,80 +224,43 @@ test("worker and Durable Object failures correlate one error record to the reque
         }),
     });
 
-    const resolveHandler = createTakibi()({
+    const resolveProductionHandler = createTakibi()({
       resolve: (): { tenantId: string } => {
         throw new Error("resolve failed");
       },
       logger,
       logLevel: "info",
     })
-      .defineCollections(
-        { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-        { memory: true },
-      )
+      .defineCollections({
+        posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+      })
       .actions({});
+    const resolveHandler = withSqliteTestBackend(resolveProductionHandler);
     cases.push({
       name: "resolve",
       request: async () => resolveHandler.request("https://takibi.test/posts/p1"),
     });
 
-    const memoryApp = createTakibi()({
+    const sqliteApp = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
-      logger,
-      logLevel: "info",
-    }).defineCollections({}, { memory: true });
-    const memoryHandler = memoryApp.actions({
-      $: {
-        boom: memoryApp
-          .defineAction()
-          .policy(fullAccess)
-          .handler(() => {
-            throw new Error("memory executor failed");
-          }),
-      },
-    });
-    cases.push({
-      name: "memory executor",
-      request: async () =>
-        memoryHandler.request("https://takibi.test/$:boom", {
-          method: "POST",
-        }),
-    });
-
-    let durableObject!: DurableObject;
-    const durableApp = createTakibi()({
-      resolve: () => ({ tenantId: "tenant-a" }),
-      stub: () =>
-        ({
-          fetch: (request: Request) => durableObject.fetch(request),
-        }) as DurableObjectStub,
       logger,
       logLevel: "info",
     }).defineCollections({});
-    const durableHandler = durableApp.actions({
+    const sqliteProductionHandler = sqliteApp.actions({
       $: {
-        boom: durableApp
+        boom: sqliteApp
           .defineAction()
           .policy(fullAccess)
           .handler(() => {
-            throw new Error("Durable Object executor failed");
+            throw new Error("SQLite executor failed");
           }),
       },
     });
-    durableObject = new durableHandler.DurableObject(
-      {
-        id: { name: "tenant-a" },
-        storage: createSqliteDurableObjectStorage(),
-        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
-          return callback();
-        },
-      } as DurableObjectState,
-      {},
-    );
+    const sqliteHandler = withSqliteTestBackend(sqliteProductionHandler);
     cases.push({
-      name: "Durable Object executor",
+      name: "SQLite executor",
       request: async () =>
-        durableHandler.request("https://takibi.test/$:boom", {
+        sqliteHandler.request("https://takibi.test/$:boom", {
           method: "POST",
         }),
     });

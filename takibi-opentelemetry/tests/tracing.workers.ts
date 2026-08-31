@@ -42,6 +42,12 @@ test("integration propagates OTel spans through a real Durable Object namespace"
 
   const wire = spans.find(({ name }) => name === "takibi.wire");
   const executor = spans.find(({ name }) => name === "takibi.executor");
+  const transaction = spans.find(
+    ({ name, attributes, parentSpanId }) =>
+      name === "takibi.storage" &&
+      attributes["takibi.storage.operation"] === "transaction" &&
+      parentSpanId === executor?.spanId,
+  );
   const storage = spans.find(
     ({ name, attributes }) =>
       name === "takibi.storage" && attributes["takibi.storage.operation"] === "put",
@@ -70,6 +76,8 @@ test("integration propagates OTel spans through a real Durable Object namespace"
   });
   expect(executor?.traceId).toBe(wire?.traceId);
   expect(executor?.parentSpanId).toBe(wire?.spanId);
+  expect(transaction?.traceId).toBe(executor?.traceId);
+  expect(transaction?.parentSpanId).toBe(executor?.spanId);
   expect(storage?.traceId).toBe(executor?.traceId);
-  expect(storage?.parentSpanId).toBe(executor?.spanId);
+  expect(storage?.parentSpanId).toBe(transaction?.spanId);
 });
