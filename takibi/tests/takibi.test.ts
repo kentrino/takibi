@@ -1907,6 +1907,44 @@ test("generated Durable Object action reads instance services from env", async (
   });
 });
 
+test("indexed list is available on public clients and trusted collections", async () => {
+  const context = createTakibi()({ resolve: resolveTestContext });
+  const posts = context.defineCollection({
+    schema: z.object({ ownerId: z.string(), title: z.string() }),
+    accessPolicy: fullAccess,
+    indexes: { byOwner: ["ownerId", "createdAt"] },
+  });
+  const handler = context.defineCollections({ posts }, { memory: true }).actions({});
+  const client = createClient<typeof handler>("http://fire.test", {
+    headers,
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  await client.posts.add({ ownerId: "u1", title: "second" }, { id: "p2" });
+  await client.posts.add({ ownerId: "u1", title: "first" }, { id: "p1" });
+  await client.posts.add({ ownerId: "u2", title: "other" }, { id: "p3" });
+
+  const page = await client.posts.list({
+    index: "byOwner",
+    where: (query) => query.ownerId.eq("u1"),
+    orderBy: (query) => query.createdAt.desc(),
+    limit: 10,
+  });
+  expect(page.ok).toBe(true);
+  if (page.ok) {
+    expect(page.data.items.map((document) => document.id)).toEqual(["p2", "p1"]);
+  }
+
+  const unknown = await client.posts.list({
+    index: "missing",
+    where: (query: { ownerId: { eq(value: string): unknown } }) => query.ownerId.eq("u1"),
+  } as never);
+  expect(unknown).toMatchObject({
+    ok: false,
+    error: { code: "BAD_REQUEST", status: 400 },
+  });
+});
+
 test("handlers expose no post-hoc action registration surface", () => {
   const production = createProductionPostsHandler();
   const forked = production.with({ memory: true, resolve: resolveTestContext });

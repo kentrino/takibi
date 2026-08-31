@@ -66,6 +66,9 @@ const handler = context
     notes: {
       schema: noteSchema,
       accessPolicy: noteOwnerPolicy,
+      indexes: {
+        byOwner: ["ownerId", "createdAt"],
+      },
     },
   })
   .actions({});
@@ -78,9 +81,27 @@ The member policy grants `list` only when the complete query implies
 `ownerId.eq(user.id)`. This accepts `and(ownerId.eq(user.id), ...)` and rejects
 an absent query, another owner value, `or(ownerId.eq(user.id), ...)`, and
 `not(ownerId.eq(other))`. Filtering runs in trusted server storage before the
-response is built, so unrelated documents are not returned to the client. The
-initial implementation scans the collection without an index; account for that
-linear cost when choosing collection size.
+response is built, so unrelated documents are not returned to the client.
+
+Pair that equality with the `byOwner` index so owner lists scan
+`ownerId, createdAt, id` instead of the collection id order:
+
+```ts
+const page = await client.notes.list({
+  index: "byOwner",
+  where: (query) => query.ownerId.eq(user.id),
+  orderBy: (query) => query.createdAt.desc(),
+  limit: 20,
+});
+```
+
+`orderBy` cannot stand alone, and `createdAt` is valid only because `ownerId`
+is a single-value equality. Writes still update `takibi_documents` only;
+SQLite maintains the expression index and pays write amplification on those
+fields. Adding the index, or advancing the notes schema version, backfills
+existing documents during activation and blocks that tenant until the index is
+ready. Unindexed `list` remains available and stays id-ordered; there is no
+automatic fallback from an invalid indexed request to that scan.
 
 For a different owner field such as `authorId`, pick and compare that field
 instead. If ownership transfer is valid in the domain, model it as a separate
