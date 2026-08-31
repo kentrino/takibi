@@ -18,22 +18,22 @@ import { createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { decodeWireRequest, type WireResponse } from "./protocol";
 import { createDurableObjectStorage } from "./storage";
+import { createMaintenanceGatedCollections, MaintenanceController } from "./maintenance";
+import { createDurableObjectCollectionsApi } from "./snapshot";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
-import { TAKIBI_TRUSTED_RESET_STORAGE } from "./trusted.server";
 import { storageAdd } from "./typed-storage";
 import type {
   CollectionDefinition,
   CollectionsDef,
+  DurableObjectCollectionsApi,
   StorageDriver,
-  TrustedCollectionsApi,
 } from "./types";
 
 type DurableObjectClass<TCollections> = new (
   state: DurableObjectState,
   env: unknown,
 ) => DurableObject & {
-  $collections: TrustedCollectionsApi<TCollections>;
-  [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void>;
+  $collections: DurableObjectCollectionsApi<TCollections>;
 };
 
 export function createDurableObjectClass<TCollections extends CollectionsDef>(
@@ -48,12 +48,14 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
     readonly #services: unknown;
-    readonly $collections: TrustedCollectionsApi<TCollections>;
+    readonly #maintenance: MaintenanceController;
+    readonly $collections: DurableObjectCollectionsApi<TCollections>;
 
     constructor(state: DurableObjectState, env: unknown) {
       this.#services = createServices ? createServices({ env }) : {};
       this.#state = state;
       const registry = compileIndexRegistry(collections);
+      this.#maintenance = new MaintenanceController(state.storage);
       this.#driver = applyStorageLogging(
         createMigratingStorage(
           collections,
@@ -63,6 +65,7 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
         logger,
       );
       this.#ready = state.blockConcurrencyWhile(async () => {
+        await this.#maintenance.cleanupAbandoned();
         await reconcileCollectionIndexes({
           sql: state.storage.sql,
           collections,
@@ -72,35 +75,20 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
         });
         await seedCollections(collections, this.#driver, logger);
       });
-      this.$collections = createTrustedCollections(
-        collections,
-        afterInitialization(this.#driver, this.#ready),
-        logger,
-      );
-    }
-
-    async [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void> {
-      await this.#ready;
-      await this.#state.blockConcurrencyWhile(async () => {
-        await this.#state.storage.deleteAll();
-        const registry = compileIndexRegistry(collections);
-        const driver = applyStorageLogging(
-          createMigratingStorage(
+      this.$collections = createDurableObjectCollectionsApi(
+        createMaintenanceGatedCollections(
+          createTrustedCollections(
             collections,
-            createDurableObjectStorage(this.#state.storage, registry),
+            afterInitialization(this.#driver, this.#ready),
             logger,
           ),
-          logger,
-        );
-        await reconcileCollectionIndexes({
-          sql: this.#state.storage.sql,
-          collections,
-          storage: driver,
-          registry,
-          logger,
-        });
-        await seedCollections(collections, driver, logger);
-      });
+          this.#maintenance,
+        ),
+        collections,
+        this.#maintenance,
+        this.#ready,
+        logger,
+      );
     }
 
     async fetch(request: Request): Promise<Response> {
@@ -115,63 +103,67 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
               invocation = { kind: "batch", items: body.items };
               assertTenantMatchesDurableObjectName(this.#state.id.name, body.context);
               await this.#ready;
-              const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-              const results: WireResponse[] = [];
-              for (const item of body.items) {
-                try {
-                  const data = await withLoggedSpan(
-                    logger,
-                    {
-                      name: TAKIBI_SPAN.executor,
-                      kind: "server",
-                      attributes: invocationSpanAttributes(item),
-                    },
-                    { event: "takibi.executor", ...debugInvocationFields(item) },
-                    () => executeOperation(collections, driver, body.context, item, logger),
-                    extracted?.span,
-                  );
-                  results.push({ ok: true, data });
-                } catch (error) {
-                  const wire = toWireFailure(error);
-                  emitFailure(logger, wire.error, invocationFields(item));
-                  results.push(wire);
+              return this.#maintenance.runNormal(async () => {
+                const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
+                const results: WireResponse[] = [];
+                for (const item of body.items) {
+                  try {
+                    const data = await withLoggedSpan(
+                      logger,
+                      {
+                        name: TAKIBI_SPAN.executor,
+                        kind: "server",
+                        attributes: invocationSpanAttributes(item),
+                      },
+                      { event: "takibi.executor", ...debugInvocationFields(item) },
+                      () => executeOperation(collections, driver, body.context, item, logger),
+                      extracted?.span,
+                    );
+                    results.push({ ok: true, data });
+                  } catch (error) {
+                    const wire = toWireFailure(error);
+                    emitFailure(logger, wire.error, invocationFields(item));
+                    results.push(wire);
+                  }
                 }
-              }
-              return Response.json({ ok: true, data: results } satisfies WireResponse);
+                return Response.json({ ok: true, data: results } satisfies WireResponse);
+              });
             }
             const { context, ...decodedInvocation } = body;
             invocation = decodedInvocation;
             assertTenantMatchesDurableObjectName(this.#state.id.name, context);
             await this.#ready;
-            const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-            const data = await withLoggedSpan(
-              logger,
-              {
-                name: TAKIBI_SPAN.executor,
-                kind: "server",
-                attributes: invocationSpanAttributes(decodedInvocation),
-              },
-              { event: "takibi.executor", ...debugInvocationFields(decodedInvocation) },
-              () =>
-                decodedInvocation.kind === "action"
-                  ? executeAction(
-                      registry,
-                      collections,
-                      driver,
-                      context,
-                      decodedInvocation as ActionInvocation,
-                      logger,
-                      this.#services,
-                    )
-                  : executeOperation(
-                      collections,
-                      driver,
-                      context,
-                      decodedInvocation as ExecuteRequest,
-                      logger,
-                    ),
-              extracted?.span,
-            );
+            const data = await this.#maintenance.runNormal(async () => {
+              const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
+              return withLoggedSpan(
+                logger,
+                {
+                  name: TAKIBI_SPAN.executor,
+                  kind: "server",
+                  attributes: invocationSpanAttributes(decodedInvocation),
+                },
+                { event: "takibi.executor", ...debugInvocationFields(decodedInvocation) },
+                () =>
+                  decodedInvocation.kind === "action"
+                    ? executeAction(
+                        registry,
+                        collections,
+                        driver,
+                        context,
+                        decodedInvocation as ActionInvocation,
+                        logger,
+                        this.#services,
+                      )
+                    : executeOperation(
+                        collections,
+                        driver,
+                        context,
+                        decodedInvocation as ExecuteRequest,
+                        logger,
+                      ),
+                extracted?.span,
+              );
+            });
             return Response.json({ ok: true, data } satisfies WireResponse);
           } catch (err) {
             return errorResponse(err, logger, invocation, request);

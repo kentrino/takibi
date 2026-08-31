@@ -11,12 +11,13 @@ import {
   none,
   queryImpliesEquality,
   read,
-  TAKIBI_TRUSTED_RESET_STORAGE,
   UnauthorizedError,
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { MaintenanceController } from "../src/maintenance";
+import { createDurableObjectStorage } from "../src/storage";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -1014,16 +1015,49 @@ test("trusted count and conditional writes are atomic and schema-checked", async
   await expect(records.updateMany({ marked: true }, {} as never)).rejects.toThrow(/require where/);
 });
 
-test("trusted reset clears documents and restores collection seeds", async () => {
+test("owner snapshot round-trips metadata and reset restores collection seeds", async () => {
   const handler = createProductionPostsHandler();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
     {},
   );
   await object.$collections.posts.add({ title: "temporary", secret: false }, { id: "temporary" });
+  await object.$collections.posts.update("temporary", { title: "snapshot", rev: 1 });
+
+  expect("$exportSnapshot" in object).toBe(false);
+  expect("$restoreSnapshot" in object).toBe(false);
+  expect("$resetAll" in object).toBe(false);
+  expect(Object.keys(object.$collections)).not.toContain("$exportSnapshot");
+  await object.$collections.$transaction(async ($collections) => {
+    expect("$exportSnapshot" in $collections).toBe(false);
+    expect("$restoreSnapshot" in $collections).toBe(false);
+    expect("$resetAll" in $collections).toBe(false);
+  });
+  const snapshot = await object.$collections.$exportSnapshot();
+  const encoded = await new Response(snapshot).text();
+  const records = encoded
+    .trimEnd()
+    .split("\n")
+    .map((record) => JSON.parse(record) as Record<string, unknown>);
+  const repeated = await new Response(await object.$collections.$exportSnapshot()).text();
+  expect(repeated).toBe(encoded);
+  expect(records[0]).toEqual({
+    type: "header",
+    format: "takibi.logical-snapshot",
+    version: 1,
+    collections: [{ name: "posts", schemaVersion: 0 }],
+  });
+  expect(records.at(-1)).toMatchObject({
+    type: "trailer",
+    counts: { posts: 2 },
+  });
+  expect(records.filter((record) => record.type === "document").map((record) => record.id)).toEqual(
+    ["seeded", "temporary"],
+  );
 
   expect("$resetStorage" in object).toBe(false);
-  await object[TAKIBI_TRUSTED_RESET_STORAGE]();
+  expect("$resetAll" in object).toBe(false);
+  await object.$collections.$resetAll();
 
   await expect(object.$collections.posts.listAll()).resolves.toMatchObject([
     {
@@ -1031,6 +1065,446 @@ test("trusted reset clears documents and restores collection seeds", async () =>
       title: "from-seed",
     },
   ]);
+
+  const report = await object.$collections.$restoreSnapshot(
+    new Blob([encoded]).stream() as ReadableStream<Uint8Array>,
+  );
+  expect(report).toEqual({
+    formatVersion: 1,
+    documentsRestored: 2,
+    seedsInserted: 0,
+    collections: {
+      posts: {
+        documentsRestored: 2,
+        seedsInserted: 0,
+      },
+    },
+  });
+  await expect(object.$collections.posts.get("temporary")).resolves.toMatchObject({
+    title: "snapshot",
+    rev: 2,
+  });
+  await expect(
+    object.$collections.posts.update("temporary", { title: "continued", rev: 2 }),
+  ).resolves.toMatchObject({
+    title: "continued",
+    rev: 3,
+  });
+});
+
+test("owner snapshot lease blocks normal operations until completion or cancellation", async () => {
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  await object.$collections.posts.get("seeded");
+
+  const snapshot = await object.$collections.$exportSnapshot();
+  await expect(object.$collections.posts.get("seeded")).rejects.toMatchObject({
+    code: "MAINTENANCE_LOCKED",
+    status: 503,
+  });
+  await expect(object.$collections.$transaction(async () => "unreachable")).rejects.toMatchObject({
+    code: "MAINTENANCE_LOCKED",
+  });
+  const actionResponse = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "action",
+        scope: "posts",
+        name: "ping",
+        context: {
+          tenantId: "tenant-a",
+          user: { id: "admin", role: "admin" },
+        },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(actionResponse.status).toBe(503);
+  await expect(actionResponse.json()).resolves.toMatchObject({
+    ok: false,
+    error: { code: "MAINTENANCE_LOCKED" },
+  });
+  await snapshot.cancel();
+  await expect(object.$collections.posts.get("seeded")).resolves.toMatchObject({
+    id: "seeded",
+  });
+});
+
+test("maintenance admission drains an active action and rejects newer operations", async () => {
+  let entered!: () => void;
+  let release!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const releasePromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const context = createTakibi()({ resolve: () => ({ tenantId: "drain" }) });
+  const app = context.defineCollections({
+    records: {
+      schema: z.object({ value: z.string() }),
+      accessPolicy: fullAccess,
+    },
+  });
+  const wait = app
+    .defineAction()
+    .policy(fullAccess)
+    .handler(async ({ $collections }) => {
+      entered();
+      await releasePromise;
+      await $collections.records.add({ value: "after-wait" }, { id: "completed" });
+      return { done: true };
+    });
+  const handler = app.actions({ $: { wait } });
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  const action = object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "action",
+        scope: "$",
+        name: "wait",
+        context: { tenantId: "drain" },
+      } satisfies WireRequest),
+    }),
+  );
+  await enteredPromise;
+
+  const exportPromise = object.$collections.$exportSnapshot();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await expect(object.$collections.records.list()).rejects.toMatchObject({
+    code: "MAINTENANCE_LOCKED",
+  });
+  release();
+  await expect(Promise.resolve(action).then((response) => response.status)).resolves.toBe(200);
+  const snapshot = await exportPromise;
+  await snapshot.cancel();
+  await expect(object.$collections.records.get("completed")).resolves.toMatchObject({
+    value: "after-wait",
+  });
+});
+
+test("maintenance drains trusted add after async schema validation starts", async () => {
+  let entered!: () => void;
+  let release!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const releasePromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const context = createTakibi()({ resolve: () => ({ tenantId: "trusted-drain" }) });
+  const handler = context
+    .defineCollections({
+      records: {
+        schema: z.object({
+          value: z.string().transform(async (value) => {
+            entered();
+            await releasePromise;
+            return value;
+          }),
+        }),
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+
+  const addition = object.$collections.records.add({ value: "validated" }, { id: "completed" });
+  await enteredPromise;
+  const exportPromise = object.$collections.$exportSnapshot();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await expect(object.$collections.records.list()).rejects.toMatchObject({
+    code: "MAINTENANCE_LOCKED",
+  });
+  release();
+  await expect(addition).resolves.toMatchObject({ value: "validated" });
+  const snapshot = await exportPromise;
+  await snapshot.cancel();
+  await expect(object.$collections.records.get("completed")).resolves.toBeDefined();
+});
+
+test("owner reset keeps normal operations locked while seeds are prepared", async () => {
+  let seedCalls = 0;
+  let entered!: () => void;
+  let release!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const releasePromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const context = createTakibi()({ resolve: () => ({ tenantId: "reset-lock" }) });
+  const handler = context
+    .defineCollections({
+      records: {
+        schema: z.object({ value: z.string() }),
+        accessPolicy: fullAccess,
+        seed: async () => {
+          seedCalls += 1;
+          if (seedCalls > 1) {
+            entered();
+            await releasePromise;
+          }
+          return { seed: { value: "seed" } };
+        },
+      },
+    })
+    .actions({});
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  await object.$collections.records.get("seed");
+
+  const reset = object.$collections.$resetAll();
+  await enteredPromise;
+  await expect(object.$collections.records.get("seed")).rejects.toMatchObject({
+    code: "MAINTENANCE_LOCKED",
+  });
+  release();
+  await expect(reset).resolves.toBeUndefined();
+  await expect(object.$collections.records.get("seed")).resolves.toBeDefined();
+});
+
+test("normal collection operations use the in-memory gate without querying the lease table", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  await object.$collections.posts.get("seeded");
+  const exec = backing.sql.exec.bind(backing.sql);
+  let leaseReads = 0;
+  backing.sql.exec = ((query: string, ...bindings: never[]) => {
+    if (query.includes("takibi_maintenance_lease")) leaseReads += 1;
+    return exec(query, ...bindings);
+  }) as DurableObjectStorage["sql"]["exec"];
+
+  await object.$collections.posts.get("seeded");
+  await object.$collections.posts.list();
+
+  expect(leaseReads).toBe(0);
+});
+
+test("expired export cannot complete or release a successor maintenance lease", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  await object.$collections.posts.add({ title: "snapshot", secret: false }, { id: "p1" });
+  const reader = (await object.$collections.$exportSnapshot()).getReader();
+  const partial: Uint8Array[] = [];
+  partial.push((await reader.read()).value!);
+  partial.push((await reader.read()).value!);
+  backing.sql.exec("UPDATE takibi_maintenance_lease SET expires_at = 0");
+
+  const successor = new MaintenanceController(backing);
+  const successorLease = await successor.acquire("reset");
+  await expect(async () => {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      partial.push(result.value);
+    }
+  }).rejects.toMatchObject({ code: "MAINTENANCE_LOCKED" });
+
+  const partialText = await new Blob(partial).text();
+  expect(partialText).not.toContain('"type":"trailer"');
+  expect(
+    backing.sql
+      .exec<{ owner_token: string }>(
+        "SELECT owner_token FROM takibi_maintenance_lease WHERE lease_key = ?",
+        "global",
+      )
+      .one().owner_token,
+  ).toBe(successorLease.token);
+  await successor.release(successorLease);
+  await expect(object.$collections.posts.get("p1")).resolves.toBeDefined();
+});
+
+test("Durable Object activation clears abandoned maintenance and restore staging", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  createDurableObjectStorage(backing);
+  const first = new MaintenanceController(backing);
+  const lease = await first.acquire("restore");
+  await first.backend.stageDocument(lease.token, {
+    collection: "posts",
+    id: "abandoned",
+    createdAt: "2026-08-31T00:00:00.000Z",
+    updatedAt: "2026-08-31T00:00:00.000Z",
+    schemaVersion: 0,
+    revision: 1,
+    data: { title: "abandoned", secret: false },
+  });
+
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  await expect(object.$collections.posts.get("seeded")).resolves.toBeDefined();
+  expect(
+    backing.sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_maintenance_lease")
+      .one().count,
+  ).toBe(0);
+  expect(
+    backing.sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_restore_staging_documents")
+      .one().count,
+  ).toBe(0);
+});
+
+test("invalid snapshot leaves live documents unchanged and releases its lease", async () => {
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  const encoded = await new Response(await object.$collections.$exportSnapshot()).text();
+  await object.$collections.posts.add({ title: "live", secret: false }, { id: "live" });
+  const corrupted = encoded.replace("from-seed", "tampered");
+
+  await expect(
+    object.$collections.$restoreSnapshot(
+      new Blob([corrupted]).stream() as ReadableStream<Uint8Array>,
+    ),
+  ).rejects.toMatchObject({ code: "SNAPSHOT_FORMAT" });
+  await expect(object.$collections.posts.get("live")).resolves.toMatchObject({
+    title: "live",
+  });
+});
+
+test("restore rolls back the live replacement when staged insertion fails", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  const encoded = await new Response(await object.$collections.$exportSnapshot()).text();
+  await object.$collections.posts.add({ title: "live", secret: false }, { id: "live" });
+  const exec = backing.sql.exec.bind(backing.sql);
+  let injected = false;
+  backing.sql.exec = ((query: string, ...bindings: never[]) => {
+    if (
+      !injected &&
+      query.includes("INSERT INTO takibi_documents") &&
+      query.includes("FROM takibi_restore_staging_documents")
+    ) {
+      injected = true;
+      throw new Error("injected restore failure");
+    }
+    return exec(query, ...bindings);
+  }) as DurableObjectStorage["sql"]["exec"];
+
+  await expect(
+    object.$collections.$restoreSnapshot(
+      new Blob([encoded]).stream() as ReadableStream<Uint8Array>,
+    ),
+  ).rejects.toThrow("injected restore failure");
+  expect(injected).toBe(true);
+  await expect(object.$collections.posts.get("live")).resolves.toMatchObject({
+    title: "live",
+  });
+  await expect(object.$collections.posts.get("seeded")).resolves.toMatchObject({
+    title: "from-seed",
+  });
+});
+
+test("restore rolls back when atomic lease finalization fails", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  const encoded = await new Response(await object.$collections.$exportSnapshot()).text();
+  await object.$collections.posts.add({ title: "live", secret: false }, { id: "live" });
+  const exec = backing.sql.exec.bind(backing.sql);
+  let injected = false;
+  backing.sql.exec = ((query: string, ...bindings: never[]) => {
+    if (!injected && query.includes("DELETE FROM takibi_maintenance_lease")) {
+      injected = true;
+      throw new Error("injected finalization failure");
+    }
+    return exec(query, ...bindings);
+  }) as DurableObjectStorage["sql"]["exec"];
+
+  await expect(
+    object.$collections.$restoreSnapshot(
+      new Blob([encoded]).stream() as ReadableStream<Uint8Array>,
+    ),
+  ).rejects.toThrow("injected finalization failure");
+  await expect(object.$collections.posts.get("live")).resolves.toMatchObject({
+    title: "live",
+  });
+});
+
+test("owner reset preserves storage not managed by Takibi", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  await object.$collections.posts.add({ title: "temporary", secret: false }, { id: "temporary" });
+  backing.sql.exec("CREATE TABLE application_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  backing.sql.exec(
+    "INSERT INTO application_state (key, value) VALUES (?, ?)",
+    "marker",
+    "preserved",
+  );
+
+  await object.$collections.$resetAll();
+
+  expect(
+    backing.sql
+      .exec<{ value: string }>("SELECT value FROM application_state WHERE key = ?", "marker")
+      .one().value,
+  ).toBe("preserved");
+  await expect(object.$collections.posts.get("temporary")).rejects.toMatchObject({
+    code: "NOT_FOUND",
+  });
+});
+
+test("owner reset rolls back when seed insertion fails", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  await object.$collections.posts.add({ title: "live", secret: false }, { id: "live" });
+  const exec = backing.sql.exec.bind(backing.sql);
+  let injected = false;
+  backing.sql.exec = ((query: string, ...bindings: never[]) => {
+    if (!injected && query.includes("INSERT OR IGNORE INTO takibi_documents")) {
+      injected = true;
+      throw new Error("injected reset failure");
+    }
+    return exec(query, ...bindings);
+  }) as DurableObjectStorage["sql"]["exec"];
+
+  await expect(object.$collections.$resetAll()).rejects.toThrow("injected reset failure");
+  await expect(object.$collections.posts.get("live")).resolves.toMatchObject({
+    title: "live",
+  });
+});
+
+test("owner reset rolls back when atomic lease finalization fails", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const handler = createProductionPostsHandler();
+  const object = new handler.DurableObject(createFakeDurableObjectState(backing), {});
+  await object.$collections.posts.add({ title: "live", secret: false }, { id: "live" });
+  const exec = backing.sql.exec.bind(backing.sql);
+  let injected = false;
+  backing.sql.exec = ((query: string, ...bindings: never[]) => {
+    if (!injected && query.includes("DELETE FROM takibi_maintenance_lease")) {
+      injected = true;
+      throw new Error("injected reset finalization failure");
+    }
+    return exec(query, ...bindings);
+  }) as DurableObjectStorage["sql"]["exec"];
+
+  await expect(object.$collections.$resetAll()).rejects.toThrow(
+    "injected reset finalization failure",
+  );
+  await expect(object.$collections.posts.get("live")).resolves.toMatchObject({
+    title: "live",
+  });
 });
 
 test("wire id is required for document actions and rejected elsewhere", async () => {

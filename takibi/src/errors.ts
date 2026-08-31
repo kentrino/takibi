@@ -63,3 +63,31 @@ export class ListAllLimitError extends TakibiError {
     this.name = "ListAllLimitError";
   }
 }
+
+export class MaintenanceLockedError extends TakibiError {
+  constructor(message = "Takibi maintenance is in progress") {
+    super("MAINTENANCE_LOCKED", message, 503);
+    this.name = "MaintenanceLockedError";
+  }
+}
+
+export class SnapshotFormatError extends TakibiError {
+  constructor(message = "Invalid logical snapshot") {
+    super("SNAPSHOT_FORMAT", message, 400);
+    this.name = "SnapshotFormatError";
+  }
+}
+
+export class SnapshotIncompatibleError extends TakibiError {
+  constructor(message = "Logical snapshot is incompatible with this collection registry") {
+    super("SNAPSHOT_INCOMPATIBLE", message, 400);
+    this.name = "SnapshotIncompatibleError";
+  }
+}
+
+export class SnapshotInvalidDocumentError extends TakibiError {
+  constructor(message = "Logical snapshot contains an invalid document") {
+    super("SNAPSHOT_INVALID_DOCUMENT", message, 400);
+    this.name = "SnapshotInvalidDocumentError";
+  }
+}

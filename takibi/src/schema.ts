@@ -30,3 +30,12 @@ export async function parseSchema<S extends StandardSchemaV1>(
     },
   );
 }
+
+export async function parseSchemaUnobserved<S extends StandardSchemaV1>(
+  schema: S,
+  value: unknown,
+): Promise<StandardSchemaV1.InferOutput<S>> {
+  const result = await schema["~standard"].validate(value);
+  if (result.issues) throw new SchemaValidationError(result.issues);
+  return result.value as StandardSchemaV1.InferOutput<S>;
+}

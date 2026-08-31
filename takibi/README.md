@@ -308,8 +308,9 @@ synchronous and receive only unvalidated domain data—never `id`, timestamps, o
 the version marker.
 
 Migration is per-document and lazy. Takibi does not enumerate tenants, eagerly
-migrate a whole deployment, report global progress, provide rollback or backup
-tooling, or guarantee when inactive tenants finish migrating.
+migrate a whole deployment, report global progress, provide deployment-level
+rollback/PITR orchestration, or guarantee when inactive tenants finish
+migrating. Owner-local logical snapshots are described below.
 
 `accessPolicy` receives `doc` / `nextDoc` (schema output plus `id` / `createdAt` / `updatedAt` / `rev`) so you can authorize on document attributes — not only collection-level actions:
 
@@ -880,6 +881,33 @@ await this.$collections.$transaction(async ($collections) => {
 
 Nested `$transaction` calls join the enclosing transaction.
 
+The root facade also owns transport-neutral logical snapshot and reset
+operations:
+
+```ts
+const stream = await this.$collections.$exportSnapshot();
+await env.BACKUPS.put(objectKey, stream);
+
+const object = await env.BACKUPS.get(objectKey);
+if (object === null) throw new Error("Snapshot not found");
+const report = await this.$collections.$restoreSnapshot(object.body);
+
+await this.$collections.$resetAll();
+```
+
+These methods do not appear on transaction callbacks, action `$collections`,
+policy-bound APIs, public clients, or the Durable Object RPC method surface.
+Export is pull-driven NDJSON and preserves stored timestamps, revision, and
+document schema version. Restore validates the complete stream in local staging
+before atomically replacing live Takibi documents. During export, restore, and
+reset, normal reads and writes fail with retryable `MAINTENANCE_LOCKED` status 503.
+
+Takibi does not choose the object store, key, encryption, retention policy, or
+maintenance endpoint authorization. A full snapshot can contain password
+hashes and session tokens. See
+[`docs/spec/logical-snapshots.md`](./docs/spec/logical-snapshots.md) for the
+format, lease, compatibility, and atomicity contract.
+
 Server-side policy-bound collections and trusted `$collections` expose
 `count`, which pages through the same query, index selection, and migration
 transforms as `list`. A policy-bound count requires the `list` permission.
@@ -931,6 +959,8 @@ layout versions synchronously during activation. A newer unknown layout fails cl
 Layout version 2 moves a valid version 1 `data.rev` value into the revision column,
 defaults a missing or invalid legacy value to `1`, and removes `rev` from the JSON.
 The table rebuild and layout-version update are one transaction.
+Layout version 4 adds the Takibi-owned maintenance lease and restore staging
+tables without changing existing documents or indexes.
 This internal layout migration is separate from collection `migrations`: layout
 migrations change Takibi's tables, while collection migrations lazily transform one
 domain document after it is read.

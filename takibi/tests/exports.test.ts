@@ -180,6 +180,7 @@ test("public annotation types use the collection/action vocabulary", () => {
 });
 
 test("removed resource/storage aliases and internal assembly APIs are not public", () => {
+  expectTypeOf(Takibi).not.toHaveProperty("TAKIBI_TRUSTED_RESET_STORAGE");
   expectTypeOf(Takibi).not.toHaveProperty("defineResource");
   expectTypeOf(Takibi).not.toHaveProperty("executeOperation");
   expectTypeOf(Takibi).not.toHaveProperty("createTypedStorage");
@@ -194,6 +195,7 @@ test("removed resource/storage aliases and internal assembly APIs are not public
 
   type PublicModule = typeof import("../src/index");
   type Removed =
+    | "TAKIBI_TRUSTED_RESET_STORAGE"
     | "AccessAction"
     | "InferHandlerResources"
     | "InferResourceDoc"
