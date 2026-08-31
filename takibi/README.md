@@ -708,7 +708,22 @@ Every top-level field supports `present()`, which tests whether the document has
 that key; a stored JSON `null` value is present. Use
 `query.not(query.optionalField.present())` to match a missing optional field.
 Top-level scalar fields support `eq`; string and number fields also support
-`gt`, `gte`, `lt`, and `lte`. Compose expressions with `and`, `or`, and `not`.
+`gt`, `gte`, `lt`, and `lte`. Scalar fields also support `in` with 1–32
+values. String fields support case-sensitive `contains`, `startsWith`, and
+`endsWith`; an empty search string matches every stored string. Compose
+expressions with `and`, `or`, and `not`:
+
+```ts
+const page = await client.appointments.list({
+  where: (query) =>
+    query.and(
+      query.status.in(["pending", "confirmed"]),
+      query.email.endsWith("@clinic.example"),
+      query.not(query.token.in(revokedTokens)),
+    ),
+});
+```
+
 Unindexed `list` results stay in document id order. Filtering happens before
 `cursor` and `limit`.
 
@@ -816,7 +831,43 @@ Inside the DO (trusted / admin path, `accessPolicy` bypassed):
 
 ```ts
 const post = await this.$collections.posts.add({ title: "Hi", body: "..." });
+const pending = await this.$collections.posts.count({
+  where: (query) => query.status.eq("pending"),
+});
 ```
+
+Server-side policy-bound collections and trusted `$collections` expose
+`count`, which pages through the same query, index selection, and migration
+transforms as `list`. A policy-bound count requires the `list` permission.
+`count` is not available on the public HTTP client.
+
+Trusted `$collections` additionally expose atomic conditional writes:
+
+```ts
+await this.$collections.posts.updateMany(
+  { archived: true },
+  { where: (query) => query.ownerId.eq(ownerId), index: "byOwner" },
+);
+await this.$collections.sessions.deleteMany({
+  where: (query) => query.userId.eq(userId),
+});
+const token = await this.$collections.verifications.consumeOne({
+  where: (query) => query.value.eq(value),
+});
+const counter = await this.$collections.counters.incrementOne(
+  { attempts: 1 },
+  {
+    where: (query) => query.id.eq(id),
+    set: { lastAttemptAt: new Date().toISOString() },
+  },
+);
+```
+
+The `where` clause is mandatory. Bulk operations process every match;
+`consumeOne` and `incrementOne` use the first document in normal `list` order.
+They join an enclosing trusted/action transaction or open one when called
+directly. These methods bypass collection policy and are unavailable through
+policy-bound collections, the public client, and HTTP.
 
 Documents are stored with `state.storage.sql` in one library-managed
 `takibi_documents` table shared by all collections in the Durable Object. Domain
