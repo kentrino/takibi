@@ -19,7 +19,7 @@ import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { decodeWireRequest, type WireResponse } from "./protocol";
 import { createDurableObjectStorage } from "./storage";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
-import { TAKIBI_TRUSTED_RESET_STORAGE, TAKIBI_TRUSTED_TRANSACTION } from "./trusted.server";
+import { TAKIBI_TRUSTED_RESET_STORAGE } from "./trusted.server";
 import { storageAdd } from "./typed-storage";
 import type {
   CollectionDefinition,
@@ -33,9 +33,6 @@ type DurableObjectClass<TCollections> = new (
   env: unknown,
 ) => DurableObject & {
   $collections: TrustedCollectionsApi<TCollections>;
-  [TAKIBI_TRUSTED_TRANSACTION]<T>(
-    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
-  ): Promise<T>;
   [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void>;
 };
 
@@ -79,15 +76,6 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
         collections,
         afterInitialization(this.#driver, this.#ready),
         logger,
-      );
-    }
-
-    async [TAKIBI_TRUSTED_TRANSACTION]<T>(
-      callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
-    ): Promise<T> {
-      await this.#ready;
-      return this.#driver.transaction((storage) =>
-        callback(createTrustedCollections(collections, storage, logger, true)),
       );
     }
 

@@ -13,7 +13,6 @@ Takibi's server-managed `id`, `createdAt`, `updatedAt`, `rev`, or
 ```ts
 import { betterAuth } from "better-auth";
 import { z } from "zod";
-import { TAKIBI_TRUSTED_TRANSACTION } from "@takibi/takibi";
 import { defineBetterAuthCollections, takibiAdapter } from "@takibi/takibi-better-auth-adapter";
 
 const authCollections = defineBetterAuthCollections({
@@ -82,7 +81,7 @@ export class TenantStore extends handler.DurableObject {
   readonly auth = betterAuth({
     database: takibiAdapter({
       collections: this.$collections,
-      transaction: (run) => this[TAKIBI_TRUSTED_TRANSACTION](run),
+      transaction: (run) => this.$collections.$transaction(run),
       models,
     }),
   });

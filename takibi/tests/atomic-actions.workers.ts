@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi, fullAccess, none, TAKIBI_TRUSTED_TRANSACTION } from "../src/index";
+import { createTakibi, fullAccess, none } from "../src/index";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import type { StorageTestObject } from "./worker";
 
@@ -221,7 +221,7 @@ test("atomic actions have matching memory and actual SQLite-backed DO semantics"
     };
     await exerciseAtomicActions(durable, "durable");
 
-    await object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+    await object.$collections.$transaction(async ($collections) => {
       await $collections.orders.add({ value: "transaction" }, { id: "direct-transaction-order" });
       await $collections.inventory.add(
         { value: "transaction" },
@@ -238,7 +238,7 @@ test("atomic actions have matching memory and actual SQLite-backed DO semantics"
     ).resolves.toMatchObject({ value: "transaction" });
 
     await expect(
-      object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+      object.$collections.$transaction(async ($collections) => {
         await $collections.orders.add({ value: "rolled back" }, { id: "direct-rollback-order" });
         await $collections.inventory.add(
           { value: "rolled back" },

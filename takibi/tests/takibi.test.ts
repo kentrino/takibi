@@ -11,7 +11,6 @@ import {
   queryImpliesEquality,
   read,
   TAKIBI_TRUSTED_RESET_STORAGE,
-  TAKIBI_TRUSTED_TRANSACTION,
   UnauthorizedError,
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
@@ -895,9 +894,10 @@ test("trusted transaction commits and rolls back transaction-bound collections",
     {},
   );
   expect("$transaction" in object).toBe(false);
-  expect(object[TAKIBI_TRUSTED_TRANSACTION]).toBeTypeOf("function");
+  expect("transaction" in object).toBe(false);
+  expect("$transaction" in object.$collections).toBe(true);
 
-  const committed = await object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+  const committed = await object.$collections.$transaction(async ($collections) => {
     await $collections.posts.add({ title: "committed" }, { id: "committed-post" });
     await $collections.audits.add({ action: "committed" }, { id: "committed-audit" });
     return "done";
@@ -925,9 +925,11 @@ test("trusted transaction commits and rolls back transaction-bound collections",
   });
 
   await expect(
-    object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+    object.$collections.$transaction(async ($collections) => {
       await $collections.posts.add({ title: "rolled back" }, { id: "rolled-back-post" });
-      await $collections.audits.add({ action: "rolled back" }, { id: "rolled-back-audit" });
+      await $collections.$transaction(async (nested) => {
+        await nested.audits.add({ action: "rolled back" }, { id: "rolled-back-audit" });
+      });
       throw new Error("rollback");
     }),
   ).rejects.toThrow("rollback");
@@ -995,7 +997,7 @@ test("trusted count and conditional writes are atomic and schema-checked", async
   await expect(records.get("r2")).resolves.toMatchObject({ value: "two" });
 
   await expect(
-    object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+    object.$collections.$transaction(async ($collections) => {
       await $collections.audits.add({ action: "rollback" }, { id: "rollback" });
       await $collections.records.updateMany(
         { marked: false },
