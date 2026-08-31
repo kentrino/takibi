@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";
 import { createMigratingStorage } from "../src/migrations";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
-import type { AccessContext } from "../src/types";
+import type { AccessContext, CollectionsDef } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { createSqliteDurableObjectStorage } from "./sqlite";
 
@@ -500,4 +500,73 @@ test("memory and Durable Object storage share lazy migration semantics", async (
       $schemaVersion: 1,
     });
   }
+});
+
+test("indexed backfill migrates existing documents before the index is ready", async () => {
+  const { compileIndexRegistry } = await import("../src/indexes");
+  const { backfillIndexedCollections, reconcileCollectionIndexes } =
+    await import("../src/index-reconcile");
+
+  const definition = {
+    schema: z.object({ ownerId: z.string(), title: z.string() }),
+    accessPolicy: fullAccess,
+    indexes: { byOwner: ["ownerId", "createdAt"] as const },
+    migrations: {
+      steps: [
+        (data: unknown) => ({
+          ...(data as { title: string }),
+          ownerId: "migrated",
+        }),
+      ] as const,
+    },
+  };
+  const collections = { posts: definition };
+  const registry = compileIndexRegistry(collections);
+  const memory = createMemoryStorage(registry);
+  await memory.put(
+    "posts",
+    legacy("p1", { title: "old" }) as import("../src/types").StoredDocument,
+  );
+  const migrating = createMigratingStorage(collections as unknown as CollectionsDef, memory);
+  await backfillIndexedCollections(collections, migrating);
+  await expect(memory.get("posts", "p1")).resolves.toMatchObject({
+    ownerId: "migrated",
+    $schemaVersion: 1,
+  });
+  const page = await memory.list("posts", {
+    index: "byOwner",
+    where: { field: "ownerId", op: "eq", value: "migrated" },
+  });
+  expect(page.items.map((document) => document.id)).toEqual(["p1"]);
+
+  const failing = {
+    posts: {
+      ...definition,
+      migrations: {
+        steps: [
+          () => {
+            throw new Error("migration-failed");
+          },
+        ] as const,
+      },
+    },
+  };
+  const backing = createSqliteDurableObjectStorage();
+  const durable = createDurableObjectStorage(backing, compileIndexRegistry(failing));
+  await durable.put(
+    "posts",
+    legacy("p2", { title: "old" }) as import("../src/types").StoredDocument,
+  );
+  await expect(
+    reconcileCollectionIndexes({
+      sql: backing.sql,
+      collections: failing,
+      storage: createMigratingStorage(failing as unknown as CollectionsDef, durable),
+      registry: compileIndexRegistry(failing),
+    }),
+  ).rejects.toThrow("migration-failed");
+  expect(
+    backing.sql.exec<{ count: number }>("SELECT count(*) AS count FROM takibi_index_catalog").one()
+      .count,
+  ).toBe(0);
 });

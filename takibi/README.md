@@ -226,7 +226,7 @@ part of the tuple. Violations return `ALREADY_EXISTS` (409) and name the
 constraint.
 
 Unique checks currently scan the collection inside the write transaction; they
-do not depend on a declared read index. Adding a constraint does not eagerly
+do not use a declared read index. Adding a constraint does not eagerly
 audit untouched existing documents, so clean up historical duplicates before
 deploying it.
 
@@ -561,7 +561,7 @@ not an RPC wire.
 | `get`     | `GET {baseUrl}/{collection}/{id}`                                                    |
 | `update`  | `PATCH {baseUrl}/{collection}/{id}`                                                  |
 | `delete`  | `DELETE {baseUrl}/{collection}/{id}`                                                 |
-| `list`    | `GET {baseUrl}/{collection}?limit=&cursor=&where=`                                   |
+| `list`    | `GET {baseUrl}/{collection}?limit=&cursor=&where=&index=&orderBy=`                   |
 
 `listAll` is a client convenience over repeated `list` calls, not a new HTTP
 operation or policy permission. It reuses `list` (and its grant) page by page,
@@ -709,16 +709,53 @@ that key; a stored JSON `null` value is present. Use
 `query.not(query.optionalField.present())` to match a missing optional field.
 Top-level scalar fields support `eq`; string and number fields also support
 `gt`, `gte`, `lt`, and `lte`. Compose expressions with `and`, `or`, and `not`.
-Results are always ordered by document id, and filtering happens before
+Unindexed `list` results stay in document id order. Filtering happens before
 `cursor` and `limit`.
 
-The memory implementation evaluates the AST in JavaScript. The Durable Object
-implementation compiles it to a parameterized SQLite predicate and performs a final
-JavaScript check to preserve the same missing / null / type and string-ordering
-semantics. There are no secondary field indexes yet, so SQLite may still scan the
-collection, but non-matching current-version rows are not deserialized into JavaScript.
-Treat `nextCursor` as opaque and reuse it only with the same collection and
-structurally identical query; do not inspect, modify, or guess cursor values.
+Declare named composite indexes on required top-level `string` / finite `number`
+fields plus `id` / `createdAt` / `updatedAt`. `index` selects that field order;
+it is not a planner hint. Omit `index` to keep the existing id-ascending scan.
+`orderBy` is allowed only with `index`, and only for a field of that index.
+Fields before the chosen order field must be single-value equalities in `where`;
+otherwise the request is `BAD_REQUEST` and does not fall back to another scan
+or an in-memory sort.
+
+```ts
+const posts = context.defineCollection({
+  schema: postSchema,
+  indexes: {
+    byOwner: ["ownerId", "createdAt"],
+    byStatus: ["status", "updatedAt"],
+  },
+  accessPolicy,
+});
+
+const page = await client.posts.list({
+  index: "byOwner",
+  where: (query) => query.ownerId.eq(user.id),
+  orderBy: (query) => query.createdAt.desc(),
+  limit: 20,
+});
+```
+
+Equality prefix plus one range field can narrow the index; remaining `where`
+clauses are residual predicates. `limit` applies after that filter. Indexed
+cursors bind collection, query, index descriptor, order field, direction, and
+the last index tuple. Reuse a cursor only with that same request.
+
+Indexed collections backfill existing documents to the current schema when the
+index is added or the document schema version advances. That backfill runs
+during Durable Object activation and blocks request handling for that tenant
+until it succeeds. Writes still go only to `takibi_documents`; SQLite
+expression indexes maintain themselves and add write amplification on those
+columns. There is no unindexed `orderBy` and no automatic index selection.
+
+The memory implementation evaluates the AST in JavaScript and uses the same
+UTF-8 byte / numeric comparators as SQLite `BINARY`. The Durable Object
+implementation compiles predicates to parameterized SQL, uses the declared
+expression index for the chosen order, and performs a final JavaScript check
+to preserve the same missing / null / type semantics. Treat `nextCursor` as
+opaque; do not inspect, modify, or guess cursor values.
 
 ### Migrating from the previous throw / null API
 
@@ -910,11 +947,13 @@ operation failure.
 - Growing collections belong in child collections (for example `postItems` with a
   parent id field), not as unbounded arrays embedded in a parent document.
   Keep embedded arrays small and bounded.
-- `list` returns full documents in id order and supports typed `where`,
-  `limit`, and an opaque query-bound `cursor`. It does not offer `orderBy`,
-  offset, or projection. Each page defaults to **50** documents and is capped
-  at **200**. `listAll` walks those pages (default page size 200) and stops at
-  a client safety cap of **10_000** documents unless `createClient({ listAll })`
-  or the call site sets a smaller `maxItems`.
-- `where` is currently unindexed. SQLite evaluates its predicate and only candidate
-  rows cross into JavaScript; adding field indexes remains a future optimization.
+- `list` returns full documents. Without `index` the order is id ascending.
+  With `index`, order follows the declared field tuple (and `orderBy` on that
+  index). It does not offer unindexed `orderBy`, offset, or projection. Each
+  page defaults to **50** documents and is capped at **200**. `listAll` walks
+  those pages (default page size 200) and stops at a client safety cap of
+  **10_000** documents unless `createClient({ listAll })` or the call site sets
+  a smaller `maxItems`.
+- `where` remains an arbitrary boolean AST. Indexed lists scan the selected
+  index in its declared order and apply residual predicates before `limit`.
+  Unindexed lists may still scan the collection.
