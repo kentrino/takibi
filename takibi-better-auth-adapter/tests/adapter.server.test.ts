@@ -3,6 +3,7 @@ import { admin, bearer } from "better-auth/plugins";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { takibiAdapter, type BetterAuthModelMap } from "../src/adapter.server.ts";
+import { createTestCollection } from "./test-collection.server";
 
 type Row = Record<string, unknown> & {
   id: string;
@@ -93,7 +94,7 @@ function createHarness(
   models: BetterAuthModelMap<(typeof collectionNames)[keyof typeof collectionNames]> = MODELS,
 ) {
   const scanEvents: unknown[] = [];
-  const listCalls: Array<{ collection: string; options: unknown }> = [];
+  const listCalls: Array<{ collection: string; operation: string; options: unknown }> = [];
   const state: State = {
     tables: Object.fromEntries(Object.values(collectionNames).map((name) => [name, new Map()])),
   };
@@ -102,45 +103,10 @@ function createHarness(
     Object.fromEntries(
       Object.keys(active.tables).map((name) => [
         name,
-        {
-          async add(data: Record<string, unknown>, options?: { id?: string }) {
-            const id = options?.id ?? crypto.randomUUID();
-            const table = active.tables[name]!;
-            if (table.has(id)) throw new Error("duplicate id");
-            const now = new Date().toISOString();
-            const row = structuredClone({
-              ...data,
-              id,
-              createdAt: now,
-              updatedAt: now,
-            });
-            table.set(id, row);
-            return structuredClone(row);
-          },
-          async update(id: string, data: Record<string, unknown>) {
-            const table = active.tables[name]!;
-            const existing = table.get(id);
-            if (!existing) throw new Error("missing row");
-            const row = structuredClone({
-              ...existing,
-              ...data,
-              id,
-              createdAt: existing.createdAt,
-              updatedAt: new Date().toISOString(),
-            });
-            table.set(id, row);
-            return structuredClone(row);
-          },
-          async delete(id: string) {
-            const deleted = active.tables[name]!.delete(id);
-            if (!deleted) throw new Error("missing row");
-            return { id };
-          },
-          async listAll(options?: unknown) {
-            listCalls.push({ collection: name, options });
-            return [...active.tables[name]!.values()].map((row) => structuredClone(row));
-          },
-        },
+        createTestCollection(
+          () => active.tables[name]!,
+          (operation, options) => listCalls.push({ collection: name, operation, options }),
+        ),
       ]),
     );
 
@@ -466,6 +432,72 @@ test("filters, sorting, offset, count, and bulk mutations follow the adapter con
   ).resolves.toBe(1);
 });
 
+test("pushable filters and mutations avoid fallback scans", async () => {
+  const { adapter, scanEvents, listCalls } = createHarness();
+  await createUser(adapter, "u1", "alice@example.com");
+  await createUser(adapter, "u2", "bob@example.com");
+  scanEvents.length = 0;
+  listCalls.length = 0;
+
+  await adapter.findOne({
+    model: "user",
+    where: [{ field: "email", value: "alice", operator: "starts_with" }],
+  });
+  await adapter.findMany({
+    model: "user",
+    where: [{ field: "email", value: "@example.com", operator: "contains" }],
+    limit: 10,
+  });
+  await adapter.count({
+    model: "user",
+    where: [{ field: "id", value: ["u1", "u2"], operator: "in" }],
+  });
+  await adapter.count({
+    model: "user",
+    where: [{ field: "createdAt", value: new Date("2026-02-01"), operator: "lt" }],
+  });
+  await adapter.updateMany({
+    model: "user",
+    where: [{ field: "email", value: ".com", operator: "ends_with" }],
+    update: { emailVerified: true },
+  });
+
+  expect(scanEvents).toEqual([]);
+  expect(listCalls.map(({ operation }) => operation)).toEqual([
+    "list",
+    "list",
+    "count",
+    "count",
+    "updateMany",
+  ]);
+  expect(listCalls.some(({ operation }) => operation === "listAll")).toBe(false);
+
+  await adapter.findMany({
+    model: "user",
+    where: [
+      {
+        field: "email",
+        value: "ALICE@EXAMPLE.COM",
+        operator: "eq",
+        mode: "insensitive",
+      },
+    ],
+    limit: 10,
+  });
+  await adapter.count({
+    model: "user",
+    where: [
+      {
+        field: "id",
+        value: Array.from({ length: 33 }, (_, index) => `u${index}`),
+        operator: "in",
+      },
+    ],
+  });
+  expect(scanEvents).toHaveLength(2);
+  expect(listCalls.filter(({ operation }) => operation === "listAll")).toHaveLength(2);
+});
+
 test("consumeOne and incrementOne use the supplied transaction", async () => {
   const { adapter } = createHarness();
   await adapter.create({
@@ -575,7 +607,7 @@ test("Better Auth transactions commit and roll back across mapped collections", 
 });
 
 test("experimental one-to-many joins use mapped related collections", async () => {
-  const { adapter } = createHarness();
+  const { adapter, scanEvents, listCalls } = createHarness();
   await createUser(adapter, "u1", "join@example.com");
   for (const [id, token] of [
     ["s1", "first"],
@@ -594,6 +626,8 @@ test("experimental one-to-many joins use mapped related collections", async () =
       forceAllowId: true,
     });
   }
+  scanEvents.length = 0;
+  listCalls.length = 0;
 
   const user = await adapter.findOne<Record<string, unknown>>({
     model: "user",
@@ -601,6 +635,10 @@ test("experimental one-to-many joins use mapped related collections", async () =
     join: { session: { limit: 1 } },
   });
   expect(user?.session).toEqual([expect.objectContaining({ id: "s1", userId: "u1" })]);
+  expect(scanEvents).toContainEqual(
+    expect.objectContaining({ model: "session", operation: "findMany" }),
+  );
+  expect(listCalls.some(({ operation }) => operation === "listAll")).toBe(true);
 });
 
 test("email/password, bearer sessions, admin mutations, and password reset use Takibi", async () => {

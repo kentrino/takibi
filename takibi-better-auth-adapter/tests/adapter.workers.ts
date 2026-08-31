@@ -39,6 +39,7 @@ const authCollections = defineBetterAuthCollections({
     identifier: z.string(),
     value: z.string(),
     expiresAt: z.iso.datetime(),
+    attempts: z.number().nullable().optional(),
   }),
 });
 const handler = context
@@ -87,6 +88,11 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
     })({
       emailAndPassword: { enabled: true },
       advanced: { database: { generateId: false } },
+      verification: {
+        additionalFields: {
+          attempts: { type: "number", required: false },
+        },
+      },
     });
 
     const createUser = (id: string, email: string) =>
@@ -159,6 +165,42 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
     ]);
     expect(consumed.filter((value) => value !== null)).toHaveLength(1);
     expect(consumed.filter((value) => value === null)).toHaveLength(1);
+
+    await adapter.create({
+      model: "verification",
+      data: {
+        id: "counter",
+        identifier: "rate-limit",
+        value: "counter",
+        expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      forceAllowId: true,
+    });
+    const incremented = await Promise.all([
+      adapter.incrementOne<Record<string, unknown>>({
+        model: "verification",
+        where: [{ field: "id", value: "counter" }],
+        increment: { attempts: 1 },
+      }),
+      adapter.incrementOne<Record<string, unknown>>({
+        model: "verification",
+        where: [{ field: "id", value: "counter" }],
+        increment: { attempts: 1 },
+      }),
+    ]);
+    expect(
+      incremented
+        .map((document) => document?.attempts)
+        .sort((left, right) => Number(left) - Number(right)),
+    ).toEqual([1, 2]);
+    await expect(
+      adapter.findOne<Record<string, unknown>>({
+        model: "verification",
+        where: [{ field: "id", value: "counter" }],
+      }),
+    ).resolves.toMatchObject({ attempts: 2 });
 
     await expect(
       object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
