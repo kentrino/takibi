@@ -35,7 +35,7 @@ import {
   readRequestJson,
   type PublicRequest,
 } from "../http";
-import { requestLogFields, resolveLogging, withLoggedSpan, type LoggingOptions } from "../logging";
+import { requestLogFields, resolveLogging, withLoggedSpan } from "../logging";
 import { assertCollectionMigrations } from "../migrations";
 import { batchSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import { createPolicyHelper } from "../policy";
@@ -50,8 +50,14 @@ import {
 import type { CollectionsDef } from "../types";
 import { assertCollectionIndexes } from "../indexes";
 import { assertCollectionUniqueConstraints } from "../unique";
-import { createMemoryExecutor, createStubExecutor } from "./executors";
+import { createStubExecutor } from "./executors";
 import { ownStringEntries } from "./own-entries";
+import {
+  registerTestingFork,
+  type TestingExecutorFactory,
+  type TestingFork,
+  type TestingForkOptions,
+} from "./testing-fork.server";
 
 export type {
   CollectionsOptions,
@@ -170,27 +176,31 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   resolveStub?: ContextStubResolver<object, TInitial>;
   createServices?: (input: { env: unknown }) => unknown;
   options: InternalCollectionsOptions;
+  testing?: {
+    createExecutor: TestingExecutorFactory;
+    services: unknown;
+  };
 }): TakibiHandler<object, TCollections, TInitial> {
-  const { collections, registry, actionMap, resolve, resolveStub, createServices, options } = args;
-  const memory = options.memory ?? false;
-  if (memory && createServices != null && !("services" in options)) {
-    throw new TakibiError(
-      "MISSING_SERVICES",
-      "Memory mode requires services when createTakibi()({ services }) is configured — pass .with({ memory: true, services }) or defineCollections(..., { memory: true, services })",
-      500,
-    );
-  }
-  const services = memory
-    ? "services" in options && options.services !== undefined
-      ? options.services
-      : {}
-    : undefined;
+  const {
+    collections,
+    registry,
+    actionMap,
+    resolve,
+    resolveStub,
+    createServices,
+    options,
+    testing,
+  } = args;
   const app = new Hono<{ Bindings: Record<string, unknown> }>();
   const logger = resolveLogging(options);
 
-  const execute = memory
-    ? createMemoryExecutor(collections, registry, logger, services ?? {})
-    : createStubExecutor(resolveStub, logger);
+  const testingExecutor = testing?.createExecutor({
+    collections,
+    registry,
+    logger,
+    services: testing.services,
+  });
+  const execute = testingExecutor?.execute ?? createStubExecutor(resolveStub, logger);
 
   const run = async (
     request: Request,
@@ -306,6 +316,7 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
       initial: null as unknown as TInitial,
       collections,
       actions: actionMap,
+      services: null,
     },
     enumerable: false,
   });
@@ -323,24 +334,38 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
     );
     return { matched: true, response };
   };
-  handler.with = ((
-    withOptions: LoggingOptions & {
-      memory: true;
-      resolve?: ContextResolver<object, TInitial>;
-      services?: unknown;
-    },
-  ) =>
-    assembleHandler({
+  if (testingExecutor !== undefined) {
+    Object.defineProperty(handler, Symbol.dispose, {
+      value: () => testingExecutor.dispose(),
+      enumerable: false,
+    });
+  }
+  registerTestingFork(handler, ((
+    withOptions: TestingForkOptions,
+    createExecutor: TestingExecutorFactory,
+  ) => {
+    if (createServices != null && !("services" in withOptions)) {
+      throw new TakibiError(
+        "MISSING_SERVICES",
+        "SQLite test backend requires services when createTakibi()({ services }) is configured",
+        500,
+      );
+    }
+    return assembleHandler({
       collections,
       registry: registry.clone(),
       actionMap,
-      resolve: withOptions.resolve ?? resolve,
+      resolve: (withOptions.resolve ?? resolve) as ContextResolver<object, TInitial>,
       createServices,
-      options: {
-        ...mergeLoggingOptions(options, withOptions),
-        memory: true,
-        ...("services" in withOptions ? { services: withOptions.services } : {}),
-      } as InternalCollectionsOptions,
-    })) as typeof handler.with;
+      options: mergeLoggingOptions(options, withOptions) as InternalCollectionsOptions,
+      testing: {
+        createExecutor,
+        services:
+          "services" in withOptions && withOptions.services !== undefined
+            ? withOptions.services
+            : {},
+      },
+    });
+  }) satisfies TestingFork);
   return handler;
 }

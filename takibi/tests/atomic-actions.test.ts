@@ -3,7 +3,8 @@ import { z } from "zod";
 import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "../src/action";
 import { executeAction } from "../src/action-executor";
 import { fullAccess, none } from "../src/policy";
-import { createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { CollectionsDef, StorageDriver, StoredDocument } from "../src/types";
 
 const TS = "2026-08-19T00:00:00.000Z";
@@ -12,47 +13,36 @@ function document(id: string, value: string): StoredDocument {
   return { id, value, createdAt: TS, updatedAt: TS, rev: 1 };
 }
 
-test("memory transactions commit, rollback, and serialize concurrent writes", async () => {
-  const storage = createMemoryStorage();
+function createStorage() {
+  return createDurableObjectStorage(createSqliteDurableObjectStorage());
+}
+
+test("SQLite transactions commit, roll back, and join nested transactions", async () => {
+  const storage = createStorage();
   await storage.put("items", document("existing", "before"));
 
-  let enter!: () => void;
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve;
-  });
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const transaction = storage.transaction(async (scoped) => {
+  await storage.transaction(async (scoped) => {
     await scoped.put("items", document("atomic", "committed"));
-    enter();
-    await released;
+    await scoped.transaction(async (nested) => {
+      await nested.put("items", document("nested", "committed"));
+    });
   });
-  await entered;
-
-  let concurrentCompleted = false;
-  const concurrent = storage.put("items", document("concurrent", "preserved")).then(() => {
-    concurrentCompleted = true;
-  });
-  await Promise.resolve();
-  expect(concurrentCompleted).toBe(false);
-  release();
-  await Promise.all([transaction, concurrent]);
 
   await expect(storage.get("items", "atomic")).resolves.toEqual(document("atomic", "committed"));
-  await expect(storage.get("items", "concurrent")).resolves.toEqual(
-    document("concurrent", "preserved"),
-  );
+  await expect(storage.get("items", "nested")).resolves.toEqual(document("nested", "committed"));
 
   await expect(
     storage.transaction(async (scoped) => {
       await scoped.put("items", document("rolled-back", "no"));
       await scoped.delete("items", "existing");
+      await scoped.transaction(async (nested) => {
+        await nested.put("items", document("nested-rolled-back", "no"));
+      });
       throw new Error("rollback");
     }),
   ).rejects.toThrow("rollback");
   await expect(storage.get("items", "rolled-back")).resolves.toBeNull();
+  await expect(storage.get("items", "nested-rolled-back")).resolves.toBeNull();
   await expect(storage.get("items", "existing")).resolves.toEqual(document("existing", "before"));
 });
 
@@ -64,7 +54,7 @@ test("policy and input failures happen before an atomic transaction or handler",
       accessPolicy: fullAccess,
     },
   } satisfies CollectionsDef<Ctx>;
-  const raw = createMemoryStorage();
+  const raw = createStorage();
   let transactions = 0;
   const storage: StorageDriver = {
     ...raw,

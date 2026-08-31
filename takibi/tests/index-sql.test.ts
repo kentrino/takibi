@@ -2,12 +2,12 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "../src/index";
 import { compileIndexedScanSql, physicalIndexName } from "../src/index-sql";
-import { backfillIndexedCollections, reconcileCollectionIndexes } from "../src/index-reconcile";
+import { reconcileCollectionIndexes } from "../src/index-reconcile";
 import { compileIndexRegistry, resolveIndexedList } from "../src/indexes";
 import { createMigratingStorage } from "../src/migrations";
-import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { CollectionsDef, WithMetadata } from "../src/types";
-import { createSqliteDurableObjectStorage } from "./sqlite";
 
 const TS = "2026-08-09T14:12:00.000Z";
 
@@ -125,18 +125,15 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
   expect(catalog).toEqual(["byCreator"]);
 });
 
-test("memory backfill and SQLite indexed order stay aligned for mixed keys", async () => {
+test("SQLite backfill preserves indexed order for mixed keys", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
-  const memory = createMemoryStorage(registry);
   const backing = createSqliteDurableObjectStorage();
   const durable = createDurableObjectStorage(backing, registry);
-  const migratingMemory = createMigratingStorage(collections as unknown as CollectionsDef, memory);
   const migratingDurable = createMigratingStorage(
     collections as unknown as CollectionsDef,
     durable,
   );
-  await backfillIndexedCollections(collections, migratingMemory);
   await reconcileCollectionIndexes({
     sql: backing.sql,
     collections,
@@ -150,7 +147,6 @@ test("memory backfill and SQLite indexed order stay aligned for mixed keys", asy
     meta({ id: "o", ownerId: "u1", createdAt: "2026-01-02T00:00:00.000Z", score: 2, label: "a" }),
   ];
   for (const doc of docs) {
-    await migratingMemory.put("posts", doc);
     await migratingDurable.put("posts", doc);
   }
 
@@ -159,10 +155,7 @@ test("memory backfill and SQLite indexed order stay aligned for mixed keys", asy
     where: { field: "ownerId" as const, op: "eq" as const, value: "u1" },
     orderBy: { field: "createdAt", direction: "asc" as const },
   };
-  const memoryPage = await memory.list("posts", opts);
   const durablePage = await durable.list("posts", opts);
-  expect(memoryPage.items.map((document) => document.id)).toEqual(
-    durablePage.items.map((document) => document.id),
-  );
-  expect(memoryPage.nextCursor).toEqual(durablePage.nextCursor);
+  expect(durablePage.items.map((document) => document.id)).toEqual(["m", "n", "o"]);
+  expect(durablePage.nextCursor).toBeUndefined();
 });

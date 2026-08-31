@@ -29,6 +29,7 @@
     ".": "./src/index.ts",
     "./client": "./src/client-entry.ts",
     "./instrumentation": "./src/instrumentation.ts",
+    "./testing": "./src/testing.server.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -44,6 +45,10 @@
       "./instrumentation": {
         "types": "./dist/instrumentation.d.mts",
         "import": "./dist/instrumentation.mjs"
+      },
+      "./testing": {
+        "types": "./dist/testing.d.mts",
+        "import": "./dist/testing.mjs"
       },
       "./package.json": "./package.json"
     },

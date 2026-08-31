@@ -4,8 +4,9 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createMigratingStorage } from "../src/migrations";
 import { fullAccess } from "../src/policy";
-import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
+import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
 
 const TS = "2026-08-19T00:00:00.000Z";
@@ -22,12 +23,23 @@ function storageStub(name: string): DurableObjectStub<StorageTestObject> {
   return env.TAKIBI_STORAGE_TEST.getByName(name);
 }
 
-test("actual SQLite-backed DO matches memory query semantics and stores no document KV entries", async () => {
+test("Workers Durable Object SQLite satisfies the shared storage contract", async () => {
+  const stub = storageStub("shared-storage-contract");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const storage = createDurableObjectStorage(state.storage);
+    await expect(observeStorageContract(storage)).resolves.toEqual(
+      expectedStorageContractObservation,
+    );
+  });
+});
+
+test("actual SQLite-backed DO satisfies query contracts and stores no document KV entries", async () => {
   const stub = storageStub("query-contract");
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const memory = createMemoryStorage();
     const sqlite = createDurableObjectStorage(state.storage);
     const documents = [
       meta({
@@ -46,70 +58,84 @@ test("actual SQLite-backed DO matches memory query semantics and stores no docum
       meta({ id: "d", owner: "u1", score: 30, active: false }),
     ];
     for (const document of documents) {
-      await memory.put("posts", document);
       await sqlite.put("posts", document);
     }
 
     await expect(sqlite.get("posts", "a")).resolves.toEqual(documents[0]);
 
-    const queries: QueryExpr[] = [
-      { field: "owner", op: "eq", value: "u1" },
-      { field: "score", op: "eq", value: 20 },
-      { field: "score", op: "gt", value: 15 },
-      { field: "score", op: "gte", value: 20 },
-      { field: "score", op: "lt", value: 20 },
-      { field: "score", op: "lte", value: 20 },
-      { field: "score", op: "eq", value: "20" },
-      { field: "active", op: "eq", value: true },
-      { field: "nullable", op: "eq", value: null },
-      { field: 'quote".dot[0]', op: "eq", value: "matched" },
-      { field: "attack", op: "eq", value: "' OR 1=1 --" },
-      { field: "unicode", op: "lt", value: "\uE000" },
-      { field: "owner", op: "in", values: ["u1", "u3"] },
-      { op: "not", operand: { field: "owner", op: "in", values: ["u2"] } },
-      { field: "owner", op: "contains", value: "u" },
-      { field: "owner", op: "startsWith", value: "u1" },
-      { field: "owner", op: "endsWith", value: "" },
-      { field: "score", op: "contains", value: "" },
-      { field: "nullable", op: "startsWith", value: "" },
-      { field: "missing", op: "endsWith", value: "" },
-      { field: "missing", op: "eq", value: "anything" },
-      { op: "not", operand: { field: "missing", op: "eq", value: "anything" } },
-      { field: "nullable", op: "present" },
-      { op: "not", operand: { field: "nullable", op: "present" } },
-      { field: "nested", op: "present" },
+    const cases: Array<{ where: QueryExpr; ids: string[] }> = [
+      { where: { field: "owner", op: "eq", value: "u1" }, ids: ["a", "c", "d"] },
+      { where: { field: "score", op: "eq", value: 20 }, ids: ["b"] },
+      { where: { field: "score", op: "gt", value: 15 }, ids: ["b", "d"] },
+      { where: { field: "score", op: "gte", value: 20 }, ids: ["b", "d"] },
+      { where: { field: "score", op: "lt", value: 20 }, ids: ["a"] },
+      { where: { field: "score", op: "lte", value: 20 }, ids: ["a", "b"] },
+      { where: { field: "score", op: "eq", value: "20" }, ids: ["c"] },
+      { where: { field: "active", op: "eq", value: true }, ids: ["a", "c"] },
+      { where: { field: "nullable", op: "eq", value: null }, ids: ["a"] },
+      { where: { field: 'quote".dot[0]', op: "eq", value: "matched" }, ids: ["a"] },
+      { where: { field: "attack", op: "eq", value: "' OR 1=1 --" }, ids: ["a"] },
+      { where: { field: "unicode", op: "lt", value: "\uE000" }, ids: ["a"] },
+      { where: { field: "owner", op: "in", values: ["u1", "u3"] }, ids: ["a", "c", "d"] },
       {
-        op: "and",
-        operands: [
-          { field: "owner", op: "eq", value: "u1" },
-          {
-            op: "or",
-            operands: [
-              { field: "score", op: "gte", value: 30 },
-              { field: "nullable", op: "eq", value: null },
-            ],
-          },
-        ],
+        where: { op: "not", operand: { field: "owner", op: "in", values: ["u2"] } },
+        ids: ["a", "c", "d"],
       },
-      { field: "id", op: "gte", value: "c" },
-      { field: "createdAt", op: "eq", value: TS },
-      { field: "createdAt", op: "eq", value: null },
+      { where: { field: "owner", op: "contains", value: "u" }, ids: ["a", "b", "c", "d"] },
+      { where: { field: "owner", op: "startsWith", value: "u1" }, ids: ["a", "c", "d"] },
+      { where: { field: "owner", op: "endsWith", value: "" }, ids: ["a", "b", "c", "d"] },
+      { where: { field: "score", op: "contains", value: "" }, ids: ["c"] },
+      { where: { field: "nullable", op: "startsWith", value: "" }, ids: ["c"] },
+      { where: { field: "missing", op: "endsWith", value: "" }, ids: [] },
+      { where: { field: "missing", op: "eq", value: "anything" }, ids: [] },
+      {
+        where: {
+          op: "not",
+          operand: { field: "missing", op: "eq", value: "anything" },
+        },
+        ids: ["a", "b", "c", "d"],
+      },
+      { where: { field: "nullable", op: "present" }, ids: ["a", "c"] },
+      {
+        where: { op: "not", operand: { field: "nullable", op: "present" } },
+        ids: ["b", "d"],
+      },
+      { where: { field: "nested", op: "present" }, ids: ["a"] },
+      {
+        where: {
+          op: "and",
+          operands: [
+            { field: "owner", op: "eq", value: "u1" },
+            {
+              op: "or",
+              operands: [
+                { field: "score", op: "gte", value: 30 },
+                { field: "nullable", op: "eq", value: null },
+              ],
+            },
+          ],
+        },
+        ids: ["a", "d"],
+      },
+      { where: { field: "id", op: "gte", value: "c" }, ids: ["c", "d"] },
+      { where: { field: "createdAt", op: "eq", value: TS }, ids: ["a", "b", "c", "d"] },
+      { where: { field: "createdAt", op: "eq", value: null }, ids: [] },
     ];
 
-    for (const where of queries) {
-      const expected = await memory.list("posts", { where, limit: 2 });
-      const actual = await sqlite.list("posts", { where, limit: 2 });
-      expect(actual).toEqual(expected);
-      if (actual.nextCursor !== undefined) {
-        await expect(
-          sqlite.list("posts", { where, limit: 2, cursor: actual.nextCursor }),
-        ).resolves.toEqual(
-          await memory.list("posts", {
-            where,
-            limit: 2,
-            cursor: expected.nextCursor,
-          }),
-        );
+    for (const { where, ids } of cases) {
+      const first = await sqlite.list("posts", { where, limit: 2 });
+      expect(first.items.map(({ id }) => id)).toEqual(ids.slice(0, 2));
+      if (ids.length > 2) {
+        expect(first.nextCursor).toBeDefined();
+        const second = await sqlite.list("posts", {
+          where,
+          limit: 2,
+          cursor: first.nextCursor,
+        });
+        expect(second.items.map(({ id }) => id)).toEqual(ids.slice(2));
+        expect(second.nextCursor).toBeUndefined();
+      } else {
+        expect(first.nextCursor).toBeUndefined();
       }
     }
 

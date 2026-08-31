@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { ListAllLimitError, createTakibi, fullAccess, grant, none } from "../src/index";
 import { LIST_ALL_PAGE_SIZE_DEFAULT, LIST_PAGE_MAX } from "../src/list-all";
 
@@ -16,14 +17,15 @@ function resolveTestContext({ request }: { request: Request }): AppCtx {
 
 const Post = z.object({ title: z.string(), published: z.boolean().default(true) });
 
-function memoryHandler(accessPolicy = fullAccess) {
-  return createTakibi()({ resolve: resolveTestContext })
-    .defineCollections({ posts: { schema: Post, accessPolicy } }, { memory: true })
+function sqliteHandler(accessPolicy = fullAccess) {
+  const production = createTakibi()({ resolve: resolveTestContext })
+    .defineCollections({ posts: { schema: Post, accessPolicy } })
     .actions({});
+  return withSqliteTestBackend(production);
 }
 
 function clientFor(
-  handler: ReturnType<typeof memoryHandler>,
+  handler: ReturnType<typeof sqliteHandler>,
   options: Parameters<typeof createClient>[1] = {},
 ) {
   return createClient<typeof handler>("http://takibi.test", {
@@ -47,7 +49,7 @@ async function seedPosts(
 }
 
 test("listAll follows list cursors and returns every matching document", async () => {
-  const client = clientFor(memoryHandler());
+  const client = clientFor(sqliteHandler());
   await seedPosts(client, ["a", "b", "c", "d", "e"]);
 
   const listed = await client.posts.listAll({ pageSize: 2 });
@@ -57,7 +59,7 @@ test("listAll follows list cursors and returns every matching document", async (
 });
 
 test("listAll forwards where to every page", async () => {
-  const client = clientFor(memoryHandler());
+  const client = clientFor(sqliteHandler());
   await seedPosts(client, ["keep", "drop", "keep"]);
   await client.posts.update("p02", { published: false });
 
@@ -71,7 +73,7 @@ test("listAll forwards where to every page", async () => {
 });
 
 test("listAll fails with LIST_ALL_LIMIT when matching documents remain", async () => {
-  const client = clientFor(memoryHandler(), { listAll: { maxItems: 3, pageSize: 2 } });
+  const client = clientFor(sqliteHandler(), { listAll: { maxItems: 3, pageSize: 2 } });
   await seedPosts(client, ["a", "b", "c", "d"]);
 
   const listed = await client.posts.listAll();
@@ -86,7 +88,7 @@ test("listAll fails with LIST_ALL_LIMIT when matching documents remain", async (
 });
 
 test("listAll succeeds when the collection fits exactly in maxItems", async () => {
-  const client = clientFor(memoryHandler(), { listAll: { maxItems: 3, pageSize: 2 } });
+  const client = clientFor(sqliteHandler(), { listAll: { maxItems: 3, pageSize: 2 } });
   await seedPosts(client, ["a", "b", "c"]);
 
   const listed = await client.posts.listAll();
@@ -96,14 +98,14 @@ test("listAll succeeds when the collection fits exactly in maxItems", async () =
 });
 
 test("listAll uses the same list policy on every page", async () => {
-  const denied = clientFor(memoryHandler(none));
+  const denied = clientFor(sqliteHandler(none));
   const listed = await denied.posts.listAll();
   expect(listed).toMatchObject({
     ok: false,
     error: { kind: "operation", code: "FORBIDDEN", status: 403 },
   });
 
-  const getOnly = clientFor(memoryHandler(grant("get")));
+  const getOnly = clientFor(sqliteHandler(grant("get")));
   const stillDenied = await getOnly.posts.listAll();
   expect(stillDenied).toMatchObject({
     ok: false,
@@ -113,11 +115,10 @@ test("listAll uses the same list policy on every page", async () => {
 
 test("trusted $collections.listAll follows cursors and throws ListAllLimitError", async () => {
   const context = createTakibi()({ resolve: resolveTestContext });
-  const app = context.defineCollections(
-    { posts: { schema: Post, accessPolicy: fullAccess } },
-    { memory: true },
-  );
-  const handler = app.actions({
+  const app = context.defineCollections({
+    posts: { schema: Post, accessPolicy: fullAccess },
+  });
+  const production = app.actions({
     posts: app.posts.actions((defineAction) => ({
       titles: defineAction()
         .detached()
@@ -132,6 +133,7 @@ test("trusted $collections.listAll follows cursors and throws ListAllLimitError"
         .handler(async ({ $collection }) => $collection.listAll({ pageSize: 2, maxItems: 3 })),
     })),
   });
+  const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://takibi.test", {
     headers: () => ({ "x-test-tenant": "tenant-a" }),
     fetch: (input, init) => handler.request(input, init),
@@ -149,7 +151,7 @@ test("trusted $collections.listAll follows cursors and throws ListAllLimitError"
 });
 
 test("createClient rejects invalid listAll caps", () => {
-  const handler = memoryHandler();
+  const handler = sqliteHandler();
   expect(() =>
     createClient<typeof handler>("http://takibi.test", { listAll: { pageSize: 0 } }),
   ).toThrow(TypeError);
@@ -164,7 +166,7 @@ test("createClient rejects invalid listAll caps", () => {
 });
 
 test("listAll call-site caps cannot exceed createClient caps", async () => {
-  const client = clientFor(memoryHandler(), { listAll: { maxItems: 5, pageSize: 10 } });
+  const client = clientFor(sqliteHandler(), { listAll: { maxItems: 5, pageSize: 10 } });
   expect(() => client.posts.listAll({ maxItems: 6 })).toThrow(TypeError);
   expect(() => client.posts.listAll({ pageSize: 11 })).toThrow(TypeError);
   expect(() => client.posts.listAll({ pageSize: LIST_ALL_PAGE_SIZE_DEFAULT })).toThrow(TypeError);

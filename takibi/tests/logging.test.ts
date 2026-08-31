@@ -1,5 +1,6 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import {
   createPrettyConsoleLogger,
   createTakibi,
@@ -8,7 +9,7 @@ import {
   type Logger,
 } from "../src/index";
 import type { WireRequest } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "./sqlite";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 
 const Post = z.object({ title: z.string() });
 
@@ -20,7 +21,10 @@ function capturingLogger(events: LogEvent[]): Logger {
   };
 }
 
-function createMemoryHandler(events: LogEvent[], logLevel: "debug" | "info" | "error" = "debug") {
+function createSqliteTestHandler(
+  events: LogEvent[],
+  logLevel: "debug" | "info" | "error" = "debug",
+) {
   const base = createTakibi()({
     resolve: ({ request }) => ({
       tenantId: "tenant-a",
@@ -28,20 +32,17 @@ function createMemoryHandler(events: LogEvent[], logLevel: "debug" | "info" | "e
     }),
     logger: capturingLogger(events),
     logLevel,
-  }).defineCollections(
-    {
-      posts: {
-        schema: Post,
-        accessPolicy: fullAccess,
-      },
+  }).defineCollections({
+    posts: {
+      schema: Post,
+      accessPolicy: fullAccess,
     },
-    { memory: true },
-  );
+  });
   const ping = base
     .defineAction()
     .policy(fullAccess)
     .handler(() => ({ pong: true }));
-  return base.actions({ $: { ping } });
+  return withSqliteTestBackend(base.actions({ $: { ping } }));
 }
 
 function fakeState(storage: DurableObjectStorage): DurableObjectState {
@@ -56,7 +57,7 @@ function fakeState(storage: DurableObjectStorage): DurableObjectState {
 
 test("custom logger receives filtered stage events without request data", async () => {
   const events: LogEvent[] = [];
-  const handler = createMemoryHandler(events);
+  const handler = createSqliteTestHandler(events);
   const response = await handler.request("https://takibi.test/posts/p1", {
     method: "POST",
     headers: {
@@ -97,7 +98,7 @@ test("custom logger receives filtered stage events without request data", async 
 
 test("errors match the public failure and logger throws never change results", async () => {
   const events: LogEvent[] = [];
-  const handler = createMemoryHandler(events, "error");
+  const handler = createSqliteTestHandler(events, "error");
   const missing = await handler.request("https://takibi.test/posts/missing");
 
   expect(missing.status).toBe(404);
@@ -117,7 +118,7 @@ test("errors match the public failure and logger throws never change results", a
     }),
   ]);
 
-  const throwing = createTakibi()({
+  const throwingProduction = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
     logger: {
       log() {
@@ -126,8 +127,9 @@ test("errors match the public failure and logger throws never change results", a
     },
     logLevel: "debug",
   })
-    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const throwing = withSqliteTestBackend(throwingProduction);
   await expect(
     throwing.request("https://takibi.test/posts/p1", {
       method: "POST",
@@ -139,7 +141,7 @@ test("errors match the public failure and logger throws never change results", a
 
 test("failure logging emits one error before the request completion", async () => {
   const events: LogEvent[] = [];
-  const handler = createMemoryHandler(events, "info");
+  const handler = createSqliteTestHandler(events, "info");
 
   const response = await handler.request("https://takibi.test/posts/missing");
   const body = (await response.json()) as {
@@ -170,7 +172,7 @@ test("failure logging emits one error before the request completion", async () =
 
 test("decode failures log the error message and request path", async () => {
   const events: LogEvent[] = [];
-  const handler = createMemoryHandler(events, "error");
+  const handler = createSqliteTestHandler(events, "error");
   const result = await handler.handle(
     new Request("https://takibi.test/posts", {
       method: "POST",
@@ -202,7 +204,7 @@ test("decode failures log the error message and request path", async () => {
 });
 
 test("logger mutation cannot change an in-flight query", async () => {
-  const handler = createTakibi()({
+  const production = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),
     logger: {
       log(event) {
@@ -213,16 +215,14 @@ test("logger mutation cannot change an in-flight query", async () => {
     },
     logLevel: "debug",
   })
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({ title: z.string(), ownerId: z.string() }),
-          accessPolicy: fullAccess,
-        },
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string(), ownerId: z.string() }),
+        accessPolicy: fullAccess,
       },
-      { memory: true },
-    )
+    })
     .actions({});
+  const handler = withSqliteTestBackend(production);
   for (const [id, ownerId] of [
     ["p1", "u1"],
     ["p2", "u2"],
@@ -242,7 +242,7 @@ test("logger mutation cannot change an in-flight query", async () => {
   });
 });
 
-test("logging options inherit and override by field through collections and with", async () => {
+test("logging options inherit and override through the SQLite test backend", async () => {
   const baseEvents: LogEvent[] = [];
   const replacementEvents: LogEvent[] = [];
   const builder = createTakibi()({
@@ -250,36 +250,23 @@ test("logging options inherit and override by field through collections and with
     logger: capturingLogger(baseEvents),
     logLevel: "debug",
   });
-  const disabled = builder
-    .defineCollections(
-      { posts: { schema: Post, accessPolicy: fullAccess } },
-      { memory: true, logger: false },
-    )
+  const production = builder
+    .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
+  const disabled = withSqliteTestBackend(production, { logger: false });
   await disabled.request("https://takibi.test/posts/missing");
   expect(baseEvents).toEqual([]);
 
-  const narrowed = builder
-    .defineCollections(
-      { posts: { schema: Post, accessPolicy: fullAccess } },
-      { memory: true, logLevel: "error" },
-    )
-    .actions({});
+  const narrowed = withSqliteTestBackend(production, { logLevel: "error" });
   await narrowed.request("https://takibi.test/posts/missing");
   expect(baseEvents).toEqual([expect.objectContaining({ event: "takibi.error" })]);
 
   baseEvents.length = 0;
-  const production = builder
-    .defineCollections({
-      posts: { schema: Post, accessPolicy: fullAccess },
-    })
-    .actions({});
-  const inherited = production.with({ memory: true });
+  const inherited = withSqliteTestBackend(production);
   await inherited.request("https://takibi.test/posts/missing");
   expect(baseEvents.some(({ event }) => event === "takibi.resolve")).toBe(true);
 
-  const replaced = production.with({
-    memory: true,
+  const replaced = withSqliteTestBackend(production, {
     logger: capturingLogger(replacementEvents),
     logLevel: "info",
   });
@@ -301,20 +288,22 @@ test("built-in console modes keep structured and pretty output distinct", async 
   console.warn = (value) => calls.push({ method: "warn", value });
   console.error = (value) => calls.push({ method: "error", value });
   try {
-    const silent = createTakibi()({
+    const silentProduction = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
     })
-      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
       .actions({});
+    const silent = withSqliteTestBackend(silentProduction);
     await silent.request("https://takibi.test/posts/missing");
     expect(calls).toEqual([]);
 
-    const structured = createTakibi()({
+    const structuredProduction = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logger: true,
     })
-      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
       .actions({});
+    const structured = withSqliteTestBackend(structuredProduction);
     await structured.request("https://takibi.test/posts/missing");
     expect(calls.some(({ method, value }) => method === "info" && typeof value === "object")).toBe(
       true,
@@ -322,12 +311,13 @@ test("built-in console modes keep structured and pretty output distinct", async 
     expect(calls.some(({ method }) => method === "debug")).toBe(false);
 
     calls.length = 0;
-    const levelOnly = createTakibi()({
+    const levelOnlyProduction = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logLevel: "debug",
     })
-      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } }, { memory: true })
+      .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
       .actions({});
+    const levelOnly = withSqliteTestBackend(levelOnlyProduction);
     await levelOnly.request("https://takibi.test/posts/missing");
     expect(calls.some(({ method, value }) => method === "debug" && typeof value === "object")).toBe(
       true,

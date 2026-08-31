@@ -1,4 +1,4 @@
-import { createSqliteDurableObjectStorage } from "../sqlite";
+import { createSqliteDurableObjectStorage } from "../../src/testing/sqlite-storage.server";
 
 export function createFailingDocumentWriteStorage(): DurableObjectStorage {
   const storage = createSqliteDurableObjectStorage();

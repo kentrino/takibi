@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { createTakibi, fullAccess, grant, none, UnauthorizedError } from "../src/index";
 
 type User = { id: string; role: "staff" | "member" };
@@ -50,7 +51,7 @@ function createApp() {
       b1: { title: "existing", status: "pending" as const },
     }),
   });
-  const app = context.defineCollections({ bookings }, { memory: true });
+  const app = context.defineCollections({ bookings });
 
   const bookingsActions = app.bookings.actions((defineAction) => ({
     submit: defineAction()
@@ -83,7 +84,7 @@ function createApp() {
       .handler(({ ctx }) => ({ role: ctx.user.role })),
   }));
 
-  const handler = app.actions({ bookings: bookingsActions });
+  const handler = withSqliteTestBackend(app.actions({ bookings: bookingsActions }));
   return { handler };
 }
 

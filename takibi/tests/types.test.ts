@@ -2,6 +2,7 @@ import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient } from "@takibi/takibi/client";
+import { type SqliteTestBackendOptions, withSqliteTestBackend } from "@takibi/takibi/testing";
 import { and, createTakibi, fullAccess, none, UnauthorizedError } from "../src/index";
 import type { RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
@@ -43,7 +44,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
       accessPolicy: fullAccess,
     },
   };
-  const handler = context.defineCollections(collections, { memory: true }).actions({});
+  const handler = context.defineCollections(collections).actions({});
   const durableHandler = context.defineCollections(collections).actions({});
   const client = createClient<typeof handler>("http://fire.test");
 
@@ -75,7 +76,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
   expectTypeOf(handler).not.toHaveProperty("$collections");
   expectTypeOf(durableHandler).not.toHaveProperty("$collections");
   expectTypeOf(handler).not.toHaveProperty("storage");
-  expectTypeOf<CollectionsOptions>().toHaveProperty("memory");
+  expectTypeOf<CollectionsOptions>().not.toHaveProperty("memory");
   expectTypeOf<CollectionsOptions>().not.toHaveProperty("tracer");
 
   type DurableInstance = InstanceType<typeof handler.DurableObject>;
@@ -215,7 +216,7 @@ test("union collection add/set accept each variant and narrow the return", () =>
     schema: z.object({ title: z.string(), published: z.boolean().default(false) }),
     accessPolicy: fullAccess,
   });
-  const app = context.defineCollections({ tickets, posts }, { memory: true });
+  const app = context.defineCollections({ tickets, posts });
   const ticketsActions = app.tickets.actions((defineAction) => ({
     hold: defineAction()
       .detached()
@@ -459,19 +460,16 @@ test("collection indexes accept required scalar tuples and reach ClientOf", () =
     },
   });
   const handler = context
-    .defineCollections(
-      {
-        posts,
-        notes: {
-          schema: z.object({ ownerId: z.string(), title: z.string() }),
-          accessPolicy: fullAccess,
-          indexes: {
-            byOwner: ["ownerId", "createdAt"],
-          },
+    .defineCollections({
+      posts,
+      notes: {
+        schema: z.object({ ownerId: z.string(), title: z.string() }),
+        accessPolicy: fullAccess,
+        indexes: {
+          byOwner: ["ownerId", "createdAt"],
         },
       },
-      { memory: true },
-    )
+    })
     .actions({});
   const client = createClient<typeof handler>("http://fire.test");
   type Client = ClientOf<typeof handler>;
@@ -592,7 +590,7 @@ test("collection migrations accept unknown intermediate data and constrain the f
   });
 
   const checkMarkerPrivacy = () => {
-    const handler = context.defineCollections({ migrated }, { memory: true }).actions({});
+    const handler = context.defineCollections({ migrated }).actions({});
     const client = createClient<typeof handler>("http://fire.test");
     // @ts-expect-error the internal marker is not accepted as document input
     void client.migrated.add({ title: "x", published: true, $schemaVersion: 4 });
@@ -621,7 +619,7 @@ test("document and detached action handler args and client signatures are inferr
     schema: z.object({ title: z.string() }),
     accessPolicy: fullAccess,
   });
-  const app = context.defineCollections({ posts }, { memory: true });
+  const app = context.defineCollections({ posts });
   const postsActions = app.posts.actions((defineAction) => ({
     transformed: defineAction()
       .input(z.string().transform((value) => value.length))
@@ -726,7 +724,7 @@ test("action maps attach methods per collection scope and enforce the scope bran
     schema: z.object({ title: z.string() }),
     accessPolicy: fullAccess,
   });
-  const app = context.defineCollections({ notes, posts }, { memory: true });
+  const app = context.defineCollections({ notes, posts });
   const postsActions = app.posts.actions((defineAction) => ({
     duplicate: defineAction()
       .policy(fullAccess)
@@ -789,13 +787,10 @@ test("root actions infer all collections and appear flat on the client", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
-  const app = context.defineCollections(
-    {
-      posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
-      notes: { schema: z.object({ body: z.string() }), accessPolicy: fullAccess },
-    },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+    notes: { schema: z.object({ body: z.string() }), accessPolicy: fullAccess },
+  });
   const exportAll = app
     .defineAction()
     .policy(fullAccess)
@@ -819,12 +814,9 @@ test("atomic actions preserve builder, handler, and client inference at every st
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const Input = z.object({ title: z.string() });
-  const app = context.defineCollections(
-    {
-      posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
-    },
-    { memory: true },
-  );
+  const app = context.defineCollections({
+    posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+  });
   const postsActions = app.posts.actions((defineAction) => ({
     duplicate: defineAction()
       .atomic()
@@ -1154,15 +1146,12 @@ test("inferred document uses collection names from the handler", () => {
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const handler = context
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({ title: z.string() }),
-          accessPolicy: fullAccess,
-        },
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
       },
-      { memory: true },
-    )
+    })
     .actions({});
   type Document = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
@@ -1176,15 +1165,12 @@ test("JsonValue includes arrays and inferred document ids are unconstrained stri
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const handler = context
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({ title: z.string() }),
-          accessPolicy: fullAccess,
-        },
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
       },
-      { memory: true },
-    )
+    })
     .actions({});
   type Document = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
   expectTypeOf<Document["id"]>().toEqualTypeOf<string>();
@@ -1372,15 +1358,12 @@ test("ClientOf matches createClient and rejects collection maps", () => {
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const handler = context
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({ title: z.string() }),
-          accessPolicy: fullAccess,
-        },
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
       },
-      { memory: true },
-    )
+    })
     .actions({});
 
   type FromAlias = ClientOf<typeof handler>;
@@ -1400,15 +1383,12 @@ test("list options can be projected from a public collection method", () => {
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
   const handler = context
-    .defineCollections(
-      {
-        posts: {
-          schema: z.object({ title: z.string(), published: z.boolean() }),
-          accessPolicy: fullAccess,
-        },
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string(), published: z.boolean() }),
+        accessPolicy: fullAccess,
       },
-      { memory: true },
-    )
+    })
     .actions({});
   const client = createClient<typeof handler>("http://fire.test");
   type PostListOptions = NonNullable<Parameters<typeof client.posts.list>[0]>;
@@ -1435,7 +1415,7 @@ test("list options can be projected from a public collection method", () => {
   void byMissing;
 });
 
-test("with({ memory: true }) keeps ClientOf collection action names", () => {
+test("withSqliteTestBackend keeps ClientOf collection action names", () => {
   const context = createContext({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
   });
@@ -1450,26 +1430,24 @@ test("with({ memory: true }) keeps ClientOf collection action names", () => {
       .handler(() => ({ copied: true as const })),
   }));
   const handler = app.actions({ posts: postsActions });
-  const forked = handler.with({ memory: true });
-  const replaced = handler.with({
-    memory: true,
+  const forked = withSqliteTestBackend(handler);
+  const replaced = withSqliteTestBackend(handler, {
     resolve: (): AppCtx => ({ tenantId: "test", user: { id: "u1", role: "member" } }),
   });
 
   expectTypeOf<ClientOf<typeof forked>>().toEqualTypeOf<ClientOf<typeof handler>>();
   expectTypeOf<ClientOf<typeof replaced>>().toEqualTypeOf<ClientOf<typeof handler>>();
   expectTypeOf<ClientOf<typeof forked>["posts"]>().toHaveProperty("duplicate");
-  expectTypeOf<ClientOf<ReturnType<typeof handler.with>>["posts"]>().toHaveProperty("duplicate");
 
-  handler.with({
-    memory: true,
+  const invalidOptions: SqliteTestBackendOptions<
+    AppCtx,
+    Record<string, never>,
+    Record<string, never>
+  > = {
     // @ts-expect-error resolve must return the original execution context
     resolve: () => ({ tenantId: "acme" }),
-  });
-  // @ts-expect-error memory must be the literal true
-  handler.with({ memory: false });
-  // @ts-expect-error memory is required
-  handler.with({ resolve: (): AppCtx => ({ tenantId: "acme", user: null }) });
+  };
+  void invalidOptions;
 });
 
 test("services factory return type reaches action handler args", () => {
@@ -1527,31 +1505,19 @@ test("unconfigured services reject property access", () => {
   void check;
 });
 
-test("non-empty services require a memory services value", () => {
+test("non-empty services require a SQLite test backend services value", () => {
   const takibi = createTakibi()({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
     services: () => ({ flag: "x" }),
   });
-  const checkDefine = () => {
-    takibi.defineCollections(
-      { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-      // @ts-expect-error memory mode requires services when TServices is non-empty
-      { memory: true },
-    );
-  };
   const app = takibi.defineCollections({
     posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
   });
   const handler = app.actions({});
-  const checkWith = () => {
-    // @ts-expect-error .with memory requires services when TServices is non-empty
-    handler.with({ memory: true });
+  const checkBackend = () => {
+    // @ts-expect-error SQLite test backend requires services when TServices is non-empty
+    withSqliteTestBackend(handler);
   };
-  void checkDefine;
-  void checkWith;
-  handler.with({ memory: true, services: { flag: "from-test" } });
-  takibi.defineCollections(
-    { posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess } },
-    { memory: true, services: { flag: "from-test" } },
-  );
+  void checkBackend;
+  withSqliteTestBackend(handler, { services: { flag: "from-test" } });
 });

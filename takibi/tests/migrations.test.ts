@@ -2,10 +2,10 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";
 import { createMigratingStorage } from "../src/migrations";
-import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { AccessContext, CollectionsDef } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "./sqlite";
 
 const CREATED_AT = "2026-08-01T00:00:00.000Z";
 const UPDATED_AT = "2026-08-02T00:00:00.000Z";
@@ -466,9 +466,9 @@ test("collection registration rejects migration bases that are not non-negative 
   }
 });
 
-test("memory and Durable Object storage share lazy migration semantics", async () => {
+test("SQLite storage applies lazy migration semantics", async () => {
   const durableBacking = createInspectableDurableObjectStorage();
-  const rawDrivers = [createMemoryStorage(), createDurableObjectStorage(durableBacking.storage)];
+  const raw = createDurableObjectStorage(durableBacking.storage);
   const definition = {
     schema: z.object({ title: z.string(), published: z.boolean() }),
     migrations: {
@@ -482,30 +482,27 @@ test("memory and Durable Object storage share lazy migration semantics", async (
     accessPolicy: fullAccess,
   };
 
-  for (const raw of rawDrivers) {
-    await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
-    const storage = createMigratingStorage({ posts: definition }, raw);
+  await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
+  const storage = createMigratingStorage({ posts: definition }, raw);
 
-    await expect(storage.get("posts", "p1")).resolves.toEqual({
-      id: "p1",
-      title: "old",
-      published: true,
-      createdAt: CREATED_AT,
-      updatedAt: UPDATED_AT,
-      rev: 1,
-    });
-    await expect(raw.get("posts", "p1")).resolves.toMatchObject({
-      title: "old",
-      published: true,
-      $schemaVersion: 1,
-    });
-  }
+  await expect(storage.get("posts", "p1")).resolves.toEqual({
+    id: "p1",
+    title: "old",
+    published: true,
+    createdAt: CREATED_AT,
+    updatedAt: UPDATED_AT,
+    rev: 1,
+  });
+  await expect(raw.get("posts", "p1")).resolves.toMatchObject({
+    title: "old",
+    published: true,
+    $schemaVersion: 1,
+  });
 });
 
 test("indexed backfill migrates existing documents before the index is ready", async () => {
   const { compileIndexRegistry } = await import("../src/indexes");
-  const { backfillIndexedCollections, reconcileCollectionIndexes } =
-    await import("../src/index-reconcile");
+  const { reconcileCollectionIndexes } = await import("../src/index-reconcile");
 
   const definition = {
     schema: z.object({ ownerId: z.string(), title: z.string() }),
@@ -522,18 +519,24 @@ test("indexed backfill migrates existing documents before the index is ready", a
   };
   const collections = { posts: definition };
   const registry = compileIndexRegistry(collections);
-  const memory = createMemoryStorage(registry);
-  await memory.put(
+  const backing = createSqliteDurableObjectStorage();
+  const durable = createDurableObjectStorage(backing, registry);
+  await durable.put(
     "posts",
     legacy("p1", { title: "old" }) as import("../src/types").StoredDocument,
   );
-  const migrating = createMigratingStorage(collections as unknown as CollectionsDef, memory);
-  await backfillIndexedCollections(collections, migrating);
-  await expect(memory.get("posts", "p1")).resolves.toMatchObject({
+  const migrating = createMigratingStorage(collections as unknown as CollectionsDef, durable);
+  await reconcileCollectionIndexes({
+    sql: backing.sql,
+    collections,
+    storage: migrating,
+    registry,
+  });
+  await expect(durable.get("posts", "p1")).resolves.toMatchObject({
     ownerId: "migrated",
     $schemaVersion: 1,
   });
-  const page = await memory.list("posts", {
+  const page = await durable.list("posts", {
     index: "byOwner",
     where: { field: "ownerId", op: "eq", value: "migrated" },
   });
@@ -551,22 +554,23 @@ test("indexed backfill migrates existing documents before the index is ready", a
       },
     },
   };
-  const backing = createSqliteDurableObjectStorage();
-  const durable = createDurableObjectStorage(backing, compileIndexRegistry(failing));
-  await durable.put(
+  const failingBacking = createSqliteDurableObjectStorage();
+  const failingDurable = createDurableObjectStorage(failingBacking, compileIndexRegistry(failing));
+  await failingDurable.put(
     "posts",
     legacy("p2", { title: "old" }) as import("../src/types").StoredDocument,
   );
   await expect(
     reconcileCollectionIndexes({
-      sql: backing.sql,
+      sql: failingBacking.sql,
       collections: failing,
-      storage: createMigratingStorage(failing as unknown as CollectionsDef, durable),
+      storage: createMigratingStorage(failing as unknown as CollectionsDef, failingDurable),
       registry: compileIndexRegistry(failing),
     }),
   ).rejects.toThrow("migration-failed");
   expect(
-    backing.sql.exec<{ count: number }>("SELECT count(*) AS count FROM takibi_index_catalog").one()
-      .count,
+    failingBacking.sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_index_catalog")
+      .one().count,
   ).toBe(0);
 });

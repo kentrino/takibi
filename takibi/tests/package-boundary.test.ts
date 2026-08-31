@@ -57,6 +57,18 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api-logs"]?.optional).toBe(true);
 });
 
+test("core package exposes the Node-only testing subpath in source and published builds", () => {
+  const core = readManifest(join(import.meta.dirname, "../package.json"));
+
+  expect(core.exports?.["./testing"]).toBe("./src/testing.server.ts");
+  expect(core.publishConfig?.exports).toMatchObject({
+    "./testing": {
+      types: "./dist/testing.d.mts",
+      import: "./dist/testing.mjs",
+    },
+  });
+});
+
 test("instrumentation exports the stable Takibi telemetry vocabulary", () => {
   expect(TAKIBI_SPAN.wire).toBe("takibi.wire");
   expect(TAKIBI_ATTR.collection.name).toBe("takibi.collection.name");

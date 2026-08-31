@@ -1,9 +1,10 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
-import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
+import { createDurableObjectStorage } from "../src/storage";
+import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
-import { createSqliteDurableObjectStorage } from "./sqlite";
+import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 
 const TS = "2026-08-09T14:12:00.000Z";
 
@@ -69,6 +70,13 @@ function createVersionOneStorage(
   return storage;
 }
 
+test("Node SQLite satisfies the shared storage contract", async () => {
+  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  await expect(observeStorageContract(storage)).resolves.toEqual(
+    expectedStorageContractObservation,
+  );
+});
+
 test("generateUlid produces valid 26-char Crockford Base32", () => {
   resetUlidStateForTests();
   const id = generateUlid();
@@ -85,8 +93,7 @@ test("monotonic ULID: same-ms generation order matches lexicographic order", () 
   expect(sorted).toEqual(ids);
 });
 
-test("memory and DO SQLite pagination agree on order, boundary, and nextCursor", async () => {
-  const memory = createMemoryStorage();
+test("SQLite pagination preserves order, boundary, and nextCursor", async () => {
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
 
   const docs = [
@@ -98,7 +105,6 @@ test("memory and DO SQLite pagination agree on order, boundary, and nextCursor",
   ];
 
   for (const doc of docs) {
-    await memory.put("posts", doc);
     await durable.put("posts", doc);
   }
 
@@ -107,44 +113,35 @@ test("memory and DO SQLite pagination agree on order, boundary, and nextCursor",
   expect(await durable.get("posts", "a")).toEqual(meta({ id: "a", title: "A" }));
   expect(await durable.get("comments", "a")).toEqual(meta({ id: "a", body: "x" }));
 
-  const page1Memory = await memory.list("posts", { limit: 2 });
-  const page1Durable = await durable.list("posts", { limit: 2 });
-  expect(page1Memory).toEqual(page1Durable);
-  expect(page1Memory.items.map((d) => d.id)).toEqual(["a", "b"]);
-  expect(decodeCursor(page1Memory.nextCursor!)).toEqual({
+  const page1 = await durable.list("posts", { limit: 2 });
+  expect(page1.items.map((d) => d.id)).toEqual(["a", "b"]);
+  expect(decodeCursor(page1.nextCursor!)).toEqual({
     v: 2,
     collection: "posts",
     where: null,
     id: "b",
   });
 
-  const page2Memory = await memory.list("posts", { limit: 2, cursor: page1Memory.nextCursor });
-  const page2Durable = await durable.list("posts", { limit: 2, cursor: page1Durable.nextCursor });
-  expect(page2Memory).toEqual(page2Durable);
-  expect(page2Memory.items.map((d) => d.id)).toEqual(["c", "d"]);
-  expect(decodeCursor(page2Memory.nextCursor!)).toMatchObject({ id: "d" });
+  const page2 = await durable.list("posts", { limit: 2, cursor: page1.nextCursor });
+  expect(page2.items.map((d) => d.id)).toEqual(["c", "d"]);
+  expect(decodeCursor(page2.nextCursor!)).toMatchObject({ id: "d" });
 
-  const page3Memory = await memory.list("posts", { limit: 2, cursor: page2Memory.nextCursor });
-  const page3Durable = await durable.list("posts", { limit: 2, cursor: page2Durable.nextCursor });
-  expect(page3Memory).toEqual(page3Durable);
-  expect(page3Memory.items.map((d) => d.id)).toEqual(["e"]);
-  expect(page3Memory.nextCursor).toBeUndefined();
+  const page3 = await durable.list("posts", { limit: 2, cursor: page2.nextCursor });
+  expect(page3.items.map((d) => d.id)).toEqual(["e"]);
+  expect(page3.nextCursor).toBeUndefined();
 
   // Missing cursor seeks past that key (startAfter), not rewind to the start.
   const missingCursor = encodeCursor({
-    ...decodeCursor(page1Memory.nextCursor!),
+    ...decodeCursor(page1.nextCursor!),
     id: "a0",
   });
-  const afterMissingMemory = await memory.list("posts", { limit: 10, cursor: missingCursor });
-  const afterMissingDurable = await durable.list("posts", { limit: 10, cursor: missingCursor });
-  expect(afterMissingMemory).toEqual(afterMissingDurable);
-  expect(afterMissingMemory.items.map((d) => d.id)).toEqual(["b", "c", "d", "e"]);
+  const afterMissing = await durable.list("posts", { limit: 10, cursor: missingCursor });
+  expect(afterMissing.items.map((d) => d.id)).toEqual(["b", "c", "d", "e"]);
 
-  await expect(memory.list("posts", { cursor: "b" })).rejects.toBeInstanceOf(BadRequestError);
+  await expect(durable.list("posts", { cursor: "b" })).rejects.toBeInstanceOf(BadRequestError);
 });
 
-test("memory and DO filter before limit with query-bound cursors", async () => {
-  const memory = createMemoryStorage();
+test("SQLite filters before limit with query-bound cursors", async () => {
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
   const docs = [
     meta({ id: "a", ownerId: "u2", score: 30 }),
@@ -154,48 +151,38 @@ test("memory and DO filter before limit with query-bound cursors", async () => {
     meta({ id: "e", ownerId: "u1", score: 30 }),
   ];
   for (const doc of docs) {
-    await memory.put("posts", doc);
     await durable.put("posts", doc);
   }
 
   const where: QueryExpr = { field: "ownerId", op: "eq", value: "u1" };
-  const firstMemory = await memory.list("posts", { limit: 2, where });
-  const firstDurable = await durable.list("posts", { limit: 2, where });
-  expect(firstMemory).toEqual(firstDurable);
-  expect(firstMemory.items.map((document) => document.id)).toEqual(["b", "d"]);
-  expect(decodeCursor(firstMemory.nextCursor!)).toEqual({
+  const first = await durable.list("posts", { limit: 2, where });
+  expect(first.items.map((document) => document.id)).toEqual(["b", "d"]);
+  expect(decodeCursor(first.nextCursor!)).toEqual({
     v: 2,
     collection: "posts",
     where,
     id: "d",
   });
 
-  const secondMemory = await memory.list("posts", {
+  const second = await durable.list("posts", {
     limit: 2,
     where,
-    cursor: firstMemory.nextCursor,
+    cursor: first.nextCursor,
   });
-  const secondDurable = await durable.list("posts", {
-    limit: 2,
-    where,
-    cursor: firstDurable.nextCursor,
-  });
-  expect(secondMemory).toEqual(secondDurable);
-  expect(secondMemory.items.map((document) => document.id)).toEqual(["e"]);
+  expect(second.items.map((document) => document.id)).toEqual(["e"]);
 
   await expect(
-    memory.list("comments", { where, cursor: firstMemory.nextCursor }),
+    durable.list("comments", { where, cursor: first.nextCursor }),
   ).rejects.toBeInstanceOf(BadRequestError);
   await expect(
-    memory.list("posts", {
+    durable.list("posts", {
       where: { field: "ownerId", op: "eq", value: "u2" },
-      cursor: firstMemory.nextCursor,
+      cursor: first.nextCursor,
     }),
   ).rejects.toBeInstanceOf(BadRequestError);
 });
 
-test("memory and DO SQLite agree on in and case-sensitive string matching", async () => {
-  const memory = createMemoryStorage();
+test("SQLite supports in and case-sensitive string matching", async () => {
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
   const documents = [
     meta({ id: "a", value: "YR Clinic" }),
@@ -205,21 +192,22 @@ test("memory and DO SQLite agree on in and case-sensitive string matching", asyn
     meta({ id: "e" }),
   ];
   for (const document of documents) {
-    await memory.put("items", document);
     await durable.put("items", document);
   }
 
-  const queries: QueryExpr[] = [
-    { field: "value", op: "in", values: ["YR Clinic", null] },
-    { op: "not", operand: { field: "value", op: "in", values: ["yr clinic"] } },
-    { field: "value", op: "contains", value: "Clinic" },
-    { field: "value", op: "startsWith", value: "YR" },
-    { field: "value", op: "endsWith", value: "" },
+  const cases: Array<{ where: QueryExpr; ids: string[] }> = [
+    { where: { field: "value", op: "in", values: ["YR Clinic", null] }, ids: ["a", "c"] },
+    {
+      where: { op: "not", operand: { field: "value", op: "in", values: ["yr clinic"] } },
+      ids: ["a", "c", "d", "e"],
+    },
+    { where: { field: "value", op: "contains", value: "Clinic" }, ids: ["a"] },
+    { where: { field: "value", op: "startsWith", value: "YR" }, ids: ["a"] },
+    { where: { field: "value", op: "endsWith", value: "" }, ids: ["a", "b"] },
   ];
-  for (const where of queries) {
-    await expect(durable.list("items", { where })).resolves.toEqual(
-      await memory.list("items", { where }),
-    );
+  for (const { where, ids } of cases) {
+    const page = await durable.list("items", { where });
+    expect(page.items.map((document) => document.id)).toEqual(ids);
   }
 });
 
@@ -386,7 +374,6 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     indexes: { byOwner: ["ownerId", "createdAt"] as const },
   };
   const registry = compileIndexRegistry({ posts });
-  const memory = createMemoryStorage(registry);
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage(), registry);
 
   const docs = [
@@ -397,7 +384,6 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     { ...meta({ id: "e", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-00T00:00:00.000Z" },
   ];
   for (const doc of docs) {
-    await memory.put("posts", doc);
     await durable.put("posts", doc);
   }
 
@@ -408,11 +394,9 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     orderBy: { field: "createdAt", direction: "desc" as const },
     limit: 2,
   };
-  const firstMemory = await memory.list("posts", desc);
-  const firstDurable = await durable.list("posts", desc);
-  expect(firstMemory.items.map((document) => document.id)).toEqual(["b", "c"]);
-  expect(firstDurable.items.map((document) => document.id)).toEqual(["b", "c"]);
-  expect(decodeCursor(firstMemory.nextCursor!)).toMatchObject({
+  const first = await durable.list("posts", desc);
+  expect(first.items.map((document) => document.id)).toEqual(["b", "c"]);
+  expect(decodeCursor(first.nextCursor!)).toMatchObject({
     v: 3,
     index: "byOwner",
     orderField: "createdAt",
@@ -420,10 +404,8 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     id: "c",
   });
 
-  const secondMemory = await memory.list("posts", { ...desc, cursor: firstMemory.nextCursor });
-  const secondDurable = await durable.list("posts", { ...desc, cursor: firstDurable.nextCursor });
-  expect(secondMemory.items.map((document) => document.id)).toEqual(["a", "e"]);
-  expect(secondDurable).toEqual(secondMemory);
+  const second = await durable.list("posts", { ...desc, cursor: first.nextCursor });
+  expect(second.items.map((document) => document.id)).toEqual(["a", "e"]);
 
   const asc = {
     index: "byOwner",
@@ -431,12 +413,6 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     orderBy: { field: "createdAt", direction: "asc" as const },
     limit: 10,
   };
-  expect((await memory.list("posts", asc)).items.map((document) => document.id)).toEqual([
-    "e",
-    "a",
-    "c",
-    "b",
-  ]);
   expect((await durable.list("posts", asc)).items.map((document) => document.id)).toEqual([
     "e",
     "a",
@@ -453,32 +429,31 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     orderBy: { field: "createdAt", direction: "desc" as const },
     limit: 2,
   };
-  const filtered = await memory.list("posts", residual);
+  const filtered = await durable.list("posts", residual);
   expect(filtered.items.map((document) => document.id)).toEqual(["b", "c"]);
   expect(filtered.nextCursor).toBeDefined();
-  const nextFiltered = await memory.list("posts", { ...residual, cursor: filtered.nextCursor });
+  const nextFiltered = await durable.list("posts", { ...residual, cursor: filtered.nextCursor });
   expect(nextFiltered.items.map((document) => document.id)).toEqual(["e"]);
-  expect(await durable.list("posts", residual)).toEqual(filtered);
 
   await expect(
-    memory.list("posts", {
+    durable.list("posts", {
       ...desc,
       where: { field: "ownerId", op: "eq", value: "u2" },
-      cursor: firstMemory.nextCursor,
+      cursor: first.nextCursor,
     }),
   ).rejects.toBeInstanceOf(BadRequestError);
   await expect(
-    memory.list("posts", { orderBy: { field: "createdAt", direction: "desc" } }),
+    durable.list("posts", { orderBy: { field: "createdAt", direction: "desc" } }),
   ).rejects.toBeInstanceOf(BadRequestError);
-  await expect(memory.list("posts", { index: "missing", where })).rejects.toBeInstanceOf(
+  await expect(durable.list("posts", { index: "missing", where })).rejects.toBeInstanceOf(
     BadRequestError,
   );
 
-  await memory.put("posts", {
+  await durable.put("posts", {
     ...meta({ id: "f", ownerId: "u1", tag: "keep" }),
     createdAt: "2026-01-04T00:00:00.000Z",
   });
   expect(
-    (await memory.list("posts", { ...desc, limit: 1 })).items.map((document) => document.id),
+    (await durable.list("posts", { ...desc, limit: 1 })).items.map((document) => document.id),
   ).toEqual(["f"]);
 });
