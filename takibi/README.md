@@ -784,8 +784,11 @@ const post = await this.$collections.posts.add({ title: "Hi", body: "..." });
 Documents are stored with `state.storage.sql` in one library-managed
 `takibi_documents` table shared by all collections in the Durable Object. Domain
 fields are JSON text; collection, id, timestamps, and document schema version are
-separate columns. Takibi does not create a table or columns from each application
-schema, and applications do not manage or query this internal table.
+separate columns. The server-managed `rev` is also stored in a dedicated `REAL NOT
+NULL` column, not in the domain JSON, so revisions above JavaScript's safe-integer and
+SQLite's signed 64-bit integer boundaries retain their IEEE-754 value. Takibi does not
+create a table or columns from each application schema, and applications do not manage
+or query this internal table.
 
 Auto-generated document ids are monotonic ULIDs (26 Crockford Base32 characters).
 Caller-supplied ids are still accepted; creation-order lexicographic sort is
@@ -793,6 +796,9 @@ guaranteed only for library-generated ULIDs.
 
 Takibi versions its internal SQL layout in `takibi_metadata` and migrates known
 layout versions synchronously during activation. A newer unknown layout fails closed.
+Layout version 2 moves a valid version 1 `data.rev` value into the revision column,
+defaults a missing or invalid legacy value to `1`, and removes `rev` from the JSON.
+The table rebuild and layout-version update are one transaction.
 This internal layout migration is separate from collection `migrations`: layout
 migrations change Takibi's tables, while collection migrations lazily transform one
 domain document after it is read.

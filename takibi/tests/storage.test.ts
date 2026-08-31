@@ -1,7 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
-import type { QueryExpr, WithMetadata } from "../src/types";
+import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
 import { createSqliteDurableObjectStorage } from "./sqlite";
 
@@ -24,6 +24,49 @@ function encodeCursor(cursor: Record<string, unknown>): string {
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
+}
+
+function createVersionOneStorage(
+  rows: Array<{
+    id: string;
+    data: Record<string, unknown>;
+  }>,
+): DurableObjectStorage {
+  const storage = createSqliteDurableObjectStorage();
+  storage.transactionSync(() => {
+    storage.sql.exec(
+      `CREATE TABLE takibi_metadata (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+      ) WITHOUT ROWID`,
+    );
+    storage.sql.exec("INSERT INTO takibi_metadata (key, value) VALUES (?, ?)", "layout_version", 1);
+    storage.sql.exec(
+      `CREATE TABLE takibi_documents (
+        collection TEXT NOT NULL,
+        id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        data TEXT NOT NULL CHECK (json_valid(data) AND json_type(data) = 'object'),
+        PRIMARY KEY (collection, id)
+      ) WITHOUT ROWID`,
+    );
+    for (const row of rows) {
+      storage.sql.exec(
+        `INSERT INTO takibi_documents
+          (collection, id, created_at, updated_at, schema_version, data)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        "posts",
+        row.id,
+        TS,
+        TS,
+        0,
+        JSON.stringify(row.data),
+      );
+    }
+  });
+  return storage;
 }
 
 test("generateUlid produces valid 26-char Crockford Base32", () => {
@@ -176,4 +219,129 @@ test("DO SQLite get isolates collections sharing the same id", async () => {
   expect(await durable.get("posts", "p1")).toEqual(meta({ id: "p1", title: "hi" }));
   expect(await durable.get("comments", "p1")).toEqual(meta({ id: "p1", title: "other" }));
   expect(await durable.get("posts", "missing")).toBeNull();
+});
+
+test("DO SQLite layout stores revision in a dedicated REAL column", async () => {
+  const backing = createSqliteDurableObjectStorage();
+  const durable = createDurableObjectStorage(backing);
+  const document = { ...meta({ id: "p1", title: "one" }), rev: 7 };
+
+  await durable.put("posts", document);
+
+  expect(
+    backing.sql
+      .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
+      .one().value,
+  ).toBe(2);
+  expect(
+    backing.sql
+      .exec<{ name: string; type: string; notnull: number }>(
+        `SELECT name, type, "notnull"
+         FROM pragma_table_info('takibi_documents')
+         WHERE name = 'revision'`,
+      )
+      .one(),
+  ).toEqual({ name: "revision", type: "REAL", notnull: 1 });
+  expect(
+    backing.sql
+      .exec<{ revision: number; json_revision_type: string | null }>(
+        `SELECT revision, json_type(data, '$.rev') AS json_revision_type
+         FROM takibi_documents
+         WHERE collection = ? AND id = ?`,
+        "posts",
+        "p1",
+      )
+      .one(),
+  ).toEqual({ revision: 7, json_revision_type: null });
+  await expect(durable.get("posts", "p1")).resolves.toEqual(document);
+
+  createDurableObjectStorage(backing);
+  await expect(durable.get("posts", "p1")).resolves.toEqual(document);
+});
+
+test("DO SQLite migrates version 1 revisions and normalizes legacy values", async () => {
+  const backing = createVersionOneStorage([
+    { id: "valid", data: { title: "valid", rev: 9 } },
+    { id: "missing", data: { title: "missing" } },
+    { id: "fractional", data: { title: "fractional", rev: 1.5 } },
+    { id: "string", data: { title: "string", rev: "4" } },
+  ]);
+
+  const durable = createDurableObjectStorage(backing);
+
+  expect(
+    backing.sql
+      .exec<{ id: string; revision: number; json_revision_type: string | null }>(
+        `SELECT id, revision, json_type(data, '$.rev') AS json_revision_type
+         FROM takibi_documents
+         ORDER BY id`,
+      )
+      .toArray(),
+  ).toEqual([
+    { id: "fractional", revision: 1, json_revision_type: null },
+    { id: "missing", revision: 1, json_revision_type: null },
+    { id: "string", revision: 1, json_revision_type: null },
+    { id: "valid", revision: 9, json_revision_type: null },
+  ]);
+  await expect(durable.get("posts", "valid")).resolves.toMatchObject({
+    title: "valid",
+    rev: 9,
+  });
+  await expect(durable.get("posts", "missing")).resolves.toMatchObject({
+    title: "missing",
+    rev: 1,
+  });
+});
+
+test("DO SQLite keeps version 1 intact when revision migration copy fails", () => {
+  const backing = createVersionOneStorage([{ id: "p1", data: { title: "one", rev: 3 } }]);
+  const exec = backing.sql.exec.bind(backing.sql);
+  let rejectedCopy = false;
+  backing.sql.exec = ((query: string, ...bindings: never[]) => {
+    if (query.includes("INSERT INTO takibi_documents_v2")) {
+      rejectedCopy = true;
+      throw new Error("copy-failed");
+    }
+    return exec(query, ...bindings);
+  }) as DurableObjectStorage["sql"]["exec"];
+
+  expect(() => createDurableObjectStorage(backing)).toThrow("copy-failed");
+  expect(rejectedCopy).toBe(true);
+  expect(
+    backing.sql
+      .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
+      .one().value,
+  ).toBe(1);
+  expect(
+    backing.sql
+      .exec<{ name: string }>("SELECT name FROM pragma_table_info('takibi_documents')")
+      .toArray()
+      .map(({ name }) => name),
+  ).not.toContain("revision");
+  expect(
+    backing.sql
+      .exec<{ data: string }>(
+        "SELECT data FROM takibi_documents WHERE collection = ? AND id = ?",
+        "posts",
+        "p1",
+      )
+      .one().data,
+  ).toBe('{"title":"one","rev":3}');
+});
+
+test("DO SQLite round-trips revisions beyond safe and signed 64-bit integer limits", async () => {
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const revisions = [1, 2 ** 53, 2 ** 63];
+
+  for (const [index, revision] of revisions.entries()) {
+    const document = {
+      id: `p${index}`,
+      title: String(revision),
+      createdAt: TS,
+      updatedAt: TS,
+      rev: revision,
+    } as StoredDocument;
+    await durable.put("posts", document);
+    await expect(durable.get("posts", document.id)).resolves.toEqual(document);
+  }
 });
