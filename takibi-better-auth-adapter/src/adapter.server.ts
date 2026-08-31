@@ -116,8 +116,8 @@ export type TakibiAdapterOptions<TCollections> = {
    */
   collections: TCollections;
   /**
-   * Bind a callback to the generated Durable Object's symbol-keyed trusted
-   * transaction capability.
+   * Bind a callback to the generated Durable Object's trusted collections
+   * `$transaction`.
    */
   transaction<R>(callback: (collections: TCollections) => Promise<R>): Promise<R>;
   /**

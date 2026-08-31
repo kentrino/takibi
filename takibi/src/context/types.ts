@@ -16,10 +16,7 @@ import type {
 import type { LoggingOptions } from "../logging";
 import type { PolicyHelper } from "../policy";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
-import {
-  type TAKIBI_TRUSTED_RESET_STORAGE,
-  type TAKIBI_TRUSTED_TRANSACTION,
-} from "../trusted.server";
+import { type TAKIBI_TRUSTED_RESET_STORAGE } from "../trusted.server";
 import type {
   CollectionDefinition,
   CollectionIndexes,
@@ -123,9 +120,6 @@ export type TakibiBrand<
     env: TEnv,
   ) => DurableObject & {
     $collections: TrustedCollectionsApi<TCollections>;
-    [TAKIBI_TRUSTED_TRANSACTION]<T>(
-      callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
-    ): Promise<T>;
     [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void>;
   };
   /**
@@ -251,7 +245,7 @@ type CollectionsWithMatchingDefinitions<TCollections, TCtx extends object> = {
     : TCollections[K];
 };
 
-type ReservedCollectionName = ReservedPublicName | "defineAction" | "actions";
+type ReservedCollectionName = ReservedPublicName | "defineAction" | "actions" | "$transaction";
 
 export type CreateContextBuilder<
   TCtx extends object,

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { createTakibi, fullAccess, TAKIBI_TRUSTED_TRANSACTION } from "@takibi/takibi";
+import { createTakibi, fullAccess } from "@takibi/takibi";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { takibiAdapter } from "../src/adapter.server.ts";
@@ -83,7 +83,7 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
     const object = new handler.DurableObject(state, {});
     const adapter = takibiAdapter({
       collections: object.$collections,
-      transaction: (callback) => object[TAKIBI_TRUSTED_TRANSACTION](callback),
+      transaction: (callback) => object.$collections.$transaction(callback),
       models,
     })({
       emailAndPassword: { enabled: true },
@@ -203,7 +203,7 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
     ).resolves.toMatchObject({ attempts: 2 });
 
     await expect(
-      object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+      object.$collections.$transaction(async ($collections) => {
         await $collections.auditEvents.add({ action: "rolled-back" }, { id: "audit-rollback" });
         const transactionAdapter = takibiAdapter({
           collections: $collections,

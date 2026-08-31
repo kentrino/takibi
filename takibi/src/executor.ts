@@ -370,7 +370,8 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   transactionBound = false,
 ): TrustedCollectionsApi<TCollections> {
   const api = Object.create(null) as TrustedCollectionsApi<TCollections>;
-  for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
+  for (const name of Object.keys(collections) as (Exclude<keyof TCollections, "$transaction"> &
+    string)[]) {
     const definition = collections[name]!;
     const collectionApi = {
       add: (input, options) => storageAdd(definition, storage, name, input, options, logger),
@@ -439,8 +440,16 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       },
     } as TrustedCollectionApi<TCollections[typeof name]>;
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
-    api[name] = collectionApi;
+    (api as unknown as Record<string, unknown>)[name] = collectionApi;
   }
+  api.$transaction = <T>(
+    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+  ): Promise<T> =>
+    transactionBound
+      ? callback(api)
+      : storage.transaction((scoped) =>
+          callback(createTrustedCollections(collections, scoped, logger, true)),
+        );
   return api;
 }
 

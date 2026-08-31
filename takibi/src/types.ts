@@ -571,7 +571,11 @@ export type TrustedCollectionApi<C> = Omit<CollectionApi<C>, "add"> & {
 };
 
 export type TrustedCollectionsApi<TCollections> = {
-  [K in keyof TCollections]: TrustedCollectionApi<TCollections[K]>;
+  [K in Exclude<keyof TCollections, "$transaction">]: TrustedCollectionApi<TCollections[K]>;
+} & {
+  $transaction<T>(
+    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+  ): Promise<T>;
 };
 
 /** Result-shaped CRUD facade used by the public HTTP client. */

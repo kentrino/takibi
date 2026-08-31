@@ -836,6 +836,18 @@ const pending = await this.$collections.posts.count({
 });
 ```
 
+Use `$transaction` on the trusted collections facade to commit or roll back
+mutations across collections as one storage transaction:
+
+```ts
+await this.$collections.$transaction(async ($collections) => {
+  await $collections.orders.add(order);
+  await $collections.inventory.update(itemId, { stock });
+});
+```
+
+Nested `$transaction` calls join the enclosing transaction.
+
 Server-side policy-bound collections and trusted `$collections` expose
 `count`, which pages through the same query, index selection, and migration
 transforms as `list`. A policy-bound count requires the `list` permission.
