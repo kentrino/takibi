@@ -2,7 +2,9 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
 import { createTakibi, fullAccess } from "../src/index";
+import { nextDocumentRevision } from "../src/revision";
 import { createDurableObjectStorage, createMemoryStorage } from "../src/storage";
+import { storageSet } from "../src/typed-storage";
 import type { StoredDocument } from "../src/types";
 import { createSqliteDurableObjectStorage } from "./sqlite";
 
@@ -99,4 +101,33 @@ test("documents stored without rev read as 1 and the next write stores 2", async
   const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
   await durable.put("posts", legacy);
   expect(await durable.get("posts", "legacy")).toMatchObject({ title: "old", rev: 1 });
+});
+
+test("SQLite-backed updates advance revisions beyond numeric storage boundaries", async () => {
+  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const definition = {
+    schema: z.object({ title: z.string() }),
+    accessPolicy: fullAccess,
+  };
+
+  for (const current of [2 ** 53, 2 ** 63]) {
+    const id = `p-${String(current)}`;
+    await storage.put("posts", {
+      id,
+      title: "old",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      rev: current,
+    });
+
+    const updated = await storageSet(definition, storage, "posts", id, {
+      title: "new",
+      rev: current,
+    });
+    expect(updated.rev).toBe(nextDocumentRevision(current));
+    await expect(storage.get("posts", id)).resolves.toMatchObject({
+      title: "new",
+      rev: nextDocumentRevision(current),
+    });
+  }
 });

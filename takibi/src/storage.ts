@@ -11,8 +11,8 @@ import type {
   StoredDocument,
   WithMetadata,
 } from "./types";
-import { withDocumentRevision } from "./revision";
-import { TAKIBI_VERSION_KEY } from "./types";
+import { documentRevision, withDocumentRevision } from "./revision";
+import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
 
 type ListCursorV2 = {
   v: 2;
@@ -22,8 +22,9 @@ type ListCursorV2 = {
 };
 
 const LIST_CHUNK_SIZE = 128;
-const STORAGE_LAYOUT_VERSION = 1;
+const STORAGE_LAYOUT_VERSION = 2;
 const STORAGE_LAYOUT_KEY = "layout_version";
+const MAX_FINITE_DOUBLE = 1.7976931348623157e308;
 
 type ScanItem = {
   id: string;
@@ -51,6 +52,7 @@ type DocumentRow = Record<string, SqlStorageValue> & {
   created_at: string;
   updated_at: string;
   schema_version: number;
+  revision: number;
   data: string;
 };
 
@@ -149,7 +151,7 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
     async get(resource, id) {
       const rows = storage.sql
         .exec<DocumentRow>(
-          `SELECT id, created_at, updated_at, schema_version, data
+          `SELECT id, created_at, updated_at, schema_version, revision, data
            FROM takibi_documents
            WHERE collection = ? AND id = ?`,
           resource,
@@ -162,18 +164,20 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
       const encoded = encodeDocument(doc);
       storage.sql.exec(
         `INSERT INTO takibi_documents
-           (collection, id, created_at, updated_at, schema_version, data)
-         VALUES (?, ?, ?, ?, ?, ?)
+           (collection, id, created_at, updated_at, schema_version, revision, data)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (collection, id) DO UPDATE SET
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
            schema_version = excluded.schema_version,
+           revision = excluded.revision,
            data = excluded.data`,
         resource,
         doc.id,
         doc.createdAt,
         doc.updatedAt,
         encoded.schemaVersion,
+        encoded.revision,
         encoded.data,
       );
     },
@@ -237,25 +241,19 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
     }
 
     while (version < STORAGE_LAYOUT_VERSION) {
-      if (version !== 0) {
+      if (version === 0) {
+        createDocumentTable(storage.sql, "takibi_documents");
+        version = STORAGE_LAYOUT_VERSION;
+      } else if (version === 1) {
+        migrateVersionOneToTwo(storage.sql);
+        version = 2;
+      } else {
         throw new TakibiError(
           "STORAGE_LAYOUT_VERSION",
           `No migration from Takibi storage layout version ${version}`,
           500,
         );
       }
-      storage.sql.exec(
-        `CREATE TABLE takibi_documents (
-          collection TEXT NOT NULL,
-          id TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          schema_version INTEGER NOT NULL,
-          data TEXT NOT NULL CHECK (json_valid(data) AND json_type(data) = 'object'),
-          PRIMARY KEY (collection, id)
-        ) WITHOUT ROWID`,
-      );
-      version = 1;
       storage.sql.exec(
         `INSERT INTO takibi_metadata (key, value)
          VALUES (?, ?)
@@ -265,6 +263,89 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
       );
     }
   });
+}
+
+function createDocumentTable(sql: SqlStorage, table: "takibi_documents" | "takibi_documents_v2") {
+  sql.exec(
+    `CREATE TABLE ${table} (
+      collection TEXT NOT NULL,
+      id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      revision REAL NOT NULL CHECK (
+        revision >= 1
+        AND (
+          revision >= 9007199254740992
+          OR revision = CAST(revision AS INTEGER)
+        )
+      ),
+      data TEXT NOT NULL CHECK (json_valid(data) AND json_type(data) = 'object'),
+      PRIMARY KEY (collection, id)
+    ) WITHOUT ROWID`,
+  );
+}
+
+function migrateVersionOneToTwo(sql: SqlStorage): void {
+  sql.exec("ALTER TABLE takibi_documents RENAME TO takibi_documents_v1");
+  createDocumentTable(sql, "takibi_documents_v2");
+  sql.exec(
+    `INSERT INTO takibi_documents_v2
+      (collection, id, created_at, updated_at, schema_version, revision, data)
+     SELECT
+       collection,
+       id,
+       created_at,
+       updated_at,
+       schema_version,
+       CASE
+         WHEN json_type(data, '$.rev') IN ('integer', 'real')
+           AND json_extract(data, '$.rev') >= 1
+           AND json_extract(data, '$.rev') <= ?
+           AND (
+             json_extract(data, '$.rev') >= 9007199254740992
+             OR json_extract(data, '$.rev') = CAST(json_extract(data, '$.rev') AS INTEGER)
+           )
+         THEN CAST(json_extract(data, '$.rev') AS REAL)
+         ELSE 1.0
+       END,
+       json_remove(data, '$.rev')
+     FROM takibi_documents_v1`,
+    MAX_FINITE_DOUBLE,
+  );
+
+  const oldCount = sql
+    .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_documents_v1")
+    .one().count;
+  const newCount = sql
+    .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_documents_v2")
+    .one().count;
+  const invalidCount = sql
+    .exec<{ count: number }>(
+      `SELECT count(*) AS count
+       FROM takibi_documents_v2
+       WHERE revision < 1
+         OR revision > ?
+         OR (
+           revision < 9007199254740992
+           AND revision <> CAST(revision AS INTEGER)
+         )
+         OR NOT json_valid(data)
+         OR json_type(data) <> 'object'
+         OR json_type(data, '$.rev') IS NOT NULL`,
+      MAX_FINITE_DOUBLE,
+    )
+    .one().count;
+  if (oldCount !== newCount || invalidCount !== 0) {
+    throw new TakibiError(
+      "STORAGE_LAYOUT_VERSION",
+      "Takibi storage layout migration validation failed",
+      500,
+    );
+  }
+
+  sql.exec("DROP TABLE takibi_documents_v1");
+  sql.exec("ALTER TABLE takibi_documents_v2 RENAME TO takibi_documents");
 }
 
 function createSqlChunkReader(
@@ -295,7 +376,7 @@ function createSqlChunkReader(
 
     return sql
       .exec<DocumentRow>(
-        `SELECT id, created_at, updated_at, schema_version, data
+        `SELECT id, created_at, updated_at, schema_version, revision, data
          FROM takibi_documents
          WHERE ${clauses.join(" AND ")}
          ORDER BY id ASC
@@ -307,12 +388,17 @@ function createSqlChunkReader(
   };
 }
 
-function encodeDocument(document: StoredDocument): { schemaVersion: number; data: string } {
+function encodeDocument(document: StoredDocument): {
+  schemaVersion: number;
+  revision: number;
+  data: string;
+} {
   const {
     id: _id,
     createdAt: _createdAt,
     updatedAt: _updatedAt,
     [TAKIBI_VERSION_KEY]: rawVersion,
+    [TAKIBI_REVISION_KEY]: _rawRevision,
     ...data
   } = document;
   assertJsonObject(data, {
@@ -327,7 +413,8 @@ function encodeDocument(document: StoredDocument): { schemaVersion: number; data
       500,
     );
   }
-  return { schemaVersion: schemaVersion as number, data: JSON.stringify(data) };
+  const revision = documentRevision(document);
+  return { schemaVersion: schemaVersion as number, revision, data: JSON.stringify(data) };
 }
 
 function rowToDocument(row: DocumentRow): StoredDocument {
@@ -346,6 +433,7 @@ function rowToDocument(row: DocumentRow): StoredDocument {
     id: row.id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    [TAKIBI_REVISION_KEY]: row.revision,
     ...(row.schema_version === 0 ? {} : { [TAKIBI_VERSION_KEY]: row.schema_version }),
   });
 }

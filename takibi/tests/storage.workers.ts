@@ -113,6 +113,17 @@ test("actual SQLite-backed DO matches memory query semantics and stores no docum
       )
       .toArray();
     expect(rows).toEqual([{ collection: "posts", count: 4 }]);
+    expect(
+      state.storage.sql
+        .exec<{ revision: number; json_revision_type: string | null }>(
+          `SELECT revision, json_type(data, '$.rev') AS json_revision_type
+           FROM takibi_documents
+           WHERE collection = ? AND id = ?`,
+          "posts",
+          "a",
+        )
+        .one(),
+    ).toEqual({ revision: 1, json_revision_type: null });
     await expect(state.storage.list({ prefix: "takibi:" })).resolves.toEqual(new Map());
 
     await sqlite.put("posts", meta({ id: "a", title: "replaced" }));
@@ -137,7 +148,7 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
           "layout_version",
         )
         .one().value,
-    ).toBe(1);
+    ).toBe(2);
 
     state.storage.sql.exec(
       "UPDATE takibi_metadata SET value = ? WHERE key = ?",
@@ -196,7 +207,10 @@ test("documents survive Durable Object eviction", async () => {
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
     const storage = createDurableObjectStorage(state.storage);
-    await storage.put("posts", meta({ id: "persistent", title: "still here" }));
+    await storage.put("posts", {
+      ...meta({ id: "persistent", title: "still here" }),
+      rev: 2 ** 63,
+    });
   });
 
   await evictDurableObject(stub);
@@ -204,8 +218,107 @@ test("documents survive Durable Object eviction", async () => {
 
   await runInDurableObject(stub, async (_instance, state) => {
     const storage = createDurableObjectStorage(state.storage);
-    await expect(storage.get("posts", "persistent")).resolves.toEqual(
-      meta({ id: "persistent", title: "still here" }),
+    await expect(storage.get("posts", "persistent")).resolves.toEqual({
+      ...meta({ id: "persistent", title: "still here" }),
+      rev: 2 ** 63,
+    });
+  });
+});
+
+test("version 1 rows migrate revisions out of JSON and survive eviction", async () => {
+  const stub = storageStub("revision-layout-migration");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    state.storage.sql.exec(
+      `CREATE TABLE takibi_metadata (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+      ) WITHOUT ROWID`,
     );
+    state.storage.sql.exec(
+      "INSERT INTO takibi_metadata (key, value) VALUES (?, ?)",
+      "layout_version",
+      1,
+    );
+    state.storage.sql.exec(
+      `CREATE TABLE takibi_documents (
+        collection TEXT NOT NULL,
+        id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        data TEXT NOT NULL CHECK (json_valid(data) AND json_type(data) = 'object'),
+        PRIMARY KEY (collection, id)
+      ) WITHOUT ROWID`,
+    );
+    for (const [id, data] of [
+      ["valid", { title: "valid", rev: 2 ** 63 }],
+      ["missing", { title: "missing" }],
+      ["invalid", { title: "invalid", rev: 1.5 }],
+    ] as const) {
+      state.storage.sql.exec(
+        `INSERT INTO takibi_documents
+          (collection, id, created_at, updated_at, schema_version, data)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        "posts",
+        id,
+        TS,
+        TS,
+        0,
+        JSON.stringify(data),
+      );
+    }
+
+    const storage = createDurableObjectStorage(state.storage);
+    await expect(storage.get("posts", "valid")).resolves.toMatchObject({
+      title: "valid",
+      rev: 2 ** 63,
+    });
+    expect(
+      state.storage.sql
+        .exec<{ id: string; revision: number; json_revision_type: string | null }>(
+          `SELECT id, revision, json_type(data, '$.rev') AS json_revision_type
+           FROM takibi_documents
+           ORDER BY id`,
+        )
+        .toArray(),
+    ).toEqual([
+      { id: "invalid", revision: 1, json_revision_type: null },
+      { id: "missing", revision: 1, json_revision_type: null },
+      { id: "valid", revision: 2 ** 63, json_revision_type: null },
+    ]);
+  });
+
+  await evictDurableObject(stub);
+  await stub.ping();
+  await runInDurableObject(stub, async (_instance, state) => {
+    const storage = createDurableObjectStorage(state.storage);
+    await expect(storage.get("posts", "valid")).resolves.toMatchObject({
+      title: "valid",
+      rev: 2 ** 63,
+    });
+  });
+});
+
+test("Workers SQLite round-trips revisions across numeric storage boundaries", async () => {
+  const stub = storageStub("revision-number-boundaries");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const storage = createDurableObjectStorage(state.storage);
+    const revisions = [1, 2 ** 53, 2 ** 63];
+    for (const [index, revision] of revisions.entries()) {
+      await storage.put("posts", {
+        id: `p${index}`,
+        title: String(revision),
+        createdAt: TS,
+        updatedAt: TS,
+        rev: revision,
+      });
+      await expect(storage.get("posts", `p${index}`)).resolves.toMatchObject({
+        rev: revision,
+      });
+    }
   });
 });
