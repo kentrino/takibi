@@ -2,7 +2,14 @@ import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient } from "@takibi/takibi/client";
-import { and, createTakibi, fullAccess, none, UnauthorizedError } from "../src/index";
+import {
+  and,
+  createTakibi,
+  fullAccess,
+  none,
+  TAKIBI_TRUSTED_TRANSACTION,
+  UnauthorizedError,
+} from "../src/index";
 import type { RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {
@@ -79,7 +86,12 @@ test("collection schemas type CRUD clients without handler $collections", () => 
 
   type DurableInstance = InstanceType<typeof handler.DurableObject>;
   expectTypeOf<DurableInstance>().toHaveProperty("$collections");
+  expectTypeOf<DurableInstance>().toHaveProperty(TAKIBI_TRUSTED_TRANSACTION);
   expectTypeOf(durableHandler.DurableObject).instance.toHaveProperty("$collections");
+  expectTypeOf(durableHandler.DurableObject).instance.toHaveProperty(TAKIBI_TRUSTED_TRANSACTION);
+  expectTypeOf<Parameters<DurableInstance[typeof TAKIBI_TRUSTED_TRANSACTION]>[0]>()
+    .parameter(0)
+    .toEqualTypeOf<DurableInstance["$collections"]>();
   expectTypeOf<DurableInstance["$collections"]["posts"]["add"]>().returns.resolves.toMatchTypeOf<{
     id: string;
     title: string;

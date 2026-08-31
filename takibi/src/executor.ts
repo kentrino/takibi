@@ -25,6 +25,8 @@ import type {
   CollectionsDef,
   StorageDriver,
   StorageListOptions,
+  TrustedCollectionApi,
+  TrustedCollectionsApi,
   WithMetadata,
 } from "./types";
 
@@ -340,8 +342,8 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,
   logger?: InternalLogger,
-): CollectionsApi<TCollections> {
-  const api = Object.create(null) as CollectionsApi<TCollections>;
+): TrustedCollectionsApi<TCollections> {
+  const api = Object.create(null) as TrustedCollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
     const definition = collections[name]!;
     const collectionApi = {
@@ -355,7 +357,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       update: (id, input) => storageUpdate(definition, storage, name, id, input, logger),
       delete: (id) => storageDelete(storage, name, id),
       list: (options) => storage.list(name, compileListOptions(options)),
-    } as CollectionApi<TCollections[typeof name]>;
+    } as TrustedCollectionApi<TCollections[typeof name]>;
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
     api[name] = collectionApi;
   }

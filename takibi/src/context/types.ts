@@ -16,15 +16,19 @@ import type {
 import type { LoggingOptions } from "../logging";
 import type { PolicyHelper } from "../policy";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
+import {
+  type TAKIBI_TRUSTED_RESET_STORAGE,
+  type TAKIBI_TRUSTED_TRANSACTION,
+} from "../trusted.server";
 import type {
   CollectionDefinition,
   CollectionIndexes,
   CollectionUniqueConstraints,
-  CollectionsApi,
   CollectionsDef,
   InferCollectionDoc,
   IndexDeclaration,
   ReservedDocumentSchemaConstraint,
+  TrustedCollectionsApi,
   UniqueConstraintDeclaration,
 } from "../types";
 
@@ -118,8 +122,11 @@ export type TakibiBrand<
     state: DurableObjectState,
     env: TEnv,
   ) => DurableObject & {
-    $collections: CollectionsApi<TCollections>;
-    $resetStorage(): Promise<void>;
+    $collections: TrustedCollectionsApi<TCollections>;
+    [TAKIBI_TRUSTED_TRANSACTION]<T>(
+      callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+    ): Promise<T>;
+    [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void>;
   };
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
