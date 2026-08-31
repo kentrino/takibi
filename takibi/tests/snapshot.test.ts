@@ -1,9 +1,10 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess, type SnapshotRestoreReport } from "../src/index";
 import { MaintenanceController } from "../src/maintenance";
 import { MemoryMaintenanceBackend } from "../src/maintenance-memory";
-import { Sha256 } from "../src/sha256";
 import { createDurableObjectCollectionsApi } from "../src/snapshot";
 import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
 import type { TrustedCollectionsApi } from "../src/types";
@@ -51,11 +52,11 @@ function decodeSnapshot(value: string): SnapshotRecord[] {
 
 function encodeValidSnapshot(records: SnapshotRecord[]): string {
   const body = records.slice(0, -1);
-  const checksum = new Sha256();
+  const checksum = sha256.create();
   const lines = body.map((record) => `${JSON.stringify(record)}\n`);
   for (const line of lines) checksum.update(encoder.encode(line));
   const trailer = records.at(-1)!;
-  trailer.sha256 = checksum.digestHex();
+  trailer.sha256 = bytesToHex(checksum.digest());
   return `${lines.join("")}${JSON.stringify(trailer)}\n`;
 }
 

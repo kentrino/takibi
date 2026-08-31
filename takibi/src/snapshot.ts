@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   SnapshotFormatError,
   SnapshotIncompatibleError,
@@ -7,7 +9,6 @@ import {
 import { assertDocumentIndexFields } from "./indexes";
 import type { LeaseHandle, MaintenanceController, SnapshotStoredDocument } from "./maintenance";
 import { currentCollectionVersion, validateStoredDocumentForRestore } from "./migrations";
-import { Sha256 } from "./sha256";
 import { prepareAddDoc } from "./typed-storage";
 import {
   RESERVED_DOCUMENT_DATA_KEYS,
@@ -99,7 +100,7 @@ async function exportSnapshot(
     string,
     number
   >;
-  const checksum = new Sha256();
+  const checksum = sha256.create();
   let headerPending = true;
   let page: SnapshotStoredDocument[] = [];
   let pageOffset = 0;
@@ -137,7 +138,7 @@ async function exportSnapshot(
             const trailer = encodeRecord({
               type: "trailer",
               counts,
-              sha256: checksum.digestHex(),
+              sha256: bytesToHex(checksum.digest()),
             } satisfies TrailerRecord);
             await maintenance.release(lease);
             finished = true;
@@ -184,7 +185,7 @@ async function restoreSnapshot(
   let finalized = false;
   try {
     await maintenance.backend.clearStaging(lease.token);
-    const checksum = new Sha256();
+    const checksum = sha256.create();
     let header: HeaderRecord | undefined;
     let trailerSeen = false;
     let previous: { collection: string; id: string } | undefined;
@@ -200,7 +201,7 @@ async function restoreSnapshot(
         continue;
       }
       if (isRecordWithType(value, "trailer")) {
-        validateTrailer(value, header, counts, checksum.digestHex());
+        validateTrailer(value, header, counts, bytesToHex(checksum.digest()));
         trailerSeen = true;
         continue;
       }

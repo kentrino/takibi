@@ -63,6 +63,7 @@
     "check": "vp check"
   },
   "dependencies": {
+    "@noble/hashes": "catalog:",
     "@standard-schema/spec": "catalog:",
     "hono": "catalog:"
   },
