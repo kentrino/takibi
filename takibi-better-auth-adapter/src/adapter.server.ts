@@ -157,6 +157,7 @@ export function takibiAdapter<TCollections>(
 
   const rootTransaction: RunTransaction = (callback) =>
     adapterOptions.transaction((collections) => callback(collections as RuntimeCollections));
+  const schemaCompatibilityByOptions = new WeakMap<BetterAuthOptions, Promise<void>>();
 
   const createFactory = (
     activeCollections: RuntimeCollections,
@@ -186,9 +187,13 @@ export function takibiAdapter<TCollections>(
           }),
       },
       adapter: ({ getDefaultModelName, schema }): CustomAdapter => {
-        let schemaCompatibility: Promise<void> | undefined;
-        const assertSchemaCompatibility = () =>
-          (schemaCompatibility ??= validateModelSchemas(schema, adapterOptions.models));
+        const assertSchemaCompatibility = () => {
+          const cached = schemaCompatibilityByOptions.get(activeOptions);
+          if (cached) return cached;
+          const validation = validateModelSchemas(schema, adapterOptions.models);
+          schemaCompatibilityByOptions.set(activeOptions, validation);
+          return validation;
+        };
 
         const bindingFor = (model: string): BetterAuthModelBinding => {
           const defaultModel = getDefaultModelName(model);
