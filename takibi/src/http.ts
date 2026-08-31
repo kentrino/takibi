@@ -2,7 +2,7 @@ import { BadRequestError, TakibiError, NotFoundError } from "./errors";
 import type { ActionInvocation } from "./action-executor";
 import type { ExecuteRequest } from "./executor";
 import { decodePublicBatch, type PublicBatchRequest } from "./protocol";
-import { normalizeQueryExpr } from "./query";
+import { normalizeOrderBy, normalizeQueryExpr } from "./query";
 import type { StorageListOptions } from "./types";
 
 export class MethodNotAllowedError extends TakibiError {
@@ -222,7 +222,13 @@ function assertNoQuery(
 
 function parseListQuery(searchParams: URLSearchParams): StorageListOptions | undefined {
   for (const key of searchParams.keys()) {
-    if (key !== "limit" && key !== "cursor" && key !== "where") {
+    if (
+      key !== "limit" &&
+      key !== "cursor" &&
+      key !== "where" &&
+      key !== "index" &&
+      key !== "orderBy"
+    ) {
       throw new BadRequestError(`Unknown query parameter: ${key}`);
     }
   }
@@ -246,6 +252,19 @@ function parseListQuery(searchParams: URLSearchParams): StorageListOptions | und
       list.where = normalizeQueryExpr(JSON.parse(searchParams.get("where") ?? ""));
     } catch (error) {
       throw new BadRequestError(error instanceof Error ? error.message : "Invalid where query");
+    }
+  }
+  if (searchParams.has("index")) {
+    const index = searchParams.get("index") ?? "";
+    if (index.length === 0) throw new BadRequestError("Invalid list index");
+    list.index = index;
+  }
+  if (searchParams.has("orderBy")) {
+    if (list.index === undefined) throw new BadRequestError("orderBy requires index");
+    try {
+      list.orderBy = normalizeOrderBy(JSON.parse(searchParams.get("orderBy") ?? ""));
+    } catch (error) {
+      throw new BadRequestError(error instanceof Error ? error.message : "Invalid orderBy");
     }
   }
   return Object.keys(list).length > 0 ? list : undefined;

@@ -1,5 +1,11 @@
 import { expect, test } from "vite-plus/test";
-import { compileWhere, matchesQuery, normalizeQueryExpr, queryImpliesEquality } from "../src/query";
+import {
+  compileListOptions,
+  compileWhere,
+  matchesQuery,
+  normalizeQueryExpr,
+  queryImpliesEquality,
+} from "../src/query";
 import type { QueryBuilder, QueryExpr } from "../src/types";
 
 type Item = {
@@ -181,4 +187,25 @@ test("owner equality implication is conservative across boolean structure", () =
   expect(queryImpliesEquality(orBoth, "ownerId", "u1")).toBe(true);
   expect(queryImpliesEquality(negated, "ownerId", "u1")).toBe(false);
   expect(queryImpliesEquality(undefined, "ownerId", "u1")).toBe(false);
+});
+
+test("compileListOptions serializes index and orderBy", () => {
+  expect(
+    compileListOptions({
+      index: "byOwner",
+      where: (query: QueryBuilder<Item>) => query.ownerId.eq("u1"),
+      orderBy: (query) => query.createdAt.desc(),
+      limit: 20,
+    }),
+  ).toEqual({
+    index: "byOwner",
+    where: { field: "ownerId", op: "eq", value: "u1" },
+    orderBy: { field: "createdAt", direction: "desc" },
+    limit: 20,
+  });
+  expect(() =>
+    compileListOptions({
+      orderBy: (query: { createdAt: { desc(): unknown } }) => query.createdAt.desc(),
+    } as never),
+  ).toThrow(/orderBy requires index/);
 });

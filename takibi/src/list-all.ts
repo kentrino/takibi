@@ -62,16 +62,20 @@ function assertPositiveInt(name: string, value: number, max?: number): void {
   }
 }
 
-function pageOptions<TDoc>(
-  options: ListAllOptions<TDoc> | undefined,
+function pageOptions<TDoc, TIndexes extends Record<string, readonly string[]>>(
+  options: ListAllOptions<TDoc, TIndexes> | undefined,
   cursor: string | undefined,
   limit: number,
-): ListOptions<TDoc> {
+): ListOptions<TDoc, TIndexes> {
+  const index = options && "index" in options ? options.index : undefined;
+  const orderBy = options && "orderBy" in options ? options.orderBy : undefined;
   return {
     limit,
     ...(cursor === undefined ? {} : { cursor }),
     ...(options?.where === undefined ? {} : { where: options.where }),
-  };
+    ...(typeof index === "string" ? { index } : {}),
+    ...(orderBy === undefined ? {} : { orderBy }),
+  } as ListOptions<TDoc, TIndexes>;
 }
 
 export async function collectListPages<T>(
@@ -145,20 +149,27 @@ function nextPageLimit(itemCount: number, bounds: ListAllBounds): number | undef
   return Math.min(bounds.pageSize, remaining);
 }
 
-export function bindThrowingListAll<TDoc>(
-  list: (opts?: ListOptions<TDoc>) => Promise<ListPage<TDoc>>,
+export function bindThrowingListAll<
+  TDoc,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+>(
+  list: (opts?: ListOptions<TDoc, TIndexes>) => Promise<ListPage<TDoc>>,
   cap: ListAllBounds = { pageSize: LIST_ALL_PAGE_SIZE_DEFAULT },
-): (opts?: ListAllOptions<TDoc>) => Promise<TDoc[]> {
+): (opts?: ListAllOptions<TDoc, TIndexes>) => Promise<TDoc[]> {
   return (options) => {
     const bounds = resolveListAllBounds(options, cap);
     return collectListPages((cursor, limit) => list(pageOptions(options, cursor, limit)), bounds);
   };
 }
 
-export function bindResultListAll<TDoc, TReasonCode extends string = never>(
-  list: (opts?: ListOptions<TDoc>) => Promise<TakibiResult<ListPage<TDoc>, TReasonCode>>,
+export function bindResultListAll<
+  TDoc,
+  TReasonCode extends string = never,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+>(
+  list: (opts?: ListOptions<TDoc, TIndexes>) => Promise<TakibiResult<ListPage<TDoc>, TReasonCode>>,
   cap: { pageSize: number; maxItems: number },
-): (opts?: ListAllOptions<TDoc>) => Promise<TakibiResult<TDoc[], TReasonCode>> {
+): (opts?: ListAllOptions<TDoc, TIndexes>) => Promise<TakibiResult<TDoc[], TReasonCode>> {
   return (options) => {
     const bounds = resolveListAllBounds(options, cap);
     return collectListPagesResult((cursor, limit) => list(pageOptions(options, cursor, limit)), {

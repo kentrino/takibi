@@ -1,7 +1,7 @@
 import type { ActionInvocation } from "./action-executor";
 import { BadRequestError } from "./errors";
 import type { ExecuteRequest } from "./executor";
-import { normalizeQueryExpr } from "./query";
+import { normalizeOrderBy, normalizeQueryExpr } from "./query";
 import type { TakibiFailure } from "./types";
 import type { StorageListOptions } from "./types";
 
@@ -168,15 +168,29 @@ function assertContext(value: unknown): asserts value is WireContext {
 function normalizeList(value: unknown): StorageListOptions | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new BadRequestError("Invalid list options");
-  assertExactKeys(value, ["limit", "cursor", "where"]);
+  assertExactKeys(value, ["limit", "cursor", "where", "index", "orderBy"]);
   if (value.limit !== undefined) assertListLimit(value.limit);
   if (value.cursor !== undefined && typeof value.cursor !== "string") {
     throw new BadRequestError("Invalid list cursor");
+  }
+  if (value.index !== undefined && (typeof value.index !== "string" || value.index.length === 0)) {
+    throw new BadRequestError("Invalid list index");
+  }
+  let orderBy: StorageListOptions["orderBy"];
+  if (value.orderBy !== undefined) {
+    if (value.index === undefined) throw new BadRequestError("orderBy requires index");
+    try {
+      orderBy = normalizeOrderBy(value.orderBy);
+    } catch (error) {
+      throw new BadRequestError(error instanceof Error ? error.message : "Invalid orderBy");
+    }
   }
   return {
     ...(value.limit !== undefined ? { limit: value.limit } : {}),
     ...(value.cursor !== undefined ? { cursor: value.cursor } : {}),
     ...(value.where !== undefined ? { where: normalizeQueryExpr(value.where) } : {}),
+    ...(value.index !== undefined ? { index: value.index } : {}),
+    ...(orderBy === undefined ? {} : { orderBy }),
   };
 }
 

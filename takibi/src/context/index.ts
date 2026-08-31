@@ -48,6 +48,7 @@ import {
   type TakibiTracer,
 } from "../tracing";
 import type { CollectionsDef } from "../types";
+import { assertCollectionIndexes } from "../indexes";
 import { assertCollectionUniqueConstraints } from "../unique";
 import { createMemoryExecutor, createStubExecutor } from "./executors";
 import { ownStringEntries } from "./own-entries";
@@ -102,6 +103,7 @@ function buildContext<TInitial, TEnv>(
           definition as CollectionsDef<object>[string],
           propertyKey,
         );
+        assertCollectionIndexes(definition as CollectionsDef<object>[string], propertyKey);
       }
       return createAppDefinition({
         collections: collections as CollectionsDef<object>,

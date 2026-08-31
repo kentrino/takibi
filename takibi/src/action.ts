@@ -8,9 +8,11 @@ import type {
   AccessPermission,
   CollectionApi,
   CollectionDefinition,
+  CollectionIndexes,
   CollectionUniqueConstraints,
   CollectionsApi,
   InferCollectionDoc,
+  IndexDeclaration,
   JsonValue,
   UniqueConstraintDeclaration,
 } from "./types";
@@ -438,10 +440,12 @@ export type CollectionDefinitionInput<
     TCtx
   >["accessPolicy"],
   TUnique extends CollectionUniqueConstraints<TSchema> = CollectionUniqueConstraints<TSchema>,
+  TIndexes extends CollectionIndexes<TSchema> | Record<string, never> = Record<string, never>,
 > = {
   schema: CollectionDefinition<TSchema, TCtx>["schema"];
   accessPolicy: TPolicy;
   unique?: TUnique & UniqueConstraintDeclaration<TSchema, TUnique>;
+  indexes?: TIndexes & IndexDeclaration<TSchema, TIndexes>;
   migrations?: CollectionDefinition<TSchema, TCtx>["migrations"];
   seed?: CollectionDefinition<TSchema, TCtx>["seed"];
 };
@@ -451,11 +455,12 @@ export function defineCollection<
   TSchema extends StandardSchemaV1,
   const TPolicy extends CollectionDefinition<TSchema, TCtx>["accessPolicy"],
   const TUnique extends CollectionUniqueConstraints<TSchema> = CollectionUniqueConstraints<TSchema>,
+  const TIndexes extends CollectionIndexes<TSchema> | Record<string, never> = Record<string, never>,
 >(
-  definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy, TUnique>,
-): CollectionDefinition<TSchema, TCtx, TPolicy> {
+  definition: CollectionDefinitionInput<TSchema, TCtx, TPolicy, TUnique, TIndexes>,
+): CollectionDefinition<TSchema, TCtx, TPolicy, TIndexes> {
   assertNoActionsOption(definition);
-  return definition as CollectionDefinition<TSchema, TCtx, TPolicy>;
+  return definition as CollectionDefinition<TSchema, TCtx, TPolicy, TIndexes>;
 }
 
 export function assertNoActionsOption(definition: object): void {
