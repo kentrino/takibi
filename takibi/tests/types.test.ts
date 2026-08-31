@@ -24,6 +24,7 @@ import type {
   InferCollectionDoc,
   InferHandlerCollections,
   NarrowCollectionDoc,
+  QueryBuilder,
 } from "../src/index";
 import type { StorageDriver } from "../src/types";
 
@@ -112,6 +113,38 @@ test("collection schemas type CRUD clients without handler $collections", () => 
       rev: number;
     }[]
   >();
+  expectTypeOf<
+    DurableInstance["$collections"]["posts"]["count"]
+  >().returns.resolves.toEqualTypeOf<number>();
+  expectTypeOf<
+    DurableInstance["$collections"]["posts"]["updateMany"]
+  >().returns.resolves.toEqualTypeOf<{ updated: number }>();
+  expectTypeOf<
+    DurableInstance["$collections"]["posts"]["deleteMany"]
+  >().returns.resolves.toEqualTypeOf<{ deleted: number }>();
+  expectTypeOf(client.posts).not.toHaveProperty("count");
+  expectTypeOf(client.posts).not.toHaveProperty("updateMany");
+  expectTypeOf(client.posts).not.toHaveProperty("deleteMany");
+  expectTypeOf(client.posts).not.toHaveProperty("consumeOne");
+  expectTypeOf(client.posts).not.toHaveProperty("incrementOne");
+
+  const checkTrustedQueries = (collections: DurableInstance["$collections"]) => {
+    void collections.posts.count({ where: (query) => query.published.eq(true) });
+    void collections.posts.updateMany(
+      { published: true },
+      { where: (query) => query.title.in(["draft"]) },
+    );
+    // @ts-expect-error conditional writes require where
+    void collections.posts.deleteMany({});
+    void collections.posts.incrementOne(
+      {
+        // @ts-expect-error only number fields can be incremented
+        title: 1,
+      },
+      { where: (query) => query.title.eq("draft") },
+    );
+  };
+  void checkTrustedQueries;
 
   const checkListQueries = () => {
     void client.posts.list({
@@ -125,6 +158,16 @@ test("collection schemas type CRUD clients without handler $collections", () => 
       where: (query) => query.not(query.title.present()),
     });
     void client.posts.list({
+      where: (query) =>
+        query.and(
+          query.title.in(["first", "second"]),
+          query.title.contains("ir"),
+          query.title.startsWith("f"),
+          query.title.endsWith("t"),
+          query.published.in([true]),
+        ),
+    });
+    void client.posts.list({
       // @ts-expect-error unknown fields are not queryable
       where: (query) => query.missing.eq("value"),
     });
@@ -136,6 +179,10 @@ test("collection schemas type CRUD clients without handler $collections", () => 
       // @ts-expect-error equality values follow the schema output type
       where: (query) => query.title.eq(42),
     });
+    void client.posts.list({
+      // @ts-expect-error string matching is only available on string fields
+      where: (query) => query.published.contains("true"),
+    });
     void client.posts.listAll({
       where: (query) => query.published.eq(true),
     });
@@ -145,6 +192,13 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     });
   };
   void checkListQueries;
+
+  const checkMixedStringQueries = (query: QueryBuilder<{ mixed: string | number }>) => {
+    query.mixed.in(["value", 1]);
+    // @ts-expect-error string matching is unavailable when the field can store numbers
+    query.mixed.contains("value");
+  };
+  void checkMixedStringQueries;
 });
 
 test("union collection add/set accept each variant and narrow the return", () => {

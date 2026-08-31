@@ -3,7 +3,7 @@ import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
 import { compileListOptions } from "./query";
-import { bindThrowingListAll } from "./list-all";
+import { bindThrowingListAll, LIST_PAGE_MAX } from "./list-all";
 import {
   commitAddDoc,
   prepareAddDoc,
@@ -49,6 +49,7 @@ function resolvePermission(
     case "get":
       return "get";
     case "list":
+    case "count":
       return "list";
     case "update":
       return "update";
@@ -231,6 +232,17 @@ export async function executeOperation<TCtx extends object>(
       await assertAccess(def, accessCtx, { conceal: false }, logger);
       return storage.list(req.collection, req.list);
     }
+    case "count": {
+      const accessCtx: AccessContext<TCtx> = {
+        ...ctx,
+        collection: req.collection,
+        operation: "count",
+        permission: "list",
+        ...(req.list?.where ? { where: req.list.where } : {}),
+      };
+      await assertAccess(def, accessCtx, { conceal: false }, logger);
+      return countDocuments(storage, req.collection, req.list);
+    }
     default: {
       const _exhaustive: never = req.operation;
       return _exhaustive;
@@ -331,6 +343,19 @@ export function createPolicyCollections<
           },
           logger,
         ),
+      count: (list) =>
+        executeOperation(
+          collections,
+          storage,
+          ctx,
+          {
+            kind: "collection",
+            collection: name,
+            operation: "count",
+            ...(list ? { list: compileListOptions(list) } : {}),
+          },
+          logger,
+        ),
     } as CollectionApi<TCollections[typeof name]>;
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
     api[name] = collectionApi;
@@ -342,6 +367,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,
   logger?: InternalLogger,
+  transactionBound = false,
 ): TrustedCollectionsApi<TCollections> {
   const api = Object.create(null) as TrustedCollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
@@ -357,9 +383,142 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       update: (id, input) => storageUpdate(definition, storage, name, id, input, logger),
       delete: (id) => storageDelete(storage, name, id),
       list: (options) => storage.list(name, compileListOptions(options)),
+      count: (options) => countDocuments(storage, name, compileListOptions(options)),
+      async updateMany(input, options) {
+        const compiled = compileConditionalWriteOptions(options);
+        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+          const targets = await collectDocuments(scoped, name, compiled);
+          for (const target of targets) {
+            await updateTrustedDocument(definition, scoped, name, target, input, logger);
+          }
+          return { updated: targets.length };
+        });
+      },
+      async deleteMany(options) {
+        const compiled = compileConditionalWriteOptions(options);
+        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+          const targets = await collectDocuments(scoped, name, compiled);
+          for (const target of targets) {
+            await storageDelete(scoped, name, target.id);
+          }
+          return { deleted: targets.length };
+        });
+      },
+      async consumeOne(options) {
+        const compiled = compileConditionalWriteOptions(options);
+        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+          const page = await scoped.list(name, { ...compiled, limit: 1 });
+          const target = page.items[0];
+          if (!target) return null;
+          await storageDelete(scoped, name, target.id);
+          return target;
+        });
+      },
+      async incrementOne(increment, options) {
+        const entries = normalizeIncrement(increment);
+        const compiled = compileConditionalWriteOptions(options);
+        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+          const page = await scoped.list(name, { ...compiled, limit: 1 });
+          const target = page.items[0];
+          if (!target) return null;
+          const incremented = Object.fromEntries(
+            entries.map(([field, delta]) => [
+              field,
+              (typeof target[field] === "number" ? target[field] : 0) + delta,
+            ]),
+          );
+          return updateTrustedDocument(
+            definition,
+            scoped,
+            name,
+            target,
+            { ...incremented, ...options.set },
+            logger,
+          );
+        });
+      },
     } as TrustedCollectionApi<TCollections[typeof name]>;
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
     api[name] = collectionApi;
   }
   return api;
+}
+
+async function countDocuments(
+  storage: StorageDriver,
+  collection: string,
+  options: StorageListOptions | undefined,
+): Promise<number> {
+  let count = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await storage.list(collection, {
+      ...options,
+      limit: LIST_PAGE_MAX,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    count += page.items.length;
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return count;
+}
+
+async function collectDocuments(
+  storage: StorageDriver,
+  collection: string,
+  options: StorageListOptions,
+): Promise<WithMetadata<Record<string, unknown>>[]> {
+  const documents: WithMetadata<Record<string, unknown>>[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await storage.list(collection, {
+      ...options,
+      limit: LIST_PAGE_MAX,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    documents.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return documents;
+}
+
+function compileConditionalWriteOptions(options: unknown): StorageListOptions {
+  const compiled = compileListOptions(options as never);
+  if (!compiled?.where) {
+    throw new TypeError("Conditional writes require where");
+  }
+  return compiled;
+}
+
+function runTrustedMutation<T>(
+  storage: StorageDriver,
+  transactionBound: boolean,
+  callback: (storage: StorageDriver) => Promise<T>,
+): Promise<T> {
+  return transactionBound ? callback(storage) : storage.transaction(callback);
+}
+
+function normalizeIncrement(value: unknown): [string, number][] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("increment must be an object");
+  }
+  return Object.entries(value).map(([field, delta]) => {
+    if (field.length === 0 || typeof delta !== "number" || !Number.isFinite(delta)) {
+      throw new TypeError("increment values must be finite numbers");
+    }
+    return [field, delta];
+  });
+}
+
+async function updateTrustedDocument(
+  definition: CollectionDefinition,
+  storage: StorageDriver,
+  collection: string,
+  existing: WithMetadata<Record<string, unknown>>,
+  input: unknown,
+  logger?: InternalLogger,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  const document = await prepareUpdateDoc(definition, existing.id, input, existing, logger);
+  await storage.put(collection, document);
+  return document;
 }

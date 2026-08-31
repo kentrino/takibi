@@ -88,7 +88,12 @@ export async function executeAction<TCtx extends object>(
       actionCtx,
       logger,
     );
-    const trustedCollections = createTrustedCollections(collections, scopedStorage, logger);
+    const trustedCollections = createTrustedCollections(
+      collections,
+      scopedStorage,
+      logger,
+      definition.atomic,
+    );
     const args: Record<string, unknown> = {
       ctx: actionCtx,
       collections: policyCollections,

@@ -25,6 +25,8 @@ import type {
   StorageListOptions,
 } from "./types";
 
+type ClientCollectionOperation = Exclude<CollectionOperation, "count">;
+
 export type InferHandlerCollections<H> = H extends {
   readonly "~takibi": { collections: infer C };
 }
@@ -319,7 +321,7 @@ function createCollectionClient(
   listAllCap: { pageSize: number; maxItems: number },
 ): ClientCollectionApi<{ schema: never }> {
   const call = async <T>(
-    operation: CollectionOperation,
+    operation: ClientCollectionOperation,
     parts: { id?: string; input?: unknown; list?: StorageListOptions } = {},
   ): Promise<TakibiResult<T>> => {
     if (parts.id === "") {
@@ -402,7 +404,7 @@ function emptyIdFailure(): TakibiResult<never> {
 
 function buildPublicRequest(
   collection: string,
-  operation: CollectionOperation,
+  operation: ClientCollectionOperation,
   parts: { id?: string; input?: unknown; list?: StorageListOptions },
 ): { method: string; path: string; input?: unknown; query?: URLSearchParams } {
   const encodedCollection = encodeURIComponent(collection);

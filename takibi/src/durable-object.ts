@@ -87,7 +87,7 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
     ): Promise<T> {
       await this.#ready;
       return this.#driver.transaction((storage) =>
-        callback(createTrustedCollections(collections, storage, logger)),
+        callback(createTrustedCollections(collections, storage, logger, true)),
       );
     }
 

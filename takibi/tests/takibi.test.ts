@@ -557,6 +557,18 @@ test("client compiles list callbacks to normalized HTTP query AST", async () => 
       { field: "createdAt", op: "gte", value: "2026-08-15T00:00:00.000Z" },
     ],
   });
+
+  expect(() =>
+    client.posts.list({
+      where: (query) => query.title.in([]),
+    }),
+  ).toThrow(/between 1 and 32/);
+  expect(() =>
+    client.posts.list({
+      where: (query) => query.title.in(Array.from({ length: 33 }, (_, index) => `title-${index}`)),
+    }),
+  ).toThrow(/between 1 and 32/);
+  expect(calls).toBe(1);
 });
 
 test("owner policy only grants list when the whole query implies the caller owner", async () => {
@@ -676,6 +688,60 @@ test("list policy sees normalized where before storage access", async () => {
 
   expect(observed).toEqual(where);
   expect(listCalls).toBe(0);
+});
+
+test("count uses list permission and follows every storage page", async () => {
+  let observed: Pick<AccessContext<object>, "operation" | "permission" | "where"> | undefined;
+  let listCalls = 0;
+  const where: QueryExpr = { field: "ownerId", op: "eq", value: "u1" };
+  const storage: StorageDriver = {
+    async get() {
+      return null;
+    },
+    async put() {},
+    async delete() {
+      return false;
+    },
+    async list(_collection, options) {
+      listCalls += 1;
+      return options?.cursor
+        ? { items: [{ id: "c", createdAt: "", updatedAt: "", rev: 1 }] }
+        : {
+            items: [
+              { id: "a", createdAt: "", updatedAt: "", rev: 1 },
+              { id: "b", createdAt: "", updatedAt: "", rev: 1 },
+            ],
+            nextCursor: "next",
+          };
+    },
+    transaction(callback) {
+      return callback(storage);
+    },
+  };
+
+  await expect(
+    executeOperation(
+      {
+        notes: {
+          schema: z.object({ ownerId: z.string() }),
+          accessPolicy(context) {
+            observed = context;
+            return read;
+          },
+        },
+      },
+      storage,
+      {},
+      {
+        kind: "collection",
+        collection: "notes",
+        operation: "count",
+        list: { where },
+      },
+    ),
+  ).resolves.toBe(3);
+  expect(observed).toMatchObject({ operation: "count", permission: "list", where });
+  expect(listCalls).toBe(2);
 });
 
 test("gate policy is mandatory at execution and requires can use list grants", async () => {
@@ -871,6 +937,94 @@ test("trusted transaction commits and rolls back transaction-bound collections",
   await expect(object.$collections.audits.get("rolled-back-audit")).rejects.toMatchObject({
     code: "NOT_FOUND",
   });
+});
+
+test("trusted count and conditional writes are atomic and schema-checked", async () => {
+  const context = createTakibi()({ resolve: () => ({ tenantId: "conditional-writes" }) });
+  const handler = context
+    .defineCollections({
+      records: {
+        schema: z.object({
+          group: z.string(),
+          value: z.string(),
+          counter: z.number().nullable().optional(),
+          marked: z.boolean().default(false),
+        }),
+        accessPolicy: fullAccess,
+        unique: { byValue: ["value"] },
+        indexes: { byGroup: ["group"] },
+      },
+      audits: {
+        schema: z.object({ action: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  const records = object.$collections.records;
+  await records.add({ group: "a", value: "one", counter: 1 }, { id: "r1" });
+  await records.add({ group: "a", value: "two", counter: null }, { id: "r2" });
+  await records.add({ group: "b", value: "three" }, { id: "r3" });
+
+  await expect(
+    records.count({
+      index: "byGroup",
+      where: (query) => query.group.eq("a"),
+    }),
+  ).resolves.toBe(2);
+  await expect(
+    records.updateMany(
+      { marked: true },
+      { index: "byGroup", where: (query) => query.group.eq("a") },
+    ),
+  ).resolves.toEqual({ updated: 2 });
+  await expect(
+    records.incrementOne(
+      { counter: 2 },
+      { where: (query) => query.id.eq("r2"), set: { marked: false } },
+    ),
+  ).resolves.toMatchObject({ id: "r2", counter: 2, marked: false });
+
+  await expect(
+    records.updateMany({ value: "duplicate" }, { where: (query) => query.group.eq("a") }),
+  ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+  await expect(records.get("r1")).resolves.toMatchObject({ value: "one" });
+  await expect(records.get("r2")).resolves.toMatchObject({ value: "two" });
+
+  await expect(
+    object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+      await $collections.audits.add({ action: "rollback" }, { id: "rollback" });
+      await $collections.records.updateMany(
+        { marked: false },
+        { where: (query) => query.group.eq("a") },
+      );
+      throw new Error("rollback");
+    }),
+  ).rejects.toThrow("rollback");
+  await expect(object.$collections.audits.get("rollback")).rejects.toMatchObject({
+    code: "NOT_FOUND",
+  });
+  await expect(records.get("r1")).resolves.toMatchObject({ marked: true });
+
+  await expect(
+    records.consumeOne({
+      index: "byGroup",
+      where: (query) => query.group.eq("a"),
+    }),
+  ).resolves.toMatchObject({ id: "r1" });
+  await expect(records.deleteMany({ where: (query) => query.group.eq("a") })).resolves.toEqual({
+    deleted: 1,
+  });
+  await expect(
+    records.consumeOne({ where: (query) => query.group.eq("missing") }),
+  ).resolves.toBeNull();
+  await expect(
+    records.incrementOne({ counter: 1 }, { where: (query) => query.id.eq("missing") }),
+  ).resolves.toBeNull();
+  await expect(records.updateMany({ marked: true }, {} as never)).rejects.toThrow(/require where/);
 });
 
 test("trusted reset clears documents and restores collection seeds", async () => {

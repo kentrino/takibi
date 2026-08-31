@@ -5,6 +5,7 @@ import type {
   QueryBuilder,
   QueryExpr,
   QueryScalar,
+  QueryStringOperator,
   QueryValueOperator,
   StorageListOptions,
 } from "./types";
@@ -14,6 +15,7 @@ export const QUERY_MAX_NODES = 32;
 export const QUERY_MAX_DEPTH = 8;
 
 const VALUE_OPERATORS = new Set<QueryValueOperator>(["eq", "gt", "gte", "lt", "lte"]);
+const STRING_OPERATORS = new Set<QueryStringOperator>(["contains", "startsWith", "endsWith"]);
 
 export function compileListOptions<
   TDoc,
@@ -125,13 +127,24 @@ function createQueryBuilder<TDoc>(expressions: WeakSet<object>): QueryBuilder<TD
       assertQueryValue(op, value);
       return register({ field, op, value });
     };
+    const stringLeaf = (op: QueryStringOperator, value: unknown): QueryExpr => {
+      if (typeof value !== "string") throw new TypeError(`${op} requires a string`);
+      return register({ field, op, value });
+    };
     methods = Object.freeze({
       present: () => register({ field, op: "present" }),
       eq: (value: unknown) => leaf("eq", value),
+      in: (values: unknown) => {
+        const normalized = normalizeInValues(values);
+        return register({ field, op: "in", values: normalized });
+      },
       gt: (value: unknown) => leaf("gt", value),
       gte: (value: unknown) => leaf("gte", value),
       lt: (value: unknown) => leaf("lt", value),
       lte: (value: unknown) => leaf("lte", value),
+      contains: (value: unknown) => stringLeaf("contains", value),
+      startsWith: (value: unknown) => stringLeaf("startsWith", value),
+      endsWith: (value: unknown) => stringLeaf("endsWith", value),
     });
     fields.set(field, methods);
     return methods;
@@ -193,6 +206,25 @@ export function normalizeQueryExpr(value: unknown): QueryExpr {
       assertExactKeys(input, ["field", "op"]);
       assertQueryableField(input.field);
       normalized = Object.freeze({ field: input.field, op });
+    } else if (op === "in") {
+      assertExactKeys(input, ["field", "op", "values"]);
+      assertQueryableField(input.field);
+      normalized = Object.freeze({
+        field: input.field,
+        op,
+        values: normalizeInValues(input.values),
+      });
+    } else if (typeof op === "string" && STRING_OPERATORS.has(op as QueryStringOperator)) {
+      assertExactKeys(input, ["field", "op", "value"]);
+      assertQueryableField(input.field);
+      if (typeof input.value !== "string") {
+        throw new TypeError(`${op} requires a string`);
+      }
+      normalized = Object.freeze({
+        field: input.field,
+        op: op as QueryStringOperator,
+        value: input.value,
+      });
     } else if (typeof op === "string" && VALUE_OPERATORS.has(op as QueryValueOperator)) {
       assertExactKeys(input, ["field", "op", "value"]);
       assertQueryableField(input.field);
@@ -234,6 +266,19 @@ export function matchesQuery(
     if (expression.op === "present") return present;
     if (!present) return false;
     const actual = document[expression.field];
+    if (expression.op === "in") {
+      return expression.values.some((value) => matchesScalarEquality(actual, value));
+    }
+    if (
+      expression.op === "contains" ||
+      expression.op === "startsWith" ||
+      expression.op === "endsWith"
+    ) {
+      if (typeof actual !== "string" || typeof expression.value !== "string") return false;
+      if (expression.op === "contains") return actual.includes(expression.value);
+      if (expression.op === "startsWith") return actual.startsWith(expression.value);
+      return actual.endsWith(expression.value);
+    }
     if (actual === null || expression.value === null) {
       return expression.op === "eq" && actual === expression.value;
     }
@@ -307,6 +352,23 @@ function assertQueryValue(op: QueryValueOperator, value: unknown): asserts value
   if (op !== "eq" && typeof value !== "string" && typeof value !== "number") {
     throw new TypeError(`${op} requires a string or finite number`);
   }
+}
+
+function normalizeInValues(value: unknown): readonly QueryScalar[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > QUERY_MAX_NODES) {
+    throw new TypeError(`in requires between 1 and ${QUERY_MAX_NODES} values`);
+  }
+  for (const entry of value) assertQueryValue("eq", entry);
+  return Object.freeze([...value]) as readonly QueryScalar[];
+}
+
+function matchesScalarEquality(actual: unknown, expected: QueryScalar): boolean {
+  if (actual === null || expected === null) return actual === expected;
+  if (typeof actual !== typeof expected) return false;
+  return (
+    (typeof actual === "string" || typeof actual === "number" || typeof actual === "boolean") &&
+    actual === expected
+  );
 }
 
 function assertQueryableField(value: unknown): asserts value is string {

@@ -147,6 +147,32 @@ test("query evaluation uses strict scalar types and ordinary boolean logic", () 
   ).toBe(false);
 });
 
+test("in is one bounded node and string operators use JavaScript semantics", () => {
+  const values = Array.from({ length: 32 }, (_, index) => `status-${index}`);
+  const inQuery = compileWhere<Item>((query) => query.status.in(values));
+  expect(inQuery).toEqual({ field: "status", op: "in", values });
+  expect(matchesQuery({ status: "status-31" }, inQuery)).toBe(true);
+  expect(matchesQuery({ status: "other" }, inQuery)).toBe(false);
+
+  expect(() => compileWhere<Item>((query) => query.status.in([]))).toThrow(/between 1 and 32/);
+  expect(() =>
+    compileWhere<Item>((query) =>
+      query.status.in(Array.from({ length: 33 }, (_, index) => `status-${index}`)),
+    ),
+  ).toThrow(/between 1 and 32/);
+
+  const contains = compileWhere<Item>((query) => query.status.contains("Clinic"));
+  const startsWith = compileWhere<Item>((query) => query.status.startsWith("YR"));
+  const endsWith = compileWhere<Item>((query) => query.status.endsWith(""));
+  expect(matchesQuery({ status: "YR Clinic" }, contains)).toBe(true);
+  expect(matchesQuery({ status: "yr clinic" }, contains)).toBe(false);
+  expect(matchesQuery({ status: "YR Clinic" }, startsWith)).toBe(true);
+  expect(matchesQuery({ status: "YR Clinic" }, endsWith)).toBe(true);
+  expect(matchesQuery({ status: null }, endsWith)).toBe(false);
+  expect(matchesQuery({ status: 1 }, endsWith)).toBe(false);
+  expect(matchesQuery({}, endsWith)).toBe(false);
+});
+
 test("present distinguishes missing fields from stored null values", () => {
   const present = compileWhere<Item>((query) => query.nullable.present());
   const absentStatus = compileWhere<Item>((query) => query.not(query.status.present()));

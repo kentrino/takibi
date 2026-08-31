@@ -77,6 +77,10 @@ test("decodeWireRequest rejects invalid envelopes as BadRequestError", () => {
     /Invalid CRUD operation/,
   );
   rejects(
+    { kind: "collection", collection: "posts", operation: "count", context },
+    /Invalid CRUD operation/,
+  );
+  rejects(
     { kind: "collection", collection: "posts", operation: "get", context },
     /Invalid CRUD id/,
   );

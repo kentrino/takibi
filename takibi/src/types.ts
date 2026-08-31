@@ -94,7 +94,9 @@ export type QueryScalar = string | number | boolean | null;
 
 export type QueryValueOperator = "eq" | "gt" | "gte" | "lt" | "lte";
 
-export type QueryOperator = QueryValueOperator | "present";
+export type QueryStringOperator = "contains" | "startsWith" | "endsWith";
+
+export type QueryOperator = QueryValueOperator | QueryStringOperator | "in" | "present";
 
 type UniqueFieldKeys<TSchema extends StandardSchemaV1> = {
   [K in keyof StandardSchemaV1.InferOutput<TSchema> & string]-?: IsAny<
@@ -204,16 +206,30 @@ export type OrderBuilder<TFields extends readonly string[]> = {
 
 export type QueryExpr =
   | { readonly field: string; readonly op: QueryValueOperator; readonly value: QueryScalar }
+  | { readonly field: string; readonly op: "in"; readonly values: readonly QueryScalar[] }
+  | {
+      readonly field: string;
+      readonly op: QueryStringOperator;
+      readonly value: string;
+    }
   | { readonly field: string; readonly op: "present" }
   | { readonly op: "and" | "or"; readonly operands: readonly QueryExpr[] }
   | { readonly op: "not"; readonly operand: QueryExpr };
 
 type QueryEqValue<T> = Extract<Exclude<T, undefined>, QueryScalar>;
 type QueryComparableValue<T> = Extract<Exclude<T, undefined | null>, string | number>;
+type QueryStringValue<T> = [Exclude<T, undefined | null>] extends [never]
+  ? never
+  : [Exclude<T, undefined | null>] extends [string]
+    ? Extract<Exclude<T, undefined | null>, string>
+    : never;
 
 export type QueryField<T> = { present(): QueryExpr } & ([QueryEqValue<T>] extends [never]
   ? object
-  : { eq(value: QueryEqValue<T>): QueryExpr }) &
+  : {
+      eq(value: QueryEqValue<T>): QueryExpr;
+      in(values: readonly QueryEqValue<T>[]): QueryExpr;
+    }) &
   ([QueryComparableValue<T>] extends [never]
     ? object
     : {
@@ -221,6 +237,13 @@ export type QueryField<T> = { present(): QueryExpr } & ([QueryEqValue<T>] extend
         gte(value: QueryComparableValue<T>): QueryExpr;
         lt(value: QueryComparableValue<T>): QueryExpr;
         lte(value: QueryComparableValue<T>): QueryExpr;
+      }) &
+  ([QueryStringValue<T>] extends [never]
+    ? object
+    : {
+        contains(value: QueryStringValue<T>): QueryExpr;
+        startsWith(value: QueryStringValue<T>): QueryExpr;
+        endsWith(value: QueryStringValue<T>): QueryExpr;
       });
 
 type QueryFields<TDoc> = {
@@ -237,7 +260,7 @@ export type QueryBuilder<TDoc> = QueryFields<TDoc> & {
   not(operand: QueryExpr): QueryExpr;
 };
 
-export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list";
+export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list" | "count";
 
 export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
 
@@ -276,7 +299,7 @@ export type AccessContext<
   TDoc = WithMetadata<Record<string, unknown>>,
 > = TCtx & {
   collection: string;
-  operation: "add" | "set" | "get" | "update" | "delete" | "list" | "invoke";
+  operation: CollectionOperation | "invoke";
   permission: AccessPermission;
   /** Normalized list query. Present only when list was called with `where`. */
   where?: QueryExpr;
@@ -500,6 +523,7 @@ export type CollectionApi<C> = {
   listAll: (
     opts?: ListAllOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
   ) => Promise<InferCollectionDoc<C>[]>;
+  count: (opts?: CountOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>) => Promise<number>;
 };
 
 export type CollectionsApi<TCollections> = {
@@ -507,6 +531,18 @@ export type CollectionsApi<TCollections> = {
 };
 
 /** Local trusted facade that can preserve metadata during controlled imports. */
+export type CollectionIncrementInput<C> = C extends {
+  schema: infer S extends StandardSchemaV1;
+}
+  ? {
+      [K in keyof StandardSchemaV1.InferOutput<S> & string]?: [
+        Extract<Exclude<StandardSchemaV1.InferOutput<S>[K], null | undefined>, number>,
+      ] extends [never]
+        ? never
+        : number;
+    }
+  : never;
+
 export type TrustedCollectionApi<C> = Omit<CollectionApi<C>, "add"> & {
   add: <TData extends CollectionDataInput<C>>(
     data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
@@ -516,6 +552,22 @@ export type TrustedCollectionApi<C> = Omit<CollectionApi<C>, "add"> & {
       updatedAt?: string;
     },
   ) => Promise<NarrowCollectionDoc<C, TData>>;
+  updateMany: (
+    data: CollectionPatchInput<C>,
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<{ updated: number }>;
+  deleteMany: (
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<{ deleted: number }>;
+  consumeOne: (
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<InferCollectionDoc<C> | null>;
+  incrementOne: (
+    increment: CollectionIncrementInput<C>,
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>> & {
+      set?: CollectionPatchInput<C>;
+    },
+  ) => Promise<InferCollectionDoc<C> | null>;
 };
 
 export type TrustedCollectionsApi<TCollections> = {
@@ -602,6 +654,24 @@ export type ListAllOptions<
   TDoc = WithMetadata<Record<string, QueryScalar>>,
   TIndexes extends Record<string, readonly string[]> = Record<string, never>,
 > = ListAllFromList<ListOptions<TDoc, TIndexes>>;
+
+type CountFromList<T> = T extends unknown ? Omit<T, "limit" | "cursor" | "orderBy"> : never;
+
+/** Server-only aggregate over the same query and index selection as `list`. */
+export type CountOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = CountFromList<ListOptions<TDoc, TIndexes>>;
+
+type RequireWhere<T> = T extends unknown
+  ? Omit<T, "where"> & { where: NonNullable<T extends { where?: infer W } ? W : never> }
+  : never;
+
+/** Trusted-only selector that cannot represent an unqualified write. */
+export type ConditionalWriteOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = RequireWhere<CountOptions<TDoc, TIndexes>>;
 
 export type StorageOrderBy = {
   field: string;
