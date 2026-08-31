@@ -2,6 +2,7 @@ import { AlreadyExistsError, TakibiError } from "./errors";
 import { RESERVED_DOCUMENT_DATA_KEYS } from "./types";
 import type {
   CollectionDefinition,
+  QueryExpr,
   QueryScalar,
   StorageDriver,
   StorageListPlan,
@@ -52,6 +53,28 @@ export async function assertUniqueDocument(
   const constraints = participatingConstraints(definition, collection, candidate);
   if (constraints.length === 0) return;
 
+  const indexed = constraints.map((constraint) => ({
+    constraint,
+    index: matchingIndex(definition, constraint),
+  }));
+  if (indexed.every(({ index }) => index !== undefined)) {
+    for (const { constraint, index } of indexed) {
+      const page = await storage.list(
+        collection,
+        {
+          index,
+          limit: 2,
+          where: constraintQuery(constraint),
+        },
+        plan,
+      );
+      if (page.items.some((document) => document.id !== candidate.id)) {
+        throw uniqueViolation(collection, constraint.name);
+      }
+    }
+    return;
+  }
+
   let cursor: string | undefined;
   do {
     const page = await storage.list(
@@ -66,14 +89,39 @@ export async function assertUniqueDocument(
       if (document.id === candidate.id) continue;
       for (const constraint of constraints) {
         if (matchesConstraint(document, constraint)) {
-          throw new AlreadyExistsError(
-            `Unique constraint violated: ${collection}.${constraint.name}`,
-          );
+          throw uniqueViolation(collection, constraint.name);
         }
       }
     }
     cursor = page.nextCursor;
   } while (cursor !== undefined);
+}
+
+function matchingIndex(
+  definition: CollectionDefinition,
+  constraint: ParticipatingConstraint,
+): string | undefined {
+  if (constraint.values.some((value) => typeof value !== "string" && typeof value !== "number")) {
+    return undefined;
+  }
+  return Object.entries(definition.indexes ?? {}).find(([, fields]) =>
+    constraint.fields.every((field, index) => fields[index] === field),
+  )?.[0];
+}
+
+function constraintQuery(constraint: ParticipatingConstraint): QueryExpr {
+  const operands = constraint.fields.map(
+    (field, index): QueryExpr => ({
+      field,
+      op: "eq",
+      value: constraint.values[index]!,
+    }),
+  );
+  return operands.length === 1 ? operands[0]! : { op: "and", operands };
+}
+
+function uniqueViolation(collection: string, constraint: string): AlreadyExistsError {
+  return new AlreadyExistsError(`Unique constraint violated: ${collection}.${constraint}`);
 }
 
 function participatingConstraints(
