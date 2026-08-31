@@ -10,3 +10,4 @@ export {
   defineBetterAuthCollections,
   type BetterAuthCollectionSchemas,
 } from "./collections.server.ts";
+export { createZodBetterAuthBaseSchemas } from "./zod-schemas.ts";
