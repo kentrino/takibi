@@ -12,6 +12,8 @@ import { ForbiddenError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import type { PublicRequest } from "./http";
 import { withLoggedSpan, emitFailure, type InternalLogger } from "./logging";
+import { compileIndexRegistry } from "./indexes";
+import { reconcileCollectionIndexes } from "./index-reconcile";
 import { createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { decodeWireRequest, type WireResponse } from "./protocol";
@@ -45,13 +47,25 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
     constructor(state: DurableObjectState, env: unknown) {
       this.#services = createServices ? createServices({ env }) : {};
       this.#state = state;
+      const registry = compileIndexRegistry(collections);
       this.#driver = applyStorageLogging(
-        createMigratingStorage(collections, createDurableObjectStorage(state.storage), logger),
+        createMigratingStorage(
+          collections,
+          createDurableObjectStorage(state.storage, registry),
+          logger,
+        ),
         logger,
       );
-      this.#ready = state.blockConcurrencyWhile(() =>
-        seedCollections(collections, this.#driver, logger),
-      );
+      this.#ready = state.blockConcurrencyWhile(async () => {
+        await reconcileCollectionIndexes({
+          sql: state.storage.sql,
+          collections,
+          storage: this.#driver,
+          registry,
+          logger,
+        });
+        await seedCollections(collections, this.#driver, logger);
+      });
       this.$collections = createTrustedCollections(
         collections,
         afterInitialization(this.#driver, this.#ready),
@@ -63,14 +77,22 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
       await this.#ready;
       await this.#state.blockConcurrencyWhile(async () => {
         await this.#state.storage.deleteAll();
+        const registry = compileIndexRegistry(collections);
         const driver = applyStorageLogging(
           createMigratingStorage(
             collections,
-            createDurableObjectStorage(this.#state.storage),
+            createDurableObjectStorage(this.#state.storage, registry),
             logger,
           ),
           logger,
         );
+        await reconcileCollectionIndexes({
+          sql: this.#state.storage.sql,
+          collections,
+          storage: driver,
+          registry,
+          logger,
+        });
         await seedCollections(collections, driver, logger);
       });
     }
