@@ -1,5 +1,16 @@
 import { LIST_PAGE_DEFAULT, LIST_PAGE_MAX } from "./list-all";
 import { BadRequestError, TakibiError } from "./errors";
+import { compileIndexedScanSql, createIndexCatalogTableSql } from "./index-sql";
+import {
+  afterIndexCursor,
+  compareDocumentIndexOrder,
+  compareUtf8,
+  extractIndexValues,
+  matchesIndexRange,
+  resolveIndexedList,
+  type IndexRegistry,
+  type ResolvedIndexScan,
+} from "./indexes";
 import { assertJsonObject } from "./json";
 import { matchesQuery, normalizeQueryExpr } from "./query";
 import { compileQueryToSql } from "./sql-query";
@@ -21,8 +32,26 @@ type ListCursorV2 = {
   id: string;
 };
 
+type ListCursorV3 = {
+  v: 3;
+  collection: string;
+  where: QueryExpr | null;
+  index: string;
+  fields: readonly string[];
+  orderField: string;
+  direction: "asc" | "desc";
+  values: readonly (string | number)[];
+  id: string;
+};
+
+type ListCursor = ListCursorV2 | ListCursorV3;
+
 const LIST_CHUNK_SIZE = 128;
-const STORAGE_LAYOUT_VERSION = 2;
+const STORAGE_LAYOUT_VERSION = 3;
+const EMPTY_INDEX_REGISTRY: IndexRegistry = {
+  byCollection: new Map(),
+  schemaVersions: new Map(),
+};
 const STORAGE_LAYOUT_KEY = "layout_version";
 const MAX_FINITE_DOUBLE = 1.7976931348623157e308;
 
@@ -39,8 +68,14 @@ type ReadChunk = (
 type PreparedList = {
   collection: string;
   where: QueryExpr | undefined;
-  startAfter: string | undefined;
   limit: number;
+  scan:
+    | { kind: "id"; startAfter: string | undefined }
+    | {
+        kind: "index";
+        resolved: ResolvedIndexScan;
+        startAfter?: { values: readonly (string | number)[]; id: string };
+      };
 };
 
 type LayoutRow = Record<string, SqlStorageValue> & {
@@ -56,7 +91,7 @@ type DocumentRow = Record<string, SqlStorageValue> & {
   data: string;
 };
 
-export function createMemoryStorage(): StorageDriver {
+export function createMemoryStorage(registry: IndexRegistry = EMPTY_INDEX_REGISTRY): StorageDriver {
   const state: MemoryState = { tables: new Map() };
   let writeQueue = Promise.resolve();
   const coordinate: WriteCoordinator = (operation) => {
@@ -67,7 +102,7 @@ export function createMemoryStorage(): StorageDriver {
     );
     return result;
   };
-  return createMemoryDriver(state, coordinate);
+  return createMemoryDriver(state, coordinate, registry);
 }
 
 type MemoryState = {
@@ -76,7 +111,11 @@ type MemoryState = {
 
 type WriteCoordinator = <T>(operation: () => T | Promise<T>) => Promise<T>;
 
-function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): StorageDriver {
+function createMemoryDriver(
+  state: MemoryState,
+  coordinate: WriteCoordinator,
+  registry: IndexRegistry,
+): StorageDriver {
   const immediate: WriteCoordinator = async (operation) => operation();
 
   const table = (resource: string) => {
@@ -102,20 +141,55 @@ function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): S
       return coordinate(() => table(resource).delete(id));
     },
     async list(resource, opts, plan) {
-      const prepared = prepareList(resource, opts);
-      const items = [...table(resource).values()]
-        .sort((a, b) => compareIds(a.id, b.id))
-        .map((document) => ({
-          id: document.id,
-          document: withDocumentRevision(structuredClone(document)),
-        }));
-      return paginate(
+      const prepared = prepareList(resource, opts, registry);
+      const documents = [...table(resource).values()].map((document) =>
+        withDocumentRevision(structuredClone(document)),
+      );
+      if (prepared.scan.kind === "id") {
+        const items = documents
+          .sort((left, right) => compareIds(left.id, right.id))
+          .map((document) => ({ id: document.id, document }));
+        return paginate(
+          prepared,
+          async (startAfter, limit) => {
+            const start =
+              startAfter === undefined
+                ? 0
+                : items.findIndex((item) => compareIds(item.id, startAfter) > 0);
+            return start < 0 ? [] : items.slice(start, start + limit);
+          },
+          plan,
+        );
+      }
+
+      const scan = prepared.scan;
+      const items = documents
+        .filter((document) => matchesIndexRange(document, scan.resolved.range))
+        .sort((left, right) =>
+          compareDocumentIndexOrder(
+            left,
+            right,
+            scan.resolved.index.fields,
+            scan.resolved.direction,
+          ),
+        )
+        .map((document) => ({ id: document.id, document }));
+      return paginateIndex(
         prepared,
-        async (startAfter, limit) => {
-          const start =
-            startAfter === undefined
-              ? 0
-              : items.findIndex((item) => compareIds(item.id, startAfter) > 0);
+        scan.resolved,
+        (startAfter, limit) => {
+          const start = items.findIndex((item) => {
+            const values = extractIndexValues(item.document, scan.resolved.index.fields);
+            if (values === undefined) return false;
+            if (startAfter === undefined) return true;
+            return afterIndexCursor(
+              values,
+              item.id,
+              startAfter.values,
+              startAfter.id,
+              scan.resolved.direction,
+            );
+          });
           return start < 0 ? [] : items.slice(start, start + limit);
         },
         plan,
@@ -124,7 +198,7 @@ function createMemoryDriver(state: MemoryState, coordinate: WriteCoordinator): S
     transaction(callback) {
       return coordinate(async () => {
         const scopedState: MemoryState = { tables: cloneMemoryTables(state.tables) };
-        const result = await callback(createMemoryDriver(scopedState, immediate));
+        const result = await callback(createMemoryDriver(scopedState, immediate, registry));
         state.tables = scopedState.tables;
         return result;
       });
@@ -143,7 +217,10 @@ function cloneMemoryTables(
   );
 }
 
-export function createDurableObjectStorage(storage: DurableObjectStorage): StorageDriver {
+export function createDurableObjectStorage(
+  storage: DurableObjectStorage,
+  registry: IndexRegistry = EMPTY_INDEX_REGISTRY,
+): StorageDriver {
   initializeStorageLayout(storage);
   let transactionDepth = 0;
 
@@ -195,7 +272,15 @@ export function createDurableObjectStorage(storage: DurableObjectStorage): Stora
       );
     },
     async list(resource, opts, plan) {
-      const prepared = prepareList(resource, opts);
+      const prepared = prepareList(resource, opts, registry);
+      if (prepared.scan.kind === "index") {
+        return paginateIndex(
+          prepared,
+          prepared.scan.resolved,
+          createSqlIndexChunkReader(storage.sql, resource, prepared, plan),
+          plan,
+        );
+      }
       return paginate(prepared, createSqlChunkReader(storage.sql, resource, prepared, plan), plan);
     },
     transaction(callback) {
@@ -243,10 +328,14 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
     while (version < STORAGE_LAYOUT_VERSION) {
       if (version === 0) {
         createDocumentTable(storage.sql, "takibi_documents");
+        createIndexCatalog(storage.sql);
         version = STORAGE_LAYOUT_VERSION;
       } else if (version === 1) {
         migrateVersionOneToTwo(storage.sql);
         version = 2;
+      } else if (version === 2) {
+        createIndexCatalog(storage.sql);
+        version = 3;
       } else {
         throw new TakibiError(
           "STORAGE_LAYOUT_VERSION",
@@ -263,6 +352,10 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
       );
     }
   });
+}
+
+function createIndexCatalog(sql: SqlStorage): void {
+  sql.exec(createIndexCatalogTableSql());
 }
 
 function createDocumentTable(sql: SqlStorage, table: "takibi_documents" | "takibi_documents_v2") {
@@ -388,6 +481,29 @@ function createSqlChunkReader(
   };
 }
 
+function createSqlIndexChunkReader(
+  sql: SqlStorage,
+  resource: string,
+  prepared: PreparedList,
+  _plan: StorageListPlan | undefined,
+): IndexReadChunk {
+  if (prepared.scan.kind !== "index") {
+    throw new TakibiError("INVALID_DOCUMENT", "Indexed scan required", 500);
+  }
+  const scan = prepared.scan.resolved;
+  return (startAfter, limit) => {
+    const compiled = compileIndexedScanSql(resource, scan, {
+      ...(startAfter === undefined ? {} : { startAfter }),
+      ...(prepared.where === undefined ? {} : { residual: prepared.where }),
+      limit,
+    });
+    return sql
+      .exec<DocumentRow>(compiled.sql, ...compiled.bindings)
+      .toArray()
+      .map((row) => ({ id: row.id, document: withDocumentRevision(rowToDocument(row)) }));
+  };
+}
+
 function encodeDocument(document: StoredDocument): {
   schemaVersion: number;
   revision: number;
@@ -438,17 +554,16 @@ function rowToDocument(row: DocumentRow): StoredDocument {
   });
 }
 
-function prepareList(resource: string, opts: StorageListOptions | undefined): PreparedList {
+function prepareList(
+  resource: string,
+  opts: StorageListOptions | undefined,
+  registry: IndexRegistry,
+): PreparedList {
   let where: QueryExpr | undefined;
   try {
     where = opts?.where === undefined ? undefined : normalizeQueryExpr(opts.where);
   } catch (error) {
     throw new BadRequestError(error instanceof Error ? error.message : "Invalid query");
-  }
-
-  const cursor = opts?.cursor === undefined ? undefined : decodeCursor(opts.cursor);
-  if (cursor !== undefined && (cursor.collection !== resource || !sameQuery(cursor.where, where))) {
-    throw new BadRequestError("Cursor does not match this collection and query");
   }
 
   if (
@@ -458,11 +573,43 @@ function prepareList(resource: string, opts: StorageListOptions | undefined): Pr
     throw new BadRequestError("Invalid list limit");
   }
 
+  const resolved = resolveIndexedList(resource, { ...opts, where }, registry);
+  const cursor = opts?.cursor === undefined ? undefined : decodeCursor(opts.cursor);
+  const limit = Math.min(opts?.limit ?? LIST_PAGE_DEFAULT, LIST_PAGE_MAX);
+
+  if (resolved === undefined) {
+    if (cursor !== undefined && cursor.v !== 2) {
+      throw new BadRequestError("Cursor does not match this collection and query");
+    }
+    if (
+      cursor !== undefined &&
+      (cursor.collection !== resource || !sameQuery(cursor.where, where))
+    ) {
+      throw new BadRequestError("Cursor does not match this collection and query");
+    }
+    return {
+      collection: resource,
+      where,
+      limit,
+      scan: { kind: "id", startAfter: cursor?.id },
+    };
+  }
+
+  if (cursor !== undefined) {
+    if (cursor.v !== 3 || !sameIndexedCursor(cursor, resource, where, resolved)) {
+      throw new BadRequestError("Cursor does not match this collection and query");
+    }
+  }
+
   return {
     collection: resource,
     where,
-    startAfter: cursor?.id,
-    limit: Math.min(opts?.limit ?? LIST_PAGE_DEFAULT, LIST_PAGE_MAX),
+    limit,
+    scan: {
+      kind: "index",
+      resolved,
+      ...(cursor && cursor.v === 3 ? { startAfter: { values: cursor.values, id: cursor.id } } : {}),
+    },
   };
 }
 
@@ -472,7 +619,7 @@ async function paginate(
   plan: StorageListPlan | undefined,
 ): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }> {
   const page: WithMetadata<Record<string, unknown>>[] = [];
-  let startAfter = prepared.startAfter;
+  let startAfter = prepared.scan.kind === "id" ? prepared.scan.startAfter : undefined;
 
   while (true) {
     const chunk = await readChunk(startAfter, LIST_CHUNK_SIZE);
@@ -486,7 +633,70 @@ async function paginate(
         const last = page.at(-1)!;
         return {
           items: page,
-          nextCursor: encodeCursor(prepared.collection, prepared.where, last.id),
+          nextCursor: encodeCursor({
+            v: 2,
+            collection: prepared.collection,
+            where: prepared.where ?? null,
+            id: last.id,
+          }),
+        };
+      }
+      page.push(document);
+    }
+
+    if (chunk.length < LIST_CHUNK_SIZE) break;
+  }
+
+  return { items: page };
+}
+
+type IndexReadChunk = (
+  startAfter: { values: readonly (string | number)[]; id: string } | undefined,
+  limit: number,
+) => Promise<ScanItem[]> | ScanItem[];
+
+async function paginateIndex(
+  prepared: PreparedList,
+  resolved: ResolvedIndexScan,
+  readChunk: IndexReadChunk,
+  plan: StorageListPlan | undefined,
+): Promise<{ items: WithMetadata<Record<string, unknown>>[]; nextCursor?: string }> {
+  const page: WithMetadata<Record<string, unknown>>[] = [];
+  let startAfter = prepared.scan.kind === "index" ? prepared.scan.startAfter : undefined;
+
+  while (true) {
+    const chunk = await readChunk(startAfter, LIST_CHUNK_SIZE);
+    if (chunk.length === 0) break;
+
+    for (const item of chunk) {
+      const document = plan ? await plan.transform(item.document) : item.document;
+      const values = extractIndexValues(document, resolved.index.fields);
+      if (values === undefined) continue;
+      startAfter = { values, id: document.id };
+      if (prepared.where && !matchesQuery(document, prepared.where)) continue;
+      if (page.length === prepared.limit) {
+        const last = page.at(-1)!;
+        const lastValues = extractIndexValues(last, resolved.index.fields);
+        if (lastValues === undefined) {
+          throw new TakibiError(
+            "INVALID_DOCUMENT",
+            "Indexed document is missing index fields",
+            500,
+          );
+        }
+        return {
+          items: page,
+          nextCursor: encodeCursor({
+            v: 3,
+            collection: prepared.collection,
+            where: prepared.where ?? null,
+            index: resolved.index.name,
+            fields: resolved.index.fields,
+            orderField: resolved.orderField,
+            direction: resolved.direction,
+            values: lastValues,
+            id: last.id,
+          }),
         };
       }
       page.push(document);
@@ -499,27 +709,31 @@ async function paginate(
 }
 
 function compareIds(left: string, right: string): number {
-  const leftBytes = new TextEncoder().encode(left);
-  const rightBytes = new TextEncoder().encode(right);
-  const length = Math.min(leftBytes.length, rightBytes.length);
-  for (let index = 0; index < length; index += 1) {
-    const delta = leftBytes[index]! - rightBytes[index]!;
-    if (delta !== 0) return delta;
-  }
-  return leftBytes.length - rightBytes.length;
+  return compareUtf8(left, right);
 }
 
 function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | undefined): boolean {
   return JSON.stringify(cursorWhere) === JSON.stringify(where ?? null);
 }
 
-function encodeCursor(collection: string, where: QueryExpr | undefined, id: string): string {
-  const cursor: ListCursorV2 = {
-    v: 2,
-    collection,
-    where: where ?? null,
-    id,
-  };
+function sameIndexedCursor(
+  cursor: ListCursorV3,
+  collection: string,
+  where: QueryExpr | undefined,
+  resolved: ResolvedIndexScan,
+): boolean {
+  return (
+    cursor.collection === collection &&
+    sameQuery(cursor.where, where) &&
+    cursor.index === resolved.index.name &&
+    cursor.orderField === resolved.orderField &&
+    cursor.direction === resolved.direction &&
+    cursor.fields.length === resolved.index.fields.length &&
+    cursor.fields.every((field, index) => field === resolved.index.fields[index])
+  );
+}
+
+function encodeCursor(cursor: ListCursor): string {
   const bytes = new TextEncoder().encode(JSON.stringify(cursor));
   const chunkSize = 8192;
   let binary = "";
@@ -529,7 +743,7 @@ function encodeCursor(collection: string, where: QueryExpr | undefined, id: stri
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
-function decodeCursor(token: string): ListCursorV2 {
+function decodeCursor(token: string): ListCursor {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(token) || token.length % 4 === 1) {
       throw new Error("Invalid base64url");
@@ -541,26 +755,69 @@ function decodeCursor(token: string): ListCursorV2 {
     const json = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
     const value = JSON.parse(json) as unknown;
     if (!isRecord(value)) throw new Error("Invalid cursor object");
-    assertExactCursorKeys(value);
-    if (
-      value.v !== 2 ||
-      typeof value.collection !== "string" ||
-      value.collection.length === 0 ||
-      typeof value.id !== "string" ||
-      value.id.length === 0
-    ) {
-      throw new Error("Invalid cursor fields");
+    if (value.v === 2) {
+      assertExactKeys(value, ["v", "collection", "where", "id"]);
+      if (
+        typeof value.collection !== "string" ||
+        value.collection.length === 0 ||
+        typeof value.id !== "string" ||
+        value.id.length === 0
+      ) {
+        throw new Error("Invalid cursor fields");
+      }
+      const where = value.where === null ? null : normalizeQueryExpr(value.where);
+      return { v: 2, collection: value.collection, where, id: value.id };
     }
-    const where = value.where === null ? null : normalizeQueryExpr(value.where);
-    return { v: 2, collection: value.collection, where, id: value.id };
+    if (value.v === 3) {
+      assertExactKeys(value, [
+        "v",
+        "collection",
+        "where",
+        "index",
+        "fields",
+        "orderField",
+        "direction",
+        "values",
+        "id",
+      ]);
+      if (
+        typeof value.collection !== "string" ||
+        value.collection.length === 0 ||
+        typeof value.index !== "string" ||
+        value.index.length === 0 ||
+        typeof value.orderField !== "string" ||
+        value.orderField.length === 0 ||
+        (value.direction !== "asc" && value.direction !== "desc") ||
+        typeof value.id !== "string" ||
+        value.id.length === 0 ||
+        !Array.isArray(value.fields) ||
+        !value.fields.every((field) => typeof field === "string") ||
+        !Array.isArray(value.values) ||
+        !value.values.every((entry) => typeof entry === "string" || typeof entry === "number")
+      ) {
+        throw new Error("Invalid cursor fields");
+      }
+      const where = value.where === null ? null : normalizeQueryExpr(value.where);
+      return {
+        v: 3,
+        collection: value.collection,
+        where,
+        index: value.index,
+        fields: value.fields,
+        orderField: value.orderField,
+        direction: value.direction,
+        values: value.values,
+        id: value.id,
+      };
+    }
+    throw new Error("Invalid cursor version");
   } catch {
     throw new BadRequestError("Invalid list cursor");
   }
 }
 
-function assertExactCursorKeys(value: Record<string, unknown>): void {
+function assertExactKeys(value: Record<string, unknown>, expected: readonly string[]): void {
   const keys = Object.keys(value);
-  const expected = ["v", "collection", "where", "id"];
   if (keys.length !== expected.length || keys.some((key) => !expected.includes(key))) {
     throw new Error("Invalid cursor fields");
   }
