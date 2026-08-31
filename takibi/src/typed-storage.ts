@@ -94,7 +94,11 @@ function domainDataFromExisting(
 export async function prepareAddDoc(
   def: CollectionDefinition,
   input: unknown,
-  options?: { id?: DocumentId },
+  options?: {
+    id?: DocumentId;
+    createdAt?: string;
+    updatedAt?: string;
+  },
   logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   assertNoReservedMetadataInData(input);
@@ -103,7 +107,9 @@ export async function prepareAddDoc(
   assertNoParsedMetadata(parsed);
   const id = resolveDocumentId(options?.id);
   const now = nowIso();
-  return { ...parsed, id, createdAt: now, updatedAt: now, rev: 1 };
+  const createdAt = trustedTimestamp(options?.createdAt, "createdAt") ?? now;
+  const updatedAt = trustedTimestamp(options?.updatedAt, "updatedAt") ?? now;
+  return { ...parsed, id, createdAt, updatedAt, rev: 1 };
 }
 
 /** CREATE-only put: rejects when `doc.id` already exists. */
@@ -181,11 +187,27 @@ export async function storageAdd(
   storage: StorageDriver,
   collection: string,
   input: unknown,
-  options?: { id?: DocumentId },
+  options?: {
+    id?: DocumentId;
+    createdAt?: string;
+    updatedAt?: string;
+  },
   logger?: InternalLogger,
 ): Promise<WithMetadata<Record<string, unknown>>> {
   const doc = await prepareAddDoc(def, input, options, logger);
   return commitAddDoc(storage, collection, doc);
+}
+
+function trustedTimestamp(
+  value: string | undefined,
+  field: "createdAt" | "updatedAt",
+): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new TypeError(`${field} must be a canonical ISO 8601 timestamp`);
+  }
+  return value;
 }
 
 export async function storageSet(

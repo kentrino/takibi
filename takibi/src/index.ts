@@ -13,6 +13,7 @@ export type {
   HandleResult,
 } from "./context/types";
 export { createPrettyConsoleLogger } from "./logging";
+export { TAKIBI_TRUSTED_RESET_STORAGE, TAKIBI_TRUSTED_TRANSACTION } from "./trusted.server";
 export type {
   Logger,
   LogEvent,
@@ -46,6 +47,8 @@ export type {
   CollectionApi,
   NarrowCollectionDoc,
   CollectionsApi,
+  TrustedCollectionApi,
+  TrustedCollectionsApi,
   PolicyReason,
   TakibiResult,
   InferCollectionDoc,

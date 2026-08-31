@@ -19,15 +19,24 @@ import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { decodeWireRequest, type WireResponse } from "./protocol";
 import { createDurableObjectStorage } from "./storage";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
+import { TAKIBI_TRUSTED_RESET_STORAGE, TAKIBI_TRUSTED_TRANSACTION } from "./trusted.server";
 import { storageAdd } from "./typed-storage";
-import type { CollectionDefinition, CollectionsApi, CollectionsDef, StorageDriver } from "./types";
+import type {
+  CollectionDefinition,
+  CollectionsDef,
+  StorageDriver,
+  TrustedCollectionsApi,
+} from "./types";
 
 type DurableObjectClass<TCollections> = new (
   state: DurableObjectState,
   env: unknown,
 ) => DurableObject & {
-  $collections: CollectionsApi<TCollections>;
-  $resetStorage(): Promise<void>;
+  $collections: TrustedCollectionsApi<TCollections>;
+  [TAKIBI_TRUSTED_TRANSACTION]<T>(
+    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+  ): Promise<T>;
+  [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void>;
 };
 
 export function createDurableObjectClass<TCollections extends CollectionsDef>(
@@ -42,7 +51,7 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
     readonly #services: unknown;
-    readonly $collections: CollectionsApi<TCollections>;
+    readonly $collections: TrustedCollectionsApi<TCollections>;
 
     constructor(state: DurableObjectState, env: unknown) {
       this.#services = createServices ? createServices({ env }) : {};
@@ -73,7 +82,16 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
       );
     }
 
-    async $resetStorage(): Promise<void> {
+    async [TAKIBI_TRUSTED_TRANSACTION]<T>(
+      callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+    ): Promise<T> {
+      await this.#ready;
+      return this.#driver.transaction((storage) =>
+        callback(createTrustedCollections(collections, storage, logger)),
+      );
+    }
+
+    async [TAKIBI_TRUSTED_RESET_STORAGE](): Promise<void> {
       await this.#ready;
       await this.#state.blockConcurrencyWhile(async () => {
         await this.#state.storage.deleteAll();

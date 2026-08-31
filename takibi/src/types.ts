@@ -506,6 +506,22 @@ export type CollectionsApi<TCollections> = {
   [K in keyof TCollections]: CollectionApi<TCollections[K]>;
 };
 
+/** Local trusted facade that can preserve metadata during controlled imports. */
+export type TrustedCollectionApi<C> = Omit<CollectionApi<C>, "add"> & {
+  add: <TData extends CollectionDataInput<C>>(
+    data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
+    options?: {
+      id?: DocumentId;
+      createdAt?: string;
+      updatedAt?: string;
+    },
+  ) => Promise<NarrowCollectionDoc<C, TData>>;
+};
+
+export type TrustedCollectionsApi<TCollections> = {
+  [K in keyof TCollections]: TrustedCollectionApi<TCollections[K]>;
+};
+
 /** Result-shaped CRUD facade used by the public HTTP client. */
 type CollectionPolicyReasonCode<C> = C extends { accessPolicy: infer TPolicy }
   ? PolicyReasonCodeOf<TPolicy>

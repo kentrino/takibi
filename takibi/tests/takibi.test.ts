@@ -1,4 +1,4 @@
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
 import { executeOperation } from "../src/executor";
@@ -10,6 +10,8 @@ import {
   none,
   queryImpliesEquality,
   read,
+  TAKIBI_TRUSTED_RESET_STORAGE,
+  TAKIBI_TRUSTED_TRANSACTION,
   UnauthorizedError,
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
@@ -820,7 +822,58 @@ test("actions execute inside the generated Durable Object", async () => {
   });
 });
 
-test("$resetStorage clears documents and restores collection seeds", async () => {
+test("trusted transaction commits and rolls back transaction-bound collections", async () => {
+  const { handler } = createActionApp();
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage()),
+    {},
+  );
+  expect("$transaction" in object).toBe(false);
+  expect(object[TAKIBI_TRUSTED_TRANSACTION]).toBeTypeOf("function");
+
+  const committed = await object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+    await $collections.posts.add({ title: "committed" }, { id: "committed-post" });
+    await $collections.audits.add({ action: "committed" }, { id: "committed-audit" });
+    return "done";
+  });
+  expect(committed).toBe("done");
+  await expect(object.$collections.posts.get("committed-post")).resolves.toMatchObject({
+    title: "committed",
+  });
+  await expect(object.$collections.audits.get("committed-audit")).resolves.toMatchObject({
+    action: "committed",
+  });
+
+  await expect(
+    object.$collections.posts.add(
+      { title: "imported" },
+      {
+        id: "imported-post",
+        createdAt: "2024-01-02T03:04:05.000Z",
+        updatedAt: "2024-02-03T04:05:06.000Z",
+      },
+    ),
+  ).resolves.toMatchObject({
+    createdAt: "2024-01-02T03:04:05.000Z",
+    updatedAt: "2024-02-03T04:05:06.000Z",
+  });
+
+  await expect(
+    object[TAKIBI_TRUSTED_TRANSACTION](async ($collections) => {
+      await $collections.posts.add({ title: "rolled back" }, { id: "rolled-back-post" });
+      await $collections.audits.add({ action: "rolled back" }, { id: "rolled-back-audit" });
+      throw new Error("rollback");
+    }),
+  ).rejects.toThrow("rollback");
+  await expect(object.$collections.posts.get("rolled-back-post")).rejects.toMatchObject({
+    code: "NOT_FOUND",
+  });
+  await expect(object.$collections.audits.get("rolled-back-audit")).rejects.toMatchObject({
+    code: "NOT_FOUND",
+  });
+});
+
+test("trusted reset clears documents and restores collection seeds", async () => {
   const handler = createProductionPostsHandler();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
@@ -828,7 +881,8 @@ test("$resetStorage clears documents and restores collection seeds", async () =>
   );
   await object.$collections.posts.add({ title: "temporary", secret: false }, { id: "temporary" });
 
-  await object.$resetStorage();
+  expect("$resetStorage" in object).toBe(false);
+  await object[TAKIBI_TRUSTED_RESET_STORAGE]();
 
   await expect(object.$collections.posts.listAll()).resolves.toMatchObject([
     {
@@ -1920,9 +1974,13 @@ test("indexed list is available on public clients and trusted collections", asyn
     fetch: (input, init) => handler.request(input, init),
   });
 
+  vi.useFakeTimers();
+  vi.setSystemTime("2026-01-01T00:00:00.000Z");
   await client.posts.add({ ownerId: "u1", title: "second" }, { id: "p2" });
+  vi.setSystemTime("2026-01-01T00:00:01.000Z");
   await client.posts.add({ ownerId: "u1", title: "first" }, { id: "p1" });
   await client.posts.add({ ownerId: "u2", title: "other" }, { id: "p3" });
+  vi.useRealTimers();
 
   const page = await client.posts.list({
     index: "byOwner",
@@ -1932,7 +1990,7 @@ test("indexed list is available on public clients and trusted collections", asyn
   });
   expect(page.ok).toBe(true);
   if (page.ok) {
-    expect(page.data.items.map((document) => document.id)).toEqual(["p2", "p1"]);
+    expect(page.data.items.map((document) => document.id)).toEqual(["p1", "p2"]);
   }
 
   const unknown = await client.posts.list({
