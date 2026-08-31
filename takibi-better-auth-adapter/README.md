@@ -128,10 +128,16 @@ the indexes needed by common lookup and revoke paths. Takibi unique constraints
 are the source of truth; the adapter does not perform a race-prone uniqueness
 precheck.
 
-Better Auth supports arbitrary filters, sort fields, offset, joins, count, and
-bulk mutations. Operations that Takibi cannot currently push into an indexed
-query use a bounded server-side scan. The default limit is 10,000 documents and
-can be lowered with `maxScanItems`.
+The adapter pushes sensitive `eq` / `ne` / `in` / `not_in`, ranges,
+`contains` / `starts_with` / `ends_with`, AND, and OR into Takibi. Dates are
+converted to ISO 8601 strings, Better Auth's missing-or-null equality is
+preserved, `findOne` uses `list({ limit: 1 })`, counts use Takibi `count`, and
+conditional writes use the trusted atomic mutation methods.
+
+Case-insensitive matching, arbitrary sort fields, offset, joins, and filters
+that exceed Takibi's query bounds still use a bounded server-side fallback
+scan. The default limit is 10,000 documents and can be lowered with
+`maxScanItems`.
 
 Use `onFallbackScan` for metadata-only observability:
 
