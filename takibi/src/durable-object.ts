@@ -23,7 +23,10 @@ import type { CollectionDefinition, CollectionsApi, CollectionsDef, StorageDrive
 type DurableObjectClass<TCollections> = new (
   state: DurableObjectState,
   env: unknown,
-) => DurableObject & { $collections: CollectionsApi<TCollections> };
+) => DurableObject & {
+  $collections: CollectionsApi<TCollections>;
+  $resetStorage(): Promise<void>;
+};
 
 export function createDurableObjectClass<TCollections extends CollectionsDef>(
   collections: TCollections,
@@ -54,6 +57,22 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
         afterInitialization(this.#driver, this.#ready),
         logger,
       );
+    }
+
+    async $resetStorage(): Promise<void> {
+      await this.#ready;
+      await this.#state.blockConcurrencyWhile(async () => {
+        await this.#state.storage.deleteAll();
+        const driver = applyStorageLogging(
+          createMigratingStorage(
+            collections,
+            createDurableObjectStorage(this.#state.storage),
+            logger,
+          ),
+          logger,
+        );
+        await seedCollections(collections, driver, logger);
+      });
     }
 
     async fetch(request: Request): Promise<Response> {
