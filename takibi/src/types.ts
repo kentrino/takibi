@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { KeysMatching } from "./type-util";
 
 export type JsonValue =
   | string
@@ -98,22 +99,18 @@ export type QueryStringOperator = "contains" | "startsWith" | "endsWith";
 
 export type QueryOperator = QueryValueOperator | QueryStringOperator | "in" | "present";
 
-type UniqueFieldKeys<TSchema extends StandardSchemaV1> = {
-  [K in keyof StandardSchemaV1.InferOutput<TSchema> & string]-?: IsAny<
-    StandardSchemaV1.InferOutput<TSchema>[K]
-  > extends true
-    ? never
-    : unknown extends StandardSchemaV1.InferOutput<TSchema>[K]
-      ? never
-      : Exclude<StandardSchemaV1.InferOutput<TSchema>[K], null | undefined> extends Exclude<
-            QueryScalar,
-            null
-          >
-        ? [Exclude<StandardSchemaV1.InferOutput<TSchema>[K], null | undefined>] extends [never]
-          ? never
-          : K
-        : never;
-}[keyof StandardSchemaV1.InferOutput<TSchema> & string];
+type UniqueFieldKeys<TSchema extends StandardSchemaV1> = Extract<
+  KeysMatching<
+    {
+      [K in keyof StandardSchemaV1.InferOutput<TSchema>]: Exclude<
+        StandardSchemaV1.InferOutput<TSchema>[K],
+        null | undefined
+      >;
+    },
+    Exclude<QueryScalar, null>
+  >,
+  string
+>;
 
 export type CollectionUniqueConstraints<TSchema extends StandardSchemaV1> = Readonly<
   Record<string, readonly [UniqueFieldKeys<TSchema>, ...UniqueFieldKeys<TSchema>[]]>
@@ -142,23 +139,9 @@ export type UniqueConstraintDeclaration<TSchema extends StandardSchemaV1, TUniqu
 
 export const INDEXABLE_METADATA_FIELDS = ["id", "createdAt", "updatedAt"] as const;
 
-type RequiredIndexableDomainKeys<TSchema extends StandardSchemaV1> = {
-  [K in keyof StandardSchemaV1.InferOutput<TSchema> & string]: IsAny<
-    StandardSchemaV1.InferOutput<TSchema>[K]
-  > extends true
-    ? never
-    : unknown extends StandardSchemaV1.InferOutput<TSchema>[K]
-      ? never
-      : undefined extends StandardSchemaV1.InferOutput<TSchema>[K]
-        ? never
-        : null extends StandardSchemaV1.InferOutput<TSchema>[K]
-          ? never
-          : [StandardSchemaV1.InferOutput<TSchema>[K]] extends [string]
-            ? K
-            : [StandardSchemaV1.InferOutput<TSchema>[K]] extends [number]
-              ? K
-              : never;
-}[keyof StandardSchemaV1.InferOutput<TSchema> & string];
+type RequiredIndexableDomainKeys<TSchema extends StandardSchemaV1> =
+  | Extract<KeysMatching<StandardSchemaV1.InferOutput<TSchema>, string>, string>
+  | Extract<KeysMatching<StandardSchemaV1.InferOutput<TSchema>, number>, string>;
 
 export type IndexableFieldKeys<TSchema extends StandardSchemaV1> =
   | RequiredIndexableDomainKeys<TSchema>
