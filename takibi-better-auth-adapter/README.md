@@ -5,47 +5,48 @@ SQLite-backed Durable Object.
 
 ## Setup
 
-Define the storage schemas in the application. They must include every field
-added through Better Auth plugins and `additionalFields`, but must not declare
-Takibi's server-managed `id`, `createdAt`, `updatedAt`, `rev`, or
-`$schemaVersion`.
+Create the Better Auth core storage schemas from the application's Zod module,
+then extend them with fields added by plugins, `additionalFields`, and the
+application domain. The factory uses dependency injection and does not load
+Zod at runtime by itself. Schemas must not declare Takibi's server-managed
+`id`, `createdAt`, `updatedAt`, `rev`, or `$schemaVersion`.
 
 ```ts
 import { betterAuth } from "better-auth";
 import { z } from "zod";
-import { defineBetterAuthCollections, takibiAdapter } from "@takibi/takibi-better-auth-adapter";
+import {
+  createZodBetterAuthBaseSchemas,
+  defineBetterAuthCollections,
+  takibiAdapter,
+} from "@takibi/takibi-better-auth-adapter";
+
+const base = createZodBetterAuthBaseSchemas(z);
+
+const userSchema = base.user
+  .extend({
+    role: z.enum(["member", "admin"]),
+    banned: z.boolean().nullable().optional(),
+    banReason: z.string().nullable().optional(),
+    banExpires: z.iso.datetime().nullable().optional(),
+    organizationId: z.string(),
+  })
+  .superRefine(validateOrganizationRole);
+
+const sessionSchema = base.session.extend({
+  impersonatedBy: z.string().nullable().optional(),
+});
 
 const authCollections = defineBetterAuthCollections({
-  user: z.object({
-    name: z.string(),
-    email: z.string(),
-    emailVerified: z.boolean(),
-    image: z.string().nullable().optional(),
-  }),
-  session: z.object({
-    expiresAt: z.iso.datetime(),
-    token: z.string(),
-    ipAddress: z.string().nullable().optional(),
-    userAgent: z.string().nullable().optional(),
-    userId: z.string(),
-  }),
-  account: z.object({
-    accountId: z.string(),
-    providerId: z.string(),
-    userId: z.string(),
-    accessToken: z.string().nullable().optional(),
-    refreshToken: z.string().nullable().optional(),
-    idToken: z.string().nullable().optional(),
-    accessTokenExpiresAt: z.iso.datetime().nullable().optional(),
-    refreshTokenExpiresAt: z.iso.datetime().nullable().optional(),
-    scope: z.string().nullable().optional(),
-    password: z.string().nullable().optional(),
-  }),
-  verification: z.object({
-    identifier: z.string(),
-    value: z.string(),
-    expiresAt: z.iso.datetime(),
-  }),
+  user: {
+    extends: {
+      schema: userSchema,
+      indexes: { byOrganization: ["organizationId", "createdAt"] },
+      seed: seedUsers,
+    },
+  },
+  session: { extends: { schema: sessionSchema } },
+  account: base.account,
+  verification: base.verification,
 });
 
 const app = takibi.defineCollections({
@@ -93,6 +94,14 @@ Authentication documents are credentials and must only be accessed through
 the adapter's trusted in-object facade. Do not pass a public Takibi client or
 expose the trusted facade over RPC.
 
+The bare schema form is shorthand for `{ extends: { schema } }`. `extends`
+only adds `indexes`, `unique`, `seed`, and `migrations`; schema composition
+happens beforehand with Zod's `.extend()`, `.superRefine()`, or `.transform()`.
+These options cannot replace the helper-owned policy or constraints. Reserved
+names (`byEmail`, `byToken`, `byProviderAccount`, `byIdentifierValue`,
+`byUser`, and `byExpiry`) are rejected by the type and with a synchronous
+`TypeError`.
+
 ## Schema compatibility
 
 Better Auth builds its database schema from the enabled plugins and
@@ -123,9 +132,11 @@ collection and a `models` entry with its collection name and schema.
 
 The helper declares unique constraints for email, session token,
 provider/account identity, and verification identifier/value. It also declares
-the indexes needed by common lookup and revoke paths. Takibi unique constraints
-are the source of truth; the adapter does not perform a race-prone uniqueness
-precheck.
+matching covering indexes for those tuples, plus user/time indexes for sessions
+and accounts and an expiry/time index for verifications. Application indexes
+and unique constraints supplied through `extends` are additive. Takibi unique
+constraints are the source of truth; the adapter does not perform a race-prone
+uniqueness precheck.
 
 The adapter pushes sensitive `eq` / `ne` / `in` / `not_in`, ranges,
 `contains` / `starts_with` / `ends_with`, AND, and OR into Takibi. Dates are
