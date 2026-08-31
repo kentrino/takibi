@@ -27,6 +27,7 @@ import {
   ParentBasedSampler,
 } from "@opentelemetry/sdk-trace-base";
 import { createTakibi, fullAccess } from "@takibi/takibi";
+import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { createOtelTakibiTracer, TakibiInstrumentation } from "../src/index";
@@ -81,19 +82,17 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
     expectTypeOf(TakibiInstrumentation).toBeConstructibleWith();
     expectTypeOf(createOtelTakibiTracer).toBeFunction();
 
-    const handler = createTakibi()({
+    const productionHandler = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
     })
-      .defineCollections(
-        {
-          posts: {
-            schema: z.object({ title: z.string() }),
-            accessPolicy: fullAccess,
-          },
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
         },
-        { memory: true },
-      )
+      })
       .actions({});
+    const handler = withSqliteTestBackend(productionHandler);
     const response = await handler.request("https://takibi.test/posts", {
       method: "POST",
       headers: { "content-type": "application/json" },
