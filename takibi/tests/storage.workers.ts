@@ -148,7 +148,7 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
           "layout_version",
         )
         .one().value,
-    ).toBe(2);
+    ).toBe(3);
 
     state.storage.sql.exec(
       "UPDATE takibi_metadata SET value = ? WHERE key = ?",

@@ -232,7 +232,7 @@ test("DO SQLite layout stores revision in a dedicated REAL column", async () => 
     backing.sql
       .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
       .one().value,
-  ).toBe(2);
+  ).toBe(3);
   expect(
     backing.sql
       .exec<{ name: string; type: string; notnull: number }>(
@@ -344,4 +344,112 @@ test("DO SQLite round-trips revisions beyond safe and signed 64-bit integer limi
     await durable.put("posts", document);
     await expect(durable.get("posts", document.id)).resolves.toEqual(document);
   }
+});
+
+test("indexed list pages by createdAt and id in both directions", async () => {
+  const { compileIndexRegistry } = await import("../src/indexes");
+  const { z } = await import("zod");
+  const { fullAccess } = await import("../src/index");
+
+  const posts = {
+    schema: z.object({ ownerId: z.string(), createdAt: z.string(), tag: z.string() }),
+    accessPolicy: fullAccess,
+    indexes: { byOwner: ["ownerId", "createdAt"] as const },
+  };
+  const registry = compileIndexRegistry({ posts });
+  const memory = createMemoryStorage(registry);
+  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage(), registry);
+
+  const docs = [
+    { ...meta({ id: "c", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-01T00:00:00.000Z" },
+    { ...meta({ id: "a", ownerId: "u1", tag: "skip" }), createdAt: "2026-01-01T00:00:00.000Z" },
+    { ...meta({ id: "b", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-02T00:00:00.000Z" },
+    { ...meta({ id: "d", ownerId: "u2", tag: "keep" }), createdAt: "2026-01-03T00:00:00.000Z" },
+    { ...meta({ id: "e", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-00T00:00:00.000Z" },
+  ];
+  for (const doc of docs) {
+    await memory.put("posts", doc);
+    await durable.put("posts", doc);
+  }
+
+  const where: QueryExpr = { field: "ownerId", op: "eq", value: "u1" };
+  const desc = {
+    index: "byOwner",
+    where,
+    orderBy: { field: "createdAt", direction: "desc" as const },
+    limit: 2,
+  };
+  const firstMemory = await memory.list("posts", desc);
+  const firstDurable = await durable.list("posts", desc);
+  expect(firstMemory.items.map((document) => document.id)).toEqual(["b", "c"]);
+  expect(firstDurable.items.map((document) => document.id)).toEqual(["b", "c"]);
+  expect(decodeCursor(firstMemory.nextCursor!)).toMatchObject({
+    v: 3,
+    index: "byOwner",
+    orderField: "createdAt",
+    direction: "desc",
+    id: "c",
+  });
+
+  const secondMemory = await memory.list("posts", { ...desc, cursor: firstMemory.nextCursor });
+  const secondDurable = await durable.list("posts", { ...desc, cursor: firstDurable.nextCursor });
+  expect(secondMemory.items.map((document) => document.id)).toEqual(["a", "e"]);
+  expect(secondDurable).toEqual(secondMemory);
+
+  const asc = {
+    index: "byOwner",
+    where,
+    orderBy: { field: "createdAt", direction: "asc" as const },
+    limit: 10,
+  };
+  expect((await memory.list("posts", asc)).items.map((document) => document.id)).toEqual([
+    "e",
+    "a",
+    "c",
+    "b",
+  ]);
+  expect((await durable.list("posts", asc)).items.map((document) => document.id)).toEqual([
+    "e",
+    "a",
+    "c",
+    "b",
+  ]);
+
+  const residual = {
+    index: "byOwner",
+    where: {
+      op: "and" as const,
+      operands: [where, { field: "tag", op: "eq" as const, value: "keep" }],
+    },
+    orderBy: { field: "createdAt", direction: "desc" as const },
+    limit: 2,
+  };
+  const filtered = await memory.list("posts", residual);
+  expect(filtered.items.map((document) => document.id)).toEqual(["b", "c"]);
+  expect(filtered.nextCursor).toBeDefined();
+  const nextFiltered = await memory.list("posts", { ...residual, cursor: filtered.nextCursor });
+  expect(nextFiltered.items.map((document) => document.id)).toEqual(["e"]);
+  expect(await durable.list("posts", residual)).toEqual(filtered);
+
+  await expect(
+    memory.list("posts", {
+      ...desc,
+      where: { field: "ownerId", op: "eq", value: "u2" },
+      cursor: firstMemory.nextCursor,
+    }),
+  ).rejects.toBeInstanceOf(BadRequestError);
+  await expect(
+    memory.list("posts", { orderBy: { field: "createdAt", direction: "desc" } }),
+  ).rejects.toBeInstanceOf(BadRequestError);
+  await expect(memory.list("posts", { index: "missing", where })).rejects.toBeInstanceOf(
+    BadRequestError,
+  );
+
+  await memory.put("posts", {
+    ...meta({ id: "f", ownerId: "u1", tag: "keep" }),
+    createdAt: "2026-01-04T00:00:00.000Z",
+  });
+  expect(
+    (await memory.list("posts", { ...desc, limit: 1 })).items.map((document) => document.id),
+  ).toEqual(["f"]);
 });
