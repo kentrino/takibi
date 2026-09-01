@@ -5,6 +5,7 @@ export {
   type BetterAuthModelMap,
   type TakibiAdapterOptions,
   type TakibiFallbackScanEvent,
+  type TransactionalCollections,
 } from "./adapter.server.ts";
 export {
   defineBetterAuthCollections,
