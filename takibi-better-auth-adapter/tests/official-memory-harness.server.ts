@@ -14,16 +14,47 @@ type State = {
   tables: Record<string, Map<string, Row>>;
 };
 
+type HarnessCollection = ReturnType<typeof createTestCollection>;
+type HarnessTransaction = <R>(
+  callback: (collections: HarnessCollections) => Promise<R>,
+) => Promise<R>;
+type HarnessCollections = {
+  [name: string]: HarnessCollection | HarnessTransaction;
+  $transaction: HarnessTransaction;
+};
+
 export function createOfficialMemoryHarness() {
   const state: State = { tables: {} };
 
-  const collectionsFor = (active: State, models: readonly string[]) =>
-    Object.fromEntries(
-      models.map((name) => {
-        const table = () => (active.tables[name] ??= new Map());
-        return [name, createTestCollection(table)];
-      }),
-    );
+  const collectionsFor = (
+    active: State,
+    models: readonly string[],
+    transactionBound = false,
+  ): HarnessCollections => {
+    const collections: HarnessCollections = {
+      ...Object.fromEntries(
+        models.map((name) => {
+          const table = () => (active.tables[name] ??= new Map());
+          return [name, createTestCollection(table)];
+        }),
+      ),
+      async $transaction<R>(callback: (scoped: HarnessCollections) => Promise<R>): Promise<R> {
+        if (transactionBound) return callback(collections);
+        const snapshot: State = {
+          tables: Object.fromEntries(
+            Object.entries(active.tables).map(([name, table]) => [
+              name,
+              new Map([...table].map(([id, row]) => [id, structuredClone(row)])),
+            ]),
+          ),
+        };
+        const result = await callback(collectionsFor(snapshot, models, true));
+        active.tables = snapshot.tables;
+        return result;
+      },
+    };
+    return collections;
+  };
 
   const databaseFor = (options: BetterAuthOptions) => {
     const authTables = getAuthTables(options);
@@ -42,19 +73,6 @@ export function createOfficialMemoryHarness() {
     return takibiAdapter({
       collections,
       models,
-      transaction: async (callback) => {
-        const snapshot: State = {
-          tables: Object.fromEntries(
-            Object.entries(state.tables).map(([name, table]) => [
-              name,
-              new Map([...table].map(([id, row]) => [id, structuredClone(row)])),
-            ]),
-          ),
-        };
-        const result = await callback(collectionsFor(snapshot, modelNames) as typeof collections);
-        state.tables = snapshot.tables;
-        return result;
-      },
     });
   };
 

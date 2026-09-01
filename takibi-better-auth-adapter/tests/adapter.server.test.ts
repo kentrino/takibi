@@ -15,6 +15,15 @@ type State = {
   tables: Record<string, Map<string, Row>>;
 };
 
+type HarnessCollection = ReturnType<typeof createTestCollection>;
+type HarnessTransaction = <R>(
+  callback: (collections: HarnessCollections) => Promise<R>,
+) => Promise<R>;
+type HarnessCollections = {
+  [name: string]: HarnessCollection | HarnessTransaction;
+  $transaction: HarnessTransaction;
+};
+
 const schemas = {
   user: z.object({
     name: z.string(),
@@ -99,35 +108,40 @@ function createHarness(
     tables: Object.fromEntries(Object.values(collectionNames).map((name) => [name, new Map()])),
   };
 
-  const collectionsFor = (active: State) =>
-    Object.fromEntries(
-      Object.keys(active.tables).map((name) => [
-        name,
-        createTestCollection(
-          () => active.tables[name]!,
-          (operation, options) => listCalls.push({ collection: name, operation, options }),
-        ),
-      ]),
-    );
+  const collectionsFor = (active: State, transactionBound = false): HarnessCollections => {
+    const collections: HarnessCollections = {
+      ...Object.fromEntries(
+        Object.keys(active.tables).map((name) => [
+          name,
+          createTestCollection(
+            () => active.tables[name]!,
+            (operation, options) => listCalls.push({ collection: name, operation, options }),
+          ),
+        ]),
+      ),
+      async $transaction<R>(callback: (scoped: HarnessCollections) => Promise<R>): Promise<R> {
+        if (transactionBound) return callback(collections);
+        const snapshot: State = {
+          tables: Object.fromEntries(
+            Object.entries(active.tables).map(([name, rows]) => [
+              name,
+              new Map([...rows].map(([id, row]) => [id, structuredClone(row)])),
+            ]),
+          ),
+        };
+        const result = await callback(collectionsFor(snapshot, true));
+        active.tables = snapshot.tables;
+        return result;
+      },
+    };
+    return collections;
+  };
 
   const collections = collectionsFor(state);
   const database = takibiAdapter({
     collections,
     models,
     onFallbackScan: (event) => scanEvents.push(event),
-    async transaction(callback) {
-      const transactionState: State = {
-        tables: Object.fromEntries(
-          Object.entries(state.tables).map(([name, rows]) => [
-            name,
-            new Map([...rows].map(([id, row]) => [id, structuredClone(row)])),
-          ]),
-        ),
-      };
-      const result = await callback(collectionsFor(transactionState));
-      state.tables = transactionState.tables;
-      return result;
-    },
   });
   const adapter = database({
     emailAndPassword: { enabled: true },
@@ -634,6 +648,37 @@ test("Better Auth transactions commit and roll back across mapped collections", 
   ).rejects.toThrow("rollback");
   expect(state.tables.authUsers?.has("rolled-back")).toBe(false);
   expect(state.tables.authSessions?.has("s2")).toBe(false);
+});
+
+test("nested collection $transaction joins the same scoped collections", async () => {
+  const { adapter, state } = createHarness();
+
+  await adapter.transaction(async (transaction) => {
+    await createUser(transaction as typeof adapter, "nested-commit", "nested-commit@example.com");
+    await transaction.update({
+      model: "user",
+      where: [{ field: "id", value: "nested-commit" }],
+      update: { name: "Nested Commit" },
+    });
+  });
+  expect(state.tables.authUsers?.get("nested-commit")).toMatchObject({ name: "Nested Commit" });
+
+  await expect(
+    adapter.transaction(async (transaction) => {
+      await createUser(
+        transaction as typeof adapter,
+        "nested-rollback",
+        "nested-rollback@example.com",
+      );
+      await transaction.update({
+        model: "user",
+        where: [{ field: "id", value: "nested-rollback" }],
+        update: { name: "should roll back" },
+      });
+      throw new Error("nested-rollback");
+    }),
+  ).rejects.toThrow("nested-rollback");
+  expect(state.tables.authUsers?.has("nested-rollback")).toBe(false);
 });
 
 test("experimental one-to-many joins use mapped related collections", async () => {

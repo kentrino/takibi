@@ -70,10 +70,25 @@ type Collection = {
   ): Promise<Document | null>;
 };
 
-type RuntimeCollections = Record<string, Collection>;
+type RuntimeTransaction = <R>(
+  callback: (collections: RuntimeCollections) => Promise<R>,
+) => Promise<R>;
+
+type RuntimeCollections = {
+  $transaction: RuntimeTransaction;
+} & { readonly [name: string]: Collection | RuntimeTransaction };
+
+/**
+ * Minimal transaction capability structurally compatible with Takibi's
+ * `TrustedCollectionsApi`. Avoids a recursive `T extends T & { $transaction }`
+ * constraint that collapses inference.
+ */
+export type TransactionalCollections<TCollections> = TCollections & {
+  $transaction<R>(callback: (collections: TCollections) => Promise<R>): Promise<R>;
+};
 
 export type BetterAuthModelBinding<TCollectionName extends string = string> = {
-  collection: TCollectionName;
+  collection: TCollectionName extends "$transaction" ? never : TCollectionName;
   schema: StandardSchemaV1;
   indexes?: Readonly<Record<string, readonly string[]>>;
   /**
@@ -97,22 +112,19 @@ export type TakibiFallbackScanEvent = {
   scannedCount: number;
 };
 
+type CollectionNameOf<TCollections> = Exclude<Extract<keyof TCollections, string>, "$transaction">;
+
 export type TakibiAdapterOptions<TCollections> = {
   /**
    * A generated Durable Object's trusted `$collections` facade.
    * Never pass a public or policy-bound Takibi client here.
    */
-  collections: TCollections;
-  /**
-   * Bind a callback to the generated Durable Object's trusted collections
-   * `$transaction`.
-   */
-  transaction<R>(callback: (collections: TCollections) => Promise<R>): Promise<R>;
+  collections: TransactionalCollections<TCollections>;
   /**
    * Better Auth default model name to Takibi collection name.
    * Plugin models must be mapped explicitly.
    */
-  models: BetterAuthModelMap<Extract<keyof TCollections, string>>;
+  models: BetterAuthModelMap<CollectionNameOf<TCollections>>;
   /**
    * Maximum documents a fallback scan may inspect for one collection.
    * @default 10000
@@ -124,8 +136,6 @@ export type TakibiAdapterOptions<TCollections> = {
    */
   onFallbackScan?(event: TakibiFallbackScanEvent): void;
 };
-
-type RunTransaction = <R>(callback: (collections: RuntimeCollections) => Promise<R>) => Promise<R>;
 
 export type AdapterMethod =
   | "count"
@@ -146,7 +156,7 @@ const RESERVED_WRITE_FIELDS = new Set(["id", "createdAt", "updatedAt", "rev", "$
  * This initial adapter keeps Better Auth-only compatibility operations
  * (arbitrary sort, offset, projection-compatible reads, and joins) inside the
  * adapter. Every scan is bounded and observable through a metadata-only hook.
- * Race-sensitive writes are executed inside the supplied Takibi transaction.
+ * Race-sensitive writes are executed inside the trusted collections `$transaction`.
  */
 export function takibiAdapter<TCollections>(
   adapterOptions: TakibiAdapterOptions<TCollections>,
@@ -154,16 +164,9 @@ export function takibiAdapter<TCollections>(
   const rootCollections = adapterOptions.collections as RuntimeCollections;
   const maxScanItems = adapterOptions.maxScanItems ?? 10_000;
   assertMaxScanItems(maxScanItems);
-
-  const rootTransaction: RunTransaction = (callback) =>
-    adapterOptions.transaction((collections) => callback(collections as RuntimeCollections));
   const schemaCompatibilityByOptions = new WeakMap<BetterAuthOptions, Promise<void>>();
 
-  const createFactory = (
-    activeCollections: RuntimeCollections,
-    runTransaction: RunTransaction,
-    activeOptions: BetterAuthOptions,
-  ) =>
+  const createFactory = (activeCollections: RuntimeCollections, activeOptions: BetterAuthOptions) =>
     createAdapterFactory({
       config: {
         adapterId: "takibi",
@@ -177,10 +180,9 @@ export function takibiAdapter<TCollections>(
         transaction: async <R>(
           callback: (adapter: DBTransactionAdapter) => Promise<R>,
         ): Promise<R> =>
-          runTransaction(async (transactionCollections) => {
+          activeCollections.$transaction(async (transactionCollections) => {
             const transactionAdapter = createFactory(
               transactionCollections,
-              async (nested) => nested(transactionCollections),
               activeOptions,
             )(activeOptions);
             return callback(transactionAdapter);
@@ -207,7 +209,7 @@ export function takibiAdapter<TCollections>(
         const collectionFor = (collections: RuntimeCollections, model: string): Collection => {
           const binding = bindingFor(model);
           const collection = collections[binding.collection];
-          if (!collection) {
+          if (!isRuntimeCollection(collection)) {
             throw new Error(`Mapped Takibi collection "${binding.collection}" is not available`);
           }
           return collection;
@@ -382,7 +384,7 @@ export function takibiAdapter<TCollections>(
           },
 
           update: ({ model, where, update }) =>
-            runTransaction(async (collections) => {
+            activeCollections.$transaction(async (collections) => {
               await assertSchemaCompatibility();
               if (where.length === 0) return null;
               const selector = conditionalSelector(model, where);
@@ -405,7 +407,7 @@ export function takibiAdapter<TCollections>(
             }) as Promise<never>,
 
           updateMany: ({ model, where, update }) =>
-            runTransaction(async (collections) => {
+            activeCollections.$transaction(async (collections) => {
               await assertSchemaCompatibility();
               const selector = conditionalSelector(model, where);
               if (!selector) {
@@ -418,7 +420,7 @@ export function takibiAdapter<TCollections>(
 
           async delete({ model, where }) {
             if (where.length === 0) return;
-            await runTransaction(async (collections) => {
+            await activeCollections.$transaction(async (collections) => {
               await assertSchemaCompatibility();
               const selector = conditionalSelector(model, where);
               if (!selector) {
@@ -430,7 +432,7 @@ export function takibiAdapter<TCollections>(
           },
 
           deleteMany: ({ model, where }) =>
-            runTransaction(async (collections) => {
+            activeCollections.$transaction(async (collections) => {
               await assertSchemaCompatibility();
               const selector = conditionalSelector(model, where);
               if (!selector) {
@@ -442,7 +444,7 @@ export function takibiAdapter<TCollections>(
             }),
 
           consumeOne: ({ model, where }) =>
-            runTransaction(async (collections) => {
+            activeCollections.$transaction(async (collections) => {
               await assertSchemaCompatibility();
               const selector = conditionalSelector(model, where);
               if (!selector) {
@@ -459,7 +461,7 @@ export function takibiAdapter<TCollections>(
             }) as Promise<never>,
 
           incrementOne: ({ model, where, increment, set }) =>
-            runTransaction(async (collections) => {
+            activeCollections.$transaction(async (collections) => {
               await assertSchemaCompatibility();
               const selector = conditionalSelector(model, where);
               if (selector) {
@@ -485,7 +487,7 @@ export function takibiAdapter<TCollections>(
       },
     });
 
-  return (options) => createFactory(rootCollections, rootTransaction, options)(options);
+  return (options) => createFactory(rootCollections, options)(options);
 }
 
 async function applyJoins(
@@ -543,6 +545,12 @@ function writeData(data: Record<string, unknown>): Record<string, unknown> {
       ([field, value]) => !RESERVED_WRITE_FIELDS.has(field) && value !== undefined,
     ),
   );
+}
+
+function isRuntimeCollection(
+  value: Collection | RuntimeTransaction | undefined,
+): value is Collection {
+  return typeof value === "object" && value !== null;
 }
 
 function assertMaxScanItems(value: number): void {

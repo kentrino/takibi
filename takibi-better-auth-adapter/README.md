@@ -82,7 +82,6 @@ export class TenantStore extends handler.DurableObject {
   readonly auth = betterAuth({
     database: takibiAdapter({
       collections: this.$collections,
-      transaction: (run) => this.$collections.$transaction(run),
       models,
     }),
   });

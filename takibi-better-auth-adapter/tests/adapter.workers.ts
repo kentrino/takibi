@@ -91,7 +91,6 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
     const collections: HandlerTrustedCollections = object.$collections;
     const adapter = takibiAdapter({
       collections,
-      transaction: (callback) => collections.$transaction(callback),
       models,
     })({
       emailAndPassword: { enabled: true },
@@ -215,7 +214,6 @@ test("actual Durable Object SQLite provides adapter atomicity and private auth c
         await $collections.auditEvents.add({ action: "rolled-back" }, { id: "audit-rollback" });
         const transactionAdapter = takibiAdapter({
           collections: $collections,
-          transaction: async (callback) => callback($collections),
           models,
         })({
           emailAndPassword: { enabled: true },
