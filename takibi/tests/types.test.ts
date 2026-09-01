@@ -11,7 +11,9 @@ import type {
   AccessPermission,
   ClientOf,
   CollectionDataInput,
+  CollectionApi,
   CollectionsOptions,
+  CollectionsApi,
   JsonValue,
   TakibiHandler,
   TakibiResult,
@@ -19,6 +21,8 @@ import type {
   InferHandlerCollections,
   NarrowCollectionDoc,
   QueryBuilder,
+  TrustedCollectionApi,
+  TrustedCollectionsApi,
 } from "../src/index";
 import type { StorageDriver } from "../src/types";
 
@@ -626,6 +630,136 @@ test("collection migrations accept unknown intermediate data and constrain the f
   void checkMarkerPrivacy;
 });
 
+test("action handlers distinguish policy-bound and trusted collection facades", () => {
+  const context = createContext({
+    resolve: (): AppCtx => ({
+      tenantId: "acme",
+      user: { id: "u1", role: "member" },
+    }),
+  });
+  const posts = context.defineCollection({
+    schema: z.object({
+      title: z.string().transform((value) => value.length),
+      status: z.enum(["draft", "published"]),
+      stock: z.number(),
+    }),
+    accessPolicy: fullAccess,
+    indexes: {
+      byStatus: ["status", "createdAt"],
+    },
+  });
+  const app = context.defineCollections({ posts });
+
+  const postsActions = app.posts.actions((defineAction) => ({
+    publish: defineAction()
+      .detached()
+      .input(z.object({ title: z.string(), rev: z.number() }))
+      .policy(fullAccess)
+      .handler(({ input, collection, $collection, collections, $collections }) => {
+        expectTypeOf(input).toEqualTypeOf<{ title: string; rev: number }>();
+        expectTypeOf(collection).toEqualTypeOf<CollectionApi<typeof posts>>();
+        expectTypeOf($collection).toEqualTypeOf<TrustedCollectionApi<typeof posts>>();
+        expectTypeOf(collections).toEqualTypeOf<CollectionsApi<{ readonly posts: typeof posts }>>();
+        expectTypeOf($collections).toEqualTypeOf<
+          TrustedCollectionsApi<{ readonly posts: typeof posts }>
+        >();
+
+        const added = $collection.add(
+          { title: input.title, status: "draft", stock: 1 },
+          {
+            id: "post-1",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            updatedAt: "2026-09-01T00:00:00.000Z",
+          },
+        );
+        expectTypeOf(added).resolves.toMatchTypeOf<{
+          title: number;
+          status: "draft" | "published";
+          stock: number;
+          rev: number;
+        }>();
+        void $collection.updateMany(
+          { title: input.title, rev: input.rev },
+          {
+            index: "byStatus",
+            where: (query) => query.status.eq("draft"),
+          },
+        );
+        const consumed = $collection.consumeOne({
+          index: "byStatus",
+          where: (query) => query.status.eq("draft"),
+        });
+        expectTypeOf(consumed).resolves.toEqualTypeOf<InferCollectionDoc<typeof posts> | null>();
+        void $collection.incrementOne(
+          { stock: 1 },
+          {
+            index: "byStatus",
+            where: (query) => query.status.eq("draft"),
+            set: { status: "published", rev: input.rev },
+          },
+        );
+        void $collection.deleteMany({
+          index: "byStatus",
+          where: (query) => query.status.eq("published"),
+        });
+
+        void $collections.$transaction(async (transaction) => {
+          expectTypeOf(transaction).toEqualTypeOf<
+            TrustedCollectionsApi<{ readonly posts: typeof posts }>
+          >();
+          return transaction.posts.consumeOne({
+            index: "byStatus",
+            where: (query) => query.status.eq("draft"),
+          });
+        });
+
+        expectTypeOf(collection).not.toHaveProperty("updateMany");
+        expectTypeOf(collection).not.toHaveProperty("deleteMany");
+        expectTypeOf(collection).not.toHaveProperty("consumeOne");
+        expectTypeOf(collection).not.toHaveProperty("incrementOne");
+        expectTypeOf($collection).toHaveProperty("updateMany");
+        expectTypeOf($collection).toHaveProperty("deleteMany");
+        expectTypeOf($collection).toHaveProperty("consumeOne");
+        expectTypeOf($collection).toHaveProperty("incrementOne");
+
+        // @ts-expect-error policy-bound collection facades do not expose trusted bulk writes
+        void collection.updateMany({}, { where: (query) => query.id.eq("post-1") });
+        // @ts-expect-error policy-bound collection facades do not expose trusted bulk deletes
+        void collection.deleteMany({ where: (query) => query.id.eq("post-1") });
+        // @ts-expect-error policy-bound collection maps do not expose trusted consume operations
+        void collections.posts.consumeOne({ where: (query) => query.id.eq("post-1") });
+        // @ts-expect-error policy-bound collection maps do not expose trusted increment operations
+        void collections.posts.incrementOne;
+        void collection.add(
+          { title: "x", status: "draft", stock: 1 },
+          // @ts-expect-error policy-bound add does not accept trusted timestamps
+          { createdAt: "2026-09-01T00:00:00.000Z" },
+        );
+        // @ts-expect-error policy-bound collection maps do not expose trusted transactions
+        void collections.$transaction(async () => null);
+        return null;
+      }),
+  }));
+
+  const inspect = app
+    .defineAction()
+    .policy(fullAccess)
+    .handler(({ collections, $collections }) => {
+      expectTypeOf(collections).toEqualTypeOf<CollectionsApi<{ readonly posts: typeof posts }>>();
+      expectTypeOf($collections).toEqualTypeOf<
+        TrustedCollectionsApi<{ readonly posts: typeof posts }>
+      >();
+      return $collections.$transaction(async (transaction) => {
+        expectTypeOf(transaction).toEqualTypeOf<
+          TrustedCollectionsApi<{ readonly posts: typeof posts }>
+        >();
+        return (await transaction.posts.list()).items;
+      });
+    });
+
+  app.actions({ $: { inspect }, posts: postsActions });
+});
+
 test("document and detached action handler args and client signatures are inferred", () => {
   const context = createContext({
     resolve: (): AppCtx => ({
@@ -648,8 +782,12 @@ test("document and detached action handler args and client signatures are inferr
         expectTypeOf(doc.title).toEqualTypeOf<string>();
         expectTypeOf(doc.rev).toEqualTypeOf<number>();
         expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
-        expectTypeOf(collection).toEqualTypeOf($collection);
-        expectTypeOf(collections).toEqualTypeOf($collections);
+        expectTypeOf(collection).toEqualTypeOf<CollectionApi<typeof posts>>();
+        expectTypeOf($collection).toEqualTypeOf<TrustedCollectionApi<typeof posts>>();
+        expectTypeOf(collections).toEqualTypeOf<CollectionsApi<{ readonly posts: typeof posts }>>();
+        expectTypeOf($collections).toEqualTypeOf<
+          TrustedCollectionsApi<{ readonly posts: typeof posts }>
+        >();
         expectTypeOf(collections).toHaveProperty("posts");
         expectTypeOf($collections).not.toHaveProperty("$exportSnapshot");
         expectTypeOf($collections).not.toHaveProperty("$restoreSnapshot");
@@ -674,8 +812,14 @@ test("document and detached action handler args and client signatures are inferr
         expectTypeOf(args.input).toEqualTypeOf<{ limit: number }>();
         expectTypeOf(args).not.toHaveProperty("id");
         expectTypeOf(args).not.toHaveProperty("doc");
-        expectTypeOf(args.collection).toEqualTypeOf(args.$collection);
-        expectTypeOf(args.collections).toEqualTypeOf(args.$collections);
+        expectTypeOf(args.collection).toEqualTypeOf<CollectionApi<typeof posts>>();
+        expectTypeOf(args.$collection).toEqualTypeOf<TrustedCollectionApi<typeof posts>>();
+        expectTypeOf(args.collections).toEqualTypeOf<
+          CollectionsApi<{ readonly posts: typeof posts }>
+        >();
+        expectTypeOf(args.$collections).toEqualTypeOf<
+          TrustedCollectionsApi<{ readonly posts: typeof posts }>
+        >();
         return { count: args.input.limit };
       }),
     promised: defineAction()
@@ -820,7 +964,8 @@ test("root actions infer all collections and appear flat on the client", () => {
       expectTypeOf(ctx.user).toEqualTypeOf<User | null>();
       expectTypeOf(collections).toHaveProperty("posts");
       expectTypeOf(collections).toHaveProperty("notes");
-      expectTypeOf(collections).toEqualTypeOf($collections);
+      expectTypeOf(collections).not.toHaveProperty("$transaction");
+      expectTypeOf($collections).toHaveProperty("$transaction");
       return { count: 0 };
     });
   const handler = app.actions({ $: { exportAll } });
@@ -851,7 +996,8 @@ test("atomic actions preserve builder, handler, and client inference at every st
         expectTypeOf(id).toEqualTypeOf<string>();
         expectTypeOf(doc.title).toEqualTypeOf<string>();
         expectTypeOf(ctx).toEqualTypeOf<AppCtx>();
-        expectTypeOf(collection).toEqualTypeOf($collection);
+        expectTypeOf(collection).not.toHaveProperty("updateMany");
+        expectTypeOf($collection).toHaveProperty("updateMany");
         return { title: input.title, ok: true as const };
       }),
   }));
@@ -866,7 +1012,8 @@ test("atomic actions preserve builder, handler, and client inference at every st
     .handler(({ input, ctx, collections, $collections }) => {
       expectTypeOf(input).toEqualTypeOf<{ title: string }>();
       expectTypeOf(ctx).toEqualTypeOf<AppCtx>();
-      expectTypeOf(collections).toEqualTypeOf($collections);
+      expectTypeOf(collections).not.toHaveProperty("$transaction");
+      expectTypeOf($collections).toHaveProperty("$transaction");
       return { title: input.title, count: 0 };
     });
   const handler = app.actions({ $: { exportAll }, posts: postsActions });

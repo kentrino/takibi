@@ -503,12 +503,20 @@ const exportAll = app
 const handler = app.actions({ $: { exportAll }, posts: postsActions });
 ```
 
-Every action handler receives `collections` / `$collections` (all collections);
-collection-scope actions additionally receive the shorthand
-`collection` / `$collection` for their own collection. Document actions also
+Every action handler receives `collections` (`CollectionsApi`) and
+`$collections` (`TrustedCollectionsApi`) for every collection. Collection-scope
+actions also receive `collection` (`CollectionApi`) and `$collection`
+(`TrustedCollectionApi`) for their own collection. Document actions also
 receive `{ id, doc }` — `doc` is the target document (schema output plus
 metadata), fetched before the handler runs. A missing id fails with
 `NOT_FOUND` before the handler.
+
+The TypeScript types follow the same split as runtime. Policy-bound
+`collection` / `collections` expose document CRUD that evaluates
+`accessPolicy`. Trusted `$collection` / `$collections` add
+metadata-preserving `add`, `updateMany`, `deleteMany`, `consumeOne`,
+`incrementOne`, and root `$transaction`. Those operations are not on the
+policy-bound types.
 
 `.input(...)` takes a Standard Schema, including refinements. Document action
 inputs must not contain the target id — the id travels in the path. Input

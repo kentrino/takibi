@@ -15,6 +15,8 @@ import type {
   InferCollectionDoc,
   IndexDeclaration,
   JsonValue,
+  TrustedCollectionApi,
+  TrustedCollectionsApi,
   UniqueConstraintDeclaration,
 } from "./types";
 
@@ -210,7 +212,7 @@ export type RuntimeActionDefinition = {
 export type RootActionArgs<TCtx, TCollections, TServices = Record<never, never>> = {
   ctx: TCtx;
   collections: CollectionsApi<TCollections>;
-  $collections: CollectionsApi<TCollections>;
+  $collections: TrustedCollectionsApi<TCollections>;
   services: TServices;
 };
 
@@ -221,7 +223,7 @@ export type CollectionActionArgs<
   TServices = Record<never, never>,
 > = RootActionArgs<TCtx, TCollections, TServices> & {
   collection: CollectionApi<TCollection>;
-  $collection: CollectionApi<TCollection>;
+  $collection: TrustedCollectionApi<TCollection>;
 };
 
 export type DocumentActionArgs<
