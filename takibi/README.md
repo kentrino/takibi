@@ -185,10 +185,10 @@ test forks as follows:
 
 ```ts
 // Before
-const testHandler = productionHandler.with({ memory: true, resolve, services });
+const testHandler = baseHandler.with({ memory: true, resolve, services });
 
 // After
-const testHandler = withSqliteTestBackend(productionHandler, { resolve, services });
+const testHandler = withSqliteTestBackend(baseHandler, { resolve, services });
 ```
 
 Import `withSqliteTestBackend` from `@takibi/takibi/testing`. Keep pure

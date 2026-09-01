@@ -152,7 +152,7 @@ test("Takibi request and stage logs carry their active span", async () => {
   const instrumentation = new TakibiInstrumentation();
   instrumentation.enable();
   try {
-    const productionHandler = createTakibi()({
+    const baseHandler = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
       logger: createOtelLogger(capturingOtelLogger(records)),
       logLevel: "debug",
@@ -164,7 +164,7 @@ test("Takibi request and stage logs carry their active span", async () => {
         },
       })
       .actions({});
-    const handler = withSqliteTestBackend(productionHandler);
+    const handler = withSqliteTestBackend(baseHandler);
     const response = await handler.request("https://takibi.test/posts/p1", {
       method: "POST",
       headers: { "content-type": "application/json" },

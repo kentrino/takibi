@@ -48,7 +48,7 @@ function okSingle(): Response {
 
 const Post = z.object({ title: z.string() });
 
-function productionHandler() {
+function baseHandler() {
   return createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) })
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
@@ -64,7 +64,7 @@ afterEach(() => {
 
 test("omitting batch sends each call immediately to its REST endpoint", async () => {
   const { calls, fetch } = captureFetch(() => okSingle());
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test/api", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test/api", {
     fetch,
   });
 
@@ -80,7 +80,7 @@ test("omitting batch sends each call immediately to its REST endpoint", async ()
 
 test("fixed window waits until maxWaitMs and does not extend the deadline", async () => {
   const { calls, fetch } = captureFetch(okBatch);
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 10 },
     fetch,
   });
@@ -111,7 +111,7 @@ test("fixed window waits until maxWaitMs and does not extend the deadline", asyn
 
 test("maxWaitMs 0 batches synchronous reads into the next timer task", async () => {
   const { calls, fetch } = captureFetch(okBatch);
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch,
   });
@@ -133,7 +133,7 @@ test("maxWaitMs 0 batches synchronous reads into the next timer task", async () 
 
 test("maxSize 1 flushes every read immediately", async () => {
   const { calls, fetch } = captureFetch(okBatch);
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0, maxSize: 1 },
     fetch,
   });
@@ -182,7 +182,7 @@ test("writes and actions bypass the queue without changing a pending read deadli
 
 test("MAX_BATCH_ITEMS flushes immediately and the next item starts a new window", async () => {
   const { calls, fetch } = captureFetch(okBatch);
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 10 },
     fetch,
   });
@@ -212,7 +212,7 @@ test("in-flight batches are not mutated; later reads start a new window", async 
         releases.push(resolve);
       }),
   );
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch,
   });
@@ -238,7 +238,7 @@ test("in-flight batches are not mutated; later reads start a new window", async 
 test("headers getter runs once per flush, not per enqueue", async () => {
   let headerReads = 0;
   const { fetch } = captureFetch(okBatch);
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     headers: () => {
       headerReads += 1;
@@ -256,7 +256,7 @@ test("headers getter runs once per flush, not per enqueue", async () => {
 
 test("empty ids fail locally without enqueuing other reads", async () => {
   const { calls, fetch } = captureFetch(okBatch);
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch,
   });
@@ -291,7 +291,7 @@ test("item operation failures resolve per Promise; transport errors reject all",
       ],
     }),
   );
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch,
   });
@@ -305,7 +305,7 @@ test("item operation failures resolve per Promise; transport errors reject all",
   });
 
   const offline = captureFetch(() => Promise.reject(new Error("offline")));
-  const rejecting = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const rejecting = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: offline.fetch,
   });
@@ -334,7 +334,7 @@ test("top-level wire failure fans out as the same result; count mismatch rejects
       { status: 401 },
     ),
   );
-  const client = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const client = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: unauthorized.fetch,
   });
@@ -348,7 +348,7 @@ test("top-level wire failure fans out as the same result; count mismatch rejects
   const mismatch = captureFetch(() =>
     Response.json({ ok: true, data: [{ ok: true, data: { id: "only-one" } }] }),
   );
-  const mismatched = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const mismatched = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: mismatch.fetch,
   });
@@ -367,7 +367,7 @@ test("top-level wire failure fans out as the same result; count mismatch rejects
   });
 
   const invalidJson = captureFetch(() => new Response("not-json"));
-  const broken = createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+  const broken = createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
     batch: { maxWaitMs: 0 },
     fetch: invalidJson.fetch,
   });
@@ -384,7 +384,7 @@ test("createClient rejects non-finite maxWaitMs", () => {
   const { fetch } = captureFetch(okSingle);
   for (const maxWaitMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
     expect(() =>
-      createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+      createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
         batch: { maxWaitMs },
         fetch,
       }),
@@ -396,7 +396,7 @@ test("createClient rejects maxSize outside the protocol limit", () => {
   const { fetch } = captureFetch(okSingle);
   for (const maxSize of [0, 1.5, MAX_BATCH_ITEMS + 1, Number.NaN]) {
     expect(() =>
-      createClient<ReturnType<typeof productionHandler>>("http://fire.test", {
+      createClient<ReturnType<typeof baseHandler>>("http://fire.test", {
         batch: { maxWaitMs: 0, maxSize },
         fetch,
       }),
