@@ -82,7 +82,7 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
     expectTypeOf(TakibiInstrumentation).toBeConstructibleWith();
     expectTypeOf(createOtelTakibiTracer).toBeFunction();
 
-    const productionHandler = createTakibi()({
+    const baseHandler = createTakibi()({
       resolve: () => ({ tenantId: "tenant-a" }),
     })
       .defineCollections({
@@ -92,7 +92,7 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
         },
       })
       .actions({});
-    const handler = withSqliteTestBackend(productionHandler);
+    const handler = withSqliteTestBackend(baseHandler);
     const response = await handler.request("https://takibi.test/posts", {
       method: "POST",
       headers: { "content-type": "application/json" },
