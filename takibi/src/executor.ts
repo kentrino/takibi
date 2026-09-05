@@ -1,8 +1,16 @@
+import {
+  allows,
+  denialReasonOf,
+  evaluateAccessPolicy,
+  type AccessContext,
+  type AccessGrant,
+  type AccessPermission,
+  type CollectionOperation,
+} from "@takibi/takibi-policy";
 import { compileListOptions } from "@takibi/takibi-query";
 import { ForbiddenError, NotFoundError } from "./errors";
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
-import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
 import { bindThrowingListAll, LIST_PAGE_MAX } from "./list-all";
 import {
   commitAddDoc,
@@ -15,12 +23,8 @@ import {
   storageUpdate,
 } from "./typed-storage";
 import type {
-  AccessContext,
-  AccessGrant,
-  AccessPermission,
   CollectionApi,
   CollectionDefinition,
-  CollectionOperation,
   CollectionsApi,
   CollectionsDef,
   StorageDriver,

@@ -99,6 +99,34 @@ export type StorageListOptions = {
   orderBy?: StorageOrderBy;
 };
 
+export type DocumentId = string;
+export const TAKIBI_VERSION_KEY = "$schemaVersion" as const;
+export const TAKIBI_REVISION_KEY = "rev" as const;
+
+export type DocumentMetadata = {
+  id: DocumentId;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ReservedDocumentDataKey =
+  | keyof DocumentMetadata
+  | typeof TAKIBI_VERSION_KEY
+  | typeof TAKIBI_REVISION_KEY;
+
+export const RESERVED_DOCUMENT_DATA_KEYS = [
+  "id",
+  "createdAt",
+  "updatedAt",
+  TAKIBI_VERSION_KEY,
+  TAKIBI_REVISION_KEY,
+] as const satisfies readonly ReservedDocumentDataKey[];
+
+export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
+
+export type WithMetadata<T> = Omit<T, keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY> &
+  DocumentMetadata;
+
 export type PolicyReason<TCode extends string = string> = {
   /**
    * Stable, machine-readable identifier for a public policy denial reason.

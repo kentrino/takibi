@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { PolicyHelper } from "@takibi/takibi-policy";
 import type { Hono } from "hono";
 import type {
   ActionDefinitions,
@@ -14,7 +15,6 @@ import type {
   ScopedActions,
 } from "../action";
 import type { LoggingOptions } from "../logging";
-import type { PolicyHelper } from "../policy";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
 import type {
   CollectionDefinition,

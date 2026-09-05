@@ -1,3 +1,4 @@
+import { createPolicyHelper } from "@takibi/takibi-policy";
 import { Hono } from "hono";
 import {
   ActionRegistry,
@@ -38,7 +39,6 @@ import {
 import { requestLogFields, resolveLogging, withLoggedSpan } from "../logging";
 import { assertCollectionMigrations } from "../migrations";
 import { batchSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
-import { createPolicyHelper } from "../policy";
 import {
   activeSpanContext,
   bindTracer,

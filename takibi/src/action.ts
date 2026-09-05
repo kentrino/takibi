@@ -1,12 +1,17 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import {
+  isAccessGrant,
+  isConstrainedPolicy,
+  permissionsOf,
+  type AccessContext,
+  type AccessGrant,
+  type AccessPermission,
+  type ConstrainedPolicy,
+  type ContextPolicy,
+} from "@takibi/takibi-policy";
 import { TakibiError } from "./errors";
-import { isAccessGrant, isConstrainedPolicy, permissionsOf } from "./policy";
-import type { ConstrainedPolicy, ContextPolicy } from "./policy";
 import type { IsAny } from "./type-util";
 import type {
-  AccessContext,
-  AccessGrant,
-  AccessPermission,
   CollectionApi,
   CollectionDefinition,
   CollectionIndexes,

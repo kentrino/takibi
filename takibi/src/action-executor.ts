@@ -16,9 +16,10 @@ import {
   isAccessGrant,
   isConstrainedPolicy,
   isContextPolicy,
-} from "./policy";
+  type AccessGrant,
+} from "@takibi/takibi-policy";
 import { parseSchema } from "./schema";
-import type { AccessGrant, CollectionsDef, JsonValue, StorageDriver } from "./types";
+import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
 
 export type ActionInvocation = {
   kind: "action";

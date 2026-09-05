@@ -1,11 +1,15 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { AccessPolicy, PolicyReasonCodeOf } from "@takibi/takibi-policy";
 import type { ListOptions } from "@takibi/takibi-query";
 import type {
-  QueryExpr,
+  DocumentId,
   QueryScalar,
+  ReservedDocumentDataKey,
   StorageListOptions,
   TakibiResult,
+  WithMetadata,
 } from "@takibi/takibi-shared-types";
+import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "@takibi/takibi-shared-types";
 import type {
   DistributiveOmit,
   ForbidKeys,
@@ -13,11 +17,24 @@ import type {
   IsAny,
   StringKeysMatching,
 } from "./type-util";
+export type {
+  AccessContext,
+  AccessGrant,
+  AccessPermission,
+  AccessPolicy,
+  AccessPolicyFn,
+  CollectionOperation,
+  PolicyReasonCodeCarrier,
+  PolicyReasonCodeOf,
+} from "@takibi/takibi-policy";
 export type { ListOptions } from "@takibi/takibi-query";
 export type {
+  DocumentId,
+  DocumentMetadata,
   OrderBuilder,
   OrderDirection,
   OrderExpr,
+  PolicyReason,
   QueryBuilder,
   QueryExpr,
   QueryField,
@@ -25,6 +42,7 @@ export type {
   QueryScalar,
   QueryStringOperator,
   QueryValueOperator,
+  ReservedDocumentDataKey,
   StorageListOptions,
   StorageOrderBy,
   TakibiFailure,
@@ -32,6 +50,13 @@ export type {
   TakibiResult,
   TakibiValidationFailure,
   ValidationIssue,
+  WithId,
+  WithMetadata,
+} from "@takibi/takibi-shared-types";
+export {
+  RESERVED_DOCUMENT_DATA_KEYS,
+  TAKIBI_REVISION_KEY,
+  TAKIBI_VERSION_KEY,
 } from "@takibi/takibi-shared-types";
 
 export type JsonValue =
@@ -55,29 +80,6 @@ type JsonDocumentSchema<TSchema extends StandardSchemaV1> =
           ? TSchema
           : never;
 
-export type DocumentId = string;
-export const TAKIBI_VERSION_KEY = "$schemaVersion" as const;
-export const TAKIBI_REVISION_KEY = "rev" as const;
-
-export type DocumentMetadata = {
-  id: DocumentId;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ReservedDocumentDataKey =
-  | keyof DocumentMetadata
-  | typeof TAKIBI_VERSION_KEY
-  | typeof TAKIBI_REVISION_KEY;
-
-export const RESERVED_DOCUMENT_DATA_KEYS = [
-  "id",
-  "createdAt",
-  "updatedAt",
-  TAKIBI_VERSION_KEY,
-  TAKIBI_REVISION_KEY,
-] as const satisfies readonly ReservedDocumentDataKey[];
-
 type KnownObjectKeys<T> = {
   [K in keyof T]-?: string extends K ? never : number extends K ? never : K;
 }[keyof T];
@@ -98,11 +100,6 @@ export type ReservedDocumentSchemaConstraint<TSchema extends StandardSchemaV1> =
           : DeclaresReservedDocumentKey<StandardSchemaV1.InferInput<TSchema>> extends true
             ? { schema: never }
             : unknown;
-
-export type WithId<T> = Omit<T, "id"> & { id: DocumentId };
-
-export type WithMetadata<T> = Omit<T, keyof DocumentMetadata | typeof TAKIBI_VERSION_KEY> &
-  DocumentMetadata;
 
 /** @internal Persisted representation. The version marker never crosses the storage boundary. */
 export type StoredDocument = WithMetadata<Record<string, unknown>> & {
@@ -183,76 +180,6 @@ export type InferCollectionIndexes<C> = C extends { indexes?: infer I }
         : NonNullable<I>
       : Record<string, never>
   : Record<string, never>;
-
-export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list" | "count";
-
-export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
-
-declare const accessGrantBrand: unique symbol;
-declare const policyReasonCodeBrand: unique symbol;
-
-export type PolicyReason<TCode extends string = string> = {
-  /**
-   * Stable, machine-readable identifier for a public policy denial reason.
-   * Clients should branch on this value and map it to localized UI copy.
-   */
-  readonly code: TCode;
-  /**
-   * Optional, non-localized developer description. This value is serialized
-   * to clients, so it must be static and must not contain sensitive data.
-   */
-  readonly description?: string;
-};
-
-/** @internal Type-only carrier used to preserve policy reason literals. */
-export type PolicyReasonCodeCarrier<TCode extends string> = {
-  readonly [policyReasonCodeBrand]: TCode;
-};
-
-/** Extract the policy reason code union carried by a policy definition. */
-export type PolicyReasonCodeOf<T> =
-  T extends PolicyReasonCodeCarrier<infer TCode extends string> ? TCode : never;
-
-/** Opaque grant a policy returns. Build with `grant(...)` or a predefined grant. */
-export type AccessGrant = {
-  readonly [accessGrantBrand]: true;
-};
-
-export type AccessContext<
-  TCtx extends object,
-  TDoc = WithMetadata<Record<string, unknown>>,
-> = TCtx & {
-  collection: string;
-  operation: CollectionOperation | "invoke";
-  permission: AccessPermission;
-  /** Normalized list query. Present only when list was called with `where`. */
-  where?: QueryExpr;
-  /**
-   * Saved document for get / update / delete / existing set, and the target
-   * document for a document action gate (`invoke`). Absent for add / list /
-   * new set.
-   */
-  doc?: TDoc;
-  /** Validated write candidate for add / update / set. Absent for get / delete / list / invoke. */
-  nextDoc?: TDoc;
-};
-
-/**
- * Capability producer: return the actions this subject may perform on this
- * collection / document. Prefer not switching on `permission` — the executor
- * collates the grant against the required permission.
- */
-export type AccessPolicyFn<TCtx extends object, TDoc = WithMetadata<Record<string, unknown>>> = (
-  ctx: AccessContext<TCtx, TDoc>,
-) => AccessGrant | Promise<AccessGrant>;
-
-/**
- * `accessPolicy` value: a function, or a constant grant
- * (`fullAccess`, `write`, `read`, `none`).
- */
-export type AccessPolicy<TCtx extends object, TDoc = WithMetadata<Record<string, unknown>>> =
-  | AccessGrant
-  | AccessPolicyFn<TCtx, TDoc>;
 
 export type CollectionDefinition<
   TSchema extends StandardSchemaV1 = any,
