@@ -1,3 +1,4 @@
+import { compileWhere } from "@takibi/takibi-query";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";
@@ -9,7 +10,6 @@ import {
   planIndexRange,
   resolveIndexedList,
 } from "../src/indexes";
-import { compileWhere } from "../src/query";
 
 const createContext = createTakibi();
 

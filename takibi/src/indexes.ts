@@ -1,5 +1,5 @@
+import { normalizeOrderBy } from "@takibi/takibi-protocol";
 import { BadRequestError, TakibiError } from "./errors";
-import { normalizeOrderBy } from "./query";
 import {
   INDEXABLE_METADATA_FIELDS,
   RESERVED_DOCUMENT_DATA_KEYS,

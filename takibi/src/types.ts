@@ -1,15 +1,26 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { ListOptions } from "@takibi/takibi-query";
 import type {
-  OrderExpr,
   QueryExpr,
   QueryScalar,
   StorageListOptions,
   TakibiResult,
 } from "@takibi/takibi-shared-types";
+import type {
+  DistributiveOmit,
+  ForbidKeys,
+  HasDuplicateTupleMember,
+  IsAny,
+  StringKeysMatching,
+} from "./type-util";
+export type { ListOptions } from "@takibi/takibi-query";
 export type {
+  OrderBuilder,
   OrderDirection,
   OrderExpr,
+  QueryBuilder,
   QueryExpr,
+  QueryField,
   QueryOperator,
   QueryScalar,
   QueryStringOperator,
@@ -22,13 +33,6 @@ export type {
   TakibiValidationFailure,
   ValidationIssue,
 } from "@takibi/takibi-shared-types";
-import type {
-  DistributiveOmit,
-  ForbidKeys,
-  HasDuplicateTupleMember,
-  IsAny,
-  StringKeysMatching,
-} from "./type-util";
 
 export type JsonValue =
   | string
@@ -179,57 +183,6 @@ export type InferCollectionIndexes<C> = C extends { indexes?: infer I }
         : NonNullable<I>
       : Record<string, never>
   : Record<string, never>;
-
-export type OrderBuilder<TFields extends readonly string[]> = {
-  [K in TFields[number]]: {
-    asc(): OrderExpr;
-    desc(): OrderExpr;
-  };
-};
-
-type QueryEqValue<T> = Extract<Exclude<T, undefined>, QueryScalar>;
-type QueryComparableValue<T> = Extract<Exclude<T, undefined | null>, string | number>;
-type QueryStringValue<T> = [Exclude<T, undefined | null>] extends [never]
-  ? never
-  : [Exclude<T, undefined | null>] extends [string]
-    ? Extract<Exclude<T, undefined | null>, string>
-    : never;
-
-export type QueryField<T> = { present(): QueryExpr } & ([QueryEqValue<T>] extends [never]
-  ? object
-  : {
-      eq(value: QueryEqValue<T>): QueryExpr;
-      in(values: readonly QueryEqValue<T>[]): QueryExpr;
-    }) &
-  ([QueryComparableValue<T>] extends [never]
-    ? object
-    : {
-        gt(value: QueryComparableValue<T>): QueryExpr;
-        gte(value: QueryComparableValue<T>): QueryExpr;
-        lt(value: QueryComparableValue<T>): QueryExpr;
-        lte(value: QueryComparableValue<T>): QueryExpr;
-      }) &
-  ([QueryStringValue<T>] extends [never]
-    ? object
-    : {
-        contains(value: QueryStringValue<T>): QueryExpr;
-        startsWith(value: QueryStringValue<T>): QueryExpr;
-        endsWith(value: QueryStringValue<T>): QueryExpr;
-      });
-
-type QueryFields<TDoc> = {
-  [K in keyof TDoc as K extends string
-    ? K extends typeof TAKIBI_REVISION_KEY | typeof TAKIBI_VERSION_KEY
-      ? never
-      : K
-    : never]-?: QueryField<TDoc[K]>;
-};
-
-export type QueryBuilder<TDoc> = QueryFields<TDoc> & {
-  and(first: QueryExpr, second: QueryExpr, ...rest: QueryExpr[]): QueryExpr;
-  or(first: QueryExpr, second: QueryExpr, ...rest: QueryExpr[]): QueryExpr;
-  not(operand: QueryExpr): QueryExpr;
-};
 
 export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list" | "count";
 
@@ -569,31 +522,6 @@ export type ClientCollectionApi<C> = {
 export type ClientCollectionsApi<TCollections> = {
   [K in keyof TCollections]: ClientCollectionApi<TCollections[K]>;
 };
-
-type UnindexedListOptions<TDoc> = {
-  limit?: number;
-  cursor?: string;
-  where?: (query: QueryBuilder<TDoc>) => QueryExpr;
-};
-
-type IndexedListOptions<TDoc, TIndexes extends Record<string, readonly string[]>> = {
-  [K in keyof TIndexes & string]: {
-    index: K;
-    limit?: number;
-    cursor?: string;
-    where?: (query: QueryBuilder<TDoc>) => QueryExpr;
-    orderBy?: (query: OrderBuilder<TIndexes[K]>) => OrderExpr;
-  };
-}[keyof TIndexes & string];
-
-export type ListOptions<
-  TDoc = WithMetadata<Record<string, QueryScalar>>,
-  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
-> = [keyof TIndexes] extends [never]
-  ? UnindexedListOptions<TDoc>
-  :
-      | (UnindexedListOptions<TDoc> & { index?: never; orderBy?: never })
-      | IndexedListOptions<TDoc, TIndexes>;
 
 type ListAllFromList<T> = DistributiveOmit<T, "limit" | "cursor"> & {
   /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */

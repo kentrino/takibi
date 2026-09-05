@@ -1,7 +1,7 @@
+import { compileListOptions, type ListOptions } from "@takibi/takibi-query";
 import { AlreadyExistsError, NotFoundError, TakibiError } from "./errors";
 import { assertJsonObject } from "./json";
 import type { InternalLogger } from "./logging";
-import { compileListOptions } from "./query";
 import {
   assertRevisionPrecondition,
   documentRevision,
@@ -21,7 +21,6 @@ import type {
   CollectionDefinition,
   DocumentId,
   TakibiResult,
-  ListOptions,
   StorageDriver,
   WithMetadata,
 } from "./types";
