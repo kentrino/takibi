@@ -65,6 +65,8 @@
   "dependencies": {
     "@noble/hashes": "catalog:",
     "@standard-schema/spec": "catalog:",
+    "@takibi/takibi-protocol": "workspace:^",
+    "@takibi/takibi-shared-types": "workspace:^",
     "hono": "catalog:"
   },
   "devDependencies": {

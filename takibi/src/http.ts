@@ -1,8 +1,8 @@
+import { parseOrderBy, parseQueryExpr } from "@takibi/takibi-protocol";
 import { BadRequestError, TakibiError, NotFoundError } from "./errors";
 import type { ActionInvocation } from "./action-executor";
 import type { ExecuteRequest } from "./executor";
 import { decodePublicBatch, type PublicBatchRequest } from "./protocol";
-import { normalizeOrderBy, normalizeQueryExpr } from "./query";
 import type { StorageListOptions } from "./types";
 
 export class MethodNotAllowedError extends TakibiError {
@@ -249,7 +249,7 @@ function parseListQuery(searchParams: URLSearchParams): StorageListOptions | und
   }
   if (searchParams.has("where")) {
     try {
-      list.where = normalizeQueryExpr(JSON.parse(searchParams.get("where") ?? ""));
+      list.where = parseQueryExpr(searchParams.get("where") ?? "");
     } catch (error) {
       throw new BadRequestError(error instanceof Error ? error.message : "Invalid where query");
     }
@@ -262,7 +262,7 @@ function parseListQuery(searchParams: URLSearchParams): StorageListOptions | und
   if (searchParams.has("orderBy")) {
     if (list.index === undefined) throw new BadRequestError("orderBy requires index");
     try {
-      list.orderBy = normalizeOrderBy(JSON.parse(searchParams.get("orderBy") ?? ""));
+      list.orderBy = parseOrderBy(searchParams.get("orderBy") ?? "");
     } catch (error) {
       throw new BadRequestError(error instanceof Error ? error.message : "Invalid orderBy");
     }

@@ -1,0 +1,7 @@
+# `@takibi/takibi-shared-types`
+
+Dependency-light shared contracts for Takibi packages.
+
+The package owns transport-safe query and order AST types, storage list
+options, JSON value types, policy reason types, and result envelopes. It has no
+dependency on the Takibi runtime.

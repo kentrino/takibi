@@ -1,3 +1,4 @@
+import { normalizeOrderBy, normalizeQueryExpr, QUERY_MAX_NODES } from "@takibi/takibi-protocol";
 import type {
   ListOptions,
   OrderBuilder,
@@ -9,13 +10,12 @@ import type {
   QueryValueOperator,
   StorageListOptions,
 } from "./types";
-import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
-
-export const QUERY_MAX_NODES = 32;
-export const QUERY_MAX_DEPTH = 8;
-
-const VALUE_OPERATORS = new Set<QueryValueOperator>(["eq", "gt", "gte", "lt", "lte"]);
-const STRING_OPERATORS = new Set<QueryStringOperator>(["contains", "startsWith", "endsWith"]);
+export {
+  normalizeOrderBy,
+  normalizeQueryExpr,
+  QUERY_MAX_DEPTH,
+  QUERY_MAX_NODES,
+} from "@takibi/takibi-protocol";
 
 export function compileListOptions<
   TDoc,
@@ -51,18 +51,6 @@ export function compileOrderBy(
     throw new TypeError("orderBy callback must return an expression created by its query builder");
   }
   return normalizeOrderBy(result);
-}
-
-export function normalizeOrderBy(value: unknown): OrderExpr {
-  if (!isRecord(value)) throw new TypeError("Order expression must be an object");
-  assertExactKeys(value, ["field", "direction"]);
-  if (typeof value.field !== "string" || value.field.length === 0) {
-    throw new TypeError("Order field must be a non-empty string");
-  }
-  if (value.direction !== "asc" && value.direction !== "desc") {
-    throw new TypeError("Order direction must be asc or desc");
-  }
-  return Object.freeze({ field: value.field, direction: value.direction });
 }
 
 function createOrderBuilder(expressions: WeakSet<object>): OrderBuilder<readonly string[]> {
@@ -183,80 +171,6 @@ function createQueryBuilder<TDoc>(expressions: WeakSet<object>): QueryBuilder<TD
   });
 }
 
-export function normalizeQueryExpr(value: unknown): QueryExpr {
-  const seen = new Set<object>();
-  const budget = { nodes: 0 };
-
-  const visit = (input: unknown, depth: number): QueryExpr => {
-    if (depth > QUERY_MAX_DEPTH) {
-      throw new TypeError(`Query depth must not exceed ${QUERY_MAX_DEPTH}`);
-    }
-    if (!isRecord(input)) throw new TypeError("Query expression must be an object");
-    if (seen.has(input)) throw new TypeError("Query expression must not be cyclic");
-    seen.add(input);
-
-    budget.nodes += 1;
-    if (budget.nodes > QUERY_MAX_NODES) {
-      throw new TypeError(`Query must not exceed ${QUERY_MAX_NODES} nodes`);
-    }
-
-    const op = input.op;
-    let normalized: QueryExpr;
-    if (op === "present") {
-      assertExactKeys(input, ["field", "op"]);
-      assertQueryableField(input.field);
-      normalized = Object.freeze({ field: input.field, op });
-    } else if (op === "in") {
-      assertExactKeys(input, ["field", "op", "values"]);
-      assertQueryableField(input.field);
-      normalized = Object.freeze({
-        field: input.field,
-        op,
-        values: normalizeInValues(input.values),
-      });
-    } else if (typeof op === "string" && STRING_OPERATORS.has(op as QueryStringOperator)) {
-      assertExactKeys(input, ["field", "op", "value"]);
-      assertQueryableField(input.field);
-      if (typeof input.value !== "string") {
-        throw new TypeError(`${op} requires a string`);
-      }
-      normalized = Object.freeze({
-        field: input.field,
-        op: op as QueryStringOperator,
-        value: input.value,
-      });
-    } else if (typeof op === "string" && VALUE_OPERATORS.has(op as QueryValueOperator)) {
-      assertExactKeys(input, ["field", "op", "value"]);
-      assertQueryableField(input.field);
-      assertQueryValue(op as QueryValueOperator, input.value);
-      normalized = Object.freeze({
-        field: input.field,
-        op: op as QueryValueOperator,
-        value: input.value,
-      });
-    } else if (op === "and" || op === "or") {
-      assertExactKeys(input, ["op", "operands"]);
-      if (!Array.isArray(input.operands) || input.operands.length < 2) {
-        throw new TypeError(`${op} requires at least two operands`);
-      }
-      normalized = Object.freeze({
-        op,
-        operands: Object.freeze(input.operands.map((operand) => visit(operand, depth + 1))),
-      });
-    } else if (op === "not") {
-      assertExactKeys(input, ["op", "operand"]);
-      normalized = Object.freeze({ op, operand: visit(input.operand, depth + 1) });
-    } else {
-      throw new TypeError("Unknown query operator");
-    }
-
-    seen.delete(input);
-    return normalized;
-  };
-
-  return visit(value, 1);
-}
-
 export function matchesQuery(
   document: Readonly<Record<string, unknown>>,
   expression: QueryExpr,
@@ -369,22 +283,6 @@ function matchesScalarEquality(actual: unknown, expected: QueryScalar): boolean 
     (typeof actual === "string" || typeof actual === "number" || typeof actual === "boolean") &&
     actual === expected
   );
-}
-
-function assertQueryableField(value: unknown): asserts value is string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError("Query field must be a non-empty string");
-  }
-  if (value === TAKIBI_VERSION_KEY || value === TAKIBI_REVISION_KEY) {
-    throw new TypeError(`${value} is reserved and cannot be queried`);
-  }
-}
-
-function assertExactKeys(value: Record<string, unknown>, expected: readonly string[]): void {
-  const actual = Object.keys(value);
-  if (actual.length !== expected.length || actual.some((key) => !expected.includes(key))) {
-    throw new TypeError("Query expression has unexpected fields");
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
