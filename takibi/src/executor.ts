@@ -1,8 +1,8 @@
+import { compileListOptions } from "@takibi/takibi-query";
 import { ForbiddenError, NotFoundError } from "./errors";
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { allows, denialReasonOf, evaluateAccessPolicy } from "./policy";
-import { compileListOptions } from "./query";
 import { bindThrowingListAll, LIST_PAGE_MAX } from "./list-all";
 import {
   commitAddDoc,

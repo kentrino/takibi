@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { compileListOptions } from "@takibi/takibi-query";
 import { unsafeClientPropertyNames } from "./action";
 import type { TakibiHandler } from "./context/types";
 import {
@@ -10,7 +11,6 @@ import {
   type CollectionReadRequest,
   type WireResponse,
 } from "./protocol";
-import { compileListOptions } from "./query";
 import {
   LIST_ALL_MAX_ITEMS_DEFAULT,
   LIST_ALL_PAGE_SIZE_DEFAULT,

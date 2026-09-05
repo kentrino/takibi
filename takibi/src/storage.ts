@@ -1,3 +1,5 @@
+import { normalizeQueryExpr } from "@takibi/takibi-protocol";
+import { matchesQuery } from "@takibi/takibi-query";
 import { LIST_PAGE_DEFAULT, LIST_PAGE_MAX } from "./list-all";
 import { BadRequestError, TakibiError } from "./errors";
 import { compileIndexedScanSql, createIndexCatalogTableSql } from "./index-sql";
@@ -8,7 +10,6 @@ import {
   type ResolvedIndexScan,
 } from "./indexes";
 import { assertJsonObject } from "./json";
-import { matchesQuery, normalizeQueryExpr } from "./query";
 import { compileQueryToSql } from "./sql-query";
 import type {
   QueryExpr,

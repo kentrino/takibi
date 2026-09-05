@@ -72,16 +72,23 @@ test("core package exposes the Node-only testing subpath in source and published
 test("protocol packages keep a one-way dependency graph", () => {
   const core = readManifest(join(import.meta.dirname, "../package.json"));
   const protocol = readManifest(join(import.meta.dirname, "../../takibi-protocol/package.json"));
+  const query = readManifest(join(import.meta.dirname, "../../takibi-query/package.json"));
   const sharedTypes = readManifest(
     join(import.meta.dirname, "../../takibi-shared-types/package.json"),
   );
 
   expect(core.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
   expect(core.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
+  expect(query.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
+  expect(query.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
+  expect(query.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(protocol.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
   expect(protocol.dependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi-protocol"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
 });
 
 test("instrumentation exports the stable Takibi telemetry vocabulary", () => {

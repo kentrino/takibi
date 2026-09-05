@@ -1,11 +1,6 @@
+import type { ListOptions } from "@takibi/takibi-query";
 import { ListAllLimitError } from "./errors";
-import type {
-  ListAllOptions,
-  ListOptions,
-  TakibiFailure,
-  TakibiOperationFailure,
-  TakibiResult,
-} from "./types";
+import type { ListAllOptions, TakibiFailure, TakibiOperationFailure, TakibiResult } from "./types";
 
 /** Default `list` page size when the caller omits `limit`. */
 export const LIST_PAGE_DEFAULT = 50;
