@@ -856,7 +856,7 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
   const production = buildProductionHandler();
   const handler = withSqliteTestBackend(production);
   const requestCounts = { list: 0, batch: 0 };
-  const fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetch = (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (url.pathname === "/_batch") requestCounts.batch += 1;

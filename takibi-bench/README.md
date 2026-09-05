@@ -1,5 +1,8 @@
 # Takibi full-path macrobenchmark
 
+This private workspace package exercises Takibi strictly through its stable
+package entry points. It is not a publishable Takibi implementation package.
+
 `full-path.bench.ts` runs one fresh, isolated multi-tenant issue-tracker
 lifecycle per sample. It is a gross-regression macrobenchmark: handler
 construction and validation/persistence of the fixed 216-document seed are
@@ -17,7 +20,7 @@ The scenario also covers document, detached, and root actions; atomic
 cross-collection writes; optimistic revisions; validation and policy failures;
 fixed-size client read batching; and explicit public protocol round-trips.
 
-Run it from `packages/takibi`:
+Run it from `packages/takibi-bench`:
 
 ```sh
 vp test benchmarks/full-path-scenario.test.ts
