@@ -55,6 +55,7 @@
     "access": "public"
   },
   "scripts": {
+    "bench:full-path": "vp test bench benchmarks/full-path.bench.ts --no-file-parallelism --maxWorkers 1",
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test && vp run test:workers && vp run test:root-compat",
