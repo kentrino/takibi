@@ -1,0 +1,62 @@
+{
+  "name": "@takibi/takibi-policy",
+  "version": "0.0.0",
+  "description": "Access-policy kernel for Takibi.",
+  "keywords": [
+    "access-control",
+    "policy",
+    "takibi",
+    "typescript"
+  ],
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/takibi-policy",
+  "bugs": {
+    "url": "https://github.com/kentrino/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentrino/takibi.git",
+    "directory": "packages/takibi-policy"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "catalog:",
+    "@takibi/takibi-shared-types": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
