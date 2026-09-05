@@ -6,6 +6,7 @@ import type { PublicRequest } from "../http";
 import { emitFailure, withLoggedSpan, type InternalLogger } from "../logging";
 import { batchSpanAttributes, invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import {
+  encodeWireRequest,
   isBatchWireResponse,
   isWireResponse,
   type CollectionReadRequest,
@@ -129,7 +130,7 @@ export function createStubExecutor<TInitial>(
           new Request("https://takibi.internal/", {
             method: "POST",
             headers,
-            body: JSON.stringify(wire),
+            body: encodeWireRequest(wire),
           }),
         );
         const body: unknown = await res.json();

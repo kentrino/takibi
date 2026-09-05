@@ -16,7 +16,7 @@ import { compileIndexRegistry } from "./indexes";
 import { reconcileCollectionIndexes } from "./index-reconcile";
 import { createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
-import { decodeWireRequest, type WireResponse } from "./protocol";
+import { parseWireRequest, type WireResponse } from "./protocol";
 import { createDurableObjectStorage } from "./storage";
 import { createMaintenanceGatedCollections, MaintenanceController } from "./maintenance";
 import { createDurableObjectCollectionsApi } from "./snapshot";
@@ -98,7 +98,7 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
         const executeWithContext = async (): Promise<Response> => {
           let invocation: PublicRequest | undefined;
           try {
-            const body = decodeWireRequest(await request.json());
+            const body = parseWireRequest(await request.text());
             if (body.kind === "batch") {
               invocation = { kind: "batch", items: body.items };
               assertTenantMatchesDurableObjectName(this.#state.id.name, body.context);

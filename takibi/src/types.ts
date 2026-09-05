@@ -1,5 +1,28 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type {
+  OrderExpr,
+  QueryExpr,
+  QueryScalar,
+  StorageListOptions,
+  TakibiResult,
+} from "@takibi/takibi-shared-types";
+export type {
+  OrderDirection,
+  OrderExpr,
+  QueryExpr,
+  QueryOperator,
+  QueryScalar,
+  QueryStringOperator,
+  QueryValueOperator,
+  StorageListOptions,
+  StorageOrderBy,
+  TakibiFailure,
+  TakibiOperationFailure,
+  TakibiResult,
+  TakibiValidationFailure,
+  ValidationIssue,
+} from "@takibi/takibi-shared-types";
+import type {
   DistributiveOmit,
   ForbidKeys,
   HasDuplicateTupleMember,
@@ -95,14 +118,6 @@ export type CollectionMigrations<TCurrentInput> = {
   steps: MigrationSteps<TCurrentInput>;
 };
 
-export type QueryScalar = string | number | boolean | null;
-
-export type QueryValueOperator = "eq" | "gt" | "gte" | "lt" | "lte";
-
-export type QueryStringOperator = "contains" | "startsWith" | "endsWith";
-
-export type QueryOperator = QueryValueOperator | QueryStringOperator | "in" | "present";
-
 type UniqueFieldKeys<TSchema extends StandardSchemaV1> = StringKeysMatching<
   {
     [K in keyof StandardSchemaV1.InferOutput<TSchema>]: Exclude<
@@ -165,31 +180,12 @@ export type InferCollectionIndexes<C> = C extends { indexes?: infer I }
       : Record<string, never>
   : Record<string, never>;
 
-export type OrderDirection = "asc" | "desc";
-
-export type OrderExpr = {
-  readonly field: string;
-  readonly direction: OrderDirection;
-};
-
 export type OrderBuilder<TFields extends readonly string[]> = {
   [K in TFields[number]]: {
     asc(): OrderExpr;
     desc(): OrderExpr;
   };
 };
-
-export type QueryExpr =
-  | { readonly field: string; readonly op: QueryValueOperator; readonly value: QueryScalar }
-  | { readonly field: string; readonly op: "in"; readonly values: readonly QueryScalar[] }
-  | {
-      readonly field: string;
-      readonly op: QueryStringOperator;
-      readonly value: string;
-    }
-  | { readonly field: string; readonly op: "present" }
-  | { readonly op: "and" | "or"; readonly operands: readonly QueryExpr[] }
-  | { readonly op: "not"; readonly operand: QueryExpr };
 
 type QueryEqValue<T> = Extract<Exclude<T, undefined>, QueryScalar>;
 type QueryComparableValue<T> = Extract<Exclude<T, undefined | null>, string | number>;
@@ -441,38 +437,6 @@ export type NarrowCollectionDoc<C, TData> = [
   ? InferCollectionDoc<C>
   : NarrowDocMembers<CollectionDocMembers<C>, TData>;
 
-export type ValidationIssue = {
-  message: string;
-  path?: readonly (string | number)[];
-};
-
-export type TakibiValidationFailure = {
-  kind: "validation";
-  code: "VALIDATION";
-  message: string;
-  status: 400;
-  issues: readonly ValidationIssue[];
-};
-
-type TakibiOperationFailureBase = {
-  kind: "operation";
-  code: string;
-  message: string;
-  status: number;
-};
-
-export type TakibiOperationFailure<TReasonCode extends string = never> =
-  TakibiOperationFailureBase &
-    ([TReasonCode] extends [never] ? object : { reason?: PolicyReason<TReasonCode> });
-
-export type TakibiFailure<TReasonCode extends string = never> =
-  | TakibiValidationFailure
-  | TakibiOperationFailure<TReasonCode>;
-
-export type TakibiResult<T, TReasonCode extends string = never> =
-  | { ok: true; data: T }
-  | { ok: false; error: TakibiFailure<TReasonCode> };
-
 /** Throwing, server-side CRUD facade used by actions and trusted `$collections`. */
 export type CollectionApi<C> = {
   add: <TData extends CollectionDataInput<C>>(
@@ -664,19 +628,6 @@ export type ConditionalWriteOptions<
   TDoc = WithMetadata<Record<string, QueryScalar>>,
   TIndexes extends Record<string, readonly string[]> = Record<string, never>,
 > = RequireWhere<CountOptions<TDoc, TIndexes>>;
-
-export type StorageOrderBy = {
-  field: string;
-  direction: OrderDirection;
-};
-
-export type StorageListOptions = {
-  limit?: number;
-  cursor?: string;
-  where?: QueryExpr;
-  index?: string;
-  orderBy?: StorageOrderBy;
-};
 
 export type StorageReadTransform = (
   document: StoredDocument,

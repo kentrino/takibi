@@ -1778,6 +1778,15 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     expect(workerResponse.status).toBe(400);
     await expect(workerResponse.json()).resolves.toMatchObject(badRequest);
   }
+
+  const malformedJsonResponse = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: "{",
+    }),
+  );
+  expect(malformedJsonResponse.status).toBe(400);
+  await expect(malformedJsonResponse.json()).resolves.toMatchObject(badRequest);
 });
 
 test("unknown collection and action names stay NOT_FOUND after decode", async () => {
