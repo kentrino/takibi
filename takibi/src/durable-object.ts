@@ -18,6 +18,11 @@ import { createTrustedCollections, executeOperation, type ExecuteRequest } from 
 import type { PublicRequest } from "./http";
 import { withLoggedSpan, emitFailure, type InternalLogger } from "./logging";
 import {
+  createMaintenanceGatedCollections,
+  initializeMaintenanceLayout,
+  MaintenanceController,
+} from "@takibi/takibi-snapshot";
+import {
   compileIndexRegistry,
   createDurableObjectStorage,
   reconcileCollectionIndexes,
@@ -26,11 +31,6 @@ import {
 import { createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { parseWireRequest, type WireResponse } from "./protocol";
-import {
-  createMaintenanceGatedCollections,
-  initializeMaintenanceLayout,
-  MaintenanceController,
-} from "./maintenance";
 import { createDurableObjectCollectionsApi } from "./snapshot";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
 import { storageAdd } from "./typed-storage";

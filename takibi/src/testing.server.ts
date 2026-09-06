@@ -1,10 +1,10 @@
+import { initializeMaintenanceLayout } from "@takibi/takibi-snapshot";
 import {
   compileIndexRegistry,
   createDurableObjectStorage,
   reconcileCollectionIndexes,
 } from "@takibi/takibi-storage";
 import { seedCollections } from "./durable-object";
-import { initializeMaintenanceLayout } from "./maintenance";
 import { createMigratingStorage } from "./migrations";
 import { createInProcessExecutor } from "./context/executors";
 import { applyStorageLogging } from "./context/runtime";
