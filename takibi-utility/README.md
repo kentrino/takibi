@@ -16,7 +16,9 @@ ones through `next`. Listed methods are updated; methods omitted from a map
 keep the previous interceptor. `new` builds the same instance with no
 interceptors. The instance is only the method surface.
 
-`ctor` is the value passed to `new` or `newWithInterceptors`. `deps` is the
+`ctor` is the value passed to `new` or `newWithInterceptors`. Interceptors
+receive that whole `ctor` so cross-cutting wrappers such as OpenTelemetry
+can read fields the method View dropped. `deps` is only for `run`: the
 constructor value after `define`'s identity cast or apply function. `args`
 is always the method argument tuple. Call `next(...args)` to keep earlier
 interceptors; `run(...args)` is the raw `define` body.
