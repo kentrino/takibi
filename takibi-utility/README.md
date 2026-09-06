@@ -11,12 +11,13 @@ Fix a method surface first, declare the constructor argument, then define each
 method. `new` and `registerHooks` are typed only after every method is defined.
 
 Hooks are not part of `define`. Register a `Partial` of the method surface on
-the defined class or on an instance. Instance registration replaces the hook
-table completely.
+the defined class or on an instance. `registerHooks` merges: listed methods
+are updated, other hooks stay, and a new hook wraps the previous one through
+`next`. `replaceHooks` replaces the whole table.
 
 `ctor` is the value passed to `new`. `deps` is what `narrows` produced for
-that method. `args` is always the method argument tuple; replay with
-`run(...args)`.
+that method. `args` is always the method argument tuple. Call `next(...args)`
+to keep existing hooks; `run(...args)` is the raw `define` body.
 
 ```ts
 import { createClass } from "@takibi/takibi-utility";
@@ -38,16 +39,19 @@ const defined = createClass<Pair>()
   );
 
 defined.registerHooks({
-  greet: ({ ctor, deps, methodName, args, run }) => {
+  greet: ({ ctor, deps, methodName, args, next }) => {
     void ctor;
     void deps;
     void methodName;
-    return run(...args);
+    return next(...args);
   },
 });
 
 const instance = defined.new({ prefix: "hi" });
 instance.registerHooks({
+  greet: ({ args, next }) => next(...args),
+});
+instance.replaceHooks({
   count: ({ run, args }) => run(...args),
 });
 ```

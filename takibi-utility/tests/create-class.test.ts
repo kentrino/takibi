@@ -29,6 +29,7 @@ test("new is available only after every method is defined", () => {
 
   expectTypeOf(incomplete).not.toHaveProperty("new");
   expectTypeOf(incomplete).not.toHaveProperty("registerHooks");
+  expectTypeOf(incomplete).not.toHaveProperty("replaceHooks");
   expectTypeOf(defined.new).toBeCallableWith({ name: "takibi" });
   expectTypeOf(defined.new({ name: "takibi" })).toEqualTypeOf<ClassInstance<Foo, ConstructorArg>>();
 });
@@ -158,7 +159,46 @@ test("hook can skip run", async () => {
   expect(ran).toBe(0);
 });
 
-test("instance registerHooks replaces the hook table", () => {
+test("registerHooks merges and wraps the previous hook via next", () => {
+  const order: string[] = [];
+  const defined = createClass<Pair>()
+    .constructor<{ prefix: string }>({
+      runtimeCheck: true,
+    })
+    .define("greet", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
+    )
+    .define("count", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
+    );
+
+  defined.registerHooks({
+    greet: ({ args, next }) => {
+      order.push("class");
+      return `class ${next(...args)}`;
+    },
+    count: () => 99,
+  });
+
+  const instance = defined.new({ prefix: "hi" });
+  instance.registerHooks({
+    greet: ({ args, next }) => {
+      order.push("otel");
+      return `otel ${next(...args)}`;
+    },
+  });
+
+  expect(instance.greet("ada")).toBe("otel class hi ada");
+  expect(order).toEqual(["otel", "class"]);
+  expect(instance.count()).toBe(99);
+
+  instance.registerHooks({
+    greet: ({ args, run }) => `raw ${run(...args)}`,
+  });
+  expect(instance.greet("ada")).toBe("raw hi ada");
+});
+
+test("replaceHooks replaces the hook table", () => {
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
@@ -179,7 +219,7 @@ test("instance registerHooks replaces the hook table", () => {
   expect(instance.greet("ada")).toBe("class");
   expect(instance.count()).toBe(99);
 
-  instance.registerHooks({
+  instance.replaceHooks({
     greet: ({ run, args }) => `instance ${run(...args)}`,
   });
 
@@ -225,6 +265,7 @@ test("define rejects leftover or unknown method names", () => {
   );
   expectTypeOf(defined).toHaveProperty("new");
   expectTypeOf(defined).toHaveProperty("registerHooks");
+  expectTypeOf(defined).toHaveProperty("replaceHooks");
 
   // @ts-expect-error unknown method
   incomplete.define("missing", ({ narrows }) => narrows<{ prefix: string }>().run(() => undefined));
@@ -248,13 +289,16 @@ test("registerHooks accepts only a partial of the method surface", () => {
     );
 
   defined.registerHooks({
-    greet: ({ args, run }) => run(...args),
+    greet: ({ args, run }) => `class ${run(...args)}`,
   });
 
   const instance = defined.new({ prefix: "hi" });
   instance.registerHooks({
-    count: ({ args, run }) => run(...args),
+    count: ({ args, run }) => run(...args) + 10,
   });
+
+  expect(instance.greet("ada")).toBe("class hi ada");
+  expect(instance.count()).toBe(12);
 
   defined.registerHooks({
     // @ts-expect-error unknown method
@@ -262,6 +306,11 @@ test("registerHooks accepts only a partial of the method surface", () => {
   });
 
   instance.registerHooks({
+    // @ts-expect-error unknown method
+    missing: () => undefined,
+  });
+
+  instance.replaceHooks({
     // @ts-expect-error unknown method
     missing: () => undefined,
   });

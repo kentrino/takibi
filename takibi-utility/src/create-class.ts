@@ -14,15 +14,19 @@ export type HookContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
   readonly methodName: K;
   readonly args: Parameters<M>;
   readonly run: (...args: Parameters<M>) => ReturnType<M>;
+  readonly next: (...args: Parameters<M>) => ReturnType<M>;
 };
 
 export type HookMap<T extends MethodMap, TCtor> = {
   [K in keyof T]: (context: HookContext<TCtor, K, T[K]>) => ReturnType<T[K]>;
 };
 
-export type ClassInstance<T extends MethodMap, TCtor> = T & {
+export type HookRegistration<T extends MethodMap, TCtor> = {
   registerHooks: (hooks: Partial<HookMap<T, TCtor>>) => void;
+  replaceHooks: (hooks: Partial<HookMap<T, TCtor>>) => void;
 };
+
+export type ClassInstance<T extends MethodMap, TCtor> = T & HookRegistration<T, TCtor>;
 
 export type DefineSpec<TCtor, TDeps, M extends AnyMethod> = {
   readonly narrows: Narrows<TCtor, TDeps>;
@@ -56,6 +60,7 @@ type DefinedClass<T extends MethodMap, TCtor, TRuntimeCheck extends boolean> = {
   registerHooks: (
     hooks: Partial<HookMap<T, TCtor>>,
   ) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
+  replaceHooks: (hooks: Partial<HookMap<T, TCtor>>) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
 };
 
 export type ClassBuilder<
@@ -106,15 +111,55 @@ type RuntimeHook = (context: {
   methodName: PropertyKey;
   args: unknown[];
   run: (...args: unknown[]) => unknown;
+  next: (...args: unknown[]) => unknown;
 }) => unknown;
 
 type RuntimeHooks = Record<string, RuntimeHook>;
 
-function replaceHooks(target: RuntimeHooks, next: RuntimeHooks): void {
+function createHookTable(from?: RuntimeHooks): RuntimeHooks {
+  return Object.assign(Object.create(null), from) as RuntimeHooks;
+}
+
+function replayArgs(contextArgs: unknown[], override: unknown[]): unknown[] {
+  return override.length === 0 ? contextArgs : override;
+}
+
+function composeHook(outer: RuntimeHook, inner: RuntimeHook | undefined): RuntimeHook {
+  return (context) =>
+    outer({
+      ...context,
+      next: (...override: unknown[]) => {
+        const args = replayArgs(context.args, override);
+        if (inner === undefined) {
+          return context.run(...args);
+        }
+        return inner({
+          ctor: context.ctor,
+          deps: context.deps,
+          methodName: context.methodName,
+          args,
+          run: context.run,
+          next: (...innerOverride: unknown[]) => context.run(...replayArgs(args, innerOverride)),
+        });
+      },
+    });
+}
+
+function mergeHooks(target: RuntimeHooks, incoming: RuntimeHooks): void {
+  for (const key of Object.keys(incoming)) {
+    const hook = incoming[key];
+    if (typeof hook !== "function") {
+      continue;
+    }
+    target[key] = composeHook(hook, Object.hasOwn(target, key) ? target[key] : undefined);
+  }
+}
+
+function replaceHookTable(target: RuntimeHooks, incoming: RuntimeHooks): void {
   for (const key of Object.keys(target)) {
     delete target[key];
   }
-  Object.assign(target, next);
+  mergeHooks(target, incoming);
 }
 
 function createBuilder(
@@ -126,16 +171,21 @@ function createBuilder(
     define(name: string, spec: RuntimeDefineFactory) {
       const next = new Map(definitions);
       next.set(name, spec({ narrows: boundNarrows }));
-      return createBuilder(options, next, { ...hooks });
+      return createBuilder(options, next, createHookTable(hooks));
     },
     registerHooks(nextHooks: RuntimeHooks) {
-      replaceHooks(hooks, nextHooks);
+      mergeHooks(hooks, nextHooks);
+      return this;
+    },
+    replaceHooks(nextHooks: RuntimeHooks) {
+      replaceHookTable(hooks, nextHooks);
       return this;
     },
     new(ctor: unknown) {
-      const instanceHooks: RuntimeHooks = { ...hooks };
+      const instanceHooks = createHookTable(hooks);
       const instance = Object.create(null) as Record<string, (...args: unknown[]) => unknown> & {
         registerHooks: (nextHooks: RuntimeHooks) => void;
+        replaceHooks: (nextHooks: RuntimeHooks) => void;
       };
 
       for (const [name, spec] of definitions) {
@@ -151,22 +201,25 @@ function createBuilder(
 
         instance[name] = (...args: unknown[]) => {
           const run = (...methodArgs: unknown[]) => spec.run(deps, ...methodArgs);
-          const hook = instanceHooks[name];
-          if (typeof hook !== "function") {
+          if (!Object.hasOwn(instanceHooks, name)) {
             return run(...args);
           }
-          return hook({
+          return instanceHooks[name]({
             ctor,
             deps,
             methodName: name,
             args,
             run,
+            next: (...override: unknown[]) => run(...replayArgs(args, override)),
           });
         };
       }
 
       instance.registerHooks = (nextHooks) => {
-        replaceHooks(instanceHooks, nextHooks);
+        mergeHooks(instanceHooks, nextHooks);
+      };
+      instance.replaceHooks = (nextHooks) => {
+        replaceHookTable(instanceHooks, nextHooks);
       };
       return instance;
     },
