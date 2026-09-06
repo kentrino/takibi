@@ -8,7 +8,6 @@ export {
   type ClassInstance,
   type InterceptContext,
   type InterceptMap,
-  type InterceptRegistration,
   type MethodMap,
   type MethodRun,
 } from "./create-class";

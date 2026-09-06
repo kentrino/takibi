@@ -21,12 +21,7 @@ export type InterceptMap<T extends MethodMap, TCtor> = {
   [K in keyof T]: (context: InterceptContext<TCtor, K, T[K]>) => ReturnType<T[K]>;
 };
 
-export type InterceptRegistration<T extends MethodMap, TCtor> = {
-  $intercept: (interceptors: Partial<InterceptMap<T, TCtor>>) => void;
-  $replace: (interceptors: Partial<InterceptMap<T, TCtor>>) => void;
-};
-
-export type ClassInstance<T extends MethodMap, TCtor> = T & InterceptRegistration<T, TCtor>;
+export type ClassInstance<T extends MethodMap, _TCtor = unknown> = T;
 
 export type MethodRun<TDeps, M extends AnyMethod> = (
   deps: TDeps,
@@ -35,6 +30,11 @@ export type MethodRun<TDeps, M extends AnyMethod> = (
 
 type DefinedClass<T extends MethodMap, TCtor> = {
   new: (ctor: TCtor) => ClassInstance<T, TCtor>;
+  newWithInterceptors: (
+    ctor: TCtor,
+    interceptors: Partial<InterceptMap<T, TCtor>>,
+    ...more: Partial<InterceptMap<T, TCtor>>[]
+  ) => ClassInstance<T, TCtor>;
 };
 
 type UnionToIntersection<U> = (U extends U ? (arg: U) => void : never) extends (
@@ -156,9 +156,48 @@ function mergeInterceptors(target: RuntimeInterceptTable, incoming: object): voi
   }
 }
 
-function replaceInterceptTable(target: RuntimeInterceptTable, incoming: object): void {
-  target.clear();
-  mergeInterceptors(target, incoming);
+function createInstance(
+  options: ClassConstructorOptions,
+  definitions: ReadonlyMap<string, RuntimeSpec>,
+  ctor: unknown,
+  interceptorMaps: readonly object[],
+) {
+  const instanceInterceptors = createInterceptTable();
+  for (const incoming of interceptorMaps) {
+    mergeInterceptors(instanceInterceptors, incoming);
+  }
+
+  const instance = Object.create(null) as Record<string, (...args: unknown[]) => unknown>;
+
+  for (const [name, spec] of definitions) {
+    let deps: unknown;
+    try {
+      deps = spec.narrows.apply(ctor);
+    } catch (error) {
+      if (options.runtimeCheck) {
+        throw new TakibiClassError(`narrows failed for "${name}"`, { cause: error });
+      }
+      throw error;
+    }
+
+    instance[name] = (...args: unknown[]) => {
+      const run = (...methodArgs: unknown[]) => spec.run(deps, ...methodArgs);
+      const interceptor = instanceInterceptors.get(name);
+      if (interceptor === undefined) {
+        return run(...args);
+      }
+      return interceptor({
+        ctor,
+        deps,
+        methodName: name,
+        args,
+        run,
+        next: (...override: unknown[]) => run(...replayArgs(args, override)),
+      });
+    };
+  }
+
+  return instance;
 }
 
 function createBuilder(
@@ -178,47 +217,10 @@ function createBuilder(
       return createBuilder(options, next);
     },
     new(ctor: unknown) {
-      const instanceInterceptors = createInterceptTable();
-      const instance = Object.create(null) as Record<string, (...args: unknown[]) => unknown> & {
-        $intercept: (nextInterceptors: object) => void;
-        $replace: (nextInterceptors: object) => void;
-      };
-
-      for (const [name, spec] of definitions) {
-        let deps: unknown;
-        try {
-          deps = spec.narrows.apply(ctor);
-        } catch (error) {
-          if (options.runtimeCheck) {
-            throw new TakibiClassError(`narrows failed for "${name}"`, { cause: error });
-          }
-          throw error;
-        }
-
-        instance[name] = (...args: unknown[]) => {
-          const run = (...methodArgs: unknown[]) => spec.run(deps, ...methodArgs);
-          const interceptor = instanceInterceptors.get(name);
-          if (interceptor === undefined) {
-            return run(...args);
-          }
-          return interceptor({
-            ctor,
-            deps,
-            methodName: name,
-            args,
-            run,
-            next: (...override: unknown[]) => run(...replayArgs(args, override)),
-          });
-        };
-      }
-
-      instance.$intercept = (nextInterceptors) => {
-        mergeInterceptors(instanceInterceptors, nextInterceptors);
-      };
-      instance.$replace = (nextInterceptors) => {
-        replaceInterceptTable(instanceInterceptors, nextInterceptors);
-      };
-      return instance;
+      return createInstance(options, definitions, ctor, []);
+    },
+    newWithInterceptors(ctor: unknown, ...interceptorMaps: object[]) {
+      return createInstance(options, definitions, ctor, interceptorMaps);
     },
   };
 }
