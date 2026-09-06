@@ -14,6 +14,7 @@ export {
   type DefineSpec,
   type HookContext,
   type HookMap,
+  type HookRegistration,
   type MethodMap,
 } from "./create-class";
 export { narrows, type Narrows } from "./narrows";
