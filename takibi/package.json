@@ -72,6 +72,7 @@
     "@takibi/takibi-shared-types": "workspace:^",
     "@takibi/takibi-snapshot": "workspace:^",
     "@takibi/takibi-storage": "workspace:^",
+    "@takibi/takibi-worker-runtime": "workspace:^",
     "hono": "catalog:"
   },
   "devDependencies": {

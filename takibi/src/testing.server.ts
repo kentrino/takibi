@@ -1,18 +1,9 @@
-import { initializeMaintenanceLayout } from "@takibi/takibi-snapshot";
 import {
-  compileIndexRegistry,
-  createDurableObjectStorage,
-  reconcileCollectionIndexes,
-} from "@takibi/takibi-storage";
-import { seedCollections } from "./durable-object";
-import { createMigratingStorage } from "./migrations";
-import { createInProcessExecutor } from "./context/executors";
-import { applyStorageLogging } from "./context/runtime";
-import {
+  createInProcessRuntime,
   getTestingFork,
   type TestingExecutorFactory,
   type TestingForkOptions,
-} from "./context/testing-fork.server";
+} from "@takibi/takibi-worker-runtime/testing-bridge";
 import type { ActionScopeMap, ContextResolverInput, TakibiHandler } from "./context/types";
 import type { LoggingOptions } from "./logging";
 import { createSqliteDurableObjectStorage } from "./testing/sqlite-storage.server";
@@ -36,32 +27,23 @@ const createSqliteExecutor: TestingExecutorFactory = ({
   services,
 }) => {
   const storage = createSqliteDurableObjectStorage();
-  const indexRegistry = compileIndexRegistry(collections);
-  const rawStorage = createDurableObjectStorage(storage, indexRegistry);
-  initializeMaintenanceLayout(storage.sql);
-  const driver = applyStorageLogging(
-    createMigratingStorage(collections, rawStorage, logger),
+  const runtime = createInProcessRuntime({
+    collections,
+    registry,
     logger,
-  );
-  const ready = (async () => {
-    await reconcileCollectionIndexes({
-      sql: storage.sql,
-      collections,
-      storage: driver,
-      registry: indexRegistry,
-    });
-    await seedCollections(collections, driver, logger);
-  })();
-  const execute = createInProcessExecutor(collections, registry, logger, services, driver, ready);
+    services,
+    storage,
+  });
   let disposed = false;
   const dispose = () => {
     if (disposed) return;
     disposed = true;
-    storageFinalizer.unregister(execute);
+    storageFinalizer.unregister(runtime.execute);
+    runtime.dispose();
     storage.close();
   };
-  storageFinalizer.register(execute, storage, execute);
-  return { execute, dispose };
+  storageFinalizer.register(runtime.execute, storage, runtime.execute);
+  return { execute: runtime.execute, dispose };
 };
 
 export function withSqliteTestBackend<

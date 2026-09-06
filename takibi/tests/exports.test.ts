@@ -496,6 +496,14 @@ test("withSqliteTestBackend lives on the Node-only testing entry", () => {
   expectTypeOf(TakibiTesting.withSqliteTestBackend).toBeFunction();
   expectTypeOf(TakibiTesting).not.toHaveProperty("createMemoryStorage");
   expectTypeOf(TakibiTesting).not.toHaveProperty("createMemoryExecutor");
+  expectTypeOf(TakibiTesting).not.toHaveProperty("createInProcessRuntime");
+  expectTypeOf(Takibi).not.toHaveProperty("createInProcessRuntime");
+
+  const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")) as {
+    exports: Record<string, string>;
+  };
+  expect(pkg.exports).not.toHaveProperty("./testing-bridge");
+  expect(pkg.exports).not.toHaveProperty("./instrumentation-bridge");
 });
 
 test("the browser entry static import graph stays off Worker modules", () => {
