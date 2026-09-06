@@ -47,21 +47,26 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-function collectValueSpecifiers(source: string): string[] {
+function collectSpecifiers(source: string, valuesOnly: boolean): string[] {
   const body = stripComments(source);
   const specifiers: string[] = [];
-  for (const match of body.matchAll(/(?:^|\n)\s*(?:import|export)\s+[\s\S]*?["']([^"']+)["']/g)) {
+  for (const match of body.matchAll(
+    /(?:^|\n)\s*(?:import|export)(?:\s+type)?\s+[\s\S]*?["']([^"']+)["']/g,
+  )) {
     const statement = match[0] ?? "";
     const specifier = match[1];
     if (!specifier) continue;
-    if (/^\s*(?:import|export)\s+type\b/m.test(statement)) continue;
+    if (valuesOnly && /^\s*(?:import|export)\s+type\b/m.test(statement)) continue;
     specifiers.push(specifier);
+  }
+  for (const match of body.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g)) {
+    if (match[1]) specifiers.push(match[1]);
   }
   return specifiers;
 }
 
 function resolveTsModule(fromFile: string, specifier: string): string {
-  if (specifier.endsWith(".ts")) {
+  if (specifier.endsWith(".ts") || specifier.endsWith(".mts") || specifier.endsWith(".mjs")) {
     return normalize(join(dirname(fromFile), specifier));
   }
   const asFile = normalize(join(dirname(fromFile), `${specifier}.ts`));
@@ -69,27 +74,50 @@ function resolveTsModule(fromFile: string, specifier: string): string {
   return normalize(join(dirname(fromFile), specifier, "index.ts"));
 }
 
-function walkValueImports(entryFile: string): Set<string> {
+function workspacePackageDir(name: string): string {
+  return join(srcDir, "../..", name.replace("@takibi/", ""));
+}
+
+function resolveWorkspaceEntry(name: string, subpath = "."): string | undefined {
+  const manifestPath = join(workspacePackageDir(name), "package.json");
+  if (!existsSync(manifestPath)) return undefined;
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    exports?: Record<string, string>;
+  };
+  const entry = manifest.exports?.[subpath];
+  if (typeof entry !== "string") return undefined;
+  return normalize(join(workspacePackageDir(name), entry));
+}
+
+function walkImports(entryFile: string, valuesOnly: boolean): Set<string> {
   const visited = new Set<string>();
   const queue = [normalize(entryFile)];
   while (queue.length > 0) {
     const file = queue.pop();
     if (!file || visited.has(file) || !existsSync(file)) continue;
     visited.add(file);
-    const specifiers = collectValueSpecifiers(readFileSync(file, "utf8"));
+    const specifiers = collectSpecifiers(readFileSync(file, "utf8"), valuesOnly);
     for (const specifier of specifiers) {
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) {
         visited.add(specifier);
         continue;
       }
-      if (!specifier.startsWith(".")) {
-        visited.add(specifier);
+      if (specifier.startsWith(".")) {
+        queue.push(resolveTsModule(file, specifier));
         continue;
       }
-      queue.push(resolveTsModule(file, specifier));
+      visited.add(specifier);
+      if (specifier.startsWith("@takibi/")) {
+        const entry = resolveWorkspaceEntry(specifier);
+        if (entry) queue.push(entry);
+      }
     }
   }
   return visited;
+}
+
+function walkValueImports(entryFile: string): Set<string> {
+  return walkImports(entryFile, true);
 }
 
 test("public root exports collection/action entry points", () => {
@@ -471,12 +499,40 @@ test("withSqliteTestBackend lives on the Node-only testing entry", () => {
 });
 
 test("the browser entry static import graph stays off Worker modules", () => {
-  const files = walkValueImports(join(srcDir, "client-entry.ts"));
+  const files = walkImports(join(srcDir, "client-entry.ts"), false);
   for (const name of forbiddenClientModules) {
     expect(files.has(normalize(join(srcDir, name))), name).toBe(false);
   }
   expect(files.has("node:async_hooks")).toBe(false);
   expect(files.has("cloudflare:workers")).toBe(false);
+  expect(files.has("hono")).toBe(false);
+  expect([...files].filter((file) => file.startsWith("node:"))).toEqual([]);
+  expect([...files].filter((file) => file.startsWith("cloudflare:"))).toEqual([]);
+  expect(files.has("@takibi/takibi-client")).toBe(true);
+  expect(
+    [...files].some((file) =>
+      /(?:^|\/)(?:storage|logging|instrumentation|durable-object)/i.test(file),
+    ),
+  ).toBe(false);
+});
+
+test("published client facade declarations stay off Worker and Node types", () => {
+  const dtsPath = join(srcDir, "../dist/client.d.mts");
+  const jsPath = join(srcDir, "../dist/client.mjs");
+  if (!existsSync(dtsPath) || !existsSync(jsPath)) return;
+
+  const dts = readFileSync(dtsPath, "utf8");
+  const js = readFileSync(jsPath, "utf8");
+  if (!js.includes("@takibi/takibi-client")) return;
+  expect(js).toMatch(/@takibi\/takibi-client/);
+  expect(dts).not.toContain("hono");
+  expect(js).not.toContain("hono");
+  expect(dts).not.toContain("node:");
+  expect(js).not.toContain("node:");
+  expect(dts).not.toContain("cloudflare:");
+  expect(js).not.toContain("cloudflare:");
+  expect(dts).not.toContain("DurableObject");
+  expect(js).not.toContain("DurableObject");
 });
 
 test("the Worker root static import graph stays off Node compatibility modules", () => {

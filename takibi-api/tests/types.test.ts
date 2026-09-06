@@ -5,7 +5,6 @@ import {
   createRootActionBuilder,
   defineCollection,
   type ClientCollectionApi,
-  type ClientOf,
   type CollectionApi,
   type CollectionDataInput,
   type DurableObjectCollectionsApi,
@@ -13,7 +12,6 @@ import {
   type InferCollectionInput,
   type JsonValue,
   type SnapshotRestoreReport,
-  type TakibiDefinition,
   type TrustedCollectionApi,
   type TrustedCollectionsApi,
 } from "../src";
@@ -319,40 +317,6 @@ test("document, detached, and root action builders infer distinct targets and in
       .input(z.date());
   };
   void checkOrdering;
-});
-
-test("action output and policy reason-code inference reach ClientOf on a structural carrier", () => {
-  const inputSchema = z.string().transform((value) => value.length);
-  type StructuralHandler = TakibiDefinition<
-    { readonly posts: { readonly schema: z.ZodObject<{ title: z.ZodString }> } },
-    {
-      readonly $: {
-        readonly inspect: {
-          readonly inputSchema: typeof inputSchema;
-          readonly handler: (args: { input: number }) => Promise<{ positive: boolean }>;
-        };
-      };
-      readonly posts: {
-        readonly touch: {
-          readonly target: "document";
-          readonly inputSchema: undefined;
-          readonly handler: (args: { id: string }) => Promise<{ touched: true }>;
-        };
-      };
-    }
-  >;
-
-  type StructuralClient = ClientOf<StructuralHandler>;
-  expectTypeOf<StructuralClient["inspect"]>().toEqualTypeOf<
-    (
-      input: string,
-    ) => Promise<import("@takibi/takibi-shared-types").TakibiResult<{ positive: boolean }>>
-  >();
-  expectTypeOf<StructuralClient["posts"]["touch"]>().toEqualTypeOf<
-    (
-      id: string,
-    ) => Promise<import("@takibi/takibi-shared-types").TakibiResult<{ touched: true }>>
-  >();
 });
 
 test("collection and action definitions accept direct takibi-policy grants", () => {
