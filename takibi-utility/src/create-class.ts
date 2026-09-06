@@ -28,36 +28,51 @@ export type InterceptRegistration<T extends MethodMap, TCtor> = {
 
 export type ClassInstance<T extends MethodMap, TCtor> = T & InterceptRegistration<T, TCtor>;
 
-export type DefineSpec<TCtor, TDeps, M extends AnyMethod> = {
-  readonly narrows: Narrows<TCtor, TDeps>;
-  readonly run: (deps: TDeps, ...args: Parameters<M>) => ReturnType<M>;
-};
-
-export type DefineNarrowed<TCtor, TDeps, M extends AnyMethod> = {
-  run(run: (deps: TDeps, ...args: Parameters<M>) => ReturnType<M>): DefineSpec<TCtor, TDeps, M>;
-};
-
-export type BoundNarrows<TCtor, M extends AnyMethod> = {
-  <TDeps>(apply: (ctor: TCtor) => TDeps): DefineNarrowed<TCtor, TDeps, M>;
-  <TDeps>(): DefineNarrowed<TCtor, TDeps, M>;
-};
-
-export type DefineHelpers<TCtor, M extends AnyMethod> = {
-  readonly narrows: BoundNarrows<TCtor, M>;
-};
-
-export type DefinedMethodSpec<TCtor, M extends AnyMethod> = {
-  readonly narrows: Narrows<TCtor, unknown>;
-  readonly run: (deps: never, ...args: Parameters<M>) => ReturnType<M>;
-};
-
-export type DefineFactory<TCtor, M extends AnyMethod> = (
-  helpers: DefineHelpers<TCtor, M>,
-) => DefinedMethodSpec<TCtor, M>;
+export type MethodRun<TDeps, M extends AnyMethod> = (
+  deps: TDeps,
+  ...args: Parameters<M>
+) => ReturnType<M>;
 
 type DefinedClass<T extends MethodMap, TCtor> = {
   new: (ctor: TCtor) => ClassInstance<T, TCtor>;
 };
+
+type UnionToIntersection<U> = (U extends U ? (arg: U) => void : never) extends (
+  arg: infer I,
+) => void
+  ? I
+  : never;
+
+type DefineForKey<
+  T extends MethodMap,
+  TCtor,
+  TRemaining extends keyof T,
+  TRuntimeCheck extends boolean,
+  K extends TRemaining,
+> = {
+  <TDeps = TCtor>(
+    name: K,
+    run: MethodRun<TDeps, T[K]>,
+  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
+  <TDeps>(
+    name: K,
+    apply: (ctor: TCtor) => TDeps,
+    run: MethodRun<TDeps, T[K]>,
+  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
+};
+
+type DefineFns<
+  T extends MethodMap,
+  TCtor,
+  TRemaining extends keyof T,
+  TRuntimeCheck extends boolean,
+> = [TRemaining] extends [never]
+  ? never
+  : UnionToIntersection<
+      {
+        [K in TRemaining]: DefineForKey<T, TCtor, TRemaining, TRuntimeCheck, K>;
+      }[TRemaining]
+    >;
 
 export type ClassBuilder<
   T extends MethodMap,
@@ -65,10 +80,7 @@ export type ClassBuilder<
   TRemaining extends keyof T,
   TRuntimeCheck extends boolean,
 > = {
-  define<K extends TRemaining>(
-    name: K,
-    spec: DefineFactory<TCtor, T[K]>,
-  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
+  define: DefineFns<T, TCtor, TRemaining, TRuntimeCheck>;
 } & ([TRemaining] extends [never] ? DefinedClass<T, TCtor> : {});
 
 export type ClassFactory<T extends MethodMap> = {
@@ -87,19 +99,6 @@ type RuntimeSpec = {
   readonly narrows: Narrows<unknown, unknown>;
   readonly run: (deps: unknown, ...args: unknown[]) => unknown;
 };
-
-type RuntimeDefineFactory = (helpers: DefineHelpers<unknown, AnyMethod>) => RuntimeSpec;
-
-function boundNarrows<TCtor, TDeps, M extends AnyMethod>(
-  apply?: (ctor: TCtor) => TDeps,
-): DefineNarrowed<TCtor, TDeps, M> {
-  const narrowed: Narrows<TCtor, TDeps> = {
-    apply: apply ?? ((ctor) => ctor as unknown as TDeps),
-  };
-  return {
-    run: (run) => ({ narrows: narrowed, run }),
-  };
-}
 
 type RuntimeInterceptor = (context: {
   ctor: unknown;
@@ -167,9 +166,15 @@ function createBuilder(
   definitions: ReadonlyMap<string, RuntimeSpec>,
 ) {
   return {
-    define(name: string, spec: RuntimeDefineFactory) {
+    define(
+      name: string,
+      applyOrRun: (value: unknown, ...args: unknown[]) => unknown,
+      maybeRun?: (deps: unknown, ...args: unknown[]) => unknown,
+    ) {
       const next = new Map(definitions);
-      next.set(name, spec({ narrows: boundNarrows }));
+      const apply = maybeRun === undefined ? (ctor: unknown) => ctor : applyOrRun;
+      const run = maybeRun ?? applyOrRun;
+      next.set(name, { narrows: { apply }, run });
       return createBuilder(options, next);
     },
     new(ctor: unknown) {
