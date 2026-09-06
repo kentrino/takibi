@@ -85,15 +85,15 @@ const defined = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: false,
   })
-  .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
-  .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
+  .define<Ctor>("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define<Ctor>("count", (deps) => deps.prefix.length);
 
 const definedWithCheck = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: true,
   })
-  .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
-  .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
+  .define<Ctor>("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define<Ctor>("count", (deps) => deps.prefix.length);
 
 const passthroughInterceptors = {
   greet: ({ args, run }: { args: [name: string]; run: (name: string) => string }) => run(...args),
@@ -104,15 +104,14 @@ const definedWithInterceptors = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: false,
   })
-  .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
-  .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
-definedWithInterceptors.$intercept(passthroughInterceptors);
-
+  .define<Ctor>("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define<Ctor>("count", (deps) => deps.prefix.length);
 const nativeInstance = new NativePair(ctor);
 const createClassInstance = defined.new(ctor);
 const interceptedNativeInstance = new InterceptedNativePair(ctor);
 interceptedNativeInstance.$intercept(passthroughInterceptors);
 const interceptedCreateClassInstance = definedWithInterceptors.new(ctor);
+interceptedCreateClassInstance.$intercept(passthroughInterceptors);
 
 let sink = 0;
 
