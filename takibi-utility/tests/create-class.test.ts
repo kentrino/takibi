@@ -59,9 +59,11 @@ test("newWithInterceptors wraps matching methods", async () => {
   const instance = defined.newWithInterceptors(
     { name: "takibi", unused: 1 },
     {
-      bar: ({ ctor, deps, methodName, args, run }) => {
+      bar: (context) => {
+        const { ctor, methodName, args, run } = context;
+        expectTypeOf(ctor).toEqualTypeOf<ConstructorArg>();
+        expectTypeOf(context).not.toHaveProperty("deps");
         expect(ctor).toEqual({ name: "takibi", unused: 1 });
-        expect(deps).toEqual({ name: "takibi" });
         expect(methodName).toBe("bar");
         expect(args).toEqual([]);
         intercepted += 1;
@@ -104,6 +106,17 @@ test("narrows pick drops unused constructor fields for run", () => {
     );
 
   expect(defined.new({ a: "x", b: 1, c: true }).use()).toBe("x:1");
+
+  defined.newWithInterceptors(
+    { a: "x", b: 1, c: true },
+    {
+      use: ({ ctor }) => {
+        expectTypeOf(ctor).toEqualTypeOf<Deps>();
+        expect(ctor.c).toBe(true);
+        return `${ctor.a}:${ctor.b}`;
+      },
+    },
+  );
 });
 
 test("method arguments reach run and a single-argument hook", () => {
@@ -121,6 +134,7 @@ test("method arguments reach run and a single-argument hook", () => {
     { prefix: "hi" },
     {
       greet: ({ ctor, methodName, args, run }) => {
+        expectTypeOf(ctor).toEqualTypeOf<{ prefix: string }>();
         expect(ctor).toEqual({ prefix: "hi" });
         expect(methodName).toBe("greet");
         expect(args).toEqual(["ada"]);
