@@ -14,6 +14,10 @@ Hooks are not part of `define`. Register a `Partial` of the method surface on
 the defined class or on an instance. Instance registration replaces the hook
 table completely.
 
+`ctor` is the value passed to `new`. `deps` is what `narrows` produced for
+that method. `args` is always the method argument tuple; replay with
+`run(...args)`.
+
 ```ts
 import { createClass } from "@takibi/takibi-utility";
 
@@ -27,21 +31,24 @@ const defined = createClass<Pair>()
     runtimeCheck: true,
   })
   .define("greet", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+    narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
   )
-  .define("count", ({ narrows }) => narrows<{ prefix: string }>().run((arg) => arg.prefix.length));
+  .define("count", ({ narrows }) =>
+    narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
+  );
 
 defined.registerHooks({
-  greet: ({ constructorArg, methodName, arg, run }) => {
-    void constructorArg;
+  greet: ({ ctor, deps, methodName, args, run }) => {
+    void ctor;
+    void deps;
     void methodName;
-    return run(arg);
+    return run(...args);
   },
 });
 
 const instance = defined.new({ prefix: "hi" });
 instance.registerHooks({
-  count: ({ run }) => run(),
+  count: ({ run, args }) => run(...args),
 });
 ```
 
@@ -51,11 +58,9 @@ Compare construction and method calls with a native class:
 vp run bench:create-class
 ```
 
-`define` receives a `narrows` already bound to the constructor argument, so
-only the narrowed type is written. `narrows<To>()` is an identity cast;
-`narrows<To>(fn)` transforms at construction.
+`define` receives a `narrows` already bound to `ctor`, so only the deps type
+is written. `narrows<To>()` is an identity cast; `narrows<To>(fn)` transforms
+at construction.
 
-`narrows` always runs at construction so `run` receives the narrowed argument.
-`runtimeCheck` wraps a failing `narrows` with the method name. A hook receives
-the original constructor argument, the method name, the method argument, and a
-`run` already bound to the narrowed argument.
+`narrows` always runs at construction so `run` receives `deps`.
+`runtimeCheck` wraps a failing `narrows` with the method name.

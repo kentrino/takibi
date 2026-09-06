@@ -10,6 +10,10 @@ type Pair = {
   count: () => number;
 };
 
+type Adder = {
+  add: (left: number, right: number) => number;
+};
+
 type ConstructorArg = {
   name: string;
   unused?: number;
@@ -20,7 +24,7 @@ test("new is available only after every method is defined", () => {
     runtimeCheck: true,
   });
   const defined = incomplete.define("bar", ({ narrows }) =>
-    narrows<{ name: string }>((arg) => ({ name: arg.name })).run(async () => {}),
+    narrows<{ name: string }>((ctor) => ({ name: ctor.name })).run(async () => {}),
   );
 
   expectTypeOf(incomplete).not.toHaveProperty("new");
@@ -36,22 +40,23 @@ test("class registerHooks wraps matching methods", async () => {
       runtimeCheck: true,
     })
     .define("bar", ({ narrows }) =>
-      narrows<{ name: string }>((arg) => {
-        expectTypeOf(arg).toEqualTypeOf<ConstructorArg>();
-        return { name: arg.name };
-      }).run(async (arg) => {
-        expectTypeOf(arg).toEqualTypeOf<{ name: string }>();
-        expect(arg).toEqual({ name: "takibi" });
+      narrows<{ name: string }>((ctor) => {
+        expectTypeOf(ctor).toEqualTypeOf<ConstructorArg>();
+        return { name: ctor.name };
+      }).run(async (deps) => {
+        expectTypeOf(deps).toEqualTypeOf<{ name: string }>();
+        expect(deps).toEqual({ name: "takibi" });
       }),
     );
 
   defined.registerHooks({
-    bar: ({ constructorArg, methodName, arg, run }) => {
-      expect(constructorArg).toEqual({ name: "takibi", unused: 1 });
+    bar: ({ ctor, deps, methodName, args, run }) => {
+      expect(ctor).toEqual({ name: "takibi", unused: 1 });
+      expect(deps).toEqual({ name: "takibi" });
       expect(methodName).toBe("bar");
-      expect(arg).toBeUndefined();
+      expect(args).toEqual([]);
       hooked += 1;
-      return run();
+      return run(...args);
     },
   });
 
@@ -79,11 +84,11 @@ test("narrows pick drops unused constructor fields for run", () => {
       narrows(({ a, b, c }) => {
         void c;
         return { a, b };
-      }).run((arg) => {
-        expectTypeOf(arg).toEqualTypeOf<{ a: string; b: number }>();
-        expectTypeOf(arg).not.toHaveProperty("c");
-        expect(arg).toEqual({ a: "x", b: 1 });
-        return `${arg.a}:${arg.b}`;
+      }).run((deps) => {
+        expectTypeOf(deps).toEqualTypeOf<{ a: string; b: number }>();
+        expectTypeOf(deps).not.toHaveProperty("c");
+        expect(deps).toEqual({ a: "x", b: 1 });
+        return `${deps.a}:${deps.b}`;
       }),
     );
 
@@ -96,18 +101,18 @@ test("method arguments reach run and a single-argument hook", () => {
       runtimeCheck: true,
     })
     .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
     )
     .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
   defined.registerHooks({
-    greet: ({ constructorArg, methodName, arg, run }) => {
-      expect(constructorArg).toEqual({ prefix: "hi" });
+    greet: ({ ctor, methodName, args, run }) => {
+      expect(ctor).toEqual({ prefix: "hi" });
       expect(methodName).toBe("greet");
-      expect(arg).toBe("ada");
-      return run(arg);
+      expect(args).toEqual(["ada"]);
+      return run(...args);
     },
   });
 
@@ -115,6 +120,22 @@ test("method arguments reach run and a single-argument hook", () => {
   expect(instance.greet("ada")).toBe("hi ada");
   expect(instance.count()).toBe(2);
   expectTypeOf(instance.greet).toEqualTypeOf<(name: string) => string>();
+});
+
+test("hook replays multi-argument methods with args", () => {
+  const defined = createClass<Adder>()
+    .constructor<Record<string, never>>({
+      runtimeCheck: true,
+    })
+    .define("add", ({ narrows }) =>
+      narrows<Record<string, never>>().run((_deps, left, right) => left + right),
+    );
+
+  defined.registerHooks({
+    add: ({ args, run }) => run(...args),
+  });
+
+  expect(defined.new({}).add(1, 2)).toBe(3);
 });
 
 test("hook can skip run", async () => {
@@ -143,10 +164,10 @@ test("instance registerHooks replaces the hook table", () => {
       runtimeCheck: true,
     })
     .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
     )
     .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
   defined.registerHooks({
@@ -159,7 +180,7 @@ test("instance registerHooks replaces the hook table", () => {
   expect(instance.count()).toBe(99);
 
   instance.registerHooks({
-    greet: ({ run, arg }) => `instance ${run(arg)}`,
+    greet: ({ run, args }) => `instance ${run(...args)}`,
   });
 
   expect(instance.greet("ada")).toBe("instance hi ada");
@@ -172,13 +193,13 @@ test("runtimeCheck wraps a failing narrows with the method name", () => {
       runtimeCheck: true,
     })
     .define("bar", ({ narrows }) =>
-      narrows<{ name: string }>((arg) => {
-        if (typeof arg.name !== "string") {
+      narrows<{ name: string }>((ctor) => {
+        if (typeof ctor.name !== "string") {
           throw new Error("name is required");
         }
-        return { name: arg.name };
-      }).run(async (arg) => {
-        void arg.name;
+        return { name: ctor.name };
+      }).run(async (deps) => {
+        void deps.name;
       }),
     );
 
@@ -195,12 +216,12 @@ test("define rejects leftover or unknown method names", () => {
     runtimeCheck: false,
   });
   const greet = incomplete.define("greet", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+    narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
   );
   expectTypeOf(greet).not.toHaveProperty("new");
 
   const defined = greet.define("count", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+    narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
   );
   expectTypeOf(defined).toHaveProperty("new");
   expectTypeOf(defined).toHaveProperty("registerHooks");
@@ -210,7 +231,7 @@ test("define rejects leftover or unknown method names", () => {
 
   // @ts-expect-error already defined
   greet.define("greet", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+    narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
   );
 });
 
@@ -220,19 +241,19 @@ test("registerHooks accepts only a partial of the method surface", () => {
       runtimeCheck: true,
     })
     .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
     )
     .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
   defined.registerHooks({
-    greet: ({ arg, run }) => run(arg),
+    greet: ({ args, run }) => run(...args),
   });
 
   const instance = defined.new({ prefix: "hi" });
   instance.registerHooks({
-    count: ({ run }) => run(),
+    count: ({ args, run }) => run(...args),
   });
 
   defined.registerHooks({
