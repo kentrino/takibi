@@ -41,6 +41,7 @@
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
+    "bench:create-class": "vp test bench benchmarks/create-class.bench.ts --no-file-parallelism --maxWorkers 1",
     "check": "vp check"
   },
   "devDependencies": {
