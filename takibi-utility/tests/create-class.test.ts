@@ -28,13 +28,13 @@ test("new is available only after every method is defined", () => {
   );
 
   expectTypeOf(incomplete).not.toHaveProperty("new");
-  expectTypeOf(incomplete).not.toHaveProperty("registerHooks");
-  expectTypeOf(incomplete).not.toHaveProperty("replaceHooks");
+  expectTypeOf(incomplete).not.toHaveProperty("$intercept");
+  expectTypeOf(incomplete).not.toHaveProperty("$replace");
   expectTypeOf(defined.new).toBeCallableWith({ name: "takibi" });
   expectTypeOf(defined.new({ name: "takibi" })).toEqualTypeOf<ClassInstance<Foo, ConstructorArg>>();
 });
 
-test("class registerHooks wraps matching methods", async () => {
+test("class $intercept wraps matching methods", async () => {
   let hooked = 0;
   const defined = createClass<Foo>()
     .constructor<ConstructorArg>({
@@ -50,7 +50,7 @@ test("class registerHooks wraps matching methods", async () => {
       }),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     bar: ({ ctor, deps, methodName, args, run }) => {
       expect(ctor).toEqual({ name: "takibi", unused: 1 });
       expect(deps).toEqual({ name: "takibi" });
@@ -108,7 +108,7 @@ test("method arguments reach run and a single-argument hook", () => {
       narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     greet: ({ ctor, methodName, args, run }) => {
       expect(ctor).toEqual({ prefix: "hi" });
       expect(methodName).toBe("greet");
@@ -132,7 +132,7 @@ test("hook replays multi-argument methods with args", () => {
       narrows<Record<string, never>>().run((_deps, left, right) => left + right),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     add: ({ args, run }) => run(...args),
   });
 
@@ -151,7 +151,7 @@ test("hook can skip run", async () => {
       }),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     bar: async () => {},
   });
 
@@ -159,7 +159,7 @@ test("hook can skip run", async () => {
   expect(ran).toBe(0);
 });
 
-test("registerHooks merges and wraps the previous hook via next", () => {
+test("$intercept merges and wraps the previous hook via next", () => {
   const order: string[] = [];
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
@@ -172,7 +172,7 @@ test("registerHooks merges and wraps the previous hook via next", () => {
       narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     greet: ({ args, next }) => {
       order.push("class");
       return `class ${next(...args)}`;
@@ -181,7 +181,7 @@ test("registerHooks merges and wraps the previous hook via next", () => {
   });
 
   const instance = defined.new({ prefix: "hi" });
-  instance.registerHooks({
+  instance.$intercept({
     greet: ({ args, next }) => {
       order.push("otel");
       return `otel ${next(...args)}`;
@@ -192,13 +192,13 @@ test("registerHooks merges and wraps the previous hook via next", () => {
   expect(order).toEqual(["otel", "class"]);
   expect(instance.count()).toBe(99);
 
-  instance.registerHooks({
+  instance.$intercept({
     greet: ({ args, run }) => `raw ${run(...args)}`,
   });
   expect(instance.greet("ada")).toBe("raw hi ada");
 });
 
-test("replaceHooks replaces the hook table", () => {
+test("$replace replaces the hook table", () => {
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
@@ -210,7 +210,7 @@ test("replaceHooks replaces the hook table", () => {
       narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     greet: () => "class",
     count: () => 99,
   });
@@ -219,7 +219,7 @@ test("replaceHooks replaces the hook table", () => {
   expect(instance.greet("ada")).toBe("class");
   expect(instance.count()).toBe(99);
 
-  instance.replaceHooks({
+  instance.$replace({
     greet: ({ run, args }) => `instance ${run(...args)}`,
   });
 
@@ -264,8 +264,8 @@ test("define rejects leftover or unknown method names", () => {
     narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
   );
   expectTypeOf(defined).toHaveProperty("new");
-  expectTypeOf(defined).toHaveProperty("registerHooks");
-  expectTypeOf(defined).toHaveProperty("replaceHooks");
+  expectTypeOf(defined).toHaveProperty("$intercept");
+  expectTypeOf(defined).toHaveProperty("$replace");
 
   // @ts-expect-error unknown method
   incomplete.define("missing", ({ narrows }) => narrows<{ prefix: string }>().run(() => undefined));
@@ -276,7 +276,7 @@ test("define rejects leftover or unknown method names", () => {
   );
 });
 
-test("registerHooks accepts only a partial of the method surface", () => {
+test("$intercept accepts only a partial of the method surface", () => {
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
@@ -288,29 +288,29 @@ test("registerHooks accepts only a partial of the method surface", () => {
       narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
     );
 
-  defined.registerHooks({
+  defined.$intercept({
     greet: ({ args, run }) => `class ${run(...args)}`,
   });
 
   const instance = defined.new({ prefix: "hi" });
-  instance.registerHooks({
+  instance.$intercept({
     count: ({ args, run }) => run(...args) + 10,
   });
 
   expect(instance.greet("ada")).toBe("class hi ada");
   expect(instance.count()).toBe(12);
 
-  defined.registerHooks({
+  defined.$intercept({
     // @ts-expect-error unknown method
     missing: () => undefined,
   });
 
-  instance.registerHooks({
+  instance.$intercept({
     // @ts-expect-error unknown method
     missing: () => undefined,
   });
 
-  instance.replaceHooks({
+  instance.$replace({
     // @ts-expect-error unknown method
     missing: () => undefined,
   });

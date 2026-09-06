@@ -12,9 +12,9 @@ export {
   type DefineNarrowed,
   type DefinedMethodSpec,
   type DefineSpec,
-  type HookContext,
-  type HookMap,
-  type HookRegistration,
+  type InterceptContext,
+  type InterceptMap,
+  type InterceptRegistration,
   type MethodMap,
 } from "./create-class";
 export { narrows, type Narrows } from "./narrows";

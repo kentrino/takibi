@@ -24,7 +24,7 @@ class NativePair {
   }
 }
 
-type PairHooks = {
+type PairInterceptors = {
   greet: (context: {
     ctor: Ctor;
     deps: unknown;
@@ -41,22 +41,22 @@ type PairHooks = {
   }) => number;
 };
 
-class HookedNativePair {
-  #hooks: Partial<PairHooks> = {};
+class InterceptedNativePair {
+  #interceptors: Partial<PairInterceptors> = {};
 
   constructor(readonly ctor: Ctor) {}
 
-  registerHooks(hooks: Partial<PairHooks>): void {
-    this.#hooks = hooks;
+  $intercept(interceptors: Partial<PairInterceptors>): void {
+    this.#interceptors = interceptors;
   }
 
   greet(name: string): string {
     const run = (value: string) => `${this.ctor.prefix} ${value}`;
-    const hook = this.#hooks.greet;
-    if (typeof hook !== "function") {
+    const interceptor = this.#interceptors.greet;
+    if (typeof interceptor !== "function") {
       return run(name);
     }
-    return hook({
+    return interceptor({
       ctor: this.ctor,
       deps: this.ctor,
       methodName: "greet",
@@ -67,11 +67,11 @@ class HookedNativePair {
 
   count(): number {
     const run = () => this.ctor.prefix.length;
-    const hook = this.#hooks.count;
-    if (typeof hook !== "function") {
+    const interceptor = this.#interceptors.count;
+    if (typeof interceptor !== "function") {
       return run();
     }
-    return hook({
+    return interceptor({
       ctor: this.ctor,
       deps: this.ctor,
       methodName: "count",
@@ -95,24 +95,24 @@ const definedWithCheck = createClass<Pair>()
   .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
   .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
 
-const passthroughHooks = {
+const passthroughInterceptors = {
   greet: ({ args, run }: { args: [name: string]; run: (name: string) => string }) => run(...args),
   count: ({ args, run }: { args: []; run: () => number }) => run(...args),
 };
 
-const definedWithHooks = createClass<Pair>()
+const definedWithInterceptors = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: false,
   })
   .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
   .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
-definedWithHooks.registerHooks(passthroughHooks);
+definedWithInterceptors.$intercept(passthroughInterceptors);
 
 const nativeInstance = new NativePair(ctor);
 const createClassInstance = defined.new(ctor);
-const hookedNativeInstance = new HookedNativePair(ctor);
-hookedNativeInstance.registerHooks(passthroughHooks);
-const hookedCreateClassInstance = definedWithHooks.new(ctor);
+const interceptedNativeInstance = new InterceptedNativePair(ctor);
+interceptedNativeInstance.$intercept(passthroughInterceptors);
+const interceptedCreateClassInstance = definedWithInterceptors.new(ctor);
 
 let sink = 0;
 
@@ -139,7 +139,7 @@ describe("construct", () => {
   });
 });
 
-describe("call without hooks", () => {
+describe("call without interceptors", () => {
   bench("native class", () => {
     callPair(nativeInstance);
   });
@@ -149,12 +149,12 @@ describe("call without hooks", () => {
   });
 });
 
-describe("call with passthrough hooks", () => {
+describe("call with passthrough interceptors", () => {
   bench("native class (manual wrap)", () => {
-    callPair(hookedNativeInstance);
+    callPair(interceptedNativeInstance);
   });
 
-  bench("createClass registerHooks", () => {
-    callPair(hookedCreateClassInstance);
+  bench("createClass $intercept", () => {
+    callPair(interceptedCreateClassInstance);
   });
 });
