@@ -6,35 +6,37 @@ type Pair = {
   count: () => number;
 };
 
-type ConstructorArg = {
+type Ctor = {
   prefix: string;
 };
 
-const arg: ConstructorArg = { prefix: "hi" };
+const ctor: Ctor = { prefix: "hi" };
 
 class NativePair {
-  constructor(readonly arg: ConstructorArg) {}
+  constructor(readonly ctor: Ctor) {}
 
   greet(name: string): string {
-    return `${this.arg.prefix} ${name}`;
+    return `${this.ctor.prefix} ${name}`;
   }
 
   count(): number {
-    return this.arg.prefix.length;
+    return this.ctor.prefix.length;
   }
 }
 
 type PairHooks = {
   greet: (context: {
-    constructorArg: ConstructorArg;
+    ctor: Ctor;
+    deps: unknown;
     methodName: "greet";
-    arg: string;
+    args: [name: string];
     run: (name: string) => string;
   }) => string;
   count: (context: {
-    constructorArg: ConstructorArg;
+    ctor: Ctor;
+    deps: unknown;
     methodName: "count";
-    arg: undefined;
+    args: [];
     run: () => number;
   }) => number;
 };
@@ -42,79 +44,75 @@ type PairHooks = {
 class HookedNativePair {
   #hooks: Partial<PairHooks> = {};
 
-  constructor(readonly arg: ConstructorArg) {}
+  constructor(readonly ctor: Ctor) {}
 
   registerHooks(hooks: Partial<PairHooks>): void {
     this.#hooks = hooks;
   }
 
   greet(name: string): string {
-    const run = (value: string) => `${this.arg.prefix} ${value}`;
+    const run = (value: string) => `${this.ctor.prefix} ${value}`;
     const hook = this.#hooks.greet;
     if (typeof hook !== "function") {
       return run(name);
     }
     return hook({
-      constructorArg: this.arg,
+      ctor: this.ctor,
+      deps: this.ctor,
       methodName: "greet",
-      arg: name,
+      args: [name],
       run,
     });
   }
 
   count(): number {
-    const run = () => this.arg.prefix.length;
+    const run = () => this.ctor.prefix.length;
     const hook = this.#hooks.count;
     if (typeof hook !== "function") {
       return run();
     }
     return hook({
-      constructorArg: this.arg,
+      ctor: this.ctor,
+      deps: this.ctor,
       methodName: "count",
-      arg: undefined,
+      args: [],
       run,
     });
   }
 }
 
 const defined = createClass<Pair>()
-  .constructor<ConstructorArg>({
+  .constructor<Ctor>({
     runtimeCheck: false,
   })
-  .define("greet", ({ narrows }) =>
-    narrows<ConstructorArg>().run((value, name) => `${value.prefix} ${name}`),
-  )
-  .define("count", ({ narrows }) => narrows<ConstructorArg>().run((value) => value.prefix.length));
+  .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
+  .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
 
 const definedWithCheck = createClass<Pair>()
-  .constructor<ConstructorArg>({
+  .constructor<Ctor>({
     runtimeCheck: true,
   })
-  .define("greet", ({ narrows }) =>
-    narrows<ConstructorArg>().run((value, name) => `${value.prefix} ${name}`),
-  )
-  .define("count", ({ narrows }) => narrows<ConstructorArg>().run((value) => value.prefix.length));
+  .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
+  .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
 
 const passthroughHooks = {
-  greet: ({ arg: name, run }: { arg: string; run: (name: string) => string }) => run(name),
-  count: ({ run }: { run: () => number }) => run(),
+  greet: ({ args, run }: { args: [name: string]; run: (name: string) => string }) => run(...args),
+  count: ({ args, run }: { args: []; run: () => number }) => run(...args),
 };
 
 const definedWithHooks = createClass<Pair>()
-  .constructor<ConstructorArg>({
+  .constructor<Ctor>({
     runtimeCheck: false,
   })
-  .define("greet", ({ narrows }) =>
-    narrows<ConstructorArg>().run((value, name) => `${value.prefix} ${name}`),
-  )
-  .define("count", ({ narrows }) => narrows<ConstructorArg>().run((value) => value.prefix.length));
+  .define("greet", ({ narrows }) => narrows<Ctor>().run((deps, name) => `${deps.prefix} ${name}`))
+  .define("count", ({ narrows }) => narrows<Ctor>().run((deps) => deps.prefix.length));
 definedWithHooks.registerHooks(passthroughHooks);
 
-const nativeInstance = new NativePair(arg);
-const createClassInstance = defined.new(arg);
-const hookedNativeInstance = new HookedNativePair(arg);
+const nativeInstance = new NativePair(ctor);
+const createClassInstance = defined.new(ctor);
+const hookedNativeInstance = new HookedNativePair(ctor);
 hookedNativeInstance.registerHooks(passthroughHooks);
-const hookedCreateClassInstance = definedWithHooks.new(arg);
+const hookedCreateClassInstance = definedWithHooks.new(ctor);
 
 let sink = 0;
 
@@ -129,15 +127,15 @@ function callPair(instance: Pair): void {
 
 describe("construct", () => {
   bench("native class", () => {
-    consume(new NativePair(arg).count());
+    consume(new NativePair(ctor).count());
   });
 
   bench("createClass", () => {
-    consume(defined.new(arg).count());
+    consume(defined.new(ctor).count());
   });
 
   bench("createClass + runtimeCheck", () => {
-    consume(definedWithCheck.new(arg).count());
+    consume(definedWithCheck.new(ctor).count());
   });
 });
 

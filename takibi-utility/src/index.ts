@@ -2,11 +2,11 @@ export {
   createClass,
   TakibiClassError,
   type AnyMethod,
+  type BoundNarrows,
   type ClassBuilder,
   type ClassConstructorOptions,
   type ClassFactory,
   type ClassInstance,
-  type BoundNarrows,
   type DefineFactory,
   type DefineHelpers,
   type DefineNarrowed,
@@ -14,7 +14,6 @@ export {
   type DefineSpec,
   type HookContext,
   type HookMap,
-  type MethodArgOf,
   type MethodMap,
 } from "./create-class";
 export { narrows, type Narrows } from "./narrows";

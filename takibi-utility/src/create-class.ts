@@ -8,75 +8,73 @@ export type ClassConstructorOptions<TRuntimeCheck extends boolean = boolean> = {
   readonly runtimeCheck: TRuntimeCheck;
 };
 
-export type MethodArgOf<M extends AnyMethod> =
-  Parameters<M> extends [] ? undefined : Parameters<M> extends [infer A] ? A : Parameters<M>;
-
-export type HookContext<TArg, K extends PropertyKey, M extends AnyMethod> = {
-  readonly constructorArg: TArg;
+export type HookContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
+  readonly ctor: TCtor;
+  readonly deps: unknown;
   readonly methodName: K;
-  readonly arg: MethodArgOf<M>;
+  readonly args: Parameters<M>;
   readonly run: (...args: Parameters<M>) => ReturnType<M>;
 };
 
-export type HookMap<T extends MethodMap, TArg> = {
-  [K in keyof T]: (context: HookContext<TArg, K, T[K]>) => ReturnType<T[K]>;
+export type HookMap<T extends MethodMap, TCtor> = {
+  [K in keyof T]: (context: HookContext<TCtor, K, T[K]>) => ReturnType<T[K]>;
 };
 
-export type ClassInstance<T extends MethodMap, TArg> = T & {
-  registerHooks: (hooks: Partial<HookMap<T, TArg>>) => void;
+export type ClassInstance<T extends MethodMap, TCtor> = T & {
+  registerHooks: (hooks: Partial<HookMap<T, TCtor>>) => void;
 };
 
-export type DefineSpec<TArg, TNarrowed, M extends AnyMethod> = {
-  readonly narrows: Narrows<TArg, TNarrowed>;
-  readonly run: (arg: TNarrowed, ...args: Parameters<M>) => ReturnType<M>;
+export type DefineSpec<TCtor, TDeps, M extends AnyMethod> = {
+  readonly narrows: Narrows<TCtor, TDeps>;
+  readonly run: (deps: TDeps, ...args: Parameters<M>) => ReturnType<M>;
 };
 
-export type DefineNarrowed<TArg, TNarrowed, M extends AnyMethod> = {
-  run(
-    run: (arg: TNarrowed, ...args: Parameters<M>) => ReturnType<M>,
-  ): DefineSpec<TArg, TNarrowed, M>;
+export type DefineNarrowed<TCtor, TDeps, M extends AnyMethod> = {
+  run(run: (deps: TDeps, ...args: Parameters<M>) => ReturnType<M>): DefineSpec<TCtor, TDeps, M>;
 };
 
-export type BoundNarrows<TArg, M extends AnyMethod> = {
-  <TNarrowed>(apply: (value: TArg) => TNarrowed): DefineNarrowed<TArg, TNarrowed, M>;
-  <TNarrowed>(): DefineNarrowed<TArg, TNarrowed, M>;
+export type BoundNarrows<TCtor, M extends AnyMethod> = {
+  <TDeps>(apply: (ctor: TCtor) => TDeps): DefineNarrowed<TCtor, TDeps, M>;
+  <TDeps>(): DefineNarrowed<TCtor, TDeps, M>;
 };
 
-export type DefineHelpers<TArg, M extends AnyMethod> = {
-  readonly narrows: BoundNarrows<TArg, M>;
+export type DefineHelpers<TCtor, M extends AnyMethod> = {
+  readonly narrows: BoundNarrows<TCtor, M>;
 };
 
-export type DefinedMethodSpec<TArg, M extends AnyMethod> = {
-  readonly narrows: Narrows<TArg, unknown>;
-  readonly run: (arg: never, ...args: Parameters<M>) => ReturnType<M>;
+export type DefinedMethodSpec<TCtor, M extends AnyMethod> = {
+  readonly narrows: Narrows<TCtor, unknown>;
+  readonly run: (deps: never, ...args: Parameters<M>) => ReturnType<M>;
 };
 
-export type DefineFactory<TArg, M extends AnyMethod> = (
-  helpers: DefineHelpers<TArg, M>,
-) => DefinedMethodSpec<TArg, M>;
+export type DefineFactory<TCtor, M extends AnyMethod> = (
+  helpers: DefineHelpers<TCtor, M>,
+) => DefinedMethodSpec<TCtor, M>;
 
-type DefinedClass<T extends MethodMap, TArg, TRuntimeCheck extends boolean> = {
-  new: (arg: TArg) => ClassInstance<T, TArg>;
-  registerHooks: (hooks: Partial<HookMap<T, TArg>>) => ClassBuilder<T, TArg, never, TRuntimeCheck>;
+type DefinedClass<T extends MethodMap, TCtor, TRuntimeCheck extends boolean> = {
+  new: (ctor: TCtor) => ClassInstance<T, TCtor>;
+  registerHooks: (
+    hooks: Partial<HookMap<T, TCtor>>,
+  ) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
 };
 
 export type ClassBuilder<
   T extends MethodMap,
-  TArg,
+  TCtor,
   TRemaining extends keyof T,
   TRuntimeCheck extends boolean,
 > = {
   define<K extends TRemaining>(
     name: K,
-    spec: DefineFactory<TArg, T[K]>,
-  ): ClassBuilder<T, TArg, Exclude<TRemaining, K>, TRuntimeCheck>;
-} & ([TRemaining] extends [never] ? DefinedClass<T, TArg, TRuntimeCheck> : {});
+    spec: DefineFactory<TCtor, T[K]>,
+  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
+} & ([TRemaining] extends [never] ? DefinedClass<T, TCtor, TRuntimeCheck> : {});
 
 export type ClassFactory<T extends MethodMap> = {
   constructor: {
-    <TArg>(options: ClassConstructorOptions<true>): ClassBuilder<T, TArg, keyof T, true>;
-    <TArg>(options: ClassConstructorOptions<false>): ClassBuilder<T, TArg, keyof T, false>;
-    <TArg>(options: ClassConstructorOptions): ClassBuilder<T, TArg, keyof T, boolean>;
+    <TCtor>(options: ClassConstructorOptions<true>): ClassBuilder<T, TCtor, keyof T, true>;
+    <TCtor>(options: ClassConstructorOptions<false>): ClassBuilder<T, TCtor, keyof T, false>;
+    <TCtor>(options: ClassConstructorOptions): ClassBuilder<T, TCtor, keyof T, boolean>;
   };
 };
 
@@ -86,16 +84,16 @@ export class TakibiClassError extends Error {
 
 type RuntimeSpec = {
   readonly narrows: Narrows<unknown, unknown>;
-  readonly run: (arg: unknown, ...args: unknown[]) => unknown;
+  readonly run: (deps: unknown, ...args: unknown[]) => unknown;
 };
 
 type RuntimeDefineFactory = (helpers: DefineHelpers<unknown, AnyMethod>) => RuntimeSpec;
 
-function boundNarrows<TArg, TNarrowed, M extends AnyMethod>(
-  apply?: (value: TArg) => TNarrowed,
-): DefineNarrowed<TArg, TNarrowed, M> {
-  const narrowed: Narrows<TArg, TNarrowed> = {
-    apply: apply ?? ((value) => value as unknown as TNarrowed),
+function boundNarrows<TCtor, TDeps, M extends AnyMethod>(
+  apply?: (ctor: TCtor) => TDeps,
+): DefineNarrowed<TCtor, TDeps, M> {
+  const narrowed: Narrows<TCtor, TDeps> = {
+    apply: apply ?? ((ctor) => ctor as unknown as TDeps),
   };
   return {
     run: (run) => ({ narrows: narrowed, run }),
@@ -103,9 +101,10 @@ function boundNarrows<TArg, TNarrowed, M extends AnyMethod>(
 }
 
 type RuntimeHook = (context: {
-  constructorArg: unknown;
+  ctor: unknown;
+  deps: unknown;
   methodName: PropertyKey;
-  arg: unknown;
+  args: unknown[];
   run: (...args: unknown[]) => unknown;
 }) => unknown;
 
@@ -116,16 +115,6 @@ function replaceHooks(target: RuntimeHooks, next: RuntimeHooks): void {
     delete target[key];
   }
   Object.assign(target, next);
-}
-
-function methodArg(args: unknown[]): unknown {
-  if (args.length === 0) {
-    return undefined;
-  }
-  if (args.length === 1) {
-    return args[0];
-  }
-  return args;
 }
 
 function createBuilder(
@@ -143,16 +132,16 @@ function createBuilder(
       replaceHooks(hooks, nextHooks);
       return this;
     },
-    new(arg: unknown) {
+    new(ctor: unknown) {
       const instanceHooks: RuntimeHooks = { ...hooks };
       const instance = Object.create(null) as Record<string, (...args: unknown[]) => unknown> & {
         registerHooks: (nextHooks: RuntimeHooks) => void;
       };
 
       for (const [name, spec] of definitions) {
-        let narrowed: unknown;
+        let deps: unknown;
         try {
-          narrowed = spec.narrows.apply(arg);
+          deps = spec.narrows.apply(ctor);
         } catch (error) {
           if (options.runtimeCheck) {
             throw new TakibiClassError(`narrows failed for "${name}"`, { cause: error });
@@ -161,15 +150,16 @@ function createBuilder(
         }
 
         instance[name] = (...args: unknown[]) => {
-          const run = (...methodArgs: unknown[]) => spec.run(narrowed, ...methodArgs);
+          const run = (...methodArgs: unknown[]) => spec.run(deps, ...methodArgs);
           const hook = instanceHooks[name];
           if (typeof hook !== "function") {
             return run(...args);
           }
           return hook({
-            constructorArg: arg,
+            ctor,
+            deps,
             methodName: name,
-            arg: methodArg(args),
+            args,
             run,
           });
         };
