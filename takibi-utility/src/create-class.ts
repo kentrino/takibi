@@ -8,7 +8,7 @@ export type ClassConstructorOptions<TRuntimeCheck extends boolean = boolean> = {
   readonly runtimeCheck: TRuntimeCheck;
 };
 
-export type HookContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
+export type InterceptContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
   readonly ctor: TCtor;
   readonly deps: unknown;
   readonly methodName: K;
@@ -17,16 +17,16 @@ export type HookContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
   readonly next: (...args: Parameters<M>) => ReturnType<M>;
 };
 
-export type HookMap<T extends MethodMap, TCtor> = {
-  [K in keyof T]: (context: HookContext<TCtor, K, T[K]>) => ReturnType<T[K]>;
+export type InterceptMap<T extends MethodMap, TCtor> = {
+  [K in keyof T]: (context: InterceptContext<TCtor, K, T[K]>) => ReturnType<T[K]>;
 };
 
-export type HookRegistration<T extends MethodMap, TCtor> = {
-  registerHooks: (hooks: Partial<HookMap<T, TCtor>>) => void;
-  replaceHooks: (hooks: Partial<HookMap<T, TCtor>>) => void;
+export type InterceptRegistration<T extends MethodMap, TCtor> = {
+  $intercept: (interceptors: Partial<InterceptMap<T, TCtor>>) => void;
+  $replace: (interceptors: Partial<InterceptMap<T, TCtor>>) => void;
 };
 
-export type ClassInstance<T extends MethodMap, TCtor> = T & HookRegistration<T, TCtor>;
+export type ClassInstance<T extends MethodMap, TCtor> = T & InterceptRegistration<T, TCtor>;
 
 export type DefineSpec<TCtor, TDeps, M extends AnyMethod> = {
   readonly narrows: Narrows<TCtor, TDeps>;
@@ -57,10 +57,12 @@ export type DefineFactory<TCtor, M extends AnyMethod> = (
 
 type DefinedClass<T extends MethodMap, TCtor, TRuntimeCheck extends boolean> = {
   new: (ctor: TCtor) => ClassInstance<T, TCtor>;
-  registerHooks: (
-    hooks: Partial<HookMap<T, TCtor>>,
+  $intercept: (
+    interceptors: Partial<InterceptMap<T, TCtor>>,
   ) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
-  replaceHooks: (hooks: Partial<HookMap<T, TCtor>>) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
+  $replace: (
+    interceptors: Partial<InterceptMap<T, TCtor>>,
+  ) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
 };
 
 export type ClassBuilder<
@@ -105,7 +107,7 @@ function boundNarrows<TCtor, TDeps, M extends AnyMethod>(
   };
 }
 
-type RuntimeHook = (context: {
+type RuntimeInterceptor = (context: {
   ctor: unknown;
   deps: unknown;
   methodName: PropertyKey;
@@ -114,17 +116,20 @@ type RuntimeHook = (context: {
   next: (...args: unknown[]) => unknown;
 }) => unknown;
 
-type RuntimeHooks = Record<string, RuntimeHook>;
+type RuntimeInterceptors = Record<string, RuntimeInterceptor>;
 
-function createHookTable(from?: RuntimeHooks): RuntimeHooks {
-  return Object.assign(Object.create(null), from) as RuntimeHooks;
+function createInterceptTable(from?: RuntimeInterceptors): RuntimeInterceptors {
+  return Object.assign(Object.create(null), from) as RuntimeInterceptors;
 }
 
 function replayArgs(contextArgs: unknown[], override: unknown[]): unknown[] {
   return override.length === 0 ? contextArgs : override;
 }
 
-function composeHook(outer: RuntimeHook, inner: RuntimeHook | undefined): RuntimeHook {
+function composeInterceptor(
+  outer: RuntimeInterceptor,
+  inner: RuntimeInterceptor | undefined,
+): RuntimeInterceptor {
   return (context) =>
     outer({
       ...context,
@@ -145,47 +150,50 @@ function composeHook(outer: RuntimeHook, inner: RuntimeHook | undefined): Runtim
     });
 }
 
-function mergeHooks(target: RuntimeHooks, incoming: RuntimeHooks): void {
+function mergeInterceptors(target: RuntimeInterceptors, incoming: RuntimeInterceptors): void {
   for (const key of Object.keys(incoming)) {
-    const hook = incoming[key];
-    if (typeof hook !== "function") {
+    const interceptor = incoming[key];
+    if (typeof interceptor !== "function") {
       continue;
     }
-    target[key] = composeHook(hook, Object.hasOwn(target, key) ? target[key] : undefined);
+    target[key] = composeInterceptor(
+      interceptor,
+      Object.hasOwn(target, key) ? target[key] : undefined,
+    );
   }
 }
 
-function replaceHookTable(target: RuntimeHooks, incoming: RuntimeHooks): void {
+function replaceInterceptTable(target: RuntimeInterceptors, incoming: RuntimeInterceptors): void {
   for (const key of Object.keys(target)) {
     delete target[key];
   }
-  mergeHooks(target, incoming);
+  mergeInterceptors(target, incoming);
 }
 
 function createBuilder(
   options: ClassConstructorOptions,
   definitions: ReadonlyMap<string, RuntimeSpec>,
-  hooks: RuntimeHooks,
+  interceptors: RuntimeInterceptors,
 ) {
   return {
     define(name: string, spec: RuntimeDefineFactory) {
       const next = new Map(definitions);
       next.set(name, spec({ narrows: boundNarrows }));
-      return createBuilder(options, next, createHookTable(hooks));
+      return createBuilder(options, next, createInterceptTable(interceptors));
     },
-    registerHooks(nextHooks: RuntimeHooks) {
-      mergeHooks(hooks, nextHooks);
+    $intercept(nextInterceptors: RuntimeInterceptors) {
+      mergeInterceptors(interceptors, nextInterceptors);
       return this;
     },
-    replaceHooks(nextHooks: RuntimeHooks) {
-      replaceHookTable(hooks, nextHooks);
+    $replace(nextInterceptors: RuntimeInterceptors) {
+      replaceInterceptTable(interceptors, nextInterceptors);
       return this;
     },
     new(ctor: unknown) {
-      const instanceHooks = createHookTable(hooks);
+      const instanceInterceptors = createInterceptTable(interceptors);
       const instance = Object.create(null) as Record<string, (...args: unknown[]) => unknown> & {
-        registerHooks: (nextHooks: RuntimeHooks) => void;
-        replaceHooks: (nextHooks: RuntimeHooks) => void;
+        $intercept: (nextInterceptors: RuntimeInterceptors) => void;
+        $replace: (nextInterceptors: RuntimeInterceptors) => void;
       };
 
       for (const [name, spec] of definitions) {
@@ -201,10 +209,10 @@ function createBuilder(
 
         instance[name] = (...args: unknown[]) => {
           const run = (...methodArgs: unknown[]) => spec.run(deps, ...methodArgs);
-          if (!Object.hasOwn(instanceHooks, name)) {
+          if (!Object.hasOwn(instanceInterceptors, name)) {
             return run(...args);
           }
-          return instanceHooks[name]({
+          return instanceInterceptors[name]({
             ctor,
             deps,
             methodName: name,
@@ -215,11 +223,11 @@ function createBuilder(
         };
       }
 
-      instance.registerHooks = (nextHooks) => {
-        mergeHooks(instanceHooks, nextHooks);
+      instance.$intercept = (nextInterceptors) => {
+        mergeInterceptors(instanceInterceptors, nextInterceptors);
       };
-      instance.replaceHooks = (nextHooks) => {
-        replaceHookTable(instanceHooks, nextHooks);
+      instance.$replace = (nextInterceptors) => {
+        replaceInterceptTable(instanceInterceptors, nextInterceptors);
       };
       return instance;
     },
@@ -232,7 +240,7 @@ export function createClass<T extends MethodMap>(): ClassFactory<T> {
       createBuilder(
         options,
         new Map(),
-        Object.create(null) as RuntimeHooks,
+        Object.create(null) as RuntimeInterceptors,
       )) as unknown as ClassFactory<T>["constructor"],
   };
 }
