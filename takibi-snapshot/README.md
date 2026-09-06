@@ -10,8 +10,9 @@ SHA-256 integrity. It depends on `@takibi/takibi-api`,
 transport, typed document lifecycle, or the Takibi compatibility package.
 
 Typed document validation, seed preparation, and Durable Object construction
-stay in `@takibi/takibi` until worker-runtime extraction. Those adapters
-implement the snapshot lifecycle ports defined here.
+live in `@takibi/takibi-worker-runtime`. Those adapters implement the
+snapshot lifecycle ports defined here. The Takibi compatibility package
+re-exports the adapters.
 
 See [`docs/spec/logical-snapshots.md`](./docs/spec/logical-snapshots.md) for
 the format, lease, compatibility, and atomicity contract.

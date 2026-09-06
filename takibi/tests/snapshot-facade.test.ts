@@ -1,5 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import * as SnapshotPkg from "@takibi/takibi-snapshot";
+import * as RuntimePkg from "@takibi/takibi-worker-runtime";
 import * as MaintenanceFacade from "../src/maintenance";
 import * as MaintenanceMemoryFacade from "../src/maintenance-memory";
 import * as SnapshotFacade from "../src/snapshot";
@@ -16,6 +17,10 @@ test("Takibi snapshot modules re-export the owner package bindings", () => {
   expect(MaintenanceMemoryFacade.MemoryMaintenanceBackend).toBe(
     SnapshotPkg.MemoryMaintenanceBackend,
   );
-  expect(typeof SnapshotFacade.createDurableObjectCollectionsApi).toBe("function");
-  expect(typeof SnapshotFacade.createTakibiSnapshotLifecycle).toBe("function");
+  expect(SnapshotFacade.createDurableObjectCollectionsApi).toBe(
+    RuntimePkg.createDurableObjectCollectionsApi,
+  );
+  expect(SnapshotFacade.createTakibiSnapshotLifecycle).toBe(
+    RuntimePkg.createTakibiSnapshotLifecycle,
+  );
 });

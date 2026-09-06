@@ -1,0 +1,84 @@
+{
+  "name": "@takibi/takibi-worker-runtime",
+  "version": "0.0.0",
+  "description": "Cloudflare Worker and Durable Object execution runtime for Takibi.",
+  "keywords": [
+    "cloudflare",
+    "durable-objects",
+    "runtime",
+    "takibi"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi-worker-runtime",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/takibi-worker-runtime"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./instrumentation": "./src/instrumentation.ts",
+    "./testing-bridge": "./src/testing-bridge.server.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./instrumentation": {
+        "types": "./dist/instrumentation.d.mts",
+        "import": "./dist/instrumentation.mjs"
+      },
+      "./testing-bridge": {
+        "types": "./dist/testing-bridge.d.mts",
+        "import": "./dist/testing-bridge.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test && vp run test:workers && vp run test:root-compat",
+    "test:workers": "vp test --config vite.workers.config.ts",
+    "test:root-compat": "vp test --config vite.root-import.workers.config.ts",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "catalog:",
+    "@takibi/takibi-api": "workspace:^",
+    "@takibi/takibi-policy": "workspace:^",
+    "@takibi/takibi-protocol": "workspace:^",
+    "@takibi/takibi-query": "workspace:^",
+    "@takibi/takibi-shared-types": "workspace:^",
+    "@takibi/takibi-snapshot": "workspace:^",
+    "@takibi/takibi-storage": "workspace:^",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@types/node": "catalog:",
+    "@takibi/takibi": "workspace:*",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
