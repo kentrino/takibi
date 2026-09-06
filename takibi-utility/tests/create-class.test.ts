@@ -30,15 +30,15 @@ test("new is available only after every method is defined", () => {
   );
 
   expectTypeOf(incomplete).not.toHaveProperty("new");
-  expectTypeOf(incomplete).not.toHaveProperty("$intercept");
-  expectTypeOf(incomplete).not.toHaveProperty("$replace");
-  expectTypeOf(defined).not.toHaveProperty("$intercept");
-  expectTypeOf(defined).not.toHaveProperty("$replace");
+  expectTypeOf(incomplete).not.toHaveProperty("newWithInterceptors");
   expectTypeOf(defined.new).toBeCallableWith({ name: "takibi" });
+  expectTypeOf(defined.newWithInterceptors).toBeCallableWith({ name: "takibi" }, {});
   expectTypeOf(defined.new({ name: "takibi" })).toEqualTypeOf<ClassInstance<Foo, ConstructorArg>>();
+  expectTypeOf(defined.new({ name: "takibi" })).not.toHaveProperty("$intercept");
+  expectTypeOf(defined.new({ name: "takibi" })).not.toHaveProperty("$replace");
 });
 
-test("instance $intercept wraps matching methods", async () => {
+test("newWithInterceptors wraps matching methods", async () => {
   let intercepted = 0;
   const defined = createClass<Foo>()
     .constructor<ConstructorArg>({
@@ -56,17 +56,19 @@ test("instance $intercept wraps matching methods", async () => {
       },
     );
 
-  const instance = defined.new({ name: "takibi", unused: 1 });
-  instance.$intercept({
-    bar: ({ ctor, deps, methodName, args, run }) => {
-      expect(ctor).toEqual({ name: "takibi", unused: 1 });
-      expect(deps).toEqual({ name: "takibi" });
-      expect(methodName).toBe("bar");
-      expect(args).toEqual([]);
-      intercepted += 1;
-      return run(...args);
+  const instance = defined.newWithInterceptors(
+    { name: "takibi", unused: 1 },
+    {
+      bar: ({ ctor, deps, methodName, args, run }) => {
+        expect(ctor).toEqual({ name: "takibi", unused: 1 });
+        expect(deps).toEqual({ name: "takibi" });
+        expect(methodName).toBe("bar");
+        expect(args).toEqual([]);
+        intercepted += 1;
+        return run(...args);
+      },
     },
-  });
+  );
 
   await instance.bar();
   expect(intercepted).toBe(1);
@@ -115,15 +117,17 @@ test("method arguments reach run and a single-argument hook", () => {
     })
     .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
-  const instance = defined.new({ prefix: "hi" });
-  instance.$intercept({
-    greet: ({ ctor, methodName, args, run }) => {
-      expect(ctor).toEqual({ prefix: "hi" });
-      expect(methodName).toBe("greet");
-      expect(args).toEqual(["ada"]);
-      return run(...args);
+  const instance = defined.newWithInterceptors(
+    { prefix: "hi" },
+    {
+      greet: ({ ctor, methodName, args, run }) => {
+        expect(ctor).toEqual({ prefix: "hi" });
+        expect(methodName).toBe("greet");
+        expect(args).toEqual(["ada"]);
+        return run(...args);
+      },
     },
-  });
+  );
 
   expect(instance.greet("ada")).toBe("hi ada");
   expect(instance.count()).toBe(2);
@@ -137,10 +141,12 @@ test("hook replays multi-argument methods with args", () => {
     })
     .define<Record<string, never>>("add", (_deps, left, right) => left + right);
 
-  const instance = defined.new({});
-  instance.$intercept({
-    add: ({ args, run }) => run(...args),
-  });
+  const instance = defined.newWithInterceptors(
+    {},
+    {
+      add: ({ args, run }) => run(...args),
+    },
+  );
 
   expect(instance.add(1, 2)).toBe(3);
 });
@@ -155,16 +161,18 @@ test("hook can skip run", async () => {
       ran += 1;
     });
 
-  const instance = defined.new({ name: "takibi" });
-  instance.$intercept({
-    bar: async () => {},
-  });
+  const instance = defined.newWithInterceptors(
+    { name: "takibi" },
+    {
+      bar: async () => {},
+    },
+  );
 
   await instance.bar();
   expect(ran).toBe(0);
 });
 
-test("$intercept merges and wraps the previous hook via next", () => {
+test("newWithInterceptors merges layers and wraps the previous hook via next", () => {
   const order: string[] = [];
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
@@ -173,32 +181,29 @@ test("$intercept merges and wraps the previous hook via next", () => {
     .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
     .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
-  const instance = defined.new({ prefix: "hi" });
-  instance.$intercept({
-    greet: ({ args, next }) => {
-      order.push("class");
-      return `class ${next(...args)}`;
+  const instance = defined.newWithInterceptors(
+    { prefix: "hi" },
+    {
+      greet: ({ args, next }) => {
+        order.push("class");
+        return `class ${next(...args)}`;
+      },
+      count: () => 99,
     },
-    count: () => 99,
-  });
-  instance.$intercept({
-    greet: ({ args, next }) => {
-      order.push("otel");
-      return `otel ${next(...args)}`;
+    {
+      greet: ({ args, next }) => {
+        order.push("otel");
+        return `otel ${next(...args)}`;
+      },
     },
-  });
+  );
 
   expect(instance.greet("ada")).toBe("otel class hi ada");
   expect(order).toEqual(["otel", "class"]);
   expect(instance.count()).toBe(99);
-
-  instance.$intercept({
-    greet: ({ args, run }) => `raw ${run(...args)}`,
-  });
-  expect(instance.greet("ada")).toBe("raw hi ada");
 });
 
-test("$replace replaces the hook table", () => {
+test("a later layer that calls run skips earlier layers", () => {
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
@@ -206,20 +211,17 @@ test("$replace replaces the hook table", () => {
     .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
     .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
-  const instance = defined.new({ prefix: "hi" });
-  instance.$intercept({
-    greet: () => "class",
-    count: () => 99,
-  });
-  expect(instance.greet("ada")).toBe("class");
-  expect(instance.count()).toBe(99);
+  const instance = defined.newWithInterceptors(
+    { prefix: "hi" },
+    {
+      greet: ({ args, next }) => `class ${next(...args)}`,
+    },
+    {
+      greet: ({ args, run }) => `raw ${run(...args)}`,
+    },
+  );
 
-  instance.$replace({
-    greet: ({ run, args }) => `instance ${run(...args)}`,
-  });
-
-  expect(instance.greet("ada")).toBe("instance hi ada");
-  expect(instance.count()).toBe(2);
+  expect(instance.greet("ada")).toBe("raw hi ada");
 });
 
 test("runtimeCheck wraps a failing narrows with the method name", () => {
@@ -257,11 +259,11 @@ test("define rejects leftover or unknown method names", () => {
     (deps, name) => `${deps.prefix} ${name}`,
   );
   expectTypeOf(greet).not.toHaveProperty("new");
+  expectTypeOf(greet).not.toHaveProperty("newWithInterceptors");
 
   const defined = greet.define<{ prefix: string }>("count", (deps) => deps.prefix.length);
   expectTypeOf(defined).toHaveProperty("new");
-  expectTypeOf(defined).not.toHaveProperty("$intercept");
-  expectTypeOf(defined).not.toHaveProperty("$replace");
+  expectTypeOf(defined).toHaveProperty("newWithInterceptors");
 
   // @ts-expect-error unknown method
   incomplete.define("missing", () => undefined);
@@ -291,7 +293,7 @@ test("prototype method names are not treated as interceptors", () => {
   expect(instance.valueOf()).toBe(2);
 });
 
-test("$intercept accepts only a partial of the method surface", () => {
+test("newWithInterceptors accepts only a partial of the method surface", () => {
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
@@ -299,22 +301,22 @@ test("$intercept accepts only a partial of the method surface", () => {
     .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
     .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
-  const instance = defined.new({ prefix: "hi" });
-  instance.$intercept({
-    greet: ({ args, run }) => `class ${run(...args)}`,
-    count: ({ args, run }) => run(...args) + 10,
-  });
+  const instance = defined.newWithInterceptors(
+    { prefix: "hi" },
+    {
+      greet: ({ args, run }) => `class ${run(...args)}`,
+      count: ({ args, run }) => run(...args) + 10,
+    },
+  );
 
   expect(instance.greet("ada")).toBe("class hi ada");
   expect(instance.count()).toBe(12);
 
-  instance.$intercept({
-    // @ts-expect-error unknown method
-    missing: () => undefined,
-  });
-
-  instance.$replace({
-    // @ts-expect-error unknown method
-    missing: () => undefined,
-  });
+  defined.newWithInterceptors(
+    { prefix: "hi" },
+    {
+      // @ts-expect-error unknown method
+      missing: () => undefined,
+    },
+  );
 });
