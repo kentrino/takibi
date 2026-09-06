@@ -15,6 +15,6 @@ export {
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
-} from "./errors";
+} from "@takibi/takibi-api";
 
-export type { PolicyReason, TakibiResult } from "./types";
+export type { PolicyReason, TakibiResult } from "@takibi/takibi-shared-types";

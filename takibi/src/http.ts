@@ -1,9 +1,9 @@
 import { parseOrderBy, parseQueryExpr } from "@takibi/takibi-protocol";
-import { BadRequestError, TakibiError, NotFoundError } from "./errors";
+import { BadRequestError, NotFoundError, TakibiError } from "@takibi/takibi-api";
 import type { ActionInvocation } from "./action-executor";
 import type { ExecuteRequest } from "./executor";
 import { decodePublicBatch, type PublicBatchRequest } from "./protocol";
-import type { StorageListOptions } from "./types";
+import type { StorageListOptions } from "@takibi/takibi-shared-types";
 
 export class MethodNotAllowedError extends TakibiError {
   constructor(message = "Method not allowed") {

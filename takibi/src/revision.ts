@@ -1,4 +1,4 @@
-import { StaleWriteError, TakibiError } from "./errors";
+import { StaleWriteError, TakibiError } from "@takibi/takibi-api";
 import { SchemaValidationError } from "./schema";
 import { TAKIBI_REVISION_KEY } from "./types";
 

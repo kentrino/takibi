@@ -1,5 +1,5 @@
 import type { IndexRangePlan, ResolvedIndexScan } from "./indexes";
-import type { QueryScalar } from "./types";
+import type { QueryScalar } from "@takibi/takibi-shared-types";
 import { compileQueryToSql, type SqlBinding, type SqlPredicate } from "./sql-query";
 
 const METADATA_COLUMNS: Readonly<Record<string, string>> = {

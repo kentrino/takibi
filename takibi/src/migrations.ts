@@ -1,19 +1,11 @@
-import { TakibiError } from "./errors";
+import { TakibiError, type CollectionDefinition, type CollectionsDef } from "@takibi/takibi-api";
+import type { WithMetadata } from "@takibi/takibi-shared-types";
 import { assertJsonObject } from "./json";
 import type { InternalLogger } from "./logging";
 import { documentRevision } from "./revision";
 import { parseSchema, parseSchemaUnobserved, SchemaValidationError } from "./schema";
-import {
-  RESERVED_DOCUMENT_DATA_KEYS,
-  TAKIBI_REVISION_KEY,
-  TAKIBI_VERSION_KEY,
-  type CollectionDefinition,
-  type CollectionsDef,
-  type StorageDriver,
-  type StorageListPlan,
-  type StoredDocument,
-  type WithMetadata,
-} from "./types";
+import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
+import type { StorageDriver, StorageListPlan, StoredDocument } from "./types";
 import { assertDocumentIndexFields } from "./indexes";
 import { assertUniqueDocument } from "./unique";
 

@@ -1,4 +1,10 @@
-import type { ActionRegistry } from "./action";
+import {
+  ForbiddenError,
+  type ActionRegistry,
+  type CollectionDefinition,
+  type CollectionsDef,
+  type DurableObjectCollectionsApi,
+} from "@takibi/takibi-api";
 import { executeAction, type ActionInvocation } from "./action-executor";
 import {
   applyStorageLogging,
@@ -8,7 +14,6 @@ import {
   toWireFailure,
 } from "./context/runtime";
 import type { InternalCollectionsOptions } from "./context/types";
-import { ForbiddenError } from "./errors";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import type { PublicRequest } from "./http";
 import { withLoggedSpan, emitFailure, type InternalLogger } from "./logging";
@@ -22,12 +27,7 @@ import { createMaintenanceGatedCollections, MaintenanceController } from "./main
 import { createDurableObjectCollectionsApi } from "./snapshot";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
 import { storageAdd } from "./typed-storage";
-import type {
-  CollectionDefinition,
-  CollectionsDef,
-  DurableObjectCollectionsApi,
-  StorageDriver,
-} from "./types";
+import type { StorageDriver } from "./types";
 
 type DurableObjectClass<TCollections> = new (
   state: DurableObjectState,

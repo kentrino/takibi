@@ -65,6 +65,7 @@
   "dependencies": {
     "@noble/hashes": "catalog:",
     "@standard-schema/spec": "catalog:",
+    "@takibi/takibi-api": "workspace:^",
     "@takibi/takibi-policy": "workspace:^",
     "@takibi/takibi-protocol": "workspace:^",
     "@takibi/takibi-query": "workspace:^",

@@ -6,7 +6,7 @@ import type {
   IsAny,
   KeysMatching,
   StringKeysMatching,
-} from "../src/type-util";
+} from "../src";
 
 declare const token: unique symbol;
 

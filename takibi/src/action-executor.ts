@@ -1,10 +1,15 @@
 import {
   ActionRegistry,
+  BadRequestError,
+  ForbiddenError,
+  NotFoundError,
+  TakibiError,
   type ActionGateContext,
   type ActionGuardFn,
+  type CollectionsDef,
   type RuntimeActionDefinition,
-} from "./action";
-import { BadRequestError, TakibiError, ForbiddenError, NotFoundError } from "./errors";
+} from "@takibi/takibi-api";
+import type { JsonValue } from "@takibi/takibi-shared-types";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
 import { assertJsonValue } from "./json";
 import { withLoggedSpan, type InternalLogger } from "./logging";
@@ -19,7 +24,7 @@ import {
   type AccessGrant,
 } from "@takibi/takibi-policy";
 import { parseSchema } from "./schema";
-import type { CollectionsDef, JsonValue, StorageDriver } from "./types";
+import type { StorageDriver } from "./types";
 
 export type ActionInvocation = {
   kind: "action";

@@ -1,0 +1,440 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { AccessPolicy, PolicyReasonCodeOf } from "@takibi/takibi-policy";
+import type { ListOptions } from "@takibi/takibi-query";
+import type {
+  DocumentId,
+  JsonObject,
+  QueryScalar,
+  ReservedDocumentDataKey,
+  SnapshotRestoreReport,
+  TakibiResult,
+  WithMetadata,
+} from "@takibi/takibi-shared-types";
+import { TAKIBI_REVISION_KEY } from "@takibi/takibi-shared-types";
+import type {
+  DistributiveOmit,
+  ForbidKeys,
+  HasDuplicateTupleMember,
+  IsAny,
+  StringKeysMatching,
+} from "./type-util";
+
+export type { JsonObject, JsonValue, SnapshotRestoreReport } from "@takibi/takibi-shared-types";
+
+type JsonDocumentSchema<TSchema extends StandardSchemaV1> =
+  IsAny<TSchema> extends true
+    ? TSchema
+    : IsAny<StandardSchemaV1.InferOutput<TSchema>> extends true
+      ? TSchema
+      : unknown extends StandardSchemaV1.InferOutput<TSchema>
+        ? TSchema
+        : StandardSchemaV1.InferOutput<TSchema> extends JsonObject
+          ? TSchema
+          : never;
+
+type KnownObjectKeys<T> = {
+  [K in keyof T]-?: string extends K ? never : number extends K ? never : K;
+}[keyof T];
+
+type DeclaresReservedDocumentKey<T> =
+  Extract<KnownObjectKeys<T>, ReservedDocumentDataKey> extends never ? false : true;
+
+/** @internal Rejects collection schemas that declare reserved document keys. */
+export type ReservedDocumentSchemaConstraint<TSchema extends StandardSchemaV1> =
+  IsAny<TSchema> extends true
+    ? unknown
+    : unknown extends StandardSchemaV1.InferOutput<TSchema>
+      ? unknown
+      : DeclaresReservedDocumentKey<StandardSchemaV1.InferOutput<TSchema>> extends true
+        ? { schema: never }
+        : unknown extends StandardSchemaV1.InferInput<TSchema>
+          ? unknown
+          : DeclaresReservedDocumentKey<StandardSchemaV1.InferInput<TSchema>> extends true
+            ? { schema: never }
+            : unknown;
+
+export type MigrationStep<TOutput = unknown> = (data: unknown) => TOutput;
+
+export type MigrationSteps<TCurrentInput> =
+  | readonly []
+  | readonly [...MigrationStep[], MigrationStep<TCurrentInput>];
+
+export type CollectionMigrations<TCurrentInput> = {
+  /** Oldest version accepted by this registry. Defaults to 0. */
+  base?: number;
+  /** Ordered, append-only transforms from `base` to the current schema version. */
+  steps: MigrationSteps<TCurrentInput>;
+};
+
+type UniqueFieldKeys<TSchema extends StandardSchemaV1> = StringKeysMatching<
+  {
+    [K in keyof StandardSchemaV1.InferOutput<TSchema>]: Exclude<
+      StandardSchemaV1.InferOutput<TSchema>[K],
+      null | undefined
+    >;
+  },
+  Exclude<QueryScalar, null>
+>;
+
+export type CollectionUniqueConstraints<TSchema extends StandardSchemaV1> = Readonly<
+  Record<string, readonly [UniqueFieldKeys<TSchema>, ...UniqueFieldKeys<TSchema>[]]>
+>;
+
+/** @internal Validates inferred literal constraint tuples without widening them. */
+export type UniqueConstraintDeclaration<TSchema extends StandardSchemaV1, TUnique> =
+  TUnique extends CollectionUniqueConstraints<TSchema>
+    ? {
+        [K in keyof TUnique]: TUnique[K] extends readonly unknown[]
+          ? HasDuplicateTupleMember<TUnique[K]> extends true
+            ? never
+            : TUnique[K]
+          : never;
+      }
+    : never;
+
+export const INDEXABLE_METADATA_FIELDS = ["id", "createdAt", "updatedAt"] as const;
+
+type RequiredIndexableDomainKeys<TSchema extends StandardSchemaV1> =
+  | StringKeysMatching<StandardSchemaV1.InferOutput<TSchema>, string>
+  | StringKeysMatching<StandardSchemaV1.InferOutput<TSchema>, number>;
+
+export type IndexableFieldKeys<TSchema extends StandardSchemaV1> =
+  | RequiredIndexableDomainKeys<TSchema>
+  | (typeof INDEXABLE_METADATA_FIELDS)[number];
+
+export type CollectionIndexes<TSchema extends StandardSchemaV1> = Readonly<
+  Record<string, readonly [IndexableFieldKeys<TSchema>, ...IndexableFieldKeys<TSchema>[]]>
+>;
+
+/** @internal Validates inferred literal index tuples without widening them. */
+export type IndexDeclaration<TSchema extends StandardSchemaV1, TIndexes> =
+  TIndexes extends CollectionIndexes<TSchema>
+    ? {
+        [K in keyof TIndexes]: TIndexes[K] extends readonly unknown[]
+          ? HasDuplicateTupleMember<TIndexes[K]> extends true
+            ? never
+            : TIndexes[K]
+          : never;
+      }
+    : never;
+
+export type InferCollectionIndexes<C> = C extends { indexes?: infer I }
+  ? [I] extends [undefined]
+    ? Record<string, never>
+    : NonNullable<I> extends Record<string, readonly string[]>
+      ? string extends keyof NonNullable<I>
+        ? Record<string, never>
+        : NonNullable<I>
+      : Record<string, never>
+  : Record<string, never>;
+
+export type CollectionDefinition<
+  TSchema extends StandardSchemaV1 = any,
+  // Default `any` keeps collection maps assignable regardless of concrete context.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional for assignability
+  TCtx extends object = any,
+  TPolicy extends AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>> =
+    AccessPolicy<TCtx, WithMetadata<StandardSchemaV1.InferOutput<TSchema>>>,
+  TIndexes extends CollectionIndexes<TSchema> | Record<string, never> = Record<string, never>,
+> = {
+  schema: JsonDocumentSchema<TSchema>;
+  accessPolicy: TPolicy;
+  /**
+   * Named top-level scalar key tuples that must be unique within this
+   * collection. A tuple containing a missing or null value does not
+   * participate in the constraint.
+   */
+  unique?: CollectionUniqueConstraints<TSchema>;
+  /**
+   * Named composite indexes. Field order is the public scan and result-order
+   * contract for `list({ index })`.
+   */
+  indexes?: TIndexes extends Record<string, never> ? CollectionIndexes<TSchema> : TIndexes;
+  migrations?: CollectionMigrations<StandardSchemaV1.InferInput<TSchema>>;
+  /**
+   * Initial documents keyed by document ID. Seeds are create-only: existing
+   * documents are never overwritten when a Durable Object is reactivated.
+   */
+  seed?: () =>
+    | Readonly<
+        Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, ReservedDocumentDataKey>>
+      >
+    | Promise<
+        Readonly<
+          Record<DocumentId, Omit<StandardSchemaV1.InferInput<TSchema>, ReservedDocumentDataKey>>
+        >
+      >;
+};
+
+export type CollectionsDef<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous collection map
+  TCtx extends object = any,
+> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous collection map
+  [key: string]: CollectionDefinition<any, TCtx>;
+};
+
+export type InferCollectionDoc<C> = C extends { schema: infer S extends StandardSchemaV1 }
+  ? WithMetadata<StandardSchemaV1.InferOutput<S>> & { [TAKIBI_REVISION_KEY]: number }
+  : never;
+
+export type InferCollectionInput<C> = C extends { schema: infer S extends StandardSchemaV1 }
+  ? StandardSchemaV1.InferInput<S>
+  : never;
+
+type DistributivePartial<T> = T extends unknown ? Partial<T> : never;
+
+export type CollectionDataInput<C> = DistributiveOmit<
+  InferCollectionInput<C>,
+  ReservedDocumentDataKey
+>;
+
+export type CollectionWriteInput<C> = CollectionDataInput<C> & {
+  [TAKIBI_REVISION_KEY]?: number;
+};
+
+export type CollectionPatchInput<C> = DistributivePartial<CollectionDataInput<C>> & {
+  [TAKIBI_REVISION_KEY]?: number;
+};
+
+type IsLiteralPrimitive<T> = [T] extends [string]
+  ? [string] extends [T]
+    ? false
+    : true
+  : [T] extends [number]
+    ? [number] extends [T]
+      ? false
+      : true
+    : [T] extends [boolean]
+      ? [boolean] extends [T]
+        ? false
+        : true
+      : false;
+
+type DiscriminantKeys<T> = {
+  [K in keyof T]-?: IsLiteralPrimitive<NonNullable<T[K]>> extends true ? K & string : never;
+}[keyof T];
+
+type SharedDiscriminantKeys<TData, D> = Extract<DiscriminantKeys<TData>, keyof D & string>;
+
+type MatchesDiscriminants<TData, D> =
+  SharedDiscriminantKeys<TData, D> extends infer K
+    ? [K] extends [never]
+      ? true
+      : K extends string
+        ? {
+            [P in K]: NonNullable<TData[P & keyof TData]> extends D[P & keyof D] ? true : false;
+          }[K] extends true
+          ? true
+          : false
+        : false
+    : false;
+
+type CollectionDocMembers<C> = C extends { schema: infer S extends StandardSchemaV1 }
+  ? StandardSchemaV1.InferOutput<S> extends infer O
+    ? O extends unknown
+      ? WithMetadata<O> & { [TAKIBI_REVISION_KEY]: number }
+      : never
+    : never
+  : never;
+
+type NarrowDocMembers<TDoc, TData> = TDoc extends unknown
+  ? MatchesDiscriminants<TData, TDoc> extends true
+    ? TDoc
+    : never
+  : never;
+
+/**
+ * Document produced by `add` / `set` for the given write payload.
+ *
+ * Members of the collection document union are kept when every discriminant
+ * key they share with `TData` is assignable. Discriminant keys are those
+ * whose `TData` value is a string, number, or boolean literal; optional
+ * keys are treated as their `NonNullable` literal. If no member remains,
+ * the result falls back to `InferCollectionDoc<C>` so a miss stays wide
+ * instead of becoming `never`.
+ *
+ * Narrowing assumes schema transforms only normalize within the same
+ * variant. A transform that rewrites a discriminant onto another variant
+ * is not reflected in this type.
+ */
+export type NarrowCollectionDoc<C, TData> = [
+  NarrowDocMembers<CollectionDocMembers<C>, TData>,
+] extends [never]
+  ? InferCollectionDoc<C>
+  : NarrowDocMembers<CollectionDocMembers<C>, TData>;
+
+/** Throwing, server-side CRUD facade used by actions and trusted `$collections`. */
+export type CollectionApi<C> = {
+  add: <TData extends CollectionDataInput<C>>(
+    data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
+    options?: { id?: DocumentId },
+  ) => Promise<NarrowCollectionDoc<C, TData>>;
+  set: <TData extends CollectionWriteInput<C>>(
+    id: DocumentId,
+    data: TData & ForbidKeys<TData, Exclude<ReservedDocumentDataKey, typeof TAKIBI_REVISION_KEY>>,
+  ) => Promise<NarrowCollectionDoc<C, TData>>;
+  get: (id: DocumentId) => Promise<InferCollectionDoc<C>>;
+  update: (id: DocumentId, data: CollectionPatchInput<C>) => Promise<InferCollectionDoc<C>>;
+  delete: (id: DocumentId) => Promise<{ id: DocumentId }>;
+  list: (opts?: ListOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>) => Promise<{
+    items: InferCollectionDoc<C>[];
+    nextCursor?: string;
+  }>;
+  listAll: (
+    opts?: ListAllOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<InferCollectionDoc<C>[]>;
+  count: (opts?: CountOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>) => Promise<number>;
+};
+
+export type CollectionsApi<TCollections> = {
+  [K in keyof TCollections]: CollectionApi<TCollections[K]>;
+};
+
+/** Local trusted facade that can preserve metadata during controlled imports. */
+export type CollectionIncrementInput<C> = C extends {
+  schema: infer S extends StandardSchemaV1;
+}
+  ? {
+      [K in keyof StandardSchemaV1.InferOutput<S> & string]?: [
+        Extract<Exclude<StandardSchemaV1.InferOutput<S>[K], null | undefined>, number>,
+      ] extends [never]
+        ? never
+        : number;
+    }
+  : never;
+
+export type TrustedCollectionApi<C> = Omit<CollectionApi<C>, "add"> & {
+  add: <TData extends CollectionDataInput<C>>(
+    data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
+    options?: {
+      id?: DocumentId;
+      createdAt?: string;
+      updatedAt?: string;
+    },
+  ) => Promise<NarrowCollectionDoc<C, TData>>;
+  updateMany: (
+    data: CollectionPatchInput<C>,
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<{ updated: number }>;
+  deleteMany: (
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<{ deleted: number }>;
+  consumeOne: (
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<InferCollectionDoc<C> | null>;
+  incrementOne: (
+    increment: CollectionIncrementInput<C>,
+    opts: ConditionalWriteOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>> & {
+      set?: CollectionPatchInput<C>;
+    },
+  ) => Promise<InferCollectionDoc<C> | null>;
+};
+
+export type TrustedCollectionsApi<TCollections> = {
+  [K in Exclude<keyof TCollections, "$transaction">]: TrustedCollectionApi<TCollections[K]>;
+} & {
+  $transaction<T>(
+    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+  ): Promise<T>;
+};
+
+/** Owner-local facade available only on the generated Durable Object instance. */
+export type DurableObjectCollectionsApi<TCollections> = TrustedCollectionsApi<TCollections> & {
+  $exportSnapshot(): Promise<ReadableStream<Uint8Array>>;
+  $restoreSnapshot(source: ReadableStream<Uint8Array>): Promise<SnapshotRestoreReport>;
+  $resetAll(): Promise<void>;
+};
+
+/** Result-shaped CRUD facade used by the public HTTP client. */
+type CollectionPolicyReasonCode<C> = C extends { accessPolicy: infer TPolicy }
+  ? PolicyReasonCodeOf<TPolicy>
+  : never;
+
+export type ClientCollectionApi<C> = {
+  add: <TData extends CollectionDataInput<C>>(
+    data: TData & ForbidKeys<TData, ReservedDocumentDataKey>,
+    options?: { id?: DocumentId },
+  ) => Promise<TakibiResult<NarrowCollectionDoc<C, TData>, CollectionPolicyReasonCode<C>>>;
+  set: <TData extends CollectionWriteInput<C>>(
+    id: DocumentId,
+    data: TData & ForbidKeys<TData, Exclude<ReservedDocumentDataKey, typeof TAKIBI_REVISION_KEY>>,
+  ) => Promise<TakibiResult<NarrowCollectionDoc<C, TData>>>;
+  get: (id: DocumentId) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  update: (
+    id: DocumentId,
+    data: CollectionPatchInput<C>,
+  ) => Promise<TakibiResult<InferCollectionDoc<C>>>;
+  delete: (id: DocumentId) => Promise<TakibiResult<{ id: DocumentId }>>;
+  list: (opts?: ListOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>) => Promise<
+    TakibiResult<
+      {
+        items: InferCollectionDoc<C>[];
+        nextCursor?: string;
+      },
+      CollectionPolicyReasonCode<C>
+    >
+  >;
+  listAll: (
+    opts?: ListAllOptions<InferCollectionDoc<C>, InferCollectionIndexes<C>>,
+  ) => Promise<TakibiResult<InferCollectionDoc<C>[], CollectionPolicyReasonCode<C>>>;
+};
+
+export type ClientCollectionsApi<TCollections> = {
+  [K in keyof TCollections]: ClientCollectionApi<TCollections[K]>;
+};
+
+type ListAllFromList<T> = DistributiveOmit<T, "limit" | "cursor"> & {
+  /** Page size forwarded to `list`. Defaults to the per-request maximum (200). */
+  pageSize?: number;
+  /**
+   * Safety cap across all pages. If matching documents remain after this many
+   * items, `listAll` fails with `LIST_ALL_LIMIT` instead of truncating.
+   */
+  maxItems?: number;
+};
+
+/** Client / server convenience over repeated `list` pages. Not a policy permission. */
+export type ListAllOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = ListAllFromList<ListOptions<TDoc, TIndexes>>;
+
+type CountFromList<T> = DistributiveOmit<T, "limit" | "cursor" | "orderBy">;
+
+/** Server-only aggregate over the same query and index selection as `list`. */
+export type CountOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = CountFromList<ListOptions<TDoc, TIndexes>>;
+
+type RequireWhere<T> = T extends unknown
+  ? Omit<T, "where"> & { where: NonNullable<T extends { where?: infer W } ? W : never> }
+  : never;
+
+/** Trusted-only selector that cannot represent an unqualified write. */
+export type ConditionalWriteOptions<
+  TDoc = WithMetadata<Record<string, QueryScalar>>,
+  TIndexes extends Record<string, readonly string[]> = Record<string, never>,
+> = RequireWhere<CountOptions<TDoc, TIndexes>>;
+
+/**
+ * Package-neutral structural carrier for authored collections and actions.
+ * Client and runtime inference read `~takibi`; they do not require a
+ * Hono-bearing handler.
+ */
+export type TakibiDefinition<
+  TCollections = unknown,
+  TActionMap = Record<never, never>,
+  TCtx extends object = object,
+  TInitial = unknown,
+  TServices = unknown,
+> = {
+  readonly "~takibi": {
+    context: TCtx;
+    initial: TInitial;
+    collections: TCollections;
+    actions: TActionMap;
+    services: TServices;
+  };
+};

@@ -7,6 +7,7 @@ import {
   type DocumentMetadata,
   type QueryBuilder,
   type QueryExpr,
+  type SnapshotRestoreReport,
   type StorageListOptions,
   type TakibiResult,
   type WithMetadata,
@@ -46,4 +47,12 @@ test("document identity and metadata contracts stay transport-safe", () => {
     "$schemaVersion",
     "rev",
   ]);
+});
+
+test("snapshot restore reports stay transport-safe leaf contracts", () => {
+  expectTypeOf<SnapshotRestoreReport["formatVersion"]>().toEqualTypeOf<1>();
+  expectTypeOf<SnapshotRestoreReport["documentsRestored"]>().toEqualTypeOf<number>();
+  expectTypeOf<SnapshotRestoreReport["collections"]>().toEqualTypeOf<
+    Record<string, { documentsRestored: number; seedsInserted: number }>
+  >();
 });

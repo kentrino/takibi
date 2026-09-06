@@ -1,4 +1,4 @@
-import { TakibiError } from "../errors";
+import { TakibiError } from "@takibi/takibi-api";
 import type { ExecuteRequest } from "../executor";
 import type { PublicRequest } from "../http";
 import {
