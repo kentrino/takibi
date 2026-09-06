@@ -1,7 +1,7 @@
 import { AlreadyExistsError, TakibiError, type CollectionDefinition } from "@takibi/takibi-api";
 import type { QueryExpr, QueryScalar } from "@takibi/takibi-shared-types";
 import { RESERVED_DOCUMENT_DATA_KEYS } from "./types";
-import type { StorageDriver, StorageListPlan, StoredDocument } from "./types";
+import type { StorageDriver, StorageListPlan, StoredDocument } from "@takibi/takibi-storage";
 
 const CONSTRAINT_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const UNIQUE_SCAN_PAGE_SIZE = 200;

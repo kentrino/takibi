@@ -11,11 +11,11 @@ import {
   type TrustedCollectionsApi,
 } from "@takibi/takibi-api";
 import type { SnapshotRestoreReport } from "@takibi/takibi-shared-types";
-import { assertDocumentIndexFields } from "./indexes";
+import { assertDocumentIndexFields, type StoredDocument } from "@takibi/takibi-storage";
 import type { LeaseHandle, MaintenanceController, SnapshotStoredDocument } from "./maintenance";
 import { currentCollectionVersion, validateStoredDocumentForRestore } from "./migrations";
 import { prepareAddDoc } from "./typed-storage";
-import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_VERSION_KEY, type StoredDocument } from "./types";
+import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_VERSION_KEY } from "./types";
 import type { InternalLogger } from "./logging";
 
 const SNAPSHOT_FORMAT = "takibi.logical-snapshot";

@@ -11,7 +11,7 @@ import {
 import type { WireFailure } from "../protocol";
 import { toTakibiFailure } from "../result";
 import { SchemaValidationError } from "../schema";
-import type { StorageDriver } from "../types";
+import type { StorageDriver } from "@takibi/takibi-storage";
 
 export function applyStorageLogging(
   driver: StorageDriver,

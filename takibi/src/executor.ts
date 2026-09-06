@@ -33,7 +33,7 @@ import {
   storageSet,
   storageUpdate,
 } from "./typed-storage";
-import type { StorageDriver } from "./types";
+import type { StorageDriver } from "@takibi/takibi-storage";
 
 export type ExecuteRequest = {
   kind: "collection";

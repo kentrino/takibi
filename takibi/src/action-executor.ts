@@ -24,7 +24,7 @@ import {
   type AccessGrant,
 } from "@takibi/takibi-policy";
 import { parseSchema } from "./schema";
-import type { StorageDriver } from "./types";
+import type { StorageDriver } from "@takibi/takibi-storage";
 
 export type ActionInvocation = {
   kind: "action";

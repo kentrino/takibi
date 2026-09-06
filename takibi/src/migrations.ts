@@ -5,8 +5,12 @@ import type { InternalLogger } from "./logging";
 import { documentRevision } from "./revision";
 import { parseSchema, parseSchemaUnobserved, SchemaValidationError } from "./schema";
 import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
-import type { StorageDriver, StorageListPlan, StoredDocument } from "./types";
-import { assertDocumentIndexFields } from "./indexes";
+import {
+  assertDocumentIndexFields,
+  type StorageDriver,
+  type StorageListPlan,
+  type StoredDocument,
+} from "@takibi/takibi-storage";
 import { assertUniqueDocument } from "./unique";
 
 export function assertCollectionMigrations(
