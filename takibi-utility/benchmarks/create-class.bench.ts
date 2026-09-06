@@ -27,18 +27,11 @@ class NativePair {
 type PairInterceptors = {
   greet: (context: {
     ctor: Ctor;
-    deps: unknown;
     methodName: "greet";
     args: [name: string];
     run: (name: string) => string;
   }) => string;
-  count: (context: {
-    ctor: Ctor;
-    deps: unknown;
-    methodName: "count";
-    args: [];
-    run: () => number;
-  }) => number;
+  count: (context: { ctor: Ctor; methodName: "count"; args: []; run: () => number }) => number;
 };
 
 class InterceptedNativePair {
@@ -59,7 +52,6 @@ class InterceptedNativePair {
     }
     return interceptor({
       ctor: this.ctor,
-      deps: this.ctor,
       methodName: "greet",
       args: [name],
       run,
@@ -74,7 +66,6 @@ class InterceptedNativePair {
     }
     return interceptor({
       ctor: this.ctor,
-      deps: this.ctor,
       methodName: "count",
       args: [],
       run,
