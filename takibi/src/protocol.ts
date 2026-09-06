@@ -9,7 +9,7 @@ import {
   type PublicBatchRequest,
   type WireRequest,
 } from "@takibi/takibi-protocol";
-import { BadRequestError } from "./errors";
+import { BadRequestError } from "@takibi/takibi-api";
 
 export {
   COLLECTION_READ_OPERATIONS,

@@ -1,4 +1,4 @@
-import { TakibiError } from "../errors";
+import { TakibiError } from "@takibi/takibi-api";
 
 /**
  * Walk enumerable own string keys of a plain object. Used to reject class

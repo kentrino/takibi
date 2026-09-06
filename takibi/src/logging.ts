@@ -1,5 +1,6 @@
 import { withSpan, type SpanContext, type SpanSpec } from "./tracing";
-import type { QueryExpr, StorageDriver, TakibiFailure } from "./types";
+import type { QueryExpr, TakibiFailure } from "@takibi/takibi-shared-types";
+import type { StorageDriver } from "./types";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 

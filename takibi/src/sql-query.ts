@@ -1,4 +1,9 @@
-import type { QueryExpr, QueryScalar, QueryStringOperator, QueryValueOperator } from "./types";
+import type {
+  QueryExpr,
+  QueryScalar,
+  QueryStringOperator,
+  QueryValueOperator,
+} from "@takibi/takibi-shared-types";
 
 export type SqlBinding = string | number | null;
 

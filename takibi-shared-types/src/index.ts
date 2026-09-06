@@ -171,3 +171,16 @@ export type TakibiFailure<TReasonCode extends string = never> =
 export type TakibiResult<T, TReasonCode extends string = never> =
   | { ok: true; data: T }
   | { ok: false; error: TakibiFailure<TReasonCode> };
+
+export type SnapshotRestoreReport = {
+  formatVersion: 1;
+  documentsRestored: number;
+  seedsInserted: number;
+  collections: Record<
+    string,
+    {
+      documentsRestored: number;
+      seedsInserted: number;
+    }
+  >;
+};

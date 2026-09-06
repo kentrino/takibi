@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { ForbiddenError, TakibiError } from "./errors";
+import { ForbiddenError, TakibiError } from "@takibi/takibi-api";
 import { SchemaValidationError } from "./schema";
 import type {
   PolicyReason,
@@ -7,7 +7,7 @@ import type {
   TakibiOperationFailure,
   TakibiResult,
   ValidationIssue,
-} from "./types";
+} from "@takibi/takibi-shared-types";
 
 /** Copy only JSON-safe message/path from Standard Schema issues. */
 export function normalizeValidationIssues(

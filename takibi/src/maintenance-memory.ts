@@ -1,4 +1,4 @@
-import { MaintenanceLockedError, SnapshotInvalidDocumentError } from "./errors";
+import { MaintenanceLockedError, SnapshotInvalidDocumentError } from "@takibi/takibi-api";
 import type {
   MaintenanceBackend,
   MaintenancePurpose,

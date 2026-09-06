@@ -1,32 +1,30 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { PolicyHelper } from "@takibi/takibi-policy";
-import type { Hono } from "hono";
 import type {
   ActionDefinitions,
   ActionNameConstraint,
   CollectionActionArgs,
+  CollectionDefinition,
   CollectionDefinitionInput,
+  CollectionIndexes,
+  CollectionUniqueConstraints,
+  CollectionsDef,
   DocumentActionArgs,
   DocumentActionBuilder,
+  DurableObjectCollectionsApi,
+  IndexDeclaration,
+  InferCollectionDoc,
   InvalidPublicKeys,
+  ReservedDocumentSchemaConstraint,
   ReservedPublicName,
   RootActionArgs,
   RootActionBuilder,
   ScopedActions,
-} from "../action";
+  UniqueConstraintDeclaration,
+} from "@takibi/takibi-api";
+import type { PolicyHelper } from "@takibi/takibi-policy";
+import type { Hono } from "hono";
 import type { LoggingOptions } from "../logging";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
-import type {
-  CollectionDefinition,
-  CollectionIndexes,
-  CollectionUniqueConstraints,
-  CollectionsDef,
-  DurableObjectCollectionsApi,
-  InferCollectionDoc,
-  IndexDeclaration,
-  ReservedDocumentSchemaConstraint,
-  UniqueConstraintDeclaration,
-} from "../types";
 
 export type ContextResolverInput<TInitial = Record<string, never>> = {
   request: Request;

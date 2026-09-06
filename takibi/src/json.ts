@@ -1,4 +1,4 @@
-import type { JsonValue } from "./types";
+import type { JsonValue } from "@takibi/takibi-shared-types";
 
 /** Nesting cap so validation fails cleanly instead of overflowing the isolate stack. */
 export const JSON_MAX_DEPTH = 64;

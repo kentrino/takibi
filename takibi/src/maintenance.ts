@@ -1,5 +1,9 @@
-import { MaintenanceLockedError, SnapshotInvalidDocumentError } from "./errors";
-import type { CollectionsDef, TrustedCollectionsApi } from "./types";
+import {
+  MaintenanceLockedError,
+  SnapshotInvalidDocumentError,
+  type CollectionsDef,
+  type TrustedCollectionsApi,
+} from "@takibi/takibi-api";
 
 export type MaintenancePurpose = "export" | "restore" | "reset";
 

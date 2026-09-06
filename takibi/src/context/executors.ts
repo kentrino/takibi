@@ -1,6 +1,6 @@
 import type { ActionRegistry } from "../action";
 import { executeAction } from "../action-executor";
-import { TakibiError } from "../errors";
+import { TakibiError } from "@takibi/takibi-api";
 import { executeOperation } from "../executor";
 import type { PublicRequest } from "../http";
 import { emitFailure, withLoggedSpan, type InternalLogger } from "../logging";
