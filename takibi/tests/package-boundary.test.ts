@@ -73,6 +73,7 @@ test("protocol packages keep a one-way dependency graph", () => {
   const core = readManifest(join(import.meta.dirname, "../package.json"));
   const protocol = readManifest(join(import.meta.dirname, "../../takibi-protocol/package.json"));
   const api = readManifest(join(import.meta.dirname, "../../takibi-api/package.json"));
+  const client = readManifest(join(import.meta.dirname, "../../takibi-client/package.json"));
   const policy = readManifest(join(import.meta.dirname, "../../takibi-policy/package.json"));
   const query = readManifest(join(import.meta.dirname, "../../takibi-query/package.json"));
   const sharedTypes = readManifest(
@@ -80,6 +81,7 @@ test("protocol packages keep a one-way dependency graph", () => {
   );
 
   expect(core.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/takibi-client"]).toBe("workspace:^");
   expect(core.dependencies?.["@takibi/takibi-policy"]).toBe("workspace:^");
   expect(core.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
   expect(core.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
@@ -88,6 +90,12 @@ test("protocol packages keep a one-way dependency graph", () => {
   expect(api.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
   expect(api.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
   expect(api.dependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
+  expect(client.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
+  expect(client.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
+  expect(client.dependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
   expect(policy.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
   expect(policy.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(policy.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
@@ -98,16 +106,19 @@ test("protocol packages keep a one-way dependency graph", () => {
   expect(query.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(query.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
   expect(query.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
   expect(protocol.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
   expect(protocol.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(protocol.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
   expect(protocol.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
   expect(protocol.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi-protocol"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
 });
 
 test("instrumentation exports the stable Takibi telemetry vocabulary", () => {

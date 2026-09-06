@@ -31,12 +31,7 @@ export type {
   RuntimeActionDefinition,
   ScopedActions,
 } from "./action";
-export type {
-  ClientOf,
-  InferHandlerActions,
-  InferHandlerCollections,
-  TakibiDefinitionCarrier,
-} from "./client-types";
+export type { TakibiDefinitionCarrier } from "./client-types";
 export {
   AlreadyExistsError,
   BadRequestError,
