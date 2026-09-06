@@ -55,14 +55,8 @@ export type DefineFactory<TCtor, M extends AnyMethod> = (
   helpers: DefineHelpers<TCtor, M>,
 ) => DefinedMethodSpec<TCtor, M>;
 
-type DefinedClass<T extends MethodMap, TCtor, TRuntimeCheck extends boolean> = {
+type DefinedClass<T extends MethodMap, TCtor> = {
   new: (ctor: TCtor) => ClassInstance<T, TCtor>;
-  $intercept: (
-    interceptors: Partial<InterceptMap<T, TCtor>>,
-  ) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
-  $replace: (
-    interceptors: Partial<InterceptMap<T, TCtor>>,
-  ) => ClassBuilder<T, TCtor, never, TRuntimeCheck>;
 };
 
 export type ClassBuilder<
@@ -75,7 +69,7 @@ export type ClassBuilder<
     name: K,
     spec: DefineFactory<TCtor, T[K]>,
   ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
-} & ([TRemaining] extends [never] ? DefinedClass<T, TCtor, TRuntimeCheck> : {});
+} & ([TRemaining] extends [never] ? DefinedClass<T, TCtor> : {});
 
 export type ClassFactory<T extends MethodMap> = {
   constructor: {
@@ -116,10 +110,10 @@ type RuntimeInterceptor = (context: {
   next: (...args: unknown[]) => unknown;
 }) => unknown;
 
-type RuntimeInterceptors = Record<string, RuntimeInterceptor>;
+type RuntimeInterceptTable = Map<string, RuntimeInterceptor>;
 
-function createInterceptTable(from?: RuntimeInterceptors): RuntimeInterceptors {
-  return Object.assign(Object.create(null), from) as RuntimeInterceptors;
+function createInterceptTable(from?: RuntimeInterceptTable): RuntimeInterceptTable {
+  return new Map(from);
 }
 
 function replayArgs(contextArgs: unknown[], override: unknown[]): unknown[] {
@@ -150,50 +144,39 @@ function composeInterceptor(
     });
 }
 
-function mergeInterceptors(target: RuntimeInterceptors, incoming: RuntimeInterceptors): void {
+function mergeInterceptors(target: RuntimeInterceptTable, incoming: object): void {
   for (const key of Object.keys(incoming)) {
-    const interceptor = incoming[key];
+    if (!Object.hasOwn(incoming, key)) {
+      continue;
+    }
+    const interceptor = (incoming as Record<string, unknown>)[key];
     if (typeof interceptor !== "function") {
       continue;
     }
-    target[key] = composeInterceptor(
-      interceptor,
-      Object.hasOwn(target, key) ? target[key] : undefined,
-    );
+    target.set(key, composeInterceptor(interceptor as RuntimeInterceptor, target.get(key)));
   }
 }
 
-function replaceInterceptTable(target: RuntimeInterceptors, incoming: RuntimeInterceptors): void {
-  for (const key of Object.keys(target)) {
-    delete target[key];
-  }
+function replaceInterceptTable(target: RuntimeInterceptTable, incoming: object): void {
+  target.clear();
   mergeInterceptors(target, incoming);
 }
 
 function createBuilder(
   options: ClassConstructorOptions,
   definitions: ReadonlyMap<string, RuntimeSpec>,
-  interceptors: RuntimeInterceptors,
 ) {
   return {
     define(name: string, spec: RuntimeDefineFactory) {
       const next = new Map(definitions);
       next.set(name, spec({ narrows: boundNarrows }));
-      return createBuilder(options, next, createInterceptTable(interceptors));
-    },
-    $intercept(nextInterceptors: RuntimeInterceptors) {
-      mergeInterceptors(interceptors, nextInterceptors);
-      return this;
-    },
-    $replace(nextInterceptors: RuntimeInterceptors) {
-      replaceInterceptTable(interceptors, nextInterceptors);
-      return this;
+      return createBuilder(options, next);
     },
     new(ctor: unknown) {
-      const instanceInterceptors = createInterceptTable(interceptors);
+      const instanceInterceptors = createInterceptTable();
       const instance = Object.create(null) as Record<string, (...args: unknown[]) => unknown> & {
-        $intercept: (nextInterceptors: RuntimeInterceptors) => void;
-        $replace: (nextInterceptors: RuntimeInterceptors) => void;
+        $intercept: (nextInterceptors: object) => void;
+        $replace: (nextInterceptors: object) => void;
       };
 
       for (const [name, spec] of definitions) {
@@ -209,10 +192,11 @@ function createBuilder(
 
         instance[name] = (...args: unknown[]) => {
           const run = (...methodArgs: unknown[]) => spec.run(deps, ...methodArgs);
-          if (!Object.hasOwn(instanceInterceptors, name)) {
+          const interceptor = instanceInterceptors.get(name);
+          if (interceptor === undefined) {
             return run(...args);
           }
-          return instanceInterceptors[name]({
+          return interceptor({
             ctor,
             deps,
             methodName: name,
@@ -237,10 +221,6 @@ function createBuilder(
 export function createClass<T extends MethodMap>(): ClassFactory<T> {
   return {
     constructor: ((options: ClassConstructorOptions) =>
-      createBuilder(
-        options,
-        new Map(),
-        Object.create(null) as RuntimeInterceptors,
-      )) as unknown as ClassFactory<T>["constructor"],
+      createBuilder(options, new Map())) as unknown as ClassFactory<T>["constructor"],
   };
 }
