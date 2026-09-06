@@ -913,8 +913,8 @@ reset, normal reads and writes fail with retryable `MAINTENANCE_LOCKED` status 5
 Takibi does not choose the object store, key, encryption, retention policy, or
 maintenance endpoint authorization. A full snapshot can contain password
 hashes and session tokens. See
-[`docs/spec/logical-snapshots.md`](./docs/spec/logical-snapshots.md) for the
-format, lease, compatibility, and atomicity contract.
+[`@takibi/takibi-snapshot` logical snapshot spec](../takibi-snapshot/docs/spec/logical-snapshots.md)
+for the format, lease, compatibility, and atomicity contract.
 
 Server-side policy-bound collections and trusted `$collections` expose
 `count`, which pages through the same query, index selection, and migration

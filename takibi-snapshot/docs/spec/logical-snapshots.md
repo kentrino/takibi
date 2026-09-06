@@ -14,6 +14,11 @@ These operations are absent from transaction-bound and action
 the Durable Object RPC method surface. A subclass that exposes them through
 HTTP or RPC must provide its own authorization.
 
+`@takibi/takibi-snapshot` owns the logical format, checksum, maintenance
+schema, and lease algorithms. `@takibi/takibi` keeps the typed document
+lifecycle adapter that validates restored documents and prepares current seeds
+until worker-runtime extraction.
+
 ## Format and transport
 
 Version 1 is LF-terminated NDJSON:
@@ -36,10 +41,10 @@ invalid order or metadata, missing or inconsistent trailers, unsupported
 collections or schema versions, and schema, index, or unique-constraint
 violations before changing live documents.
 
-Takibi owns only the logical format. Object storage, object names, upload
-completion, compression, encryption, retention, and deletion belong to the
-application. Snapshot data can include password hashes and session tokens and
-must not be logged.
+The snapshot package owns only the logical format. Object storage, object
+names, upload completion, compression, encryption, retention, and deletion
+belong to the application. Snapshot data can include password hashes and
+session tokens and must not be logged.
 
 ## Maintenance exclusion
 
@@ -75,8 +80,8 @@ outside this exclusion boundary.
 
 Restore writes incoming documents to
 `takibi_restore_staging_documents`. Unique-validation keys use the separate
-Takibi-owned `takibi_restore_staging_unique` table. Staging rows are scoped by
-owner token and never appear through collection APIs.
+snapshot-owned `takibi_restore_staging_unique` table. Staging rows are scoped
+by owner token and never appear through collection APIs.
 
 After complete format and document validation, one SQLite transaction deletes
 live rows from `takibi_documents`, copies staged rows with their original
@@ -99,3 +104,8 @@ application-owned SQL tables, KV values, or other Durable Object storage.
 
 The snapshot format version and Takibi's internal SQLite layout version are
 independent.
+
+This package owns all direct SQL and DDL for `takibi_maintenance_lease`,
+`takibi_restore_staging_documents`, and `takibi_restore_staging_unique`.
+Storage must not issue SQL against these private tables. Snapshot
+initialization must be invoked before maintenance operations.
