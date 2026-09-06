@@ -31,6 +31,30 @@ export type DefineSpec<TArg, TNarrowed, M extends AnyMethod> = {
   readonly run: (arg: TNarrowed, ...args: Parameters<M>) => ReturnType<M>;
 };
 
+export type DefineNarrowed<TArg, TNarrowed, M extends AnyMethod> = {
+  run(
+    run: (arg: TNarrowed, ...args: Parameters<M>) => ReturnType<M>,
+  ): DefineSpec<TArg, TNarrowed, M>;
+};
+
+export type BoundNarrows<TArg, M extends AnyMethod> = {
+  <TNarrowed>(apply: (value: TArg) => TNarrowed): DefineNarrowed<TArg, TNarrowed, M>;
+  <TNarrowed>(): DefineNarrowed<TArg, TNarrowed, M>;
+};
+
+export type DefineHelpers<TArg, M extends AnyMethod> = {
+  readonly narrows: BoundNarrows<TArg, M>;
+};
+
+export type DefinedMethodSpec<TArg, M extends AnyMethod> = {
+  readonly narrows: Narrows<TArg, unknown>;
+  readonly run: (arg: never, ...args: Parameters<M>) => ReturnType<M>;
+};
+
+export type DefineFactory<TArg, M extends AnyMethod> = (
+  helpers: DefineHelpers<TArg, M>,
+) => DefinedMethodSpec<TArg, M>;
+
 type DefinedClass<T extends MethodMap, TArg, TRuntimeCheck extends boolean> = {
   new: (arg: TArg) => ClassInstance<T, TArg>;
   registerHooks: (hooks: Partial<HookMap<T, TArg>>) => ClassBuilder<T, TArg, never, TRuntimeCheck>;
@@ -42,9 +66,9 @@ export type ClassBuilder<
   TRemaining extends keyof T,
   TRuntimeCheck extends boolean,
 > = {
-  define<K extends TRemaining, TNarrowed>(
+  define<K extends TRemaining>(
     name: K,
-    spec: DefineSpec<TArg, TNarrowed, T[K]>,
+    spec: DefineFactory<TArg, T[K]>,
   ): ClassBuilder<T, TArg, Exclude<TRemaining, K>, TRuntimeCheck>;
 } & ([TRemaining] extends [never] ? DefinedClass<T, TArg, TRuntimeCheck> : {});
 
@@ -64,6 +88,19 @@ type RuntimeSpec = {
   readonly narrows: Narrows<unknown, unknown>;
   readonly run: (arg: unknown, ...args: unknown[]) => unknown;
 };
+
+type RuntimeDefineFactory = (helpers: DefineHelpers<unknown, AnyMethod>) => RuntimeSpec;
+
+function boundNarrows<TArg, TNarrowed, M extends AnyMethod>(
+  apply?: (value: TArg) => TNarrowed,
+): DefineNarrowed<TArg, TNarrowed, M> {
+  const narrowed: Narrows<TArg, TNarrowed> = {
+    apply: apply ?? ((value) => value as unknown as TNarrowed),
+  };
+  return {
+    run: (run) => ({ narrows: narrowed, run }),
+  };
+}
 
 type RuntimeHook = (context: {
   constructorArg: unknown;
@@ -97,9 +134,9 @@ function createBuilder(
   hooks: RuntimeHooks,
 ) {
   return {
-    define(name: string, spec: RuntimeSpec) {
+    define(name: string, spec: RuntimeDefineFactory) {
       const next = new Map(definitions);
-      next.set(name, spec);
+      next.set(name, spec({ narrows: boundNarrows }));
       return createBuilder(options, next, { ...hooks });
     },
     registerHooks(nextHooks: RuntimeHooks) {

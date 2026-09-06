@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { createClass, TakibiClassError, narrows, type ClassInstance } from "../src/index";
+import { createClass, TakibiClassError, type ClassInstance } from "../src/index";
 
 type Foo = {
   bar: () => Promise<void>;
@@ -19,10 +19,9 @@ test("new is available only after every method is defined", () => {
   const incomplete = createClass<Foo>().constructor<ConstructorArg>({
     runtimeCheck: true,
   });
-  const defined = incomplete.define("bar", {
-    narrows: narrows<ConstructorArg, { name: string }>((arg) => ({ name: arg.name })),
-    run: async () => {},
-  });
+  const defined = incomplete.define("bar", ({ narrows }) =>
+    narrows<{ name: string }>((arg) => ({ name: arg.name })).run(async () => {}),
+  );
 
   expectTypeOf(incomplete).not.toHaveProperty("new");
   expectTypeOf(incomplete).not.toHaveProperty("registerHooks");
@@ -36,12 +35,15 @@ test("class registerHooks wraps matching methods", async () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define("bar", {
-      narrows: narrows<ConstructorArg, { name: string }>((arg) => ({ name: arg.name })),
-      run: async (arg) => {
+    .define("bar", ({ narrows }) =>
+      narrows<{ name: string }>((arg) => {
+        expectTypeOf(arg).toEqualTypeOf<ConstructorArg>();
+        return { name: arg.name };
+      }).run(async (arg) => {
+        expectTypeOf(arg).toEqualTypeOf<{ name: string }>();
         expect(arg).toEqual({ name: "takibi" });
-      },
-    });
+      }),
+    );
 
   defined.registerHooks({
     bar: ({ constructorArg, methodName, arg, run }) => {
@@ -58,19 +60,47 @@ test("class registerHooks wraps matching methods", async () => {
   expect(hooked).toBe(1);
 });
 
+test("narrows pick drops unused constructor fields for run", () => {
+  type Deps = {
+    a: string;
+    b: number;
+    c: boolean;
+  };
+
+  type Service = {
+    use: () => string;
+  };
+
+  const defined = createClass<Service>()
+    .constructor<Deps>({
+      runtimeCheck: true,
+    })
+    .define("use", ({ narrows }) =>
+      narrows(({ a, b, c }) => {
+        void c;
+        return { a, b };
+      }).run((arg) => {
+        expectTypeOf(arg).toEqualTypeOf<{ a: string; b: number }>();
+        expectTypeOf(arg).not.toHaveProperty("c");
+        expect(arg).toEqual({ a: "x", b: 1 });
+        return `${arg.a}:${arg.b}`;
+      }),
+    );
+
+  expect(defined.new({ a: "x", b: 1, c: true }).use()).toBe("x:1");
+});
+
 test("method arguments reach run and a single-argument hook", () => {
   const defined = createClass<Pair>()
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", {
-      narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-      run: (arg, name) => `${arg.prefix} ${name}`,
-    })
-    .define("count", {
-      narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-      run: (arg) => arg.prefix.length,
-    });
+    .define("greet", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+    )
+    .define("count", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+    );
 
   defined.registerHooks({
     greet: ({ constructorArg, methodName, arg, run }) => {
@@ -93,12 +123,11 @@ test("hook can skip run", async () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define("bar", {
-      narrows: narrows<ConstructorArg, ConstructorArg>((arg) => arg),
-      run: async () => {
+    .define("bar", ({ narrows }) =>
+      narrows<ConstructorArg>().run(async () => {
         ran += 1;
-      },
-    });
+      }),
+    );
 
   defined.registerHooks({
     bar: async () => {},
@@ -113,14 +142,12 @@ test("instance registerHooks replaces the hook table", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", {
-      narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-      run: (arg, name) => `${arg.prefix} ${name}`,
-    })
-    .define("count", {
-      narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-      run: (arg) => arg.prefix.length,
-    });
+    .define("greet", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+    )
+    .define("count", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+    );
 
   defined.registerHooks({
     greet: () => "class",
@@ -144,17 +171,16 @@ test("runtimeCheck wraps a failing narrows with the method name", () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define("bar", {
-      narrows: narrows<ConstructorArg, { name: string }>((arg) => {
+    .define("bar", ({ narrows }) =>
+      narrows<{ name: string }>((arg) => {
         if (typeof arg.name !== "string") {
           throw new Error("name is required");
         }
         return { name: arg.name };
-      }),
-      run: async (arg) => {
+      }).run(async (arg) => {
         void arg.name;
-      },
-    });
+      }),
+    );
 
   expect(() => defined.new({ name: undefined as unknown as string })).toThrowError(
     TakibiClassError,
@@ -168,30 +194,24 @@ test("define rejects leftover or unknown method names", () => {
   const incomplete = createClass<Pair>().constructor<{ prefix: string }>({
     runtimeCheck: false,
   });
-  const greet = incomplete.define("greet", {
-    narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-    run: (arg, name) => `${arg.prefix} ${name}`,
-  });
+  const greet = incomplete.define("greet", ({ narrows }) =>
+    narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+  );
   expectTypeOf(greet).not.toHaveProperty("new");
 
-  const defined = greet.define("count", {
-    narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-    run: (arg) => arg.prefix.length,
-  });
+  const defined = greet.define("count", ({ narrows }) =>
+    narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+  );
   expectTypeOf(defined).toHaveProperty("new");
   expectTypeOf(defined).toHaveProperty("registerHooks");
 
   // @ts-expect-error unknown method
-  incomplete.define("missing", {
-    narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-    run: () => undefined,
-  });
+  incomplete.define("missing", ({ narrows }) => narrows<{ prefix: string }>().run(() => undefined));
 
   // @ts-expect-error already defined
-  greet.define("greet", {
-    narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-    run: (arg: { prefix: string }, name: string) => `${arg.prefix} ${name}`,
-  });
+  greet.define("greet", ({ narrows }) =>
+    narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+  );
 });
 
 test("registerHooks accepts only a partial of the method surface", () => {
@@ -199,14 +219,12 @@ test("registerHooks accepts only a partial of the method surface", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", {
-      narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-      run: (arg, name) => `${arg.prefix} ${name}`,
-    })
-    .define("count", {
-      narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-      run: (arg) => arg.prefix.length,
-    });
+    .define("greet", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+    )
+    .define("count", ({ narrows }) =>
+      narrows<{ prefix: string }>().run((arg) => arg.prefix.length),
+    );
 
   defined.registerHooks({
     greet: ({ arg, run }) => run(arg),
