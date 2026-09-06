@@ -1,14 +1,14 @@
 {
-  "name": "@takibi/takibi",
+  "name": "@takibi/takibi-storage",
   "version": "0.0.0",
-  "description": "Typed multi-tenant collection store on Cloudflare Durable Objects.",
+  "description": "Durable Object SQLite storage engine for Takibi.",
   "keywords": [
-    "cloudflare",
     "durable-objects",
-    "multi-tenant",
-    "typescript"
+    "sqlite",
+    "storage",
+    "takibi"
   ],
-  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi",
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi-storage",
   "bugs": {
     "url": "https://github.com/diaree/takibi/issues"
   },
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/diaree/takibi.git",
-    "directory": "packages/takibi"
+    "directory": "packages/takibi-storage"
   },
   "files": [
     "dist",
@@ -27,9 +27,6 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./client": "./src/client-entry.ts",
-    "./instrumentation": "./src/instrumentation.ts",
-    "./testing": "./src/testing.server.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -38,18 +35,6 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs"
       },
-      "./client": {
-        "types": "./dist/client.d.mts",
-        "import": "./dist/client.mjs"
-      },
-      "./instrumentation": {
-        "types": "./dist/instrumentation.d.mts",
-        "import": "./dist/instrumentation.mjs"
-      },
-      "./testing": {
-        "types": "./dist/testing.d.mts",
-        "import": "./dist/testing.mjs"
-      },
       "./package.json": "./package.json"
     },
     "access": "public"
@@ -57,22 +42,15 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "test": "vp test && vp run test:workers && vp run test:root-compat",
+    "test": "vp test && vp run test:workers",
     "test:workers": "vp test --config vite.workers.config.ts",
-    "test:root-compat": "vp test --config vite.root-import.workers.config.ts",
     "check": "vp check"
   },
   "dependencies": {
-    "@noble/hashes": "catalog:",
-    "@standard-schema/spec": "catalog:",
     "@takibi/takibi-api": "workspace:^",
-    "@takibi/takibi-client": "workspace:^",
-    "@takibi/takibi-policy": "workspace:^",
     "@takibi/takibi-protocol": "workspace:^",
     "@takibi/takibi-query": "workspace:^",
-    "@takibi/takibi-shared-types": "workspace:^",
-    "@takibi/takibi-storage": "workspace:^",
-    "hono": "catalog:"
+    "@takibi/takibi-shared-types": "workspace:^"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",

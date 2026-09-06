@@ -1,8 +1,11 @@
+import {
+  compileIndexRegistry,
+  createDurableObjectStorage,
+  reconcileCollectionIndexes,
+} from "@takibi/takibi-storage";
 import { seedCollections } from "./durable-object";
-import { compileIndexRegistry } from "./indexes";
-import { reconcileCollectionIndexes } from "./index-reconcile";
+import { initializeMaintenanceLayout } from "./maintenance";
 import { createMigratingStorage } from "./migrations";
-import { createDurableObjectStorage } from "./storage";
 import { createInProcessExecutor } from "./context/executors";
 import { applyStorageLogging } from "./context/runtime";
 import {
@@ -34,8 +37,10 @@ const createSqliteExecutor: TestingExecutorFactory = ({
 }) => {
   const storage = createSqliteDurableObjectStorage();
   const indexRegistry = compileIndexRegistry(collections);
+  const rawStorage = createDurableObjectStorage(storage, indexRegistry);
+  initializeMaintenanceLayout(storage.sql);
   const driver = applyStorageLogging(
-    createMigratingStorage(collections, createDurableObjectStorage(storage, indexRegistry), logger),
+    createMigratingStorage(collections, rawStorage, logger),
     logger,
   );
   const ready = (async () => {
@@ -44,7 +49,6 @@ const createSqliteExecutor: TestingExecutorFactory = ({
       collections,
       storage: driver,
       registry: indexRegistry,
-      logger,
     });
     await seedCollections(collections, driver, logger);
   })();

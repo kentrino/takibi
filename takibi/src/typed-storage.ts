@@ -21,7 +21,7 @@ import {
 import { asTakibiResult } from "./result";
 import { SchemaValidationError, parseSchema } from "./schema";
 import { RESERVED_DOCUMENT_DATA_KEYS, TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "./types";
-import type { StorageDriver } from "./types";
+import type { StorageDriver } from "@takibi/takibi-storage";
 import { generateUlid } from "./ulid";
 
 const RESERVED_METADATA_KEYS = RESERVED_DOCUMENT_DATA_KEYS;

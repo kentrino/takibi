@@ -49,7 +49,7 @@ import {
   type SpanContext,
   type TakibiTracer,
 } from "../tracing";
-import { assertCollectionIndexes } from "../indexes";
+import { assertCollectionIndexes } from "@takibi/takibi-storage";
 import { assertCollectionUniqueConstraints } from "../unique";
 import { createStubExecutor } from "./executors";
 import { ownStringEntries } from "./own-entries";

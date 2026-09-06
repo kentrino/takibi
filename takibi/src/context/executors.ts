@@ -20,7 +20,8 @@ import {
   type SpanKind,
   type TakibiTracer,
 } from "../tracing";
-import type { CollectionsDef, StorageDriver } from "../types";
+import type { StorageDriver } from "@takibi/takibi-storage";
+import type { CollectionsDef } from "../types";
 import { debugInvocationFields, invocationFields, toWireFailure } from "./runtime";
 import type { ContextStubResolver } from "./types";
 

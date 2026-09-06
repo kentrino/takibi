@@ -17,17 +17,23 @@ import type { InternalCollectionsOptions } from "./context/types";
 import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
 import type { PublicRequest } from "./http";
 import { withLoggedSpan, emitFailure, type InternalLogger } from "./logging";
-import { compileIndexRegistry } from "./indexes";
-import { reconcileCollectionIndexes } from "./index-reconcile";
+import {
+  compileIndexRegistry,
+  createDurableObjectStorage,
+  reconcileCollectionIndexes,
+  type StorageDriver,
+} from "@takibi/takibi-storage";
 import { createMigratingStorage } from "./migrations";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { parseWireRequest, type WireResponse } from "./protocol";
-import { createDurableObjectStorage } from "./storage";
-import { createMaintenanceGatedCollections, MaintenanceController } from "./maintenance";
+import {
+  createMaintenanceGatedCollections,
+  initializeMaintenanceLayout,
+  MaintenanceController,
+} from "./maintenance";
 import { createDurableObjectCollectionsApi } from "./snapshot";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
 import { storageAdd } from "./typed-storage";
-import type { StorageDriver } from "./types";
 
 type DurableObjectClass<TCollections> = new (
   state: DurableObjectState,
@@ -55,13 +61,11 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
       this.#services = createServices ? createServices({ env }) : {};
       this.#state = state;
       const registry = compileIndexRegistry(collections);
+      const rawStorage = createDurableObjectStorage(state.storage, registry);
+      initializeMaintenanceLayout(state.storage.sql);
       this.#maintenance = new MaintenanceController(state.storage);
       this.#driver = applyStorageLogging(
-        createMigratingStorage(
-          collections,
-          createDurableObjectStorage(state.storage, registry),
-          logger,
-        ),
+        createMigratingStorage(collections, rawStorage, logger),
         logger,
       );
       this.#ready = state.blockConcurrencyWhile(async () => {
@@ -71,7 +75,6 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
           collections,
           storage: this.#driver,
           registry,
-          logger,
         });
         await seedCollections(collections, this.#driver, logger);
       });

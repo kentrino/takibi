@@ -47,6 +47,47 @@ const LEASE_KEY = "global";
 const LEASE_TTL_SECONDS = 30;
 const DRAIN_TIMEOUT_MS = 5_000;
 
+export function initializeMaintenanceLayout(sql: SqlStorage): void {
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS takibi_maintenance_lease (
+      lease_key TEXT PRIMARY KEY CHECK (lease_key = 'global'),
+      owner_token TEXT NOT NULL CHECK (owner_token <> ''),
+      purpose TEXT NOT NULL CHECK (purpose IN ('export', 'restore', 'reset')),
+      acquired_at REAL NOT NULL,
+      expires_at REAL NOT NULL
+    ) WITHOUT ROWID`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS takibi_restore_staging_documents (
+      owner_token TEXT NOT NULL,
+      collection TEXT NOT NULL,
+      id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      revision REAL NOT NULL CHECK (
+        revision >= 1
+        AND (
+          revision >= 9007199254740992
+          OR revision = CAST(revision AS INTEGER)
+        )
+      ),
+      data TEXT NOT NULL CHECK (json_valid(data) AND json_type(data) = 'object'),
+      PRIMARY KEY (owner_token, collection, id)
+    ) WITHOUT ROWID`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS takibi_restore_staging_unique (
+      owner_token TEXT NOT NULL,
+      collection TEXT NOT NULL,
+      constraint_name TEXT NOT NULL,
+      value_key TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      PRIMARY KEY (owner_token, collection, constraint_name, value_key)
+    ) WITHOUT ROWID`,
+  );
+}
+
 export interface MaintenanceBackend {
   cleanupAbandoned(): Promise<void>;
   acquire(
@@ -208,6 +249,7 @@ export class SqliteMaintenanceBackend {
   readonly #storage: DurableObjectStorage;
 
   constructor(storage: DurableObjectStorage) {
+    initializeMaintenanceLayout(storage.sql);
     this.#storage = storage;
   }
 
