@@ -4,7 +4,7 @@ import { decodePublicHttp } from "../src/http";
 import { decodeWireRequest, isWireResponse } from "../src/protocol";
 import { normalizeValidationIssues } from "../src/result";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import type { StoredDocument } from "../src/types";
 
 const context = { tenantId: "tenant-a" };

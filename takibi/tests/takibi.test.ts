@@ -15,7 +15,7 @@ import {
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import { MaintenanceController } from "../src/maintenance";
 import { createDurableObjectStorage } from "../src/storage";
 

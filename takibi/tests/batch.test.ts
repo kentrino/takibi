@@ -14,7 +14,7 @@ import { TAKIBI_ATTR } from "../src/otel-helper";
 import type { LogEvent, Logger } from "../src/index";
 import type { WireRequest } from "../src/protocol";
 import { createRecordingTracer } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 
 const Post = z.object({ title: z.string(), secret: z.boolean().default(false) });
 

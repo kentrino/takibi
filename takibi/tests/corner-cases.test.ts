@@ -4,7 +4,7 @@ import { NotFoundError, TakibiError } from "../src/errors";
 import { executeOperation } from "../src/executor";
 import { fullAccess, none, write } from "../src/index";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import { prepareSetDoc, storageAdd, storageSet, storageUpdate } from "../src/typed-storage";
 import type { StoredDocument, WithMetadata } from "../src/types";
 

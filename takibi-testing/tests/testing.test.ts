@@ -1,14 +1,9 @@
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "@takibi/takibi-client";
+import { fullAccess } from "@takibi/takibi-policy";
+import { createTakibi } from "@takibi/takibi-worker-runtime";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi, fullAccess } from "../src/index";
-
-test("withSqliteTestBackend rejects a non-Takibi handler", () => {
-  expect(() => withSqliteTestBackend({} as never)).toThrow(
-    new TypeError("Expected a Takibi handler created by createTakibi()"),
-  );
-});
+import { withSqliteTestBackend } from "../src";
 
 test("SQLite test handlers inherit definitions without sharing storage", async () => {
   const context = createTakibi()({
@@ -104,4 +99,35 @@ test("SQLite test handlers isolate concurrent requests from rolled-back atomic a
     data: { title: "preserved" },
   });
   handler[Symbol.dispose]();
+});
+
+test("withSqliteTestBackend rejects a non-Takibi handler", () => {
+  expect(() => withSqliteTestBackend({} as never)).toThrow(
+    new TypeError("Expected a Takibi handler created by createTakibi()"),
+  );
+});
+
+test("disposing one handler does not close another handler's storage", async () => {
+  const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+      },
+    })
+    .actions({});
+  const first = withSqliteTestBackend(production);
+  const second = withSqliteTestBackend(production);
+  const secondClient = createClient<typeof production>("https://takibi.test", {
+    fetch: (input, init) => second.request(input, init),
+  });
+  await secondClient.posts.add({ title: "kept" }, { id: "kept" });
+  first[Symbol.dispose]();
+  first[Symbol.dispose]();
+  await expect(secondClient.posts.get("kept")).resolves.toMatchObject({
+    ok: true,
+    data: { title: "kept" },
+  });
+  second[Symbol.dispose]();
 });

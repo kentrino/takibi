@@ -1,9 +1,9 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "@takibi/takibi-api";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
-import { createSqliteDurableObjectStorage } from "../../takibi/src/testing/sqlite-storage.server";
+import { createClient } from "@takibi/takibi-client";
+import { withSqliteTestBackend } from "../../takibi-testing/src/index";
+import { createSqliteDurableObjectStorage } from "../../takibi-testing/src/sqlite-storage.server";
 import * as Policy from "@takibi/takibi-policy";
 import { fullAccess, grant, none, type AccessContext } from "@takibi/takibi-policy";
 import { createTakibi, type TakibiHandler } from "../src";

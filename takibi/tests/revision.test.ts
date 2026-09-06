@@ -7,7 +7,7 @@ import { nextDocumentRevision } from "../src/revision";
 import { createDurableObjectStorage } from "../src/storage";
 import { storageSet } from "../src/typed-storage";
 import type { StoredDocument } from "../src/types";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 
 type AppCtx = { tenantId: string };
 

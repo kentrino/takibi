@@ -14,19 +14,26 @@ type PackageManifest = {
 
 const packageDir = join(import.meta.dirname, "..");
 const packagesDir = join(packageDir, "..");
+const extractedPackages = [
+  "takibi-shared-types",
+  "takibi-protocol",
+  "takibi-query",
+  "takibi-policy",
+  "takibi-api",
+  "takibi-client",
+  "takibi-storage",
+  "takibi-snapshot",
+  "takibi-worker-runtime",
+  "takibi-testing",
+] as const;
 const allowedWorkspace = new Set([
   "@takibi/takibi-api",
-  "@takibi/takibi-policy",
-  "@takibi/takibi-protocol",
-  "@takibi/takibi-query",
-  "@takibi/takibi-shared-types",
-  "@takibi/takibi-snapshot",
   "@takibi/takibi-storage",
+  "@takibi/takibi-worker-runtime",
 ]);
 const forbiddenSpecifiers = [
   "@takibi/takibi",
   "@takibi/takibi-client",
-  "@takibi/takibi-testing",
   "@takibi/takibi-execution-model",
 ];
 
@@ -65,6 +72,14 @@ function workspacePackageDir(name: string): string {
   return join(packagesDir, name.replace("@takibi/", ""));
 }
 
+function parseWorkspaceSpecifier(specifier: string): { name: string; subpath: string } | undefined {
+  if (!specifier.startsWith("@takibi/")) return undefined;
+  const rest = specifier.slice("@takibi/".length);
+  const slash = rest.indexOf("/");
+  if (slash === -1) return { name: `@takibi/${rest}`, subpath: "." };
+  return { name: `@takibi/${rest.slice(0, slash)}`, subpath: `./${rest.slice(slash + 1)}` };
+}
+
 function resolveWorkspaceEntry(name: string, subpath = "."): string {
   const manifest = readManifest(join(workspacePackageDir(name), "package.json"));
   const entry = manifest.exports?.[subpath];
@@ -91,10 +106,11 @@ function walkGraph(entryFile: string): Set<string> {
         continue;
       }
       visited.add(specifier);
-      if (allowedWorkspace.has(specifier) || specifier === "@takibi/takibi-worker-runtime") {
+      const workspace = parseWorkspaceSpecifier(specifier);
+      if (!workspace) continue;
+      if (allowedWorkspace.has(workspace.name) || workspace.name === "@takibi/takibi-testing") {
         try {
-          const subpath = specifier === "@takibi/takibi-worker-runtime" ? "." : ".";
-          queue.push(resolveWorkspaceEntry(specifier, subpath));
+          queue.push(resolveWorkspaceEntry(workspace.name, workspace.subpath));
         } catch {
           // Missing workspace package is reported by the specifier set.
         }
@@ -104,86 +120,101 @@ function walkGraph(entryFile: string): Set<string> {
   return visited;
 }
 
-test("worker-runtime package keeps a one-way dependency graph", () => {
-  const runtime = readManifest(join(packageDir, "package.json"));
+test("testing package keeps a one-way dependency graph", () => {
+  const testing = readManifest(join(packageDir, "package.json"));
   const api = readManifest(join(packagesDir, "takibi-api/package.json"));
   const client = readManifest(join(packagesDir, "takibi-client/package.json"));
-  const policy = readManifest(join(packagesDir, "takibi-policy/package.json"));
-  const query = readManifest(join(packagesDir, "takibi-query/package.json"));
-  const protocol = readManifest(join(packagesDir, "takibi-protocol/package.json"));
   const storage = readManifest(join(packagesDir, "takibi-storage/package.json"));
   const snapshot = readManifest(join(packagesDir, "takibi-snapshot/package.json"));
-  const sharedTypes = readManifest(join(packagesDir, "takibi-shared-types/package.json"));
+  const workerRuntime = readManifest(join(packagesDir, "takibi-worker-runtime/package.json"));
 
-  expect(runtime.name).toBe("@takibi/takibi-worker-runtime");
-  expect(runtime.exports?.["."]).toBe("./src/index.ts");
-  expect(runtime.exports?.["./instrumentation"]).toBe("./src/instrumentation.ts");
-  expect(runtime.exports?.["./testing-bridge"]).toBe("./src/testing-bridge.server.ts");
-  expect(runtime.files).toEqual(["dist", "README.md", "LICENSE"]);
-  expect(runtime.publishConfig?.exports).toMatchObject({
+  expect(testing.name).toBe("@takibi/takibi-testing");
+  expect(testing.exports?.["."]).toBe("./src/index.ts");
+  expect(testing.exports?.["./sqlite-storage"]).toBe("./src/sqlite-storage.server.ts");
+  expect(testing.files).toEqual(["dist", "README.md", "LICENSE"]);
+  expect(testing.publishConfig?.exports).toMatchObject({
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
-    "./instrumentation": {
-      types: "./dist/instrumentation.d.mts",
-      import: "./dist/instrumentation.mjs",
-    },
-    "./testing-bridge": {
-      types: "./dist/testing-bridge.d.mts",
-      import: "./dist/testing-bridge.mjs",
+    "./sqlite-storage": {
+      types: "./dist/sqlite-storage.d.mts",
+      import: "./dist/sqlite-storage.mjs",
     },
   });
-  expect(runtime.dependencies).toEqual({
-    "@standard-schema/spec": "catalog:",
+  expect(testing.dependencies).toEqual({
     "@takibi/takibi-api": "workspace:^",
-    "@takibi/takibi-policy": "workspace:^",
-    "@takibi/takibi-protocol": "workspace:^",
-    "@takibi/takibi-query": "workspace:^",
-    "@takibi/takibi-shared-types": "workspace:^",
-    "@takibi/takibi-snapshot": "workspace:^",
     "@takibi/takibi-storage": "workspace:^",
-    hono: "catalog:",
+    "@takibi/takibi-worker-runtime": "workspace:^",
   });
-  expect(runtime.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(runtime.devDependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(runtime.devDependencies?.["@takibi/takibi-testing"]).toBeUndefined();
-  expect(runtime.devDependencies?.["@takibi/takibi-client"]).toBe("workspace:*");
-  expect(api.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(client.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(snapshot.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
+  expect(testing.dependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(testing.devDependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(testing.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
+  expect(testing.dependencies?.["@takibi/takibi-execution-model"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
+  expect(snapshot.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
+  expect(workerRuntime.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
+  expect(workerRuntime.dependencies?.["@takibi/takibi"]).toBeUndefined();
+  expect(workerRuntime.devDependencies?.["@takibi/takibi"]).toBeUndefined();
 });
 
-test("worker-runtime source stays off client, testing, execution-model, and Node modules", () => {
+test("no extracted package has a production dependency on Takibi or execution-model", () => {
+  for (const directory of extractedPackages) {
+    const manifest = readManifest(join(packagesDir, `${directory}/package.json`));
+    expect(manifest.dependencies?.["@takibi/takibi"]).toBeUndefined();
+    expect(manifest.dependencies?.["@takibi/takibi-execution-model"]).toBeUndefined();
+    expect(manifest.devDependencies?.["@takibi/takibi-execution-model"]).toBeUndefined();
+  }
+});
+
+test("testing source consumes the runtime bridge and owns node:sqlite", () => {
   const reachable = walkGraph(join(packageDir, "src/index.ts"));
 
+  expect(reachable.has(resolveWorkspaceEntry("@takibi/takibi-worker-runtime"))).toBe(true);
+  expect(
+    reachable.has(resolveWorkspaceEntry("@takibi/takibi-worker-runtime", "./testing-bridge")),
+  ).toBe(true);
   expect(reachable.has(resolveWorkspaceEntry("@takibi/takibi-api"))).toBe(true);
-  expect(reachable.has(resolveWorkspaceEntry("@takibi/takibi-policy"))).toBe(true);
   expect(reachable.has(resolveWorkspaceEntry("@takibi/takibi-storage"))).toBe(true);
-  expect(reachable.has(resolveWorkspaceEntry("@takibi/takibi-snapshot"))).toBe(true);
+  expect(reachable.has("node:sqlite")).toBe(true);
   for (const specifier of forbiddenSpecifiers) {
     expect(reachable.has(specifier)).toBe(false);
   }
-  expect([...reachable].filter((value) => value.startsWith("node:"))).toEqual([]);
 });
 
-test("published runtime declarations do not import Node or higher-layer modules", () => {
+test("node:sqlite stays off Takibi production entries and worker-runtime", () => {
+  const takibiSrc = join(packagesDir, "takibi/src");
+  const runtimeSrc = join(packagesDir, "takibi-worker-runtime/src");
+  const clientSrc = join(packagesDir, "takibi-client/src");
+  const entries = [
+    join(takibiSrc, "index.ts"),
+    join(takibiSrc, "client-entry.ts"),
+    join(takibiSrc, "instrumentation.ts"),
+    join(runtimeSrc, "index.ts"),
+    join(clientSrc, "index.ts"),
+  ];
+
+  for (const entry of entries) {
+    const reachable = walkGraph(entry);
+    expect(reachable.has("node:sqlite"), entry).toBe(false);
+    expect(reachable.has("@takibi/takibi-testing"), entry).toBe(false);
+  }
+});
+
+test("published testing declarations stay off Takibi and execution-model", () => {
   const dtsPath = join(packageDir, "dist/index.d.mts");
   const jsPath = join(packageDir, "dist/index.mjs");
-  if (!existsSync(dtsPath) || !existsSync(jsPath)) return;
+  const sqliteJsPath = join(packageDir, "dist/sqlite-storage.mjs");
+  if (!existsSync(dtsPath) || !existsSync(jsPath) || !existsSync(sqliteJsPath)) return;
 
   const dts = readFileSync(dtsPath, "utf8");
   const js = readFileSync(jsPath, "utf8");
+  const sqliteJs = readFileSync(sqliteJsPath, "utf8");
   expect(dts).not.toMatch(/@takibi\/takibi(?:\/|"|'|$)/);
   expect(js).not.toMatch(/@takibi\/takibi(?:\/|"|'|$)/);
-  expect(dts).not.toContain("node:");
-  expect(js).not.toContain("node:");
   expect(dts).not.toContain("@takibi/takibi-client");
   expect(js).not.toContain("@takibi/takibi-client");
-  expect(dts).not.toContain("@takibi/takibi-testing");
-  expect(js).not.toContain("@takibi/takibi-testing");
   expect(dts).not.toContain("@takibi/takibi-execution-model");
   expect(js).not.toContain("@takibi/takibi-execution-model");
+  expect(js).toContain("@takibi/takibi-worker-runtime/testing-bridge");
+  expect(sqliteJs).toContain("node:sqlite");
 });
