@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { withSqliteTestBackend } from "../../takibi-testing/src/index";
 import { fullAccess } from "@takibi/takibi-policy";
 import { createPrettyConsoleLogger, createTakibi } from "../src";
 import type { LogEvent, Logger } from "../src";

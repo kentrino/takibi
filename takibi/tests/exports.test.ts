@@ -560,14 +560,16 @@ test("production entry graphs cannot reach the Node-only testing backend", () =>
   for (const [name, entry] of productionEntries) {
     const files = walkValueImports(join(srcDir, entry));
     expect(files.has(testingEntry), `${name} reaches testing.server.ts`).toBe(false);
+    expect(files.has("@takibi/takibi-testing"), `${name} reaches takibi-testing`).toBe(false);
     expect(files.has("node:sqlite"), `${name} reaches node:sqlite`).toBe(false);
   }
 });
 
-test("testing entry intentionally owns the Node SQLite import graph", () => {
+test("testing entry reaches Node SQLite only through the testing package", () => {
   const files = walkValueImports(join(srcDir, "testing.server.ts"));
 
   expect(files.has(normalize(join(srcDir, "testing.server.ts")))).toBe(true);
-  expect(files.has(normalize(join(srcDir, "testing/sqlite-storage.server.ts")))).toBe(true);
+  expect(files.has("@takibi/takibi-testing")).toBe(true);
   expect(files.has("node:sqlite")).toBe(true);
+  expect(existsSync(join(srcDir, "testing/sqlite-storage.server.ts"))).toBe(false);
 });

@@ -191,7 +191,8 @@ const testHandler = baseHandler.with({ memory: true, resolve, services });
 const testHandler = withSqliteTestBackend(baseHandler, { resolve, services });
 ```
 
-Import `withSqliteTestBackend` from `@takibi/takibi/testing`. Keep pure
+Import `withSqliteTestBackend` from `@takibi/takibi/testing`. That entry
+re-exports `@takibi/takibi-testing`. Keep pure
 query, policy, and protocol tests storage-free; the helper is for tests that
 need storage-backed behavior.
 

@@ -1,8 +1,8 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
-import { createSqliteDurableObjectStorage } from "../../takibi/src/testing/sqlite-storage.server";
+import { createClient } from "@takibi/takibi-client";
+import { withSqliteTestBackend } from "../../takibi-testing/src/index";
+import { createSqliteDurableObjectStorage } from "../../takibi-testing/src/sqlite-storage.server";
 import { createDurableObjectStorage } from "@takibi/takibi-storage";
 import { fullAccess } from "@takibi/takibi-policy";
 import { createTakibi, nextDocumentRevision, storageSet } from "../src";

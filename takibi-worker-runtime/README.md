@@ -13,6 +13,7 @@ depends on `@takibi/takibi-api`, `@takibi/takibi-policy`,
 
 It does not own browser `createClient`, Node SQLite test adapters, query AST
 construction, policy grant composition, collection/action builders, or the
-SQLite engine. Testing registers an in-process executor through
+SQLite engine. Node SQLite test adapters live in `@takibi/takibi-testing`.
+Testing registers an in-process executor through
 `@takibi/takibi-worker-runtime/testing-bridge`; that subpath is not
 exported from this package's root or from `@takibi/takibi`.
