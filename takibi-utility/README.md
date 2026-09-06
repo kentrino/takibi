@@ -15,7 +15,7 @@ the defined class or on an instance. Instance registration replaces the hook
 table completely.
 
 ```ts
-import { createClass, narrows } from "@takibi/takibi-utility";
+import { createClass } from "@takibi/takibi-utility";
 
 type Pair = {
   greet: (name: string) => string;
@@ -26,14 +26,10 @@ const defined = createClass<Pair>()
   .constructor<{ prefix: string }>({
     runtimeCheck: true,
   })
-  .define("greet", {
-    narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-    run: (arg, name) => `${arg.prefix} ${name}`,
-  })
-  .define("count", {
-    narrows: narrows<{ prefix: string }, { prefix: string }>((arg) => arg),
-    run: (arg) => arg.prefix.length,
-  });
+  .define("greet", ({ narrows }) =>
+    narrows<{ prefix: string }>().run((arg, name) => `${arg.prefix} ${name}`),
+  )
+  .define("count", ({ narrows }) => narrows<{ prefix: string }>().run((arg) => arg.prefix.length));
 
 defined.registerHooks({
   greet: ({ constructorArg, methodName, arg, run }) => {
@@ -48,6 +44,16 @@ instance.registerHooks({
   count: ({ run }) => run(),
 });
 ```
+
+Compare construction and method calls with a native class:
+
+```sh
+vp run bench:create-class
+```
+
+`define` receives a `narrows` already bound to the constructor argument, so
+only the narrowed type is written. `narrows<To>()` is an identity cast;
+`narrows<To>(fn)` transforms at construction.
 
 `narrows` always runs at construction so `run` receives the narrowed argument.
 `runtimeCheck` wraps a failing `narrows` with the method name. A hook receives
