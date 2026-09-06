@@ -42,11 +42,12 @@ type PairInterceptors = {
 };
 
 class InterceptedNativePair {
-  #interceptors: Partial<PairInterceptors> = {};
+  #interceptors: Partial<PairInterceptors>;
 
-  constructor(readonly ctor: Ctor) {}
-
-  $intercept(interceptors: Partial<PairInterceptors>): void {
+  constructor(
+    readonly ctor: Ctor,
+    interceptors: Partial<PairInterceptors>,
+  ) {
     this.#interceptors = interceptors;
   }
 
@@ -108,10 +109,11 @@ const definedWithInterceptors = createClass<Pair>()
   .define<Ctor>("count", (deps) => deps.prefix.length);
 const nativeInstance = new NativePair(ctor);
 const createClassInstance = defined.new(ctor);
-const interceptedNativeInstance = new InterceptedNativePair(ctor);
-interceptedNativeInstance.$intercept(passthroughInterceptors);
-const interceptedCreateClassInstance = definedWithInterceptors.new(ctor);
-interceptedCreateClassInstance.$intercept(passthroughInterceptors);
+const interceptedNativeInstance = new InterceptedNativePair(ctor, passthroughInterceptors);
+const interceptedCreateClassInstance = definedWithInterceptors.newWithInterceptors(
+  ctor,
+  passthroughInterceptors,
+);
 
 let sink = 0;
 
@@ -153,7 +155,7 @@ describe("call with passthrough interceptors", () => {
     callPair(interceptedNativeInstance);
   });
 
-  bench("createClass $intercept", () => {
+  bench("createClass newWithInterceptors", () => {
     callPair(interceptedCreateClassInstance);
   });
 });
