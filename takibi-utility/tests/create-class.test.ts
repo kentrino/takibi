@@ -23,8 +23,10 @@ test("new is available only after every method is defined", () => {
   const incomplete = createClass<Foo>().constructor<ConstructorArg>({
     runtimeCheck: true,
   });
-  const defined = incomplete.define("bar", ({ narrows }) =>
-    narrows<{ name: string }>((ctor) => ({ name: ctor.name })).run(async () => {}),
+  const defined = incomplete.define<{ name: string }>(
+    "bar",
+    (ctor) => ({ name: ctor.name }),
+    async () => {},
   );
 
   expectTypeOf(incomplete).not.toHaveProperty("new");
@@ -42,14 +44,16 @@ test("instance $intercept wraps matching methods", async () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define("bar", ({ narrows }) =>
-      narrows<{ name: string }>((ctor) => {
+    .define<{ name: string }>(
+      "bar",
+      (ctor) => {
         expectTypeOf(ctor).toEqualTypeOf<ConstructorArg>();
         return { name: ctor.name };
-      }).run(async (deps) => {
+      },
+      async (deps) => {
         expectTypeOf(deps).toEqualTypeOf<{ name: string }>();
         expect(deps).toEqual({ name: "takibi" });
-      }),
+      },
     );
 
   const instance = defined.new({ name: "takibi", unused: 1 });
@@ -83,16 +87,18 @@ test("narrows pick drops unused constructor fields for run", () => {
     .constructor<Deps>({
       runtimeCheck: true,
     })
-    .define("use", ({ narrows }) =>
-      narrows(({ a, b, c }) => {
+    .define(
+      "use",
+      ({ a, b, c }) => {
         void c;
         return { a, b };
-      }).run((deps) => {
+      },
+      (deps) => {
         expectTypeOf(deps).toEqualTypeOf<{ a: string; b: number }>();
         expectTypeOf(deps).not.toHaveProperty("c");
         expect(deps).toEqual({ a: "x", b: 1 });
         return `${deps.a}:${deps.b}`;
-      }),
+      },
     );
 
   expect(defined.new({ a: "x", b: 1, c: true }).use()).toBe("x:1");
@@ -103,12 +109,11 @@ test("method arguments reach run and a single-argument hook", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
-    )
-    .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-    );
+    .define<{ prefix: string }>("greet", (deps, name) => {
+      expectTypeOf(deps).toEqualTypeOf<{ prefix: string }>();
+      return `${deps.prefix} ${name}`;
+    })
+    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
   const instance = defined.new({ prefix: "hi" });
   instance.$intercept({
@@ -130,9 +135,7 @@ test("hook replays multi-argument methods with args", () => {
     .constructor<Record<string, never>>({
       runtimeCheck: true,
     })
-    .define("add", ({ narrows }) =>
-      narrows<Record<string, never>>().run((_deps, left, right) => left + right),
-    );
+    .define<Record<string, never>>("add", (_deps, left, right) => left + right);
 
   const instance = defined.new({});
   instance.$intercept({
@@ -148,11 +151,9 @@ test("hook can skip run", async () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define("bar", ({ narrows }) =>
-      narrows<ConstructorArg>().run(async () => {
-        ran += 1;
-      }),
-    );
+    .define<ConstructorArg>("bar", async () => {
+      ran += 1;
+    });
 
   const instance = defined.new({ name: "takibi" });
   instance.$intercept({
@@ -169,12 +170,8 @@ test("$intercept merges and wraps the previous hook via next", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
-    )
-    .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-    );
+    .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
+    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
   const instance = defined.new({ prefix: "hi" });
   instance.$intercept({
@@ -206,12 +203,8 @@ test("$replace replaces the hook table", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
-    )
-    .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-    );
+    .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
+    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
   const instance = defined.new({ prefix: "hi" });
   instance.$intercept({
@@ -234,15 +227,17 @@ test("runtimeCheck wraps a failing narrows with the method name", () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define("bar", ({ narrows }) =>
-      narrows<{ name: string }>((ctor) => {
+    .define<{ name: string }>(
+      "bar",
+      (ctor) => {
         if (typeof ctor.name !== "string") {
           throw new Error("name is required");
         }
         return { name: ctor.name };
-      }).run(async (deps) => {
+      },
+      async (deps) => {
         void deps.name;
-      }),
+      },
     );
 
   expect(() => defined.new({ name: undefined as unknown as string })).toThrowError(
@@ -257,25 +252,22 @@ test("define rejects leftover or unknown method names", () => {
   const incomplete = createClass<Pair>().constructor<{ prefix: string }>({
     runtimeCheck: false,
   });
-  const greet = incomplete.define("greet", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
+  const greet = incomplete.define<{ prefix: string }>(
+    "greet",
+    (deps, name) => `${deps.prefix} ${name}`,
   );
   expectTypeOf(greet).not.toHaveProperty("new");
 
-  const defined = greet.define("count", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-  );
+  const defined = greet.define<{ prefix: string }>("count", (deps) => deps.prefix.length);
   expectTypeOf(defined).toHaveProperty("new");
   expectTypeOf(defined).not.toHaveProperty("$intercept");
   expectTypeOf(defined).not.toHaveProperty("$replace");
 
   // @ts-expect-error unknown method
-  incomplete.define("missing", ({ narrows }) => narrows<{ prefix: string }>().run(() => undefined));
+  incomplete.define("missing", () => undefined);
 
   // @ts-expect-error already defined
-  greet.define("greet", ({ narrows }) =>
-    narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-  );
+  greet.define("greet", (deps) => deps.prefix.length);
 });
 
 test("prototype method names are not treated as interceptors", () => {
@@ -289,15 +281,9 @@ test("prototype method names are not treated as interceptors", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("constructor", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => `${deps.prefix} ctor`),
-    )
-    .define("toString", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => `${deps.prefix} string`),
-    )
-    .define("valueOf", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-    );
+    .define<{ prefix: string }>("constructor", (deps) => `${deps.prefix} ctor`)
+    .define<{ prefix: string }>("toString", (deps) => `${deps.prefix} string`)
+    .define<{ prefix: string }>("valueOf", (deps) => deps.prefix.length);
 
   const instance = defined.new({ prefix: "hi" });
   expect(instance.constructor()).toBe("hi ctor");
@@ -310,12 +296,8 @@ test("$intercept accepts only a partial of the method surface", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define("greet", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps, name) => `${deps.prefix} ${name}`),
-    )
-    .define("count", ({ narrows }) =>
-      narrows<{ prefix: string }>().run((deps) => deps.prefix.length),
-    );
+    .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
+    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
 
   const instance = defined.new({ prefix: "hi" });
   instance.$intercept({
