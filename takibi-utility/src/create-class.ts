@@ -10,7 +10,6 @@ export type ClassConstructorOptions<TRuntimeCheck extends boolean = boolean> = {
 
 export type InterceptContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
   readonly ctor: TCtor;
-  readonly deps: unknown;
   readonly methodName: K;
   readonly args: Parameters<M>;
   readonly run: (...args: Parameters<M>) => ReturnType<M>;
@@ -102,7 +101,6 @@ type RuntimeSpec = {
 
 type RuntimeInterceptor = (context: {
   ctor: unknown;
-  deps: unknown;
   methodName: PropertyKey;
   args: unknown[];
   run: (...args: unknown[]) => unknown;
@@ -133,7 +131,6 @@ function composeInterceptor(
         }
         return inner({
           ctor: context.ctor,
-          deps: context.deps,
           methodName: context.methodName,
           args,
           run: context.run,
@@ -188,7 +185,6 @@ function createInstance(
       }
       return interceptor({
         ctor,
-        deps,
         methodName: name,
         args,
         run,
