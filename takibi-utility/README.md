@@ -58,3 +58,26 @@ transforms at construction.
 
 The apply function (or identity) always runs at construction so `run`
 receives `deps`. `runtimeCheck` wraps a failing apply with the method name.
+
+## `withTracing`
+
+Wrap one async method of an existing instance. The returned object has the
+same call surface; the original instance is unchanged. `method` must already
+return a `Promise`. `run` is the injected span runner so this package does
+not depend on a tracing backend.
+
+```ts
+import { withTracing } from "@takibi/takibi-utility";
+
+const adapters = withTracing(instance, {
+  method: "resolveContext",
+  span: "takibi.resolve",
+  kind: "internal",
+  attributes: ({ decoded }) =>
+    decoded.kind === "batch" ? { "takibi.batch.size": decoded.items.length } : undefined,
+  run: (spec, fn) => withSpan(spec, fn),
+});
+```
+
+`run` must call `fn` once and return its result or rejection. Tracing setup
+failures belong in `run`; they must not replace the method result.
