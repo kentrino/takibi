@@ -100,6 +100,32 @@ function capturingLogger(events: LogEvent[]): InternalLogger {
   };
 }
 
+test("WorkerCallAdapter #private fields still work when resolveContext is traced", async () => {
+  const recording = createRecordingTracer();
+  const response = await serveDecodedCall({
+    request: new Request("https://takibi.test/$:echo", { method: "POST" }),
+    initial: { tenantId: "tenant-a" },
+    decode: async () => actionRequest("echo"),
+    resolve: () => ({ tenantId: "tenant-a" }),
+    execute: async (input) => {
+      expect(input.initial).toEqual({ tenantId: "tenant-a" });
+      expect(input.ctx).toEqual({ tenantId: "tenant-a" });
+      expect(input.ctx).not.toHaveProperty("resolveSpan");
+      return okResponse({ tenantId: input.ctx.tenantId });
+    },
+    logger: {
+      emit() {
+        throw new Error("logger failed");
+      },
+    },
+    options: { [internalTracerKey]: recording.tracer },
+  });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, data: { tenantId: "tenant-a" } });
+  expect(recording.spans.some((span) => span.name === TAKIBI_SPAN.resolve)).toBe(true);
+});
+
 test("decoded failure logging does not depend on onDecoded succeeding", async () => {
   const events: LogEvent[] = [];
   const logger: InternalLogger = {

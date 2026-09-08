@@ -14,7 +14,12 @@ export {
 export { jsonResponseFromStatus, statusOfResult } from "./status-response";
 export { executePlan, runInvocation } from "./flow";
 export { InvocationState } from "./state";
-export { runCall, TakibiContractConfigurationError, TakibiContractStateError } from "./request";
+export {
+  Call,
+  runCall,
+  TakibiContractConfigurationError,
+  TakibiContractStateError,
+} from "./request";
 export { RUNTIME_ADAPTER_GRAPH, type RuntimeAdapterGraph } from "./graph";
 export { CALL_BATCH_ADAPTER_KEYS, CALL_SINGLE_ADAPTER_KEYS, INVOCATION_ADAPTER_KEYS } from "./type";
 export type {
@@ -25,6 +30,9 @@ export type {
   BoundRunInvocation,
   CallAdapterMap,
   CallAdapters,
+  CallFailureInput,
+  CallFailureStage,
+  CallTerminalEvent,
   CallTypeMap,
   LocalCallRequest,
   LocalCallTypeMap,

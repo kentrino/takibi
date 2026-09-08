@@ -467,17 +467,61 @@ export type InvocationAdapters<T extends InternalInvocationTypeMap> = Adapters<
   InvocationAdapterKeys
 >;
 
+export type CallFailureStage = "decode" | "resolve" | "dispatch" | "response";
+
+export type CallFailureInput<TRequestLike, TDecoded, TContext> = Readonly<{
+  stage: CallFailureStage;
+  error: unknown;
+  request: TRequestLike;
+  decoded?: TDecoded;
+  context?: TContext;
+}>;
+
+export type CallTerminalEvent<TResponseObject, TRequestLike = unknown, TDecoded = unknown> =
+  | Readonly<{
+      outcome: "responded";
+      request: TRequestLike;
+      decoded?: TDecoded;
+      response: TResponseObject;
+    }>
+  | Readonly<{
+      outcome: "rejected";
+      request: TRequestLike;
+      decoded?: TDecoded;
+      error: unknown;
+    }>;
+
 /**
- * Call-level lifecycle adapters shared by single and batch calls.
+ * Envelope Call adapters. `dispatch` returns the envelope result; `toResponse`
+ * is optional when that result is already the caller-facing response.
  */
-export type CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject> = {
+export type CallAdapters<
+  TRequestLike,
+  TDecoded,
+  TContext,
+  TResponseObject,
+  TDispatched = TResponseObject,
+> = {
   decode: (request: TRequestLike) => MaybePromise<TDecoded>;
   resolveContext: (input: { request: TRequestLike; decoded: TDecoded }) => MaybePromise<TContext>;
   dispatch: (input: {
     request: TRequestLike;
     decoded: TDecoded;
     context: TContext;
+  }) => MaybePromise<TDispatched>;
+  toResponse?: (input: {
+    request: TRequestLike;
+    decoded: TDecoded;
+    context: TContext;
+    dispatched: TDispatched;
   }) => MaybePromise<TResponseObject>;
+  toFailureResponse?: (
+    failure: CallFailureInput<TRequestLike, TDecoded, TContext>,
+  ) => MaybePromise<TResponseObject>;
+  onDecoded?: (input: { request: TRequestLike; decoded: TDecoded }) => MaybePromise<void>;
+  onTerminal?: (
+    event: CallTerminalEvent<TResponseObject, TRequestLike, TDecoded>,
+  ) => MaybePromise<void>;
 };
 
 export type SingleCallAdapters<
@@ -564,10 +608,16 @@ export type RunBatchCall = <
   request: TRequestLike,
 ) => Promise<TResponseObject>;
 
-export type RunCall = <TRequestLike, TDecoded, TContext, TResponseObject>(
-  request: TRequestLike,
-  adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject>,
-) => Promise<TResponseObject>;
+export type RunCall = {
+  <TRequestLike, TDecoded, TContext, TResponseObject>(
+    request: TRequestLike,
+    adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject>,
+  ): Promise<TResponseObject>;
+  <TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>(
+    request: TRequestLike,
+    adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>,
+  ): Promise<TResponseObject>;
+};
 
 export type RunInvocation = <T extends InternalInvocationTypeMap>(
   adapters: InvocationAdapters<T>,

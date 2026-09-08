@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { runCall } from "../src/index";
+import { Call, runCall } from "../src/index";
 
 type DecodedRequest = { readonly kind: "action"; readonly name: string };
 type ResolvedContext = { readonly tenantId: string };
@@ -71,6 +71,160 @@ test.each(["decode", "resolveContext", "dispatch"] as const)(
     );
   },
 );
+
+test("decode success is observed before resolve and decode failure is not started", async () => {
+  const events: string[] = [];
+  await runCall("request", {
+    decode() {
+      events.push("decode");
+      return { name: "register" };
+    },
+    onDecoded() {
+      events.push("started");
+    },
+    resolveContext() {
+      events.push("resolve");
+      return { tenantId: "tenant-1" };
+    },
+    dispatch() {
+      events.push("dispatch");
+      return { status: 200 };
+    },
+    onTerminal(event) {
+      events.push(event.outcome);
+    },
+  });
+  expect(events).toEqual(["decode", "started", "resolve", "dispatch", "responded"]);
+
+  const failedEvents: string[] = [];
+  await expect(
+    runCall("request", {
+      decode() {
+        failedEvents.push("decode");
+        throw new Error("DECODE");
+      },
+      onDecoded() {
+        failedEvents.push("started");
+      },
+      resolveContext() {
+        failedEvents.push("resolve");
+        return { tenantId: "tenant-1" };
+      },
+      dispatch() {
+        failedEvents.push("dispatch");
+        return { status: 200 };
+      },
+    }),
+  ).rejects.toThrow("DECODE");
+  expect(failedEvents).toEqual(["decode"]);
+});
+
+test("toFailureResponse converts once and a converter failure rejects", async () => {
+  const converted = await runCall("request", {
+    decode: () => {
+      throw new Error("DECODE");
+    },
+    resolveContext: () => ({ tenantId: "tenant-1" }),
+    dispatch: () => ({ status: 200 }),
+    toFailureResponse(failure) {
+      expect(failure.stage).toBe("decode");
+      expect(failure.decoded).toBeUndefined();
+      return { status: 400 };
+    },
+  });
+  expect(converted).toEqual({ status: 400 });
+
+  await expect(
+    runCall("request", {
+      decode: () => ({ name: "register" }),
+      resolveContext: () => {
+        throw new Error("RESOLVE");
+      },
+      dispatch: () => ({ status: 200 }),
+      toFailureResponse() {
+        throw new Error("CONVERTER");
+      },
+    }),
+  ).rejects.toThrow("CONVERTER");
+});
+
+test("observer failures do not replace the Call result", async () => {
+  const response = await runCall("request", {
+    decode: () => ({ name: "register" }),
+    onDecoded() {
+      throw new Error("started observer failed");
+    },
+    resolveContext: () => ({ tenantId: "tenant-1" }),
+    dispatch: () => ({ status: 200 }),
+    onTerminal() {
+      throw new Error("terminal observer failed");
+    },
+  });
+  expect(response).toEqual({ status: 200 });
+});
+
+test("decoded reaches failure and terminal even when onDecoded throws", async () => {
+  const decoded = { name: "register" };
+  let failureDecoded: unknown;
+  let terminalDecoded: unknown;
+  let terminalRequest: unknown;
+
+  const converted = await runCall("request", {
+    decode: () => decoded,
+    onDecoded() {
+      throw new Error("started observer failed");
+    },
+    resolveContext: () => {
+      throw new Error("RESOLVE");
+    },
+    dispatch: () => ({ status: 200 }),
+    toFailureResponse(failure) {
+      failureDecoded = failure.decoded;
+      expect(failure.request).toBe("request");
+      return { status: 400 };
+    },
+    onTerminal(event) {
+      expect(event.outcome).toBe("responded");
+      if (event.outcome === "responded") {
+        terminalDecoded = event.decoded;
+        terminalRequest = event.request;
+      }
+    },
+  });
+
+  expect(converted).toEqual({ status: 400 });
+  expect(failureDecoded).toBe(decoded);
+  expect(terminalDecoded).toBe(decoded);
+  expect(terminalRequest).toBe("request");
+});
+
+test("Call.run uses this.resolveContext so a subclass or withTracing wrapper is observed", async () => {
+  const events: string[] = [];
+  class ProbeCall extends Call<string, { name: string }, { tenantId: string }, { status: number }> {
+    override async resolveContext(input: {
+      request: string;
+      decoded: { name: string };
+    }): Promise<{ tenantId: string }> {
+      events.push("override");
+      return super.resolveContext(input);
+    }
+  }
+
+  const response = await new ProbeCall({
+    decode: () => ({ name: "register" }),
+    resolveContext() {
+      events.push("adapter");
+      return { tenantId: "tenant-1" };
+    },
+    dispatch() {
+      events.push("dispatch");
+      return { status: 200 };
+    },
+  }).run("request");
+
+  expect(events).toEqual(["override", "adapter", "dispatch"]);
+  expect(response).toEqual({ status: 200 });
+});
 
 test("undefined values pass through without request sentinels", async () => {
   const response = await runCall("request", {
