@@ -164,7 +164,7 @@ export async function resolveCollection<TCtx extends object>(args: {
   policy: PolicySurface;
 }): Promise<ResolvedCollection<TCtx>> {
   const { collections, storage, ctx, req, logger, policy } = args;
-  const def = collections[req.collection] as CollectionDefinition | undefined;
+  const def = collections[req.collection];
   if (!def) {
     throw new NotFoundError(`Unknown collection: ${req.collection}`);
   }
