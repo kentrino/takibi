@@ -41,6 +41,30 @@ export { createPolicyCollections, createTrustedCollections, executeOperation } f
 export type { ExecuteRequest } from "./executor";
 export { executeAction } from "./action-executor";
 export type { ActionInvocation } from "./action-executor";
+export { type TakibiAdapterMap } from "./adapter-map";
+export {
+  resolveLocalAdapterMap,
+  resolveLocalExecution,
+  type LocalExecution,
+  type TakibiRuntimeAdapterMap,
+} from "./invocation-execution";
+export type {
+  TakibiActionWork,
+  TakibiApplyWork,
+  TakibiCollectionWork,
+  TakibiFullWork,
+  TakibiInvocationOperation,
+  TakibiInvocationTypeMap,
+  TakibiNoneWork,
+  TakibiPrepared,
+  TakibiPublicInvocation,
+  TakibiWireInvocation,
+} from "./invocation-type-map";
+export {
+  createBoundInvocationAdapters,
+  getTakibiRawInput,
+  toTakibiInvocation,
+} from "./invocation-adapters";
 export {
   COLLECTION_READ_OPERATIONS,
   decodeBatchItems,
@@ -98,6 +122,8 @@ export { generateUlid, isUlid, resetUlidStateForTests } from "./ulid";
 export { assertJsonObject, assertJsonValue, JSON_MAX_DEPTH } from "./json";
 export type { JsonValidationOptions } from "./json";
 export { asTakibiResult, normalizeValidationIssues, toTakibiFailure } from "./result";
+export { otel } from "./otel";
+export type { OtelMethodSpec, OtelSpec } from "./otel";
 export {
   emitFailure,
   loggedStorage,

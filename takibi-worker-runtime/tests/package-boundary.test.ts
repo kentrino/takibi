@@ -22,6 +22,8 @@ const allowedWorkspace = new Set([
   "@takibi/takibi-shared-types",
   "@takibi/takibi-snapshot",
   "@takibi/takibi-storage",
+  "@takibi/takibi-utility",
+  "@takibi/takibi-worker-runtime-contract",
 ]);
 const forbiddenSpecifiers = [
   "@takibi/takibi",
@@ -140,7 +142,10 @@ test("worker-runtime package keeps a one-way dependency graph", () => {
     "@takibi/takibi-shared-types": "workspace:^",
     "@takibi/takibi-snapshot": "workspace:^",
     "@takibi/takibi-storage": "workspace:^",
+    "@takibi/takibi-utility": "workspace:^",
+    "@takibi/takibi-worker-runtime-contract": "workspace:^",
     hono: "catalog:",
+    tatenuki: "catalog:",
   });
   expect(runtime.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(runtime.devDependencies?.["@takibi/takibi"]).toBeUndefined();

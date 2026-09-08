@@ -12,6 +12,7 @@ import {
 } from "@takibi/takibi-api";
 import { createPolicyHelper } from "@takibi/takibi-policy";
 import { Hono } from "hono";
+import { jsonResponseFromStatus, runCall } from "@takibi/takibi-worker-runtime-contract";
 import {
   assertSerializableContext,
   errorResponse,
@@ -47,7 +48,6 @@ import {
   resolveTracer,
   withSpan,
   type SpanContext,
-  type TakibiTracer,
 } from "../tracing";
 import { assertCollectionIndexes } from "@takibi/takibi-storage";
 import { assertCollectionUniqueConstraints } from "../unique";
@@ -203,40 +203,6 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   });
   const execute = testingExecutor?.execute ?? createStubExecutor(resolveStub, logger);
 
-  const run = async (
-    request: Request,
-    initial: unknown,
-    invocation: PublicRequest,
-    tracer: TakibiTracer | undefined,
-  ): Promise<Response> => {
-    try {
-      let resolveSpan: SpanContext | undefined;
-      const batchSize = invocation.kind === "batch" ? invocation.items.length : undefined;
-      const ctx = await withLoggedSpan(
-        logger,
-        {
-          name: TAKIBI_SPAN.resolve,
-          kind: "internal",
-          ...(batchSize === undefined ? {} : { attributes: batchSpanAttributes(batchSize) }),
-        },
-        {
-          event: "takibi.resolve",
-          ...(batchSize === undefined ? {} : { batchSize }),
-        },
-        async () => {
-          resolveSpan = activeSpanContext();
-          const resolved = await resolve({ request, context: initial as TInitial });
-          assertSerializableContext(resolved);
-          return resolved;
-        },
-      );
-      const json = await execute({ request, initial, ctx, invocation, tracer, resolveSpan });
-      return Response.json(json, { status: json.ok ? 200 : json.error.status });
-    } catch (err) {
-      return errorResponse(err, logger, invocation, request);
-    }
-  };
-
   const serveDecoded = async (
     request: Request,
     initial: unknown,
@@ -250,15 +216,58 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
         let invocation: PublicRequest | undefined;
         let response: Response;
         try {
-          invocation = await decode();
-          logger?.emit({
-            level: "info",
-            event: "takibi.request",
-            message: "started",
-            ...http,
-            ...invocationFields(invocation),
+          let resolveSpan: SpanContext | undefined;
+          response = await runCall(request, {
+            async decode() {
+              const decoded = await decode();
+              invocation = decoded;
+              logger?.emit({
+                level: "info",
+                event: "takibi.request",
+                message: "started",
+                ...http,
+                ...invocationFields(decoded),
+              });
+              return decoded;
+            },
+            async resolveContext({ request: resolvedRequest, decoded }) {
+              const batchSize = decoded.kind === "batch" ? decoded.items.length : undefined;
+              return withLoggedSpan(
+                logger,
+                {
+                  name: TAKIBI_SPAN.resolve,
+                  kind: "internal",
+                  ...(batchSize === undefined
+                    ? {}
+                    : { attributes: batchSpanAttributes(batchSize) }),
+                },
+                {
+                  event: "takibi.resolve",
+                  ...(batchSize === undefined ? {} : { batchSize }),
+                },
+                async () => {
+                  resolveSpan = activeSpanContext();
+                  const context = await resolve({
+                    request: resolvedRequest,
+                    context: initial as TInitial,
+                  });
+                  assertSerializableContext(context);
+                  return context;
+                },
+              );
+            },
+            async dispatch({ request: dispatchedRequest, decoded: decodedInvocation, context }) {
+              const json = await execute({
+                request: dispatchedRequest,
+                initial,
+                ctx: context,
+                invocation: decodedInvocation,
+                tracer,
+                resolveSpan,
+              });
+              return jsonResponseFromStatus(json, Response);
+            },
           });
-          response = await run(request, initial, invocation, tracer);
         } catch (err) {
           response = errorResponse(err, logger, invocation, request);
         }

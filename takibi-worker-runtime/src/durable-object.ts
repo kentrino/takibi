@@ -5,18 +5,12 @@ import {
   type CollectionsDef,
   type DurableObjectCollectionsApi,
 } from "@takibi/takibi-api";
-import { executeAction, type ActionInvocation } from "./action-executor";
-import {
-  applyStorageLogging,
-  debugInvocationFields,
-  errorResponse,
-  invocationFields,
-  toWireFailure,
-} from "./context/runtime";
+import { applyStorageLogging, errorResponse } from "./context/runtime";
 import type { InternalCollectionsOptions } from "./context/types";
-import { createTrustedCollections, executeOperation, type ExecuteRequest } from "./executor";
+import { createTrustedCollections } from "./executor";
 import type { PublicRequest } from "./http";
-import { withLoggedSpan, emitFailure, type InternalLogger } from "./logging";
+import { resolveLocalExecution } from "./invocation-execution";
+import type { InternalLogger } from "./logging";
 import {
   createMaintenanceGatedCollections,
   initializeMaintenanceLayout,
@@ -29,8 +23,7 @@ import {
   type StorageDriver,
 } from "@takibi/takibi-storage";
 import { createMigratingStorage } from "./migrations";
-import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
-import { parseWireRequest, type WireResponse } from "./protocol";
+import { parseWireRequest } from "./protocol";
 import { createDurableObjectCollectionsApi } from "./snapshot";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
 import { storageAdd } from "./typed-storage";
@@ -102,72 +95,25 @@ export function createDurableObjectClass<TCollections extends CollectionsDef>(
           let invocation: PublicRequest | undefined;
           try {
             const body = parseWireRequest(await request.text());
-            if (body.kind === "batch") {
-              invocation = { kind: "batch", items: body.items };
-              assertTenantMatchesDurableObjectName(this.#state.id.name, body.context);
-              await this.#ready;
-              return this.#maintenance.runNormal(async () => {
-                const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-                const results: WireResponse[] = [];
-                for (const item of body.items) {
-                  try {
-                    const data = await withLoggedSpan(
-                      logger,
-                      {
-                        name: TAKIBI_SPAN.executor,
-                        kind: "server",
-                        attributes: invocationSpanAttributes(item),
-                      },
-                      { event: "takibi.executor", ...debugInvocationFields(item) },
-                      () => executeOperation(collections, driver, body.context, item, logger),
-                      extracted?.span,
-                    );
-                    results.push({ ok: true, data });
-                  } catch (error) {
-                    const wire = toWireFailure(error);
-                    emitFailure(logger, wire.error, invocationFields(item));
-                    results.push(wire);
-                  }
-                }
-                return Response.json({ ok: true, data: results } satisfies WireResponse);
-              });
-            }
-            const { context, ...decodedInvocation } = body;
-            invocation = decodedInvocation;
+            const { context, ...decoded } = body;
+            invocation = decoded;
             assertTenantMatchesDurableObjectName(this.#state.id.name, context);
             await this.#ready;
-            const data = await this.#maintenance.runNormal(async () => {
-              const driver = tracer ? tracedStorage(this.#driver) : this.#driver;
-              return withLoggedSpan(
+            return await this.#maintenance.runNormal(async () => {
+              const local = await resolveLocalExecution({
+                collections,
+                registry,
                 logger,
-                {
-                  name: TAKIBI_SPAN.executor,
-                  kind: "server",
-                  attributes: invocationSpanAttributes(decodedInvocation),
-                },
-                { event: "takibi.executor", ...debugInvocationFields(decodedInvocation) },
-                () =>
-                  decodedInvocation.kind === "action"
-                    ? executeAction(
-                        registry,
-                        collections,
-                        driver,
-                        context,
-                        decodedInvocation as ActionInvocation,
-                        logger,
-                        this.#services,
-                      )
-                    : executeOperation(
-                        collections,
-                        driver,
-                        context,
-                        decodedInvocation as ExecuteRequest,
-                        logger,
-                      ),
-                extracted?.span,
-              );
+                services: this.#services,
+                storage: tracer ? tracedStorage(this.#driver) : this.#driver,
+                spanKind: "server",
+                parentSpan: extracted?.span,
+                request,
+              });
+              return decoded.kind === "batch"
+                ? local.executeBatchHttp(context, decoded.items)
+                : local.executeHttp(context, decoded);
             });
-            return Response.json({ ok: true, data } satisfies WireResponse);
           } catch (err) {
             return errorResponse(err, logger, invocation, request);
           }
