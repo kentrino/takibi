@@ -257,14 +257,14 @@ function withCurrentVersion(
 function readStoredVersion(document: StoredDocument): number {
   const value = document[TAKIBI_VERSION_KEY];
   if (value === undefined) return 0;
-  if (!Number.isInteger(value) || (value as number) < 0) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new TakibiError(
       "MIGRATION_VERSION",
       "Stored document has an invalid migration version",
       500,
     );
   }
-  return value as number;
+  return value;
 }
 
 function domainData(document: StoredDocument): Record<string, unknown> {
