@@ -66,7 +66,10 @@
     "@takibi/takibi-shared-types": "workspace:^",
     "@takibi/takibi-snapshot": "workspace:^",
     "@takibi/takibi-storage": "workspace:^",
-    "hono": "catalog:"
+    "@takibi/takibi-utility": "workspace:^",
+    "@takibi/takibi-worker-runtime-contract": "workspace:^",
+    "hono": "catalog:",
+    "tatenuki": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
