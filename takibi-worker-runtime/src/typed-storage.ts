@@ -114,19 +114,25 @@ export async function prepareAddDoc(
 }
 
 /** CREATE-only put: rejects when `doc.id` already exists. */
+export async function persistAddDoc(
+  storage: StorageDriver,
+  collection: string,
+  doc: WithMetadata<Record<string, unknown>>,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  const existing = await storage.get(collection, doc.id);
+  if (existing) {
+    throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
+  }
+  await storage.put(collection, doc);
+  return doc;
+}
+
 export async function commitAddDoc(
   storage: StorageDriver,
   collection: string,
   doc: WithMetadata<Record<string, unknown>>,
 ): Promise<WithMetadata<Record<string, unknown>>> {
-  return storage.transaction(async (tx) => {
-    const existing = await tx.get(collection, doc.id);
-    if (existing) {
-      throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
-    }
-    await tx.put(collection, doc);
-    return doc;
-  });
+  return storage.transaction((tx) => persistAddDoc(tx, collection, doc));
 }
 
 /** Build the document that would be stored for `set`, without put. */

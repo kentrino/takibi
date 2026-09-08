@@ -1,28 +1,19 @@
-import type { ActionRegistry } from "@takibi/takibi-api";
-import { executeAction } from "../action-executor";
+import type { ActionRegistry, CollectionsDef } from "@takibi/takibi-api";
 import { TakibiError } from "@takibi/takibi-api";
-import { executeOperation } from "../executor";
 import type { PublicRequest } from "../http";
-import { emitFailure, withLoggedSpan, type InternalLogger } from "../logging";
+import { resolveLocalExecution } from "../invocation-execution";
+import { withLoggedSpan, type InternalLogger } from "../logging";
 import { batchSpanAttributes, invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import {
   encodeWireRequest,
   isBatchWireResponse,
   isWireResponse,
-  type CollectionReadRequest,
   type WireRequest,
   type WireResponse,
 } from "../protocol";
-import {
-  injectTraceparent,
-  tracedStorage,
-  type SpanContext,
-  type SpanKind,
-  type TakibiTracer,
-} from "../tracing";
+import { injectTraceparent, tracedStorage, type SpanContext, type TakibiTracer } from "../tracing";
 import type { StorageDriver } from "@takibi/takibi-storage";
-import type { CollectionsDef } from "@takibi/takibi-api";
-import { debugInvocationFields, invocationFields, toWireFailure } from "./runtime";
+import { debugInvocationFields } from "./runtime";
 import type { ContextStubResolver } from "./types";
 
 export type ExecutorInput = {
@@ -50,35 +41,22 @@ export function createInProcessExecutor(
   driver: StorageDriver,
   ready: Promise<void>,
 ): Executor {
-  return async ({ ctx, invocation, tracer, resolveSpan }) => {
+  return async ({ request, ctx, invocation, tracer, resolveSpan }) => {
     await ready;
-    const storage = tracer ? tracedStorage(driver) : driver;
-    if (invocation.kind === "batch") {
-      return executeBatchReads({
-        collections,
-        storage,
-        ctx,
-        items: invocation.items,
-        logger,
-        resolveSpan,
-        spanKind: "internal",
-      });
-    }
-    const data = await withLoggedSpan(
+    const local = await resolveLocalExecution({
+      collections,
+      registry,
       logger,
-      {
-        name: TAKIBI_SPAN.executor,
-        kind: "internal",
-        attributes: invocationSpanAttributes(invocation),
-      },
-      { event: "takibi.executor", ...debugInvocationFields(invocation) },
-      () =>
-        invocation.kind === "action"
-          ? executeAction(registry, collections, storage, ctx, invocation, logger, services)
-          : executeOperation(collections, storage, ctx, invocation, logger),
-      resolveSpan,
-    );
-    return { ok: true, data };
+      services,
+      storage: tracer ? tracedStorage(driver) : driver,
+      spanKind: "internal",
+      parentSpan: resolveSpan,
+      request,
+    });
+    if (invocation.kind === "batch") {
+      return local.executeBatch(ctx, invocation.items);
+    }
+    return local.execute(ctx, invocation);
   };
 }
 
@@ -154,51 +132,4 @@ export function createStubExecutor<TInitial>(
       resolveSpan,
     );
   };
-}
-
-async function executeBatchReads(args: {
-  collections: CollectionsDef<object>;
-  storage: StorageDriver;
-  ctx: Record<string, unknown>;
-  items: CollectionReadRequest[];
-  logger: InternalLogger | undefined;
-  resolveSpan: SpanContext | undefined;
-  spanKind: SpanKind;
-}): Promise<WireResponse> {
-  const results: WireResponse[] = [];
-  for (const item of args.items) {
-    results.push(await executeReadItem(args, item));
-  }
-  return { ok: true, data: results };
-}
-
-async function executeReadItem(
-  args: {
-    collections: CollectionsDef<object>;
-    storage: StorageDriver;
-    ctx: Record<string, unknown>;
-    logger: InternalLogger | undefined;
-    resolveSpan: SpanContext | undefined;
-    spanKind: SpanKind;
-  },
-  item: CollectionReadRequest,
-): Promise<WireResponse> {
-  try {
-    const data = await withLoggedSpan(
-      args.logger,
-      {
-        name: TAKIBI_SPAN.executor,
-        kind: args.spanKind,
-        attributes: invocationSpanAttributes(item),
-      },
-      { event: "takibi.executor", ...debugInvocationFields(item) },
-      () => executeOperation(args.collections, args.storage, args.ctx, item, args.logger),
-      args.resolveSpan,
-    );
-    return { ok: true, data };
-  } catch (error) {
-    const wire = toWireFailure(error);
-    emitFailure(args.logger, wire.error, invocationFields(item));
-    return wire;
-  }
 }

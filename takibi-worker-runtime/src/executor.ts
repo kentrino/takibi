@@ -1,7 +1,5 @@
 import {
   allows,
-  denialReasonOf,
-  evaluateAccessPolicy,
   type AccessContext,
   type AccessGrant,
   type AccessPermission,
@@ -9,7 +7,6 @@ import {
 } from "@takibi/takibi-policy";
 import { compileListOptions } from "@takibi/takibi-query";
 import {
-  ForbiddenError,
   NotFoundError,
   bindThrowingListAll,
   LIST_PAGE_MAX,
@@ -21,10 +18,11 @@ import {
   type TrustedCollectionsApi,
 } from "@takibi/takibi-api";
 import type { StorageListOptions, WithMetadata } from "@takibi/takibi-shared-types";
-import { withLoggedSpan, type InternalLogger } from "./logging";
-import { collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
+import { executePlan } from "@takibi/takibi-worker-runtime-contract";
+import { createInvocationCollaborators, type PolicySurface } from "./invocation-collaborators";
+import type { InternalLogger } from "./logging";
 import {
-  commitAddDoc,
+  persistAddDoc,
   prepareAddDoc,
   prepareSetDoc,
   prepareUpdateDoc,
@@ -34,6 +32,8 @@ import {
   storageUpdate,
 } from "./typed-storage";
 import type { StorageDriver } from "@takibi/takibi-storage";
+import { collectionExecutionPlan } from "./transaction-boundary";
+import type { TakibiCollectionWork } from "./invocation-type-map";
 
 export type ExecuteRequest = {
   kind: "collection";
@@ -69,44 +69,17 @@ function resolvePermission(
   }
 }
 
-/**
- * Map accessPolicy denial to the public error code.
- * Document-level denials (get / update / delete / set) become NOT_FOUND so
- * IDs are not leaked. Create / list denials stay FORBIDDEN. `set` conceals
- * whether the document already existed.
- */
-async function assertAccess(
-  def: CollectionDefinition,
-  // Executor passes runtime docs; collection-specific TDoc is enforced at definition time.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AccessContext TDoc varies
-  accessCtx: AccessContext<any, any>,
-  options: { conceal: boolean; id?: string },
-  logger?: InternalLogger,
-): Promise<AccessGrant> {
-  return withLoggedSpan(
-    logger,
-    {
-      name: TAKIBI_SPAN.policy,
-      kind: "internal",
-      attributes: collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
-    },
-    {
-      event: "takibi.policy",
-      collection: accessCtx.collection,
-      operation: accessCtx.operation,
-      ...(options.id === undefined ? {} : { documentId: options.id }),
-      ...(accessCtx.where === undefined ? {} : { query: accessCtx.where }),
-    },
-    async () => {
-      const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
-      if (allows(granted, accessCtx.permission)) return granted;
-      if (options.conceal) {
-        throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");
-      }
-      throw new ForbiddenError("Forbidden", denialReasonOf(granted, accessCtx.permission));
-    },
-  );
-}
+export type ResolvedCollection<TCtx extends object> = {
+  readonly req: ExecuteRequest;
+  readonly ctx: TCtx;
+  readonly def: CollectionDefinition;
+  readonly collections: CollectionsDef<TCtx>;
+  readonly storage: StorageDriver;
+  readonly logger?: InternalLogger;
+  readonly grant: AccessGrant;
+  readonly existing?: WithMetadata<Record<string, unknown>> | null;
+  readonly nextDoc?: WithMetadata<Record<string, unknown>>;
+};
 
 /** Writes collate `update`/`create`. The stored document is only returned when the same grant includes `get`. */
 function writeResult(doc: WithMetadata<Record<string, unknown>>, granted: AccessGrant): unknown {
@@ -126,6 +99,72 @@ export async function executeOperation<TCtx extends object>(
   req: ExecuteRequest,
   logger?: InternalLogger,
 ): Promise<unknown> {
+  return executeOperationInScope(collections, storage, ctx, req, logger, false);
+}
+
+async function executeOperationInScope<TCtx extends object>(
+  collections: CollectionsDef<TCtx>,
+  storage: StorageDriver,
+  ctx: TCtx,
+  req: ExecuteRequest,
+  logger: InternalLogger | undefined,
+  reuseTransaction: boolean,
+): Promise<unknown> {
+  const { policy } = createInvocationCollaborators({
+    logger,
+    collection: req.collection,
+    operation: req.operation,
+    documentId: req.id,
+  });
+  const work: TakibiCollectionWork = {
+    kind: "collection",
+    operation: {
+      kind: "collection",
+      collection: req.collection,
+      operation: req.operation,
+    },
+    capability:
+      req.operation === "get" || req.operation === "list" || req.operation === "count"
+        ? "read-only"
+        : "writes",
+    request: req,
+  };
+  const plan = collectionExecutionPlan(work);
+  const prepare = (_work: TakibiCollectionWork, scopedStorage: StorageDriver) =>
+    resolveCollection({
+      collections,
+      storage: scopedStorage,
+      ctx,
+      req,
+      logger,
+      policy,
+    });
+  const apply = (resolved: ResolvedCollection<TCtx>, scopedStorage: StorageDriver) =>
+    executeResolvedCollection({ ...resolved, storage: scopedStorage });
+  return executePlan({
+    plan,
+    storage,
+    reuseTransaction,
+    runInTransaction: (callback) =>
+      storage.transaction(async (scopedStorage) => callback(scopedStorage)),
+    none: { prepare, apply },
+    apply: { prepare, apply },
+    full: {
+      prepareAndApply: async (_work, scopedStorage) =>
+        apply(await prepare(work, scopedStorage), scopedStorage),
+    },
+  });
+}
+
+export async function resolveCollection<TCtx extends object>(args: {
+  collections: CollectionsDef<TCtx>;
+  storage: StorageDriver;
+  ctx: TCtx;
+  req: ExecuteRequest;
+  logger?: InternalLogger;
+  policy: PolicySurface;
+}): Promise<ResolvedCollection<TCtx>> {
+  const { collections, storage, ctx, req, logger, policy } = args;
   const def = collections[req.collection] as CollectionDefinition | undefined;
   if (!def) {
     throw new NotFoundError(`Unknown collection: ${req.collection}`);
@@ -141,9 +180,8 @@ export async function executeOperation<TCtx extends object>(
         permission: "create",
         nextDoc,
       };
-      const granted = await assertAccess(def, accessCtx, { conceal: false }, logger);
-      await commitAddDoc(storage, req.collection, nextDoc);
-      return writeResult(nextDoc, granted);
+      const grant = await policy.evaluateCollection(def, accessCtx, { conceal: false });
+      return { req, ctx, def, collections, storage, logger, grant, nextDoc };
     }
     case "set": {
       if (!req.id) throw new NotFoundError("Missing id");
@@ -159,17 +197,15 @@ export async function executeOperation<TCtx extends object>(
       try {
         nextDoc = await prepareSetDoc(def, req.id, req.input, existing, logger);
       } catch (error) {
-        await assertAccess(def, accessCtxBase, { conceal: true, id: req.id }, logger);
+        await policy.evaluateCollection(def, accessCtxBase, { conceal: true, id: req.id });
         throw error;
       }
-      const granted = await assertAccess(
+      const grant = await policy.evaluateCollection(
         def,
         { ...accessCtxBase, nextDoc },
         { conceal: true, id: req.id },
-        logger,
       );
-      await storage.put(req.collection, nextDoc);
-      return writeResult(nextDoc, granted);
+      return { req, ctx, def, collections, storage, logger, grant, existing, nextDoc };
     }
     case "get": {
       if (!req.id) throw new NotFoundError("Missing id");
@@ -182,8 +218,11 @@ export async function executeOperation<TCtx extends object>(
         permission: "get",
         doc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
-      return doc;
+      const grant = await policy.evaluateCollection(def, accessCtx, {
+        conceal: true,
+        id: req.id,
+      });
+      return { req, ctx, def, collections, storage, logger, grant, existing: doc };
     }
     case "update": {
       if (!req.id) throw new NotFoundError("Missing id");
@@ -200,17 +239,15 @@ export async function executeOperation<TCtx extends object>(
       try {
         nextDoc = await prepareUpdateDoc(def, req.id, req.input, doc, logger);
       } catch (error) {
-        await assertAccess(def, accessCtxBase, { conceal: true, id: req.id }, logger);
+        await policy.evaluateCollection(def, accessCtxBase, { conceal: true, id: req.id });
         throw error;
       }
-      const granted = await assertAccess(
+      const grant = await policy.evaluateCollection(
         def,
         { ...accessCtxBase, nextDoc },
         { conceal: true, id: req.id },
-        logger,
       );
-      await storage.put(req.collection, nextDoc);
-      return writeResult(nextDoc, granted);
+      return { req, ctx, def, collections, storage, logger, grant, existing: doc, nextDoc };
     }
     case "delete": {
       if (!req.id) throw new NotFoundError("Missing id");
@@ -223,8 +260,11 @@ export async function executeOperation<TCtx extends object>(
         permission: "delete",
         doc,
       };
-      await assertAccess(def, accessCtx, { conceal: true, id: req.id }, logger);
-      return storageDelete(storage, req.collection, req.id);
+      const grant = await policy.evaluateCollection(def, accessCtx, {
+        conceal: true,
+        id: req.id,
+      });
+      return { req, ctx, def, collections, storage, logger, grant, existing: doc };
     }
     case "list": {
       const accessCtx: AccessContext<TCtx> = {
@@ -234,8 +274,8 @@ export async function executeOperation<TCtx extends object>(
         permission: "list",
         ...(req.list?.where ? { where: req.list.where } : {}),
       };
-      await assertAccess(def, accessCtx, { conceal: false }, logger);
-      return storage.list(req.collection, req.list);
+      const grant = await policy.evaluateCollection(def, accessCtx, { conceal: false });
+      return { req, ctx, def, collections, storage, logger, grant };
     }
     case "count": {
       const accessCtx: AccessContext<TCtx> = {
@@ -245,9 +285,36 @@ export async function executeOperation<TCtx extends object>(
         permission: "list",
         ...(req.list?.where ? { where: req.list.where } : {}),
       };
-      await assertAccess(def, accessCtx, { conceal: false }, logger);
-      return countDocuments(storage, req.collection, req.list);
+      const grant = await policy.evaluateCollection(def, accessCtx, { conceal: false });
+      return { req, ctx, def, collections, storage, logger, grant };
     }
+    default: {
+      const _exhaustive: never = req.operation;
+      return _exhaustive;
+    }
+  }
+}
+
+export async function executeResolvedCollection<TCtx extends object>(
+  resolved: ResolvedCollection<TCtx>,
+): Promise<unknown> {
+  const { req, storage, grant, nextDoc } = resolved;
+  switch (req.operation) {
+    case "add":
+      await persistAddDoc(storage, req.collection, nextDoc!);
+      return writeResult(nextDoc!, grant);
+    case "set":
+    case "update":
+      await storage.put(req.collection, nextDoc!);
+      return writeResult(nextDoc!, grant);
+    case "get":
+      return resolved.existing;
+    case "delete":
+      return storageDelete(storage, req.collection, req.id!);
+    case "list":
+      return storage.list(req.collection, req.list);
+    case "count":
+      return countDocuments(storage, req.collection, req.list);
     default: {
       const _exhaustive: never = req.operation;
       return _exhaustive;
@@ -263,12 +330,13 @@ export function createPolicyCollections<
   storage: StorageDriver,
   ctx: TCtx,
   logger?: InternalLogger,
+  reuseTransaction = false,
 ): CollectionsApi<TCollections> {
   const api = Object.create(null) as CollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (keyof TCollections & string)[]) {
     const collectionApi = {
       add: (input, options) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -280,9 +348,10 @@ export function createPolicyCollections<
             ...(options?.id !== undefined ? { id: options.id } : {}),
           },
           logger,
+          reuseTransaction,
         ),
       set: (id, input) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -294,9 +363,10 @@ export function createPolicyCollections<
             input,
           },
           logger,
+          reuseTransaction,
         ),
       get: (id) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -307,9 +377,10 @@ export function createPolicyCollections<
             id,
           },
           logger,
+          reuseTransaction,
         ),
       update: (id, input) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -321,9 +392,10 @@ export function createPolicyCollections<
             input,
           },
           logger,
+          reuseTransaction,
         ),
       delete: (id) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -334,9 +406,10 @@ export function createPolicyCollections<
             id,
           },
           logger,
+          reuseTransaction,
         ),
       list: (list) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -347,9 +420,10 @@ export function createPolicyCollections<
             ...(list ? { list: compileListOptions(list) } : {}),
           },
           logger,
+          reuseTransaction,
         ),
       count: (list) =>
-        executeOperation(
+        executeOperationInScope(
           collections,
           storage,
           ctx,
@@ -360,6 +434,7 @@ export function createPolicyCollections<
             ...(list ? { list: compileListOptions(list) } : {}),
           },
           logger,
+          reuseTransaction,
         ),
     } as CollectionApi<TCollections[typeof name]>;
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
@@ -372,7 +447,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,
   logger?: InternalLogger,
-  transactionBound = false,
+  reuseTransaction = false,
 ): TrustedCollectionsApi<TCollections> {
   const api = Object.create(null) as TrustedCollectionsApi<TCollections>;
   for (const name of Object.keys(collections) as (Exclude<keyof TCollections, "$transaction"> &
@@ -392,7 +467,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       count: (options) => countDocuments(storage, name, compileListOptions(options)),
       async updateMany(input, options) {
         const compiled = compileConditionalWriteOptions(options);
-        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+        return runTrustedMutation(storage, reuseTransaction, async (scoped) => {
           const targets = await collectDocuments(scoped, name, compiled);
           for (const target of targets) {
             await updateTrustedDocument(definition, scoped, name, target, input, logger);
@@ -402,7 +477,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       },
       async deleteMany(options) {
         const compiled = compileConditionalWriteOptions(options);
-        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+        return runTrustedMutation(storage, reuseTransaction, async (scoped) => {
           const targets = await collectDocuments(scoped, name, compiled);
           for (const target of targets) {
             await storageDelete(scoped, name, target.id);
@@ -412,7 +487,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       },
       async consumeOne(options) {
         const compiled = compileConditionalWriteOptions(options);
-        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+        return runTrustedMutation(storage, reuseTransaction, async (scoped) => {
           const page = await scoped.list(name, { ...compiled, limit: 1 });
           const target = page.items[0];
           if (!target) return null;
@@ -423,7 +498,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       async incrementOne(increment, options) {
         const entries = normalizeIncrement(increment);
         const compiled = compileConditionalWriteOptions(options);
-        return runTrustedMutation(storage, transactionBound, async (scoped) => {
+        return runTrustedMutation(storage, reuseTransaction, async (scoped) => {
           const page = await scoped.list(name, { ...compiled, limit: 1 });
           const target = page.items[0];
           if (!target) return null;
@@ -450,7 +525,7 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   api.$transaction = <T>(
     callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
   ): Promise<T> =>
-    transactionBound
+    reuseTransaction
       ? callback(api)
       : storage.transaction((scoped) =>
           callback(createTrustedCollections(collections, scoped, logger, true)),
@@ -506,10 +581,10 @@ function compileConditionalWriteOptions(options: unknown): StorageListOptions {
 
 function runTrustedMutation<T>(
   storage: StorageDriver,
-  transactionBound: boolean,
+  reuseTransaction: boolean,
   callback: (storage: StorageDriver) => Promise<T>,
 ): Promise<T> {
-  return transactionBound ? callback(storage) : storage.transaction(callback);
+  return reuseTransaction ? callback(storage) : storage.transaction(callback);
 }
 
 function normalizeIncrement(value: unknown): [string, number][] {
