@@ -13,7 +13,6 @@ import {
   MAX_BATCH_ITEMS,
   type CollectionReadOperation,
   type CollectionReadRequest,
-  type WireResponse,
 } from "@takibi/takibi-protocol";
 import { compileListOptions } from "@takibi/takibi-query";
 import type { StorageListOptions, TakibiResult } from "@takibi/takibi-shared-types";
@@ -397,8 +396,7 @@ async function callEndpoint<T>(
     throw error instanceof Error ? error : new Error("Failed to decode response JSON");
   }
   if (!isWireResponse(json)) throw new Error("Invalid response envelope");
-  const wire = json as WireResponse;
-  return wire.ok ? { ok: true, data: wire.data as T } : { ok: false, error: wire.error };
+  return json.ok ? { ok: true, data: json.data as T } : { ok: false, error: json.error };
 }
 
 function encodeJsonInput(input: unknown): string {
