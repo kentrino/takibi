@@ -133,3 +133,35 @@ test("collection names reject reserved and unsafe public identifiers", () => {
   expect(() => assertCollectionName("posts:v2")).toThrow(/Invalid collection name/);
   assertCollectionName("posts");
 });
+
+test("builder branches retain metadata and detached methods retain their builder", () => {
+  const base = createDocumentActionBuilder("posts");
+  // Deliberately detach the method to verify the public fluent API remains callable.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const { input } = base;
+  const schema = z.object({ count: z.number() });
+  const typed = input(schema);
+  const { policy } = typed;
+  const document = policy(fullAccess).handler(({ input }) => input);
+  const detached = base
+    .detached()
+    .atomic()
+    .policy(fullAccess)
+    .handler(() => null);
+  expect(document).toMatchObject({
+    kind: "collection",
+    target: "document",
+    scope: "posts",
+    atomic: false,
+  });
+  expect(document.inputSchema).toBe(schema);
+  expect(detached).toMatchObject({
+    kind: "collection",
+    target: "detached",
+    scope: "posts",
+    atomic: true,
+  });
+  expect(detached.inputSchema).toBeUndefined();
+  expect(Object.isFrozen(document)).toBe(true);
+  expect(Object.isFrozen(document.guards)).toBe(true);
+});
