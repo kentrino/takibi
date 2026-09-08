@@ -12,13 +12,8 @@ import {
 } from "@takibi/takibi-api";
 import { createPolicyHelper } from "@takibi/takibi-policy";
 import { Hono } from "hono";
-import { jsonResponseFromStatus, runCall } from "@takibi/takibi-worker-runtime-contract";
-import {
-  assertSerializableContext,
-  errorResponse,
-  invocationFields,
-  mergeLoggingOptions,
-} from "./runtime";
+import { mergeLoggingOptions } from "./runtime";
+import { serveDecodedCall } from "./worker-call";
 import type {
   ActionScopeMap,
   AppDefinition,
@@ -39,16 +34,8 @@ import {
   readRequestJson,
   type PublicRequest,
 } from "../http";
-import { requestLogFields, resolveLogging, withLoggedSpan } from "../logging";
+import { resolveLogging } from "../logging";
 import { assertCollectionMigrations } from "../migrations";
-import { batchSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
-import {
-  activeSpanContext,
-  bindTracer,
-  resolveTracer,
-  withSpan,
-  type SpanContext,
-} from "../tracing";
 import { assertCollectionIndexes } from "@takibi/takibi-storage";
 import { assertCollectionUniqueConstraints } from "../unique";
 import { createStubExecutor } from "./executors";
@@ -203,87 +190,20 @@ function assembleHandler<TInitial, TCollections extends CollectionsDef<object>>(
   });
   const execute = testingExecutor?.execute ?? createStubExecutor(resolveStub, logger);
 
-  const serveDecoded = async (
+  const serveDecoded = (
     request: Request,
     initial: unknown,
     decode: () => Promise<PublicRequest>,
-  ): Promise<Response> => {
-    const tracer = resolveTracer(options);
-    const serve = () =>
-      withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, async () => {
-        const startedAt = performance.now();
-        const http = requestLogFields(request);
-        let invocation: PublicRequest | undefined;
-        let response: Response;
-        try {
-          let resolveSpan: SpanContext | undefined;
-          response = await runCall(request, {
-            async decode() {
-              const decoded = await decode();
-              invocation = decoded;
-              logger?.emit({
-                level: "info",
-                event: "takibi.request",
-                message: "started",
-                ...http,
-                ...invocationFields(decoded),
-              });
-              return decoded;
-            },
-            async resolveContext({ request: resolvedRequest, decoded }) {
-              const batchSize = decoded.kind === "batch" ? decoded.items.length : undefined;
-              return withLoggedSpan(
-                logger,
-                {
-                  name: TAKIBI_SPAN.resolve,
-                  kind: "internal",
-                  ...(batchSize === undefined
-                    ? {}
-                    : { attributes: batchSpanAttributes(batchSize) }),
-                },
-                {
-                  event: "takibi.resolve",
-                  ...(batchSize === undefined ? {} : { batchSize }),
-                },
-                async () => {
-                  resolveSpan = activeSpanContext();
-                  const context = await resolve({
-                    request: resolvedRequest,
-                    context: initial as TInitial,
-                  });
-                  assertSerializableContext(context);
-                  return context;
-                },
-              );
-            },
-            async dispatch({ request: dispatchedRequest, decoded: decodedInvocation, context }) {
-              const json = await execute({
-                request: dispatchedRequest,
-                initial,
-                ctx: context,
-                invocation: decodedInvocation,
-                tracer,
-                resolveSpan,
-              });
-              return jsonResponseFromStatus(json, Response);
-            },
-          });
-        } catch (err) {
-          response = errorResponse(err, logger, invocation, request);
-        }
-        logger?.emit({
-          level: "info",
-          event: "takibi.request",
-          message: "completed",
-          ...http,
-          ...(invocation === undefined ? {} : invocationFields(invocation)),
-          durationMs: performance.now() - startedAt,
-          status: response.status,
-        });
-        return response;
-      });
-    return tracer ? bindTracer(tracer, serve) : serve();
-  };
+  ): Promise<Response> =>
+    serveDecodedCall({
+      request,
+      initial,
+      decode,
+      resolve,
+      execute,
+      logger,
+      options,
+    });
 
   // Routes read the trailing raw path segments: action ids are split on the
   // raw last colon before percent-decoding (Hono params decode too early).

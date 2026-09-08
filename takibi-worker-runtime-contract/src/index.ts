@@ -21,6 +21,17 @@ export {
   TakibiContractStateError,
 } from "./request";
 export {
+  createActionExecutionPlan,
+  createCollectionExecutionPlan,
+  transactionBoundaryOf,
+} from "./plan";
+export {
+  composeActionPreparation,
+  invocationStageResult,
+  mergeInvocationUpdates,
+  unwrapInvocationAdapterResult,
+} from "./prepare";
+export {
   ENVELOPE_ADAPTER_GRAPH,
   RUNTIME_ADAPTER_GRAPH,
   type EnvelopeAdapterGraph,
@@ -31,7 +42,14 @@ export {
   CALL_SINGLE_ADAPTER_KEYS,
   ENVELOPE_CALL_ADAPTER_KEYS,
   INVOCATION_ADAPTER_KEYS,
+  INVOCATION_PREPARE_ADAPTER_KEYS,
 } from "./type";
+export type {
+  ActionPlanCriteria,
+  ActionPlanTarget,
+  CollectionPlanCriteria,
+  TransactionPlanCriteria,
+} from "./plan";
 export type {
   AdapterMap,
   Adapters,

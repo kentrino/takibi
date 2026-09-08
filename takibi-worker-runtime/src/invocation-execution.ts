@@ -21,7 +21,11 @@ import {
   type TakibiCall,
 } from "@takibi/takibi-worker-runtime-contract";
 import { defineContainer, inject, type DependencyGraph } from "tatenuki";
-import { createTakibiInvocationAdapterFactories } from "./adapter-map";
+import {
+  createTakibiInvocationAdapterFactories,
+  TAKIBI_INVOCATION_REGISTRATION_GRAPH,
+  type TakibiAdapterMap,
+} from "./adapter-map";
 import { debugInvocationFields } from "./context/runtime";
 import type { PublicRequest } from "./http";
 import { invocationToWireResponse, invocationsToBatchWireResponse } from "./invocation-response";
@@ -80,11 +84,15 @@ export type TakibiRuntimeAdapterMap<
   TakibiMap<TContext, TServices>,
   LocalCallType<TContext, TServices, WireResponse>,
   LocalExecution<TContext, TServices>
-> & {
-  localSpanKind: SpanKind;
-  localParentSpan: SpanContext | undefined;
-  localRequest: Request | undefined;
-};
+> &
+  Pick<
+    TakibiAdapterMap<TContext, TServices>,
+    "invocationPolicy" | "invocationSchema" | "invocationActionHandler" | "invocationPrepareApply"
+  > & {
+    localSpanKind: SpanKind;
+    localParentSpan: SpanContext | undefined;
+    localRequest: Request | undefined;
+  };
 
 function localInvocationRuntime<TContext extends object, TServices>(
   args: LocalInvocationExecutionArgs<TContext, TServices>,
@@ -98,6 +106,7 @@ function localInvocationRuntime<TContext extends object, TServices>(
   };
 }
 
+/** Executor span lives here only. Registration factories do not wrap `invocationRun`. */
 function createInstrumentedInvocationRun<TContext extends object, TServices>(deps: {
   invocationCoreRun: BoundRunInvocation<TakibiMap<TContext, TServices>>;
   invocationRuntime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>;
@@ -139,12 +148,14 @@ function createLocalExecution<TContext extends object, TServices>(deps: {
 
 export async function resolveLocalAdapterMap<TContext extends object, TServices = unknown>(
   args: LocalInvocationExecutionArgs<TContext, TServices>,
+  overrides?: Partial<TakibiRuntimeAdapterMap<TContext, TServices>>,
 ): Promise<TakibiRuntimeAdapterMap<TContext, TServices>> {
   type Map = TakibiRuntimeAdapterMap<TContext, TServices>;
   type Invocation = TakibiMap<TContext, TServices>;
 
   const graph = {
     ...RUNTIME_ADAPTER_GRAPH,
+    ...TAKIBI_INVOCATION_REGISTRATION_GRAPH,
     localSpanKind: [],
     localParentSpan: [],
     localRequest: [],
@@ -153,7 +164,7 @@ export async function resolveLocalAdapterMap<TContext extends object, TServices 
     callToBatchResponse: ["invocationRuntime", "localRequest"],
   } as const satisfies DependencyGraph<Map>;
 
-  return defineContainer<Map>()
+  const builder = defineContainer<Map>()
     .graph(graph)
     .factories({
       ...createTakibiInvocationAdapterFactories<TContext, TServices>(),
@@ -179,13 +190,13 @@ export async function resolveLocalAdapterMap<TContext extends object, TServices 
         WireResponse
       >,
       localExecution: createLocalExecution,
-    })
-    .resolve({
-      invocationRuntime: localInvocationRuntime(args),
-      localSpanKind: args.spanKind,
-      localParentSpan: args.parentSpan,
-      localRequest: args.request,
     });
+  return (overrides === undefined ? builder : builder.override(overrides)).resolve({
+    invocationRuntime: localInvocationRuntime(args),
+    localSpanKind: args.spanKind,
+    localParentSpan: args.parentSpan,
+    localRequest: args.request,
+  });
 }
 
 export async function resolveLocalExecution<TContext extends object, TServices = unknown>(

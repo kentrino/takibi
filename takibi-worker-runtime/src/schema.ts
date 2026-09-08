@@ -1,7 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { createClass } from "@takibi/takibi-utility";
+import { withTracing } from "@takibi/takibi-utility";
 import type { InternalLogger } from "./logging";
-import { otel } from "./otel";
+import { withLoggedSpan } from "./logging";
 import { TAKIBI_SPAN } from "./otel-helper";
 
 export type SchemaSurface = {
@@ -22,20 +22,6 @@ export class SchemaValidationError extends Error {
   }
 }
 
-export async function parseSchema<S extends StandardSchemaV1>(
-  schema: S,
-  value: unknown,
-  logger?: InternalLogger,
-): Promise<StandardSchemaV1.InferOutput<S>> {
-  const parser = SchemaParser.newWithInterceptors(
-    { logger },
-    otel(logger, {
-      parse: { name: TAKIBI_SPAN.schema, kind: "internal", event: "takibi.schema" },
-    }),
-  );
-  return parser.parse(schema, value) as Promise<StandardSchemaV1.InferOutput<S>>;
-}
-
 export async function parseSchemaUnobserved<S extends StandardSchemaV1>(
   schema: S,
   value: unknown,
@@ -45,8 +31,29 @@ export async function parseSchemaUnobserved<S extends StandardSchemaV1>(
   return result.value as StandardSchemaV1.InferOutput<S>;
 }
 
-export const SchemaParser = createClass<SchemaSurface>()
-  .constructor<SchemaParserCtor>({
-    runtimeCheck: true,
-  })
-  .define("parse", (_deps, schema, value) => parseSchemaUnobserved(schema, value));
+export class SchemaParser implements SchemaSurface {
+  async parse(schema: StandardSchemaV1, value: unknown): Promise<unknown> {
+    return parseSchemaUnobserved(schema, value);
+  }
+}
+
+export function traceSchemaParser(
+  schema: SchemaParser,
+  logger: InternalLogger | undefined,
+): SchemaSurface {
+  return withTracing(schema, {
+    method: "parse",
+    span: TAKIBI_SPAN.schema,
+    kind: "internal",
+    run: (spec, fn) => withLoggedSpan(logger, spec, { event: "takibi.schema" }, fn),
+  });
+}
+
+export async function parseSchema<S extends StandardSchemaV1>(
+  schema: S,
+  value: unknown,
+  logger?: InternalLogger,
+): Promise<StandardSchemaV1.InferOutput<S>> {
+  const parser = traceSchemaParser(new SchemaParser(), logger);
+  return parser.parse(schema, value) as Promise<StandardSchemaV1.InferOutput<S>>;
+}

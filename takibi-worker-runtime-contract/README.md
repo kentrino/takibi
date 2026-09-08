@@ -16,11 +16,21 @@ providing that option is a separate runtime concern.
 - A **call** is one HTTP or wire envelope containing one invocation or a batch.
 - An **invocation** is one CRUD operation or action. Batch is call composition,
   not a separate invocation work kind.
-- `runCall` composes decode, context resolution, and dispatch in linear order.
-  It does not require a mutable call carrier or phase machine.
-- `runSingleCall` / `runBatchCall` resolve a call, extract its wire invocation(s),
-  invoke the injected `invocationRun`, and convert the results into a response.
-  Batch runs sequentially and preserves input order.
+- `Call` is the envelope runner class. Its constructor takes the envelope
+  adapter-map slots (`callDecode`, `callResolveContext`, `callDispatch`,
+  conversion, and observers). `ENVELOPE_ADAPTER_GRAPH.call` lists those
+  dependencies so a runtime can `inject(Call)` on the same graph. `run`
+  owns decode → resolve → dispatch → response. Observation failures are
+  isolated inside `Call`, not at each notify site. `runCall` is the thin
+  `new Call(adapters).run(request)` entry. Terminal events include the
+  request and decoded value when decode succeeded, so observers are not an
+  execution-data store. A failing failure converter rejects instead of
+  converting again. Instance methods such as `resolveContext` stay overridable;
+  a runtime wraps the resolve adapter with `withTracing`, not `Call.run`.
+- `runSingleCall` / `runBatchCall` are local envelope executors. They extract
+  wire invocation(s), invoke `invocationRun`, and convert results. Batch runs
+  sequentially and preserves input order. Worker production dispatch forwards
+  one envelope and does not use these runners.
 - The runtime creates a plan for each invocation. `work` describes the
   operation; `transactionBoundary` selects its storage boundary.
 - Plan creation decides the operation and transaction boundary only. It does
@@ -38,7 +48,7 @@ executePlan internals:
 
 none   prepare(base) -> apply(base)
 apply  prepare(base) -> transaction { apply(tx) }
-full   transaction { prepareAndApply(tx) }
+full   transaction { prepare(tx) -> apply(tx) }
 ```
 
 | Runtime operation                                                 | Boundary |
@@ -61,7 +71,8 @@ permissions, concealment rules, or action definitions.
 
 The package root exports:
 
-1. `runCall`, the linear call runner.
+1. `Call`, the envelope runner class, `runCall`, its thin function entry, and
+   `EnvelopeAdapterMap` / `ENVELOPE_ADAPTER_GRAPH` for the `call` DI node.
 2. `InvocationState`, the lifecycle class with JavaScript private fields and
    checked semantic transitions.
 3. `runInvocation`, the adapter-injected single-invocation lifecycle.
@@ -70,6 +81,12 @@ The package root exports:
 6. `TakibiContractConfigurationError` / `TakibiContractStateError` and type-only
    adapter, view, request, transaction-boundary, transaction-outcome, and result
    contracts.
+7. `composeActionPreparation`, `invocationStageResult`,
+   `unwrapInvocationAdapterResult`, and `mergeInvocationUpdates`. The composer
+   owns identify → authorize → parse order and successful-update acceptance.
+   `invocationStageResult` turns a throwing stage into an adapter result without
+   inventing updates or wrapping the original error. Direct callers unwrap that
+   same error; top-level settlement uses `InvocationState.acceptAdapterResult`.
 
 `executePlan` preserves execution errors and supports explicitly reusing an
 existing transaction via `reuseTransaction`. It does not settle or notify;
@@ -77,7 +94,11 @@ those belong to the top-level invocation lifecycle. Reusing an existing
 transaction must not create a second top-level notification.
 
 `ExecutionPlan` is the generic plan type. `InvocationPlan<T>` applies an
-invocation type map to that plan.
+invocation type map to that plan. `transactionBoundaryOf` and the action /
+collection plan builders own Takibi's boundary table: document atomic actions
+are `full`, other atomic actions and collection `add` are `apply`, and the
+remaining current operations are `none`. Classification adapters supply
+target / atomic / operation criteria and work; they do not pick a boundary.
 
 `InternalInvocationTypeMap` is the shared upper bound. It constrains
 `wireInvocation` to a single action or collection request, `invocation` to the
@@ -101,23 +122,34 @@ HTTP. In-process Calls use `LocalCallRequest` (`kind: "single" | "batch"`,
 local-call adapters. A wire or HTTP body that is `StatusBearingResult`
 (`ok` plus `error.status` on failure) can be projected with
 `jsonResponseFromStatus` and a `JsonResponseLike` factory; Fetch `Response`
-is not part of this package. `RUNTIME_ADAPTER_GRAPH` is the dependency graph
-for those slots.
+is not part of this package. `RUNTIME_ADAPTER_GRAPH` is the local-execution dependency graph
+for those slots. `invocationPrepareApply` depends on
+`invocationPolicy`, `invocationSchema`, and `invocationActionHandler`;
+`transactionNone` / `transactionApply` / `transactionFull` alias that
+one prepare/apply node. Concrete collaborator types stay in the runtime. `ENVELOPE_ADAPTER_GRAPH` is the Worker / testing envelope
+Call graph: `call` depends on `ENVELOPE_CALL_ADAPTER_KEYS` and does not
+require invocation or storage adapters. `EnvelopeAdapterMap` is that
+surface plus the constructed `call` instance.
 Instrumentation values stay off this type. Keys use flat camelCase prefixes
 such as `callDecode`, `invocationCreatePlan`, `transactionNone`, and
 `transactionRun`. `INVOCATION_ADAPTER_KEYS` lists the slots `runInvocation`
-reads. `CALL_SINGLE_ADAPTER_KEYS` / `CALL_BATCH_ADAPTER_KEYS` list the slots
+reads. `INVOCATION_PREPARE_ADAPTER_KEYS` lists the collaborator slots
+`invocationPrepareApply` reads. `CALL_SINGLE_ADAPTER_KEYS` / `CALL_BATCH_ADAPTER_KEYS` list the slots
 `createSingleTakibiCall` / `createBatchTakibiCall` read.
+`ENVELOPE_CALL_ADAPTER_KEYS` lists the Worker envelope Call slots.
 
 The map is the source of adapter signatures. Runners consume its selected slots
 directly; no second execution-shaped adapter bag or renaming layer is needed.
 The map includes both supplied capabilities and functions constructed from them.
 
 The contract does not depend on tatenuki or any container API. The Worker runtime
-uses tatenuki at its composition root, registers factories on
-`RUNTIME_ADAPTER_GRAPH`, and obtains injected `invocationRun`, `callSingle`,
-`callBatch`, and `localExecution`. Individual adapters receive explicit adapter
-subsets, not a container or a general-purpose `get` function.
+uses tatenuki at its composition roots. Local / DO execution registers
+factories on `RUNTIME_ADAPTER_GRAPH` and obtains injected `invocationRun`,
+`callSingle`, `callBatch`, and `localExecution`. Worker / testing HTTP
+registers factories on `ENVELOPE_ADAPTER_GRAPH` plus request-scoped
+construction slots and obtains an injected `Call` instance. Individual
+adapters receive explicit adapter subsets, not a container or a
+general-purpose `get` function.
 
 ```ts
 import {
@@ -195,9 +227,10 @@ record retains base storage and is never replaced with a transactional driver.
   document, grant, existing document, next document, or transactional storage.
   Runtime work is passed directly to execution without reconstructing an older
   executor request from a parallel contract model.
-- `none.prepare` and `apply.prepare` return ephemeral `T["nonePrepared"]` and
-  `T["applyPrepared"]` values for their corresponding `apply`. Prepared
-  business data does not accumulate on the shared carrier.
+- `none.prepare`, `apply.prepare`, and `full.prepare` return ephemeral
+  `T["nonePrepared"]`, `T["applyPrepared"]`, and `T["fullPrepared"]` values for
+  their corresponding `apply`. Prepared business data does not accumulate on
+  the shared carrier. `full` runs prepare then apply inside one transaction.
 - Actions preserve guard -> target load/gate -> input parse -> handler order.
   Guard failure must not read the target; gate denial must precede parsing.
 - Document atomic actions load, authorize, parse, and run inside the same
@@ -265,10 +298,14 @@ does not disable slot-integrity or notification single-shot checks.
   documents, grants, and transaction storage remain invocation-time values.
   Request-specific tracing context must not leak into a longer-lived runner.
 
-`createClass` remains a runtime tool for separating business method views from
-OTEL interceptors. Interceptors use constructor metadata and compose through
-`next`; business methods see their narrow views. Instances capturing phase data
-are constructed only after that view exists, not cached across invocations.
+`Call` is a normal TypeScript class and a DI graph node. Platform decode,
+context resolve, dispatch, conversion, and observation stay on runtime
+adapter factories; the contract does not import HTTP, logger, or tracing
+types. `createClass` remains a
+runtime tool for separating business method views from OTEL interceptors.
+Interceptors use constructor metadata and compose through `next`; business
+methods see their narrow views. Instances capturing phase data are
+constructed only after that view exists, not cached across invocations.
 Preserve existing span boundaries instead of collapsing policy, schema, and
 action work into one span. No tracer or class-building mechanism belongs in the
 contract's execution flow.

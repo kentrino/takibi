@@ -41,7 +41,18 @@ export { createPolicyCollections, createTrustedCollections, executeOperation } f
 export type { ExecuteRequest } from "./executor";
 export { executeAction } from "./action-executor";
 export type { ActionInvocation } from "./action-executor";
-export { type TakibiAdapterMap } from "./adapter-map";
+export {
+  createBoundInvocationAdapters,
+  type TakibiAdapterMap,
+  type TakibiInvocationRegistrationMap,
+} from "./adapter-map";
+export {
+  ActionHandler,
+  PolicyEvaluator,
+  createActionHandler,
+  createInvocationCollaborators,
+} from "./invocation-collaborators";
+export { createInvocationPrepareApply, InvocationPrepareApply } from "./invocation-paths";
 export {
   resolveLocalAdapterMap,
   resolveLocalExecution,
@@ -60,11 +71,7 @@ export type {
   TakibiPublicInvocation,
   TakibiWireInvocation,
 } from "./invocation-type-map";
-export {
-  createBoundInvocationAdapters,
-  getTakibiRawInput,
-  toTakibiInvocation,
-} from "./invocation-adapters";
+export { getTakibiRawInput, toTakibiInvocation } from "./invocation-adapters";
 export {
   COLLECTION_READ_OPERATIONS,
   decodeBatchItems,
@@ -117,7 +124,7 @@ export {
   withDocumentRevision,
 } from "./revision";
 export { assertCollectionUniqueConstraints, assertUniqueDocument } from "./unique";
-export { parseSchema, parseSchemaUnobserved, SchemaValidationError } from "./schema";
+export { parseSchema, parseSchemaUnobserved, SchemaParser, SchemaValidationError } from "./schema";
 export { generateUlid, isUlid, resetUlidStateForTests } from "./ulid";
 export { assertJsonObject, assertJsonValue, JSON_MAX_DEPTH } from "./json";
 export type { JsonValidationOptions } from "./json";

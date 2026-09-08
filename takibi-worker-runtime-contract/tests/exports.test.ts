@@ -34,12 +34,28 @@ import type { InternalInvocationInitializationView } from "../src/index";
 test("root exports linear call composition and the invocation orchestrator", () => {
   expect(Contract.Call).toBeTypeOf("function");
   expect(Contract.runCall).toBeTypeOf("function");
+  expect(Contract.transactionBoundaryOf).toBeTypeOf("function");
+  expect(Contract.createActionExecutionPlan).toBeTypeOf("function");
+  expect(Contract.composeActionPreparation).toBeTypeOf("function");
+  expect(Contract.invocationStageResult).toBeTypeOf("function");
+  expect(Contract.unwrapInvocationAdapterResult).toBeTypeOf("function");
+  expect(Contract.mergeInvocationUpdates).toBeTypeOf("function");
   expect(Contract.ENVELOPE_CALL_ADAPTER_KEYS).toContain("callDispatch");
   expect(Contract.ENVELOPE_ADAPTER_GRAPH.call).toEqual([...Contract.ENVELOPE_CALL_ADAPTER_KEYS]);
   expect(Contract.ENVELOPE_ADAPTER_GRAPH).not.toHaveProperty("invocationRuntime");
   expect(Contract.ENVELOPE_ADAPTER_GRAPH).not.toHaveProperty("callRun");
   expect(Contract.RUNTIME_ADAPTER_GRAPH).not.toHaveProperty("callDispatch");
   expect(Contract.RUNTIME_ADAPTER_GRAPH).not.toHaveProperty("call");
+  expect(Contract.INVOCATION_PREPARE_ADAPTER_KEYS).toEqual([
+    "invocationPolicy",
+    "invocationSchema",
+    "invocationActionHandler",
+  ]);
+  expect(Contract.RUNTIME_ADAPTER_GRAPH.invocationPrepareApply).toEqual([
+    ...Contract.INVOCATION_PREPARE_ADAPTER_KEYS,
+  ]);
+  expect(Contract.RUNTIME_ADAPTER_GRAPH.transactionNone).toEqual(["invocationPrepareApply"]);
+  expect(Contract.RUNTIME_ADAPTER_GRAPH).not.toHaveProperty("invocationCollaborators");
   expect(Contract.InvocationState).toBeTypeOf("function");
   expect(Contract.runInvocation).toBeTypeOf("function");
   expect(Contract.executePlan).toBeTypeOf("function");
@@ -96,6 +112,8 @@ test("root exports linear call composition and the invocation orchestrator", () 
   expectTypeOf<InvocationResult<InternalInvocationTypeMap>>().toHaveProperty("settlement");
   expectTypeOf<InvocationResult<InternalInvocationTypeMap>>().toHaveProperty("plan");
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationRun");
+  expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationPrepareApply");
+  expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationPolicy");
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().not.toHaveProperty("invocationCoreRun");
   type RuntimeMap = RuntimeAdapterMap<
     InternalInvocationTypeMap,

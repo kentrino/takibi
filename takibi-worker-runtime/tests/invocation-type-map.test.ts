@@ -92,9 +92,10 @@ test("transaction-boundary class bindings retain their map relationships", () =>
     .parameter(1)
     .toEqualTypeOf<TakibiPrepared<AppContext>>();
   expectTypeOf<Contracts["apply"]["prepare"]>().parameter(1).toEqualTypeOf<TakibiApplyWork>();
-  expectTypeOf<Contracts["full"]["prepareAndApply"]>()
+  expectTypeOf<Contracts["full"]["prepare"]>().parameter(1).toEqualTypeOf<TakibiActionWork>();
+  expectTypeOf<Contracts["full"]["apply"]>()
     .parameter(1)
-    .toEqualTypeOf<TakibiActionWork>();
+    .toEqualTypeOf<TakibiPrepared<AppContext>>();
 
   const rejectedBindings = (
     contracts: Contracts,

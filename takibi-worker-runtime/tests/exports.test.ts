@@ -11,8 +11,15 @@ test("worker-runtime exports createTakibi, handler types, and pretty logging", (
   expectTypeOf(Runtime.createPrettyConsoleLogger).toBeFunction();
   expectTypeOf(Runtime.otel).toBeFunction();
   expectTypeOf(Runtime.createBoundInvocationAdapters).toBeFunction();
+  expectTypeOf<Runtime.TakibiInvocationRegistrationMap>().not.toBeNever();
+  expectTypeOf<Runtime.TakibiInvocationRegistrationMap>().not.toHaveProperty("invocationRun");
   expectTypeOf(Runtime.resolveLocalAdapterMap).toBeFunction();
   expectTypeOf(Runtime.resolveLocalExecution).toBeFunction();
+  expect(Runtime.PolicyEvaluator).toBeTypeOf("function");
+  expect(Runtime.ActionHandler).toBeTypeOf("function");
+  expect(Runtime.SchemaParser).toBeTypeOf("function");
+  expect(Runtime.InvocationPrepareApply).toBeTypeOf("function");
+  expect(Runtime.createInvocationPrepareApply).toBeTypeOf("function");
   expectTypeOf(Runtime.resolveWorkerEnvelopeMap).toBeFunction();
   expectTypeOf<Runtime.TakibiRuntimeAdapterMap>().not.toBeNever();
   expectTypeOf<Runtime.LocalExecution>().not.toBeNever();

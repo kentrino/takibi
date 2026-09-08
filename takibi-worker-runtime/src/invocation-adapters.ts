@@ -1,18 +1,15 @@
 import { NotFoundError } from "@takibi/takibi-api";
-import type {
-  InternalInvocationRuntime,
-  InvocationAdapterResult,
-  InvocationAdapters,
-  InvocationObserverEvent,
-  InvocationPlan,
-  InvocationPlanningView,
+import {
+  createActionExecutionPlan,
+  createCollectionExecutionPlan,
+  type InvocationAdapterResult,
+  type InvocationObserverEvent,
+  type InvocationPlan,
+  type InvocationPlanningView,
 } from "@takibi/takibi-worker-runtime-contract";
 import type { ActionInvocation } from "./action-gate";
-import { classifyAction } from "./action-executor";
-import { normalizeInvocationFailure } from "./context/runtime";
+import { classifyAction } from "./action-resolution";
 import type { ExecuteRequest } from "./executor";
-import { createInvocationTransactionBoundaryContracts } from "./invocation-paths";
-import { actionExecutionPlan, collectionExecutionPlan } from "./transaction-boundary";
 import type {
   TakibiActionWork,
   TakibiCollectionWork,
@@ -36,26 +33,6 @@ export function toTakibiInvocation(wireInvocation: TakibiWireInvocation): Takibi
 
 export function getTakibiRawInput(wireInvocation: TakibiWireInvocation): unknown {
   return "input" in wireInvocation ? wireInvocation.input : undefined;
-}
-
-export function createBoundInvocationAdapters<TContext extends object, TServices = unknown>(
-  runtime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>,
-): InvocationAdapters<TakibiMap<TContext, TServices>> {
-  const transactionBoundary = createInvocationTransactionBoundaryContracts(runtime);
-  return {
-    invocationRuntime: runtime,
-    invocationToInvocation: toTakibiInvocation,
-    invocationGetRawInput: getTakibiRawInput,
-    invocationCreatePlan: createTakibiInvocationPlan,
-    transactionNone: transactionBoundary.none,
-    transactionApply: transactionBoundary.apply,
-    transactionFull: transactionBoundary.full,
-    transactionRun: (work) => runtime.storage.transaction(work),
-    transactionClassifyFailure: undefined,
-    invocationToFailure: normalizeInvocationFailure,
-    invocationSnapshotObserverEvent: snapshotTakibiObserverEvent,
-    invocationNotify: undefined,
-  };
 }
 
 /**
@@ -134,7 +111,14 @@ function actionIdentity<TContext extends object, TServices>(
     invocation,
     definition,
   };
-  return actionExecutionPlan(work);
+  return createActionExecutionPlan(
+    {
+      kind: "action",
+      target: definition.target,
+      atomic: definition.atomic,
+    },
+    work,
+  );
 }
 
 function collectionIdentity<TContext extends object, TServices>(
@@ -153,5 +137,5 @@ function collectionIdentity<TContext extends object, TServices>(
         : "writes",
     request: req,
   };
-  return collectionExecutionPlan(work);
+  return createCollectionExecutionPlan({ kind: "collection", operation: req.operation }, work);
 }

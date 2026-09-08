@@ -79,6 +79,7 @@ export type TakibiInvocationTypeMap<TContext extends object = object, TServices 
   fullWork: TakibiFullWork;
   nonePrepared: TakibiPrepared<TContext>;
   applyPrepared: TakibiPrepared<TContext>;
+  fullPrepared: TakibiPrepared<TContext>;
   result: JsonValue;
   failure: TakibiFailure<string>;
 };
