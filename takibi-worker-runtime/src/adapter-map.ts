@@ -1,5 +1,4 @@
 import {
-  INVOCATION_ADAPTER_KEYS,
   INVOCATION_PREPARE_ADAPTER_KEYS,
   type AdapterMap,
   type InvocationAdapters,
@@ -21,7 +20,7 @@ import {
   type PolicySurface,
   type SchemaSurface,
 } from "./invocation-collaborators";
-import { InvocationPrepareApply, type InvocationPrepareApplyDeps } from "./invocation-paths";
+import { InvocationPrepareApply } from "./invocation-paths";
 import { SchemaParser, traceSchemaParser } from "./schema";
 import type { TakibiInvocationRuntime, TakibiInvocationTypeMap } from "./invocation-type-map";
 
@@ -78,9 +77,6 @@ export function createTakibiInvocationAdapterFactories<
   TContext extends object,
   TServices = unknown,
 >() {
-  const InvocationPrepareApplyClass = InvocationPrepareApply as new (
-    deps: InvocationPrepareApplyDeps,
-  ) => InvocationPrepareApply<TContext, TServices>;
   return {
     invocationToInvocation: () => toTakibiInvocation,
     invocationGetRawInput: () => getTakibiRawInput,
@@ -100,7 +96,7 @@ export function createTakibiInvocationAdapterFactories<
           ...ctor,
           logger: ctor.logger ?? invocationRuntime.logger,
         }),
-    invocationPrepareApply: inject(InvocationPrepareApplyClass),
+    invocationPrepareApply: inject(InvocationPrepareApply<TContext, TServices>),
     invocationTransactionBoundary: ({
       invocationPrepareApply,
     }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationPrepareApply">) => ({
@@ -148,13 +144,5 @@ export async function createBoundInvocationAdapters<TContext extends object, TSe
   runtime: TakibiInvocationRuntime<TContext, TServices>,
   overrides?: Partial<TakibiInvocationRegistrationMap<TContext, TServices>>,
 ): Promise<InvocationAdapters<TakibiMap<TContext, TServices>>> {
-  return pickInvocationAdapters(await resolveTakibiInvocationRegistration(runtime, overrides));
-}
-
-function pickInvocationAdapters<TContext extends object, TServices>(
-  map: TakibiInvocationRegistrationMap<TContext, TServices>,
-): InvocationAdapters<TakibiMap<TContext, TServices>> {
-  return Object.fromEntries(
-    INVOCATION_ADAPTER_KEYS.map((key) => [key, map[key]]),
-  ) as InvocationAdapters<TakibiMap<TContext, TServices>>;
+  return resolveTakibiInvocationRegistration(runtime, overrides);
 }

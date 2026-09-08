@@ -16,10 +16,10 @@ import type { StorageDriver } from "@takibi/takibi-storage";
 import { debugInvocationFields } from "./runtime";
 import type { ContextStubResolver } from "./types";
 
-export type ExecutorInput = {
+export type ExecutorInput<TInitial = unknown> = {
   request: Request;
   /** Initial context from `handle(..., { context })`, before `resolve` ran. */
-  initial: unknown;
+  initial: TInitial;
   /** Resolved execution context (already asserted serializable). */
   ctx: Record<string, unknown>;
   invocation: PublicRequest;
@@ -31,7 +31,9 @@ export type ExecutorInput = {
  * Runs a decoded invocation against one storage backend and returns the
  * wire-level result.
  */
-export type Executor = (input: ExecutorInput) => Promise<WireResponse>;
+export type Executor<TInitial = unknown> = (
+  input: ExecutorInput<TInitial>,
+) => Promise<WireResponse>;
 
 export function createInProcessExecutor(
   collections: CollectionsDef<object>,
@@ -63,7 +65,7 @@ export function createInProcessExecutor(
 export function createStubExecutor<TInitial>(
   resolveStub: ContextStubResolver<object, TInitial> | undefined,
   logger: InternalLogger | undefined,
-): Executor {
+): Executor<TInitial> {
   return async ({ request, initial, ctx, invocation, resolveSpan }) => {
     if (!resolveStub) {
       throw new TakibiError(
@@ -72,7 +74,7 @@ export function createStubExecutor<TInitial>(
         500,
       );
     }
-    const doStub = await resolveStub({ request, context: initial as TInitial, resolved: ctx });
+    const doStub = await resolveStub({ request, context: initial, resolved: ctx });
     if (!doStub || typeof doStub.fetch !== "function") {
       throw new TakibiError(
         "MISSING_STUB",
