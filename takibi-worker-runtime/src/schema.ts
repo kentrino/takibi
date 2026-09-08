@@ -5,7 +5,10 @@ import { withLoggedSpan } from "./logging";
 import { TAKIBI_SPAN } from "./otel-helper";
 
 export type SchemaSurface = {
-  parse: (schema: StandardSchemaV1, value: unknown) => Promise<unknown>;
+  parse: <S extends StandardSchemaV1>(
+    schema: S,
+    value: unknown,
+  ) => Promise<StandardSchemaV1.InferOutput<S>>;
 };
 
 export type SchemaParserCtor = {
@@ -32,7 +35,10 @@ export async function parseSchemaUnobserved<S extends StandardSchemaV1>(
 }
 
 export class SchemaParser implements SchemaSurface {
-  async parse(schema: StandardSchemaV1, value: unknown): Promise<unknown> {
+  async parse<S extends StandardSchemaV1>(
+    schema: S,
+    value: unknown,
+  ): Promise<StandardSchemaV1.InferOutput<S>> {
     return parseSchemaUnobserved(schema, value);
   }
 }
@@ -55,5 +61,5 @@ export async function parseSchema<S extends StandardSchemaV1>(
   logger?: InternalLogger,
 ): Promise<StandardSchemaV1.InferOutput<S>> {
   const parser = traceSchemaParser(new SchemaParser(), logger);
-  return parser.parse(schema, value) as Promise<StandardSchemaV1.InferOutput<S>>;
+  return parser.parse(schema, value);
 }
