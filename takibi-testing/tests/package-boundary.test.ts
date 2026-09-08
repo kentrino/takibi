@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { expect, test } from "vite-plus/test";
 
@@ -217,4 +217,15 @@ test("published testing declarations stay off Takibi and execution-model", () =>
   expect(js).not.toContain("@takibi/takibi-execution-model");
   expect(js).toContain("@takibi/takibi-worker-runtime/testing-bridge");
   expect(sqliteJs).toContain("node:sqlite");
+});
+
+test("source implementations have no duplicate generated declarations", () => {
+  const files = new Set(readdirSync(join(packageDir, "src")));
+  const duplicates = [...files].filter(
+    (file) => file.endsWith(".d.ts") && files.has(file.replace(/\.d\.ts$/, ".ts")),
+  );
+  expect(
+    duplicates,
+    "Generate declarations in dist with vp pack, not beside source implementations",
+  ).toEqual([]);
 });
