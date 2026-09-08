@@ -205,23 +205,39 @@ export function matchesQuery(
         return actual === expression.value;
       case "gt":
         return (
-          (typeof actual === "string" && actual > (expression.value as string)) ||
-          (typeof actual === "number" && actual > (expression.value as number))
+          (typeof actual === "string" &&
+            typeof expression.value === "string" &&
+            actual > expression.value) ||
+          (typeof actual === "number" &&
+            typeof expression.value === "number" &&
+            actual > expression.value)
         );
       case "gte":
         return (
-          (typeof actual === "string" && actual >= (expression.value as string)) ||
-          (typeof actual === "number" && actual >= (expression.value as number))
+          (typeof actual === "string" &&
+            typeof expression.value === "string" &&
+            actual >= expression.value) ||
+          (typeof actual === "number" &&
+            typeof expression.value === "number" &&
+            actual >= expression.value)
         );
       case "lt":
         return (
-          (typeof actual === "string" && actual < (expression.value as string)) ||
-          (typeof actual === "number" && actual < (expression.value as number))
+          (typeof actual === "string" &&
+            typeof expression.value === "string" &&
+            actual < expression.value) ||
+          (typeof actual === "number" &&
+            typeof expression.value === "number" &&
+            actual < expression.value)
         );
       case "lte":
         return (
-          (typeof actual === "string" && actual <= (expression.value as string)) ||
-          (typeof actual === "number" && actual <= (expression.value as number))
+          (typeof actual === "string" &&
+            typeof expression.value === "string" &&
+            actual <= expression.value) ||
+          (typeof actual === "number" &&
+            typeof expression.value === "number" &&
+            actual <= expression.value)
         );
     }
   }
