@@ -12,3 +12,12 @@ export {
   type MethodRun,
 } from "./create-class";
 export { narrows, type Narrows } from "./narrows";
+export {
+  withTracing,
+  type TracingRunner,
+  type TracingSpanAttributeValue,
+  type TracingSpanAttributes,
+  type TracingSpanKind,
+  type TracingSpanSpec,
+  type WithTracingOptions,
+} from "./with-tracing";
