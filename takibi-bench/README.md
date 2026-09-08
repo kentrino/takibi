@@ -1,7 +1,26 @@
-# Takibi full-path macrobenchmark
+# Takibi benchmarks
 
 This private workspace package exercises Takibi strictly through its stable
 package entry points. It is not a publishable Takibi implementation package.
+
+Run it from the repository root:
+
+```sh
+pnpm --filter @takibi/takibi-bench bench
+```
+
+To save each benchmark file's results as JSON, set `OUTPUT_DIR`:
+
+```sh
+OUTPUT_DIR=.bench pnpm --filter @takibi/takibi-bench bench:json
+```
+
+The command derives each slug from its `*.bench.ts` file name and writes to
+`OUTPUT_DIR/<revision>/<slug>.json`. For example, `full-path.bench.ts` writes to
+`<revision>/full-path.json`. The revision is the current Git short SHA. A
+relative `OUTPUT_DIR` is resolved from the repository root. The same revision
+directory also contains an `INDEX.md` with run metadata, links to the JSON
+files, and the complete terminal results.
 
 `full-path.bench.ts` runs one fresh, isolated multi-tenant issue-tracker
 lifecycle per sample. It is a gross-regression macrobenchmark: handler
@@ -19,13 +38,6 @@ API builders -> client -> HTTP decode -> query/order compilation
 The scenario also covers document, detached, and root actions; atomic
 cross-collection writes; optimistic revisions; validation and policy failures;
 fixed-size client read batching; and explicit public protocol round-trips.
-
-Run it from `packages/takibi-bench`:
-
-```sh
-vp test benchmarks/full-path-scenario.test.ts
-vp test bench benchmarks/full-path.bench.ts --no-file-parallelism --maxWorkers 1
-```
 
 Exclusions:
 
