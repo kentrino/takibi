@@ -174,6 +174,7 @@ export {
   errorResponse,
   invocationFields,
   mergeLoggingOptions,
+  normalizeInvocationFailure,
   toWireFailure,
 } from "./context/runtime";
 export { createInProcessExecutor, createStubExecutor } from "./context/executors";

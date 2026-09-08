@@ -79,6 +79,15 @@ transaction must not create a second top-level notification.
 `ExecutionPlan` is the generic plan type. `InvocationPlan<T>` applies an
 invocation type map to that plan.
 
+`InternalInvocationTypeMap` is the shared upper bound. It constrains
+`wireInvocation` to a single action or collection request, `invocation` to the
+observer-safe copy without raw `input`, `context` to an object, `result` to
+`JsonValue`, and `failure` to `TakibiFailure<string>`. Concrete runtimes bind
+narrower result, context, services, and work/prepared types through the same
+map; those specifics are not replaced by the common bound. Collections,
+storage, registry, logger, services, raw/validated input, and prepare/apply
+payloads stay `unknown` here so implementation types remain in the runtime.
+
 ## Adapter composition
 
 `AdapterMap<T>` describes the complete invocation composition surface.
@@ -212,7 +221,9 @@ or call-level configuration failures may throw.
 
 A failed invocation result does not abort subsequent batch items. This relies
 on the injected runner honoring the settlement contract; DI types alone do not
-prove the behavior of arbitrary replacements.
+prove the behavior of arbitrary replacements. Mapped failures are
+`TakibiFailure<string>` values. Wire or HTTP adapters wrap those values as
+`{ ok: false; error }` when they project a response.
 
 Transaction outcome is recorded separately from execution outcome. A successful
 transaction settles as `committed` only after the transaction runner resolves,

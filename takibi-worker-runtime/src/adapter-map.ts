@@ -1,5 +1,5 @@
 import type { AdapterMap } from "@takibi/takibi-worker-runtime-contract";
-import { toWireFailure } from "./context/runtime";
+import { normalizeInvocationFailure } from "./context/runtime";
 import {
   createTakibiInvocationPlan,
   getTakibiRawInput,
@@ -47,7 +47,7 @@ export function createTakibiInvocationAdapterFactories<
       <TResult>(work: (storage: TakibiMap<TContext, TServices>["storage"]) => Promise<TResult>) =>
         invocationRuntime.storage.transaction(work),
     transactionClassifyFailure: () => undefined,
-    invocationToFailure: () => toWireFailure,
+    invocationToFailure: () => normalizeInvocationFailure,
     invocationSnapshotObserverEvent: () => snapshotTakibiObserverEvent,
     invocationNotify: () => undefined,
   };

@@ -17,7 +17,11 @@ import {
   type TrustedCollectionApi,
   type TrustedCollectionsApi,
 } from "@takibi/takibi-api";
-import type { StorageListOptions, WithMetadata } from "@takibi/takibi-shared-types";
+import type {
+  CollectionRequestData,
+  StorageListOptions,
+  WithMetadata,
+} from "@takibi/takibi-shared-types";
 import { executePlan } from "@takibi/takibi-worker-runtime-contract";
 import { createInvocationCollaborators, type PolicySurface } from "./invocation-collaborators";
 import type { InternalLogger } from "./logging";
@@ -35,14 +39,7 @@ import type { StorageDriver } from "@takibi/takibi-storage";
 import { collectionExecutionPlan } from "./transaction-boundary";
 import type { TakibiCollectionWork } from "./invocation-type-map";
 
-export type ExecuteRequest = {
-  kind: "collection";
-  collection: string;
-  operation: CollectionOperation;
-  id?: string;
-  input?: unknown;
-  list?: StorageListOptions;
-};
+export type ExecuteRequest = CollectionRequestData;
 
 function resolvePermission(
   operation: CollectionOperation,

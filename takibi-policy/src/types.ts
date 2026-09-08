@@ -1,6 +1,6 @@
-import type { QueryExpr, WithMetadata } from "@takibi/takibi-shared-types";
+import type { CollectionOperation, QueryExpr, WithMetadata } from "@takibi/takibi-shared-types";
 
-export type CollectionOperation = "add" | "set" | "get" | "update" | "delete" | "list" | "count";
+export type { CollectionOperation };
 
 export type AccessPermission = "create" | "get" | "list" | "update" | "delete" | "invoke";
 

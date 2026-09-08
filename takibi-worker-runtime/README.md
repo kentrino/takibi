@@ -11,7 +11,10 @@ resolves contract `RUNTIME_ADAPTER_GRAPH` plus Takibi construction slots:
 instrumentation, `callToSingleResponse` / `callToBatchResponse`, and
 `localExecution`. HTTP materialization uses the contract's
 `jsonResponseFromStatus` with Fetch `Response` as the `JsonResponseLike`
-factory.
+factory. Invocation adapters settle mapped failures as `TakibiFailure`;
+response adapters wrap those values as `{ ok: false; error }` for wire and
+HTTP. `toWireFailure` remains the exception-to-envelope helper for existing
+wire callers.
 Worker public HTTP decodes and resolves application context once, then either
 forwards one Call envelope through a stub hop or hands the decoded Call to the
 in-process executor. It

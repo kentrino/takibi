@@ -1,12 +1,19 @@
+import type {
+  InvocationRequestData,
+  JsonValue,
+  ObserverInvocationData,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
+
 export type MaybePromise<T> = T | Promise<T>;
 
 export type InternalInvocationTypeMap = {
-  wireInvocation: unknown;
-  invocation: unknown;
+  wireInvocation: InvocationRequestData;
+  invocation: ObserverInvocationData;
   collections: unknown;
   storage: unknown;
   registry: unknown;
-  context: unknown;
+  context: object;
   logger: unknown;
   services: unknown;
   rawInput: unknown;
@@ -16,8 +23,8 @@ export type InternalInvocationTypeMap = {
   fullWork: unknown;
   nonePrepared: unknown;
   applyPrepared: unknown;
-  result: unknown;
-  failure: unknown;
+  result: JsonValue;
+  failure: TakibiFailure<string>;
 };
 
 export type InternalInvocationPhase = "created" | "running" | "settled" | "notifying" | "notified";

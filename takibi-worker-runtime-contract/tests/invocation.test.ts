@@ -1,4 +1,9 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
+import type {
+  ActionRequestData,
+  ObserverActionRequestData,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
 import {
   InvocationState,
   runInvocation,
@@ -13,8 +18,8 @@ import {
 } from "../src";
 
 type Spec = {
-  wireInvocation: { kind: "action"; input: unknown };
-  invocation: { kind: "action" };
+  wireInvocation: ActionRequestData;
+  invocation: ObserverActionRequestData;
   collections: { names: string[] };
   storage: { scope: "base" | "transaction" };
   registry: { name: string };
@@ -28,12 +33,18 @@ type Spec = {
   fullWork: { key: string };
   nonePrepared: Record<string, never>;
   applyPrepared: Record<string, never>;
-  result: { id: string; nested?: { value: string } };
-  failure: { code: string };
+  result: { id: string } | { id: string; nested: { value: string } };
+  failure: TakibiFailure<string>;
+};
+
+const publicInvocation: ObserverActionRequestData = {
+  kind: "action",
+  scope: "patients",
+  name: "register",
 };
 
 const request: InvocationRequest<Spec> = {
-  wireInvocation: { kind: "action", input: { name: "Ada" } },
+  wireInvocation: { ...publicInvocation, input: { name: "Ada" } },
   context: { tenantId: "before" },
 };
 
@@ -48,7 +59,7 @@ const runtime: InvocationAdapters<Spec>["invocationRuntime"] = {
 function adapters(overrides: Partial<InvocationAdapters<Spec>> = {}): InvocationAdapters<Spec> {
   return {
     invocationRuntime: runtime,
-    invocationToInvocation: () => ({ kind: "action" }),
+    invocationToInvocation: () => publicInvocation,
     invocationGetRawInput: (wire) => wire.input,
     invocationCreatePlan: () => ({
       outcome: "succeeded",
@@ -68,7 +79,10 @@ function adapters(overrides: Partial<InvocationAdapters<Spec>> = {}): Invocation
     transactionRun: undefined,
     transactionClassifyFailure: undefined,
     invocationToFailure: (error) => ({
+      kind: "operation",
       code: error instanceof Error ? error.message : "INTERNAL",
+      message: error instanceof Error ? error.message : "INTERNAL",
+      status: 500,
     }),
     invocationSnapshotObserverEvent(event) {
       const { services, ...detachable } = event;
@@ -81,7 +95,7 @@ function adapters(overrides: Partial<InvocationAdapters<Spec>> = {}): Invocation
 
 function initialize(state: InvocationState<Spec>): void {
   state.start();
-  state.acceptInvocation({ kind: "action" });
+  state.acceptInvocation(publicInvocation);
   state.acceptRawInput({ name: "Ada" });
   state.acceptPlan({
     outcome: "succeeded",
@@ -114,8 +128,8 @@ test("state uses one instance and rejects illegal or duplicate transitions", () 
   expect(() => state.planningView()).toThrow(TakibiContractStateError);
   state.start();
   expect(() => state.start()).toThrow(TakibiContractStateError);
-  state.acceptInvocation({ kind: "action" });
-  expect(() => state.acceptInvocation({ kind: "action" })).toThrow(TakibiContractStateError);
+  state.acceptInvocation(publicInvocation);
+  expect(() => state.acceptInvocation(publicInvocation)).toThrow(TakibiContractStateError);
   state.acceptPlan({
     outcome: "succeeded",
     value: { transactionBoundary: "none", work: { key: "work" } },
@@ -226,7 +240,13 @@ test("notification failure cannot alter settlement", async () => {
         }),
       },
       invocationNotify: (event) => {
-        if (event.outcome !== "succeeded" || event.result.nested === undefined) return;
+        if (
+          event.outcome !== "succeeded" ||
+          !("nested" in event.result) ||
+          event.result.nested === undefined
+        ) {
+          return;
+        }
         event.result.nested.value = "observer";
         throw new Error("OBSERVER_FAILED");
       },
@@ -298,7 +318,7 @@ test("transactional execution failure is mapped and leaves outcome unknown", asy
 
   expect(observerCalls).toBe(1);
   expect(result.effects.transaction).toBe("unknown");
-  expect(result.settlement).toEqual({
+  expect(result.settlement).toMatchObject({
     outcome: "failed",
     stage: "execute",
     failure: { kind: "mapped", value: { code: "HANDLER_FAILED" } },
@@ -355,8 +375,8 @@ test("runtimeChecks controls phase checks without disabling slot integrity", () 
   const unchecked = new InvocationState(request, runtime, false);
   unchecked.start();
   expect(() => unchecked.start()).not.toThrow();
-  unchecked.acceptInvocation({ kind: "action" });
-  expect(() => unchecked.acceptInvocation({ kind: "action" })).toThrow(TakibiContractStateError);
+  unchecked.acceptInvocation(publicInvocation);
+  expect(() => unchecked.acceptInvocation(publicInvocation)).toThrow(TakibiContractStateError);
 });
 
 test("notification remains single-shot when runtimeChecks is disabled", () => {
@@ -401,22 +421,22 @@ test("observer mutation of a mapped failure cannot alter settlement", async () =
       prepare: () => ({ outcome: "succeeded", value: {} }),
       apply: () => ({ outcome: "failed", error: new Error("HANDLER_FAILED") }),
     },
-    invocationToFailure: () =>
-      ({ code: "HANDLER_FAILED", details: { reason: "original" } }) as never,
+    invocationToFailure: () => ({
+      kind: "operation",
+      code: "HANDLER_FAILED",
+      message: "original",
+      status: 500,
+    }),
     invocationNotify: (event) => {
-      if (
-        event.outcome === "failed" &&
-        event.failure.kind === "mapped" &&
-        "details" in event.failure.value
-      ) {
-        (event.failure.value.details as { reason: string }).reason = "mutated";
+      if (event.outcome === "failed" && event.failure.kind === "mapped") {
+        event.failure.value.message = "mutated";
       }
     },
   });
 
   expect(result.settlement).toMatchObject({
     outcome: "failed",
-    failure: { kind: "mapped", value: { details: { reason: "original" } } },
+    failure: { kind: "mapped", value: { message: "original" } },
   });
 });
 
@@ -458,7 +478,10 @@ test("settlement normalizes an unexpectedly open transaction", () => {
   const state = new InvocationState(request, runtime);
   initialize(state);
   state.beginTransaction();
-  state.fail("execute", { kind: "mapped", value: { code: "FAILED" } });
+  state.fail("execute", {
+    kind: "mapped",
+    value: { kind: "operation", code: "FAILED", message: "FAILED", status: 500 },
+  });
   const event = state.observerEvent();
 
   expect(event.transaction).toBe("unknown");
@@ -493,7 +516,7 @@ test("plan-creation failure preserves initialized invocation but no plan", async
     }),
   });
 
-  expect(result.invocation).toEqual({ kind: "action" });
+  expect(result.invocation).toEqual(publicInvocation);
   expect(result.plan).toBeUndefined();
 });
 

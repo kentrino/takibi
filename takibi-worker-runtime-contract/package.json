@@ -45,6 +45,9 @@
     "test": "vp test",
     "check": "vp check"
   },
+  "dependencies": {
+    "@takibi/takibi-shared-types": "workspace:^"
+  },
   "devDependencies": {
     "typescript": "catalog:",
     "vite": "catalog:",

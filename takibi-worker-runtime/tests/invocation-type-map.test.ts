@@ -22,7 +22,8 @@ import type {
   TakibiWireInvocation,
 } from "../src/invocation-type-map";
 import type { InternalLogger } from "../src/logging";
-import type { CollectionReadRequest, WireFailure } from "../src/protocol";
+import type { TakibiFailure } from "@takibi/takibi-shared-types";
+import type { CollectionReadRequest } from "../src/protocol";
 
 type AppContext = { readonly tenantId: string };
 type AppServices = { readonly queue: { readonly name: string } };
@@ -63,7 +64,7 @@ test("slots match current runtime types", () => {
   expectTypeOf<TakibiCollectionWork>().toExtend<AppMap["noneWork"]>();
   expectTypeOf<AppMap["fullWork"]>().toEqualTypeOf<TakibiActionWork>();
   expectTypeOf<AppMap["result"]>().toEqualTypeOf<JsonValue>();
-  expectTypeOf<AppMap["failure"]>().toEqualTypeOf<WireFailure>();
+  expectTypeOf<AppMap["failure"]>().toEqualTypeOf<TakibiFailure<string>>();
 });
 
 test("runtime bag uses pinned collections, storage, registry, logger, and services", () => {

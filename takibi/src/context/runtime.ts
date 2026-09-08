@@ -5,5 +5,6 @@ export {
   errorResponse,
   invocationFields,
   mergeLoggingOptions,
+  normalizeInvocationFailure,
   toWireFailure,
 } from "@takibi/takibi-worker-runtime";

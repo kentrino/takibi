@@ -8,6 +8,7 @@ import {
   type InternalLogger,
   type LoggingOptions,
 } from "../logging";
+import type { TakibiFailure } from "@takibi/takibi-shared-types";
 import type { WireFailure } from "../protocol";
 import { toTakibiFailure } from "../result";
 import { SchemaValidationError } from "../schema";
@@ -83,19 +84,20 @@ export function errorResponse(
   return Response.json(wire, { status: statusOf(error) });
 }
 
-export function toWireFailure(err: unknown): WireFailure {
-  if (err instanceof SchemaValidationError || err instanceof TakibiError) {
-    return { ok: false, error: toTakibiFailure(err) };
+export function normalizeInvocationFailure(error: unknown): TakibiFailure<string> {
+  if (error instanceof SchemaValidationError || error instanceof TakibiError) {
+    return toTakibiFailure(error);
   }
   return {
-    ok: false,
-    error: {
-      kind: "operation",
-      code: "INTERNAL",
-      message: err instanceof Error ? err.message : String(err),
-      status: 500,
-    },
+    kind: "operation",
+    code: "INTERNAL",
+    message: error instanceof Error ? error.message : String(error),
+    status: 500,
   };
+}
+
+export function toWireFailure(err: unknown): WireFailure {
+  return { ok: false, error: normalizeInvocationFailure(err) };
 }
 
 function statusOf(err: unknown): number {
