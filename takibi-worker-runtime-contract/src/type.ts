@@ -293,17 +293,29 @@ export type BoundRunInvocation<T extends InternalInvocationTypeMap> = (
   options: InvocationRunOptions<T>,
 ) => Promise<InvocationResult<T>>;
 
-/**
- * Complete runtime composition contract for invocation execution.
- * Composition libraries are deliberately absent from this public type.
- */
-type InvocationAdapterMap<T extends InternalInvocationTypeMap> = {
-  invocationRuntime: T["runtime"];
-  invocationToInvocation: (wireInvocation: T["wireInvocation"]) => T["invocation"];
-  invocationGetRawInput: (wireInvocation: T["wireInvocation"]) => T["rawInput"];
+/** Runtime type choices; invocation context has a single source of truth. */
+export type RuntimeTypeMap<
+  TInvocation extends InternalInvocationTypeMap = InternalInvocationTypeMap,
+> = {
+  invocation: TInvocation;
+  request: unknown;
+  decoded: unknown;
+  response: unknown;
+  localExecution: unknown;
+};
+
+/** All local runtime DI slots. Consumer adapter sets are projections of this map. */
+export type RuntimeAdapterMap<T extends RuntimeTypeMap = RuntimeTypeMap> = {
+  invocationRuntime: T["invocation"]["runtime"];
+  invocationToInvocation: (
+    wireInvocation: T["invocation"]["wireInvocation"],
+  ) => T["invocation"]["invocation"];
+  invocationGetRawInput: (
+    wireInvocation: T["invocation"]["wireInvocation"],
+  ) => T["invocation"]["rawInput"];
   invocationCreatePlan: (
-    view: InvocationPlanningView<T>,
-  ) => MaybePromise<InvocationAdapterResult<T, InvocationPlan<T>>>;
+    view: InvocationPlanningView<T["invocation"]>,
+  ) => MaybePromise<InvocationAdapterResult<T["invocation"], InvocationPlan<T["invocation"]>>>;
   /**
    * Runtime-pinned collaborators consumed by `invocationPrepareApply`.
    * Concrete policy / schema / handler types stay in the runtime.
@@ -312,30 +324,70 @@ type InvocationAdapterMap<T extends InternalInvocationTypeMap> = {
   invocationSchema: unknown;
   invocationActionHandler: unknown;
   invocationPrepareApply: PrepareApplyInvocationContract<
-    T,
-    T["noneWork"] | T["applyWork"] | T["fullWork"],
-    T["nonePrepared"] | T["applyPrepared"] | T["fullPrepared"]
+    T["invocation"],
+    T["invocation"]["noneWork"] | T["invocation"]["applyWork"] | T["invocation"]["fullWork"],
+    | T["invocation"]["nonePrepared"]
+    | T["invocation"]["applyPrepared"]
+    | T["invocation"]["fullPrepared"]
   >;
-  invocationTransactionBoundary: InvocationTransactionBoundaryContracts<T>;
-  transactionNone: InvocationTransactionBoundaryContracts<T>["none"];
-  transactionApply: InvocationTransactionBoundaryContracts<T>["apply"];
-  transactionFull: InvocationTransactionBoundaryContracts<T>["full"];
+  invocationTransactionBoundary: InvocationTransactionBoundaryContracts<T["invocation"]>;
+  transactionNone: InvocationTransactionBoundaryContracts<T["invocation"]>["none"];
+  transactionApply: InvocationTransactionBoundaryContracts<T["invocation"]>["apply"];
+  transactionFull: InvocationTransactionBoundaryContracts<T["invocation"]>["full"];
   transactionRun:
-    | (<TResult>(work: (storage: T["runtime"]["storage"]) => Promise<TResult>) => Promise<TResult>)
+    | (<TResult>(
+        work: (storage: T["invocation"]["runtime"]["storage"]) => Promise<TResult>,
+      ) => Promise<TResult>)
     | undefined;
   transactionClassifyFailure:
     | ((input: { error: unknown; workCompleted: boolean }) => InternalInvocationTransactionFailure)
     | undefined;
-  invocationToFailure: (error: unknown) => T["failure"];
+  invocationToFailure: (error: unknown) => T["invocation"]["failure"];
   /**
    * Produces an observer-owned value graph. Generic contract values are opaque and therefore
    * cannot be assumed to support JSON or structured cloning.
    */
   invocationSnapshotObserverEvent: (
-    event: InvocationObserverEvent<T>,
-  ) => MaybePromise<InvocationObserverEvent<T>>;
-  invocationNotify: ((event: InvocationObserverEvent<T>) => MaybePromise<void>) | undefined;
-  invocationRun: BoundRunInvocation<T>;
+    event: InvocationObserverEvent<T["invocation"]>,
+  ) => MaybePromise<InvocationObserverEvent<T["invocation"]>>;
+  invocationNotify:
+    | ((event: InvocationObserverEvent<T["invocation"]>) => MaybePromise<void>)
+    | undefined;
+  invocationRun: BoundRunInvocation<T["invocation"]>;
+
+  callDecode: (request: T["request"]) => MaybePromise<T["decoded"]>;
+  callResolveContext: (input: {
+    request: T["request"];
+    decoded: T["decoded"];
+  }) => MaybePromise<T["invocation"]["context"]>;
+  callGetWireInvocation: (input: {
+    request: T["request"];
+    decoded: T["decoded"];
+    context: T["invocation"]["context"];
+  }) => MaybePromise<T["invocation"]["wireInvocation"]>;
+  callGetWireInvocations: (input: {
+    request: T["request"];
+    decoded: T["decoded"];
+    context: T["invocation"]["context"];
+  }) => MaybePromise<readonly T["invocation"]["wireInvocation"][]>;
+  callToSingleResponse: (input: {
+    request: T["request"];
+    decoded: T["decoded"];
+    context: T["invocation"]["context"];
+    invocation: InvocationResult<T["invocation"]>;
+  }) => MaybePromise<T["response"]>;
+  callToBatchResponse: (input: {
+    request: T["request"];
+    decoded: T["decoded"];
+    context: T["invocation"]["context"];
+    invocations: readonly InvocationResult<T["invocation"]>[];
+  }) => MaybePromise<T["response"]>;
+  callRuntimeChecks: boolean | (() => boolean) | undefined;
+  callSingle: TakibiCall<T["request"], T["response"]>;
+  callBatch: TakibiCall<T["request"], T["response"]>;
+
+  invocationCoreRun: BoundRunInvocation<T["invocation"]>;
+  localExecution: T["localExecution"];
 };
 
 export type CallTypeMap<
@@ -378,61 +430,30 @@ export type LocalCallTypeMap<
   TResponseObject
 >;
 
-type CallAdapterSlots<T extends CallTypeMap<unknown, unknown, InternalInvocationTypeMap, unknown>> =
-  {
-    callDecode: (request: T["request"]) => MaybePromise<T["decoded"]>;
-    callResolveContext: (input: {
-      request: T["request"];
-      decoded: T["decoded"];
-    }) => MaybePromise<T["context"]>;
-    callGetWireInvocation: (input: {
-      request: T["request"];
-      decoded: T["decoded"];
-      context: T["context"];
-    }) => MaybePromise<T["invocation"]["wireInvocation"]>;
-    callGetWireInvocations: (input: {
-      request: T["request"];
-      decoded: T["decoded"];
-      context: T["context"];
-    }) => MaybePromise<readonly T["invocation"]["wireInvocation"][]>;
-    callToSingleResponse: (input: {
-      request: T["request"];
-      decoded: T["decoded"];
-      context: T["context"];
-      invocation: InvocationResult<T["invocation"]>;
-    }) => MaybePromise<T["response"]>;
-    callToBatchResponse: (input: {
-      request: T["request"];
-      decoded: T["decoded"];
-      context: T["context"];
-      invocations: readonly InvocationResult<T["invocation"]>[];
-    }) => MaybePromise<T["response"]>;
-    callRuntimeChecks: boolean | (() => boolean) | undefined;
-    callSingle: TakibiCall<T["request"], T["response"]>;
-    callBatch: TakibiCall<T["request"], T["response"]>;
-  };
+type InvocationCompositionKeys =
+  | InvocationAdapterKeys
+  | "invocationPolicy"
+  | "invocationSchema"
+  | "invocationActionHandler"
+  | "invocationPrepareApply"
+  | "invocationTransactionBoundary"
+  | "invocationRun";
 
-export type AdapterMap<T extends InternalInvocationTypeMap> = InvocationAdapterMap<T>;
+type CallCompositionKeys =
+  | (typeof CALL_SINGLE_ADAPTER_KEYS)[number]
+  | (typeof CALL_BATCH_ADAPTER_KEYS)[number]
+  | "callSingle"
+  | "callBatch";
 
-export type CallAdapterMap<
-  T extends InternalInvocationTypeMap,
-  TCall extends CallTypeMap<unknown, unknown, T, unknown>,
-> = AdapterMap<T> & CallAdapterSlots<TCall>;
+export type AdapterMap<T extends InternalInvocationTypeMap> = Pick<
+  RuntimeAdapterMap<RuntimeTypeMap<T>>,
+  InvocationCompositionKeys
+>;
 
-/**
- * Local DO / in-process composition surface. `invocationRun` is the runner
- * Calls consume. `invocationCoreRun` is the injected `runInvocation` before a
- * runtime applies instrumentation. Call slots stay on `CallAdapterMap`;
- * `localExecution` is the runtime facade over `callSingle` / `callBatch`.
- */
-export type RuntimeAdapterMap<
-  T extends InternalInvocationTypeMap,
-  TCall extends CallTypeMap<unknown, unknown, T, unknown>,
-  TLocalExecution,
-> = CallAdapterMap<T, TCall> & {
-  invocationCoreRun: BoundRunInvocation<T>;
-  localExecution: TLocalExecution;
-};
+export type CallAdapterMap<T extends RuntimeTypeMap = RuntimeTypeMap> = Pick<
+  RuntimeAdapterMap<T>,
+  InvocationCompositionKeys | CallCompositionKeys
+>;
 
 export const CALL_SINGLE_ADAPTER_KEYS = [
   "invocationRun",
@@ -471,16 +492,10 @@ export const ENVELOPE_CALL_ADAPTER_KEYS = [
 /**
  * The statically declared subset an adapter factory is allowed to read.
  */
-export type Adapters<
-  T extends InternalInvocationTypeMap,
-  K extends keyof CallAdapterMap<T, TCall>,
-  TCall extends CallTypeMap<unknown, unknown, T, unknown> = CallTypeMap<
-    unknown,
-    unknown,
-    T,
-    unknown
-  >,
-> = Pick<CallAdapterMap<T, TCall>, K>;
+export type Adapters<T extends RuntimeTypeMap, K extends keyof RuntimeAdapterMap<T>> = Pick<
+  RuntimeAdapterMap<T>,
+  K
+>;
 
 export const INVOCATION_ADAPTER_KEYS = [
   "invocationRuntime",
@@ -504,7 +519,7 @@ export type InvocationAdapterKeys = (typeof INVOCATION_ADAPTER_KEYS)[number];
  * canonical AdapterMap slots; no second execution-shaped adapter bag exists.
  */
 export type InvocationAdapters<T extends InternalInvocationTypeMap> = Adapters<
-  T,
+  RuntimeTypeMap<T>,
   InvocationAdapterKeys
 >;
 
@@ -589,14 +604,19 @@ export type SingleCallAdapters<
   TInvocation extends InternalInvocationTypeMap,
   TResponseObject,
 > = Adapters<
-  TInvocation,
+  {
+    invocation: TInvocation;
+    request: TRequestLike;
+    decoded: TDecoded;
+    response: TResponseObject;
+    localExecution: unknown;
+  },
   | "callDecode"
   | "callResolveContext"
   | "callGetWireInvocation"
   | "callToSingleResponse"
   | "callRuntimeChecks"
-  | "invocationRun",
-  CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>
+  | "invocationRun"
 >;
 
 export type BatchCallAdapters<
@@ -605,14 +625,19 @@ export type BatchCallAdapters<
   TInvocation extends InternalInvocationTypeMap,
   TResponseObject,
 > = Adapters<
-  TInvocation,
+  {
+    invocation: TInvocation;
+    request: TRequestLike;
+    decoded: TDecoded;
+    response: TResponseObject;
+    localExecution: unknown;
+  },
   | "callDecode"
   | "callResolveContext"
   | "callGetWireInvocations"
   | "callToBatchResponse"
   | "callRuntimeChecks"
-  | "invocationRun",
-  CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>
+  | "invocationRun"
 >;
 
 export type SingleTakibiCallOptions<

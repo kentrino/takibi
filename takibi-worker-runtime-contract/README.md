@@ -116,11 +116,13 @@ implementation types remain in the runtime.
 
 ## Adapter composition
 
-`AdapterMap<T>` describes the complete invocation composition surface.
-`CallAdapterMap<T, TCall>` adds call-specific slots, and
-`Adapters<T, K, TCall>` selects the slots a function or factory may read.
-`RuntimeAdapterMap<T, TCall, TLocalExecution>` is `CallAdapterMap` plus
-`invocationCoreRun` and `localExecution`. Call composers stay on the map as
+`RuntimeAdapterMap<T>` declares every local runtime slot directly. Its single
+`RuntimeTypeMap` argument supplies invocation, request, decoded, response, and
+local-execution types; context comes from the invocation type map. The default
+argument permits `keyof RuntimeAdapterMap` without constructing placeholder types.
+`AdapterMap<TInvocation>`, `CallAdapterMap<T>`, and `Adapters<T, K>` are `Pick`
+projections of that full map, not building blocks used to assemble it.
+Call composers stay on the map as
 `callSingle` / `callBatch`; a runtime facade may wrap their wire result for
 HTTP. In-process Calls use `LocalCallRequest` (`kind: "single" | "batch"`,
 `context`, and `invocation` or `items`) via `LocalCallTypeMap` and the default

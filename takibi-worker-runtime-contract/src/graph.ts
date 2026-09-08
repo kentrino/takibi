@@ -4,16 +4,10 @@ import {
   ENVELOPE_CALL_ADAPTER_KEYS,
   INVOCATION_ADAPTER_KEYS,
   INVOCATION_PREPARE_ADAPTER_KEYS,
-  type CallTypeMap,
-  type InternalInvocationTypeMap,
   type RuntimeAdapterMap,
 } from "./type";
 
-type RuntimeAdapterMapKeys = keyof RuntimeAdapterMap<
-  InternalInvocationTypeMap,
-  CallTypeMap<unknown, unknown, InternalInvocationTypeMap, unknown>,
-  unknown
->;
+type RuntimeAdapterMapKeys = keyof RuntimeAdapterMap;
 
 export type RuntimeAdapterGraph = {
   readonly [K in RuntimeAdapterMapKeys]: readonly RuntimeAdapterMapKeys[];

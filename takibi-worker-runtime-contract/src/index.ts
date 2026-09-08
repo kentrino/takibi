@@ -99,6 +99,7 @@ export type {
   RunBatchCall,
   RunSingleCall,
   RuntimeAdapterMap,
+  RuntimeTypeMap,
   SingleCallAdapters,
   SingleTakibiCallOptions,
   TakibiCall,
