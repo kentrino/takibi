@@ -153,9 +153,26 @@ function readCatalog(sql: SqlStorage): CatalogRecord[] {
       physicalName: row.physical_name,
       collection: row.collection,
       publicName: row.public_name,
-      fields: JSON.parse(row.fields_json) as string[],
+      fields: parseCatalogFields(row.fields_json, row.collection, row.public_name),
       schemaVersion: row.schema_version,
     }));
+}
+
+function parseCatalogFields(json: string, collection: string, publicName: string): string[] {
+  const message = `Invalid index catalog fields: ${collection}.${publicName}`;
+  let fields: unknown;
+  try {
+    fields = JSON.parse(json);
+  } catch (cause) {
+    throw new Error(message, { cause });
+  }
+  if (
+    !Array.isArray(fields) ||
+    !fields.every((field): field is string => typeof field === "string")
+  ) {
+    throw new Error(message);
+  }
+  return fields;
 }
 
 function writeCatalog(sql: SqlStorage, row: CatalogRecord): void {

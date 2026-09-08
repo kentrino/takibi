@@ -26,6 +26,22 @@ const posts = {
   indexes: { byOwner: ["ownerId", "createdAt"] as const, byScore: ["score"] as const },
 };
 
+test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
+  "index reconcile rejects invalid catalog fields %s before changing indexes",
+  async (fieldsJson) => {
+    const collections = { posts };
+    const backing = createSqliteDurableObjectStorage();
+    const storage = createDurableObjectStorage(backing, compileIndexRegistry(collections));
+    await reconcileCollectionIndexes({ sql: backing.sql, collections, storage });
+    backing.sql.exec("UPDATE takibi_index_catalog SET fields_json = ?", fieldsJson);
+    const before = backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray();
+    await expect(
+      reconcileCollectionIndexes({ sql: backing.sql, collections, storage }),
+    ).rejects.toThrow(/Invalid index catalog fields/);
+    expect(backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray()).toEqual(before);
+  },
+);
+
 test("SQLite query plan uses the declared expression index", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
