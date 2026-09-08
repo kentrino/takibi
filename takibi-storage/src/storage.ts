@@ -412,7 +412,7 @@ function encodeDocument(document: StoredDocument): {
     error: (message) => new TakibiError("INVALID_DOCUMENT", message, 500),
   });
   const schemaVersion = rawVersion ?? 0;
-  if (!Number.isInteger(schemaVersion) || (schemaVersion as number) < 0) {
+  if (typeof schemaVersion !== "number" || !Number.isInteger(schemaVersion) || schemaVersion < 0) {
     throw new TakibiError(
       "MIGRATION_VERSION",
       "Stored document has an invalid migration version",
@@ -420,7 +420,7 @@ function encodeDocument(document: StoredDocument): {
     );
   }
   const revision = documentRevision(document);
-  return { schemaVersion: schemaVersion as number, revision, data: JSON.stringify(data) };
+  return { schemaVersion, revision, data: JSON.stringify(data) };
 }
 
 function rowToDocument(row: DocumentRow): StoredDocument {

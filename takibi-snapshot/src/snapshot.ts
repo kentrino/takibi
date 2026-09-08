@@ -350,8 +350,9 @@ function validateHeader(
     assertExactRecord(entry, ["name", "schemaVersion"]);
     if (
       typeof entry.name !== "string" ||
+      typeof entry.schemaVersion !== "number" ||
       !Number.isInteger(entry.schemaVersion) ||
-      (entry.schemaVersion as number) < 0
+      entry.schemaVersion < 0
     ) {
       throw new SnapshotFormatError("Invalid collection manifest entry");
     }
@@ -363,13 +364,13 @@ function validateHeader(
       throw new SnapshotIncompatibleError(`Unknown snapshot collection: ${entry.name}`);
     }
     if (
-      (entry.schemaVersion as number) < definition.baseSchemaVersion ||
-      (entry.schemaVersion as number) > definition.currentSchemaVersion
+      entry.schemaVersion < definition.baseSchemaVersion ||
+      entry.schemaVersion > definition.currentSchemaVersion
     ) {
       throw new SnapshotIncompatibleError(`Unsupported snapshot collection version: ${entry.name}`);
     }
     previous = entry.name;
-    manifest.push({ name: entry.name, schemaVersion: entry.schemaVersion as number });
+    manifest.push({ name: entry.name, schemaVersion: entry.schemaVersion });
   }
   return {
     type: "header",
