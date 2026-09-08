@@ -4,7 +4,6 @@ import { SchemaValidationError } from "./schema";
 import type {
   PolicyReason,
   TakibiFailure,
-  TakibiOperationFailure,
   TakibiResult,
   ValidationIssue,
 } from "@takibi/takibi-shared-types";
@@ -46,15 +45,16 @@ export function toTakibiFailure<TReasonCode extends string = string>(
       issues: normalizeValidationIssues(err.issues),
     };
   }
-  return {
-    kind: "operation",
+  const failure = {
+    kind: "operation" as const,
     code: err.code,
     message: err.message,
     status: err.status,
     ...(err instanceof ForbiddenError && err.reason
       ? { reason: err.reason as PolicyReason<TReasonCode> }
       : {}),
-  } as TakibiOperationFailure<TReasonCode>;
+  };
+  return failure;
 }
 
 export async function asTakibiResult<T, TReasonCode extends string = never>(
