@@ -174,3 +174,48 @@ test("anonymous CRUD stays denied when accessPolicy does not grant", async () =>
     error: { code: "FORBIDDEN", status: 403 },
   });
 });
+
+test("action guards replace gate and handler context while nested CRUD keeps resolve context", async () => {
+  const baseContext: AppCtx = { tenantId: "tenant-a", user: { id: "s1", role: "staff" } };
+  const context = createTakibi()({ resolve: () => baseContext });
+  const policyContexts: AppCtx[] = [];
+  const app = context.defineCollections({
+    bookings: {
+      schema: Booking,
+      accessPolicy: context.policy((ctx) => {
+        policyContexts.push(ctx);
+        return ctx.tenantId === "tenant-a" && ctx.user?.role === "staff" ? fullAccess : none;
+      }),
+      seed: () => ({ b1: { title: "existing", status: "pending" as const } }),
+    },
+  });
+  const bookings = app.bookings.actions((defineAction) => ({
+    inspect: defineAction()
+      .use(() => "guarded")
+      .policy(({ ctx }) => (ctx === "guarded" ? fullAccess : none))
+      .handler(async ({ ctx, collection, id }) => ({ ctx, booking: await collection.get(id) })),
+  }));
+  const inspectRoot = app
+    .defineAction()
+    .use(() => "guarded")
+    .use((identity) => ({ identity }))
+    .policy(({ ctx }) => (ctx.identity === "guarded" ? fullAccess : none))
+    .handler(async ({ ctx, collections }) => ({
+      ctx,
+      booking: await collections.bookings.get("b1"),
+    }));
+  const handler = withSqliteTestBackend(app.actions({ bookings, $: { inspectRoot } }));
+  const client = createClient<typeof handler>("http://fire.test", {
+    fetch: (input, init) => handler.request(input, init),
+  });
+
+  expect(await client.bookings.inspect("b1")).toMatchObject({
+    ok: true,
+    data: { ctx: "guarded", booking: { title: "existing" } },
+  });
+  expect(await client.inspectRoot()).toMatchObject({
+    ok: true,
+    data: { ctx: { identity: "guarded" }, booking: { title: "existing" } },
+  });
+  expect(policyContexts).toMatchObject([baseContext, baseContext]);
+});
