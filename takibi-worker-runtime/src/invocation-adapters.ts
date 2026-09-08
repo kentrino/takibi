@@ -9,7 +9,7 @@ import type {
 } from "@takibi/takibi-worker-runtime-contract";
 import type { ActionInvocation } from "./action-gate";
 import { classifyAction } from "./action-executor";
-import { toWireFailure } from "./context/runtime";
+import { normalizeInvocationFailure } from "./context/runtime";
 import type { ExecuteRequest } from "./executor";
 import { createInvocationTransactionBoundaryContracts } from "./invocation-paths";
 import { actionExecutionPlan, collectionExecutionPlan } from "./transaction-boundary";
@@ -52,7 +52,7 @@ export function createBoundInvocationAdapters<TContext extends object, TServices
     transactionFull: transactionBoundary.full,
     transactionRun: (work) => runtime.storage.transaction(work),
     transactionClassifyFailure: undefined,
-    invocationToFailure: toWireFailure,
+    invocationToFailure: normalizeInvocationFailure,
     invocationSnapshotObserverEvent: snapshotTakibiObserverEvent,
     invocationNotify: undefined,
   };

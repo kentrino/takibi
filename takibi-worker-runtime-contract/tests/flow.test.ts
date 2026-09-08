@@ -1,4 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
+import type { TakibiFailure } from "@takibi/takibi-shared-types";
 import {
   runInvocation,
   type BoundRunInvocation,
@@ -13,13 +14,16 @@ import { createBatchTakibiCall, createSingleTakibiCall } from "../src/call";
 
 type ActionWire = {
   readonly kind: "action";
+  readonly scope: string;
   readonly name: string;
   readonly input: unknown;
 };
 type ActionInvocation = Omit<ActionWire, "input">;
 
 type ReadWire = {
-  readonly kind: "read";
+  readonly kind: "collection";
+  readonly collection: string;
+  readonly operation: "get";
   readonly id: string;
 };
 type ReadInvocation = ReadWire;
@@ -33,7 +37,7 @@ type Storage = { readonly scope: "base" | "transaction" };
 type Registry = { readonly name: "actions" };
 type Logger = { readonly name: "test" };
 type Services = { readonly audit: string[] };
-type Failure = { readonly code: string; readonly status: number };
+type Failure = TakibiFailure<string>;
 type ActionOperation = { readonly key: "action:register" };
 type ReadOperation = { readonly key: "collection:get" };
 type ActionWork = { readonly operation: ActionOperation };
@@ -84,7 +88,9 @@ type ReadSpec = {
 
 function toFailure(error: unknown): Failure {
   return {
+    kind: "operation",
     code: error instanceof Error ? error.message : "INTERNAL",
+    message: error instanceof Error ? error.message : "INTERNAL",
     status: 500,
   };
 }
@@ -108,8 +114,13 @@ function toWireResult<T extends InternalInvocationTypeMap>(
         ok: false,
         error:
           state.settlement.failure.kind === "mapped"
-            ? (state.settlement.failure.value as Failure)
-            : { code: "FAILURE_MAPPING", status: 500 },
+            ? state.settlement.failure.value
+            : {
+                kind: "operation",
+                code: "FAILURE_MAPPING",
+                message: "FAILURE_MAPPING",
+                status: 500,
+              },
       };
 }
 
@@ -229,6 +240,7 @@ test("Request -> Promise<Response> visibly composes a call and notification", as
       kind: "single",
       wireInvocation: {
         kind: "action",
+        scope: "patients",
         name: "register",
         input: { displayName: "Ada" },
       },
@@ -339,10 +351,10 @@ test("one HTTP batch resolves once and creates one invocation state per item", a
     body: JSON.stringify({
       kind: "batch",
       items: [
-        { kind: "read", id: "patient-1" },
-        { kind: "read", id: "invalid-wire" },
-        { kind: "read", id: "missing" },
-        { kind: "read", id: "patient-2" },
+        { kind: "collection", collection: "patients", operation: "get", id: "patient-1" },
+        { kind: "collection", collection: "patients", operation: "get", id: "invalid-wire" },
+        { kind: "collection", collection: "patients", operation: "get", id: "missing" },
+        { kind: "collection", collection: "patients", operation: "get", id: "patient-2" },
       ],
     } satisfies BatchDecoded),
   });
@@ -357,8 +369,24 @@ test("one HTTP batch resolves once and creates one invocation state per item", a
     ok: true,
     data: [
       { ok: true, data: { id: "patient-1" } },
-      { ok: false, error: { code: "INVALID_WIRE", status: 500 } },
-      { ok: false, error: { code: "NOT_FOUND", status: 500 } },
+      {
+        ok: false,
+        error: {
+          kind: "operation",
+          code: "INVALID_WIRE",
+          message: "INVALID_WIRE",
+          status: 500,
+        },
+      },
+      {
+        ok: false,
+        error: {
+          kind: "operation",
+          code: "NOT_FOUND",
+          message: "NOT_FOUND",
+          status: 500,
+        },
+      },
       { ok: true, data: { id: "patient-2" } },
     ],
   });
@@ -441,6 +469,7 @@ test("Durable Object adapters take context from the decoded wire envelope", asyn
         context: { tenantId: "tenant-from-wire" },
         wireInvocation: {
           kind: "action",
+          scope: "patients",
           name: "register",
           input: { displayName: "Ada" },
         },

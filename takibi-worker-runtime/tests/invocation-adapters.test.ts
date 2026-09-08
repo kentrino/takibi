@@ -625,7 +625,7 @@ test("guard failure performs no document load or later action phase", async () =
 
   expect(result.settlement).toMatchObject({
     outcome: "failed",
-    failure: { kind: "mapped", value: { error: { code: "UNAUTHORIZED" } } },
+    failure: { kind: "mapped", value: { code: "UNAUTHORIZED" } },
   });
   expect(loads).toBe(0);
   expect(events).toEqual(["guard"]);
@@ -653,7 +653,7 @@ test("document gate denial prevents input parsing and handler execution", async 
 
   expect(result.settlement).toMatchObject({
     outcome: "failed",
-    failure: { kind: "mapped", value: { error: { code: "FORBIDDEN" } } },
+    failure: { kind: "mapped", value: { code: "FORBIDDEN" } },
   });
   expect(events).toEqual(["gate"]);
 });
@@ -751,7 +751,7 @@ test("parsed input is observable when a detached transaction cannot start", asyn
   expect(observedInput).toBe("hello");
   expect(result.settlement).toMatchObject({
     outcome: "failed",
-    failure: { kind: "mapped", value: { error: { message: "TRANSACTION_START_FAILED" } } },
+    failure: { kind: "mapped", value: { message: "TRANSACTION_START_FAILED" } },
   });
 });
 
@@ -858,11 +858,9 @@ test("observer nested mapped failure mutation cannot change wire or HTTP respons
         if (context.outcome !== "failed" || context.failure.kind !== "mapped") {
           throw new Error("Expected mapped failure");
         }
-        const failure = context.failure.value as {
-          error: { code: string; status: number };
-        };
-        failure.error.code = "MUTATED";
-        failure.error.status = 418;
+        const failure = context.failure.value;
+        failure.code = "MUTATED";
+        failure.status = 418;
       },
     },
     { kind: "action", scope: "$", name: "ghost" },
@@ -1105,7 +1103,7 @@ test.each(["set", "update"] as const)(
 
     expect(result.settlement).toMatchObject({
       outcome: "failed",
-      failure: { kind: "mapped", value: { error: { code: "NOT_FOUND", status: 404 } } },
+      failure: { kind: "mapped", value: { code: "NOT_FOUND", status: 404 } },
     });
     expect(policyCalls).toBe(1);
     await expect(storage.get("items", "i1")).resolves.toMatchObject({ value: "hello" });
@@ -1124,7 +1122,7 @@ test("unknown action settles through toFailure without throwing", async () => {
     stage: "classify",
     failure: {
       kind: "mapped",
-      value: { ok: false, error: { code: "NOT_FOUND", status: 404 } },
+      value: { code: "NOT_FOUND", status: 404 },
     },
   });
 });

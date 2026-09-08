@@ -1,4 +1,9 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
+import type {
+  CollectionRequestData,
+  ObserverCollectionRequestData,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
 import {
   decodeLocalCallRequest,
   getLocalCallWireInvocation,
@@ -12,8 +17,6 @@ import {
 } from "../src";
 
 type Ctx = { readonly tenantId: string };
-type Wire = { readonly id: string };
-type Envelope = LocalCallRequest<Ctx, Wire>;
 
 test("local envelope constructors and default adapters unwrap a decoded call", () => {
   const context = { tenantId: "tenant-1" };
@@ -41,8 +44,8 @@ test("local wire getters reject the opposite envelope kind", () => {
 
 test("LocalCallTypeMap pins request and decoded to the local envelope", () => {
   type Spec = {
-    wireInvocation: Wire;
-    invocation: Wire;
+    wireInvocation: CollectionRequestData;
+    invocation: ObserverCollectionRequestData;
     collections: unknown;
     storage: unknown;
     registry: unknown;
@@ -56,11 +59,15 @@ test("LocalCallTypeMap pins request and decoded to the local envelope", () => {
     fullWork: unknown;
     nonePrepared: unknown;
     applyPrepared: unknown;
-    result: unknown;
-    failure: unknown;
+    result: { id: string };
+    failure: TakibiFailure<string>;
   };
 
-  expectTypeOf<LocalCallTypeMap<Spec, string>["request"]>().toEqualTypeOf<Envelope>();
-  expectTypeOf<LocalCallTypeMap<Spec, string>["decoded"]>().toEqualTypeOf<Envelope>();
+  expectTypeOf<LocalCallTypeMap<Spec, string>["request"]>().toEqualTypeOf<
+    LocalCallRequest<Ctx, CollectionRequestData>
+  >();
+  expectTypeOf<LocalCallTypeMap<Spec, string>["decoded"]>().toEqualTypeOf<
+    LocalCallRequest<Ctx, CollectionRequestData>
+  >();
   expectTypeOf<LocalCallTypeMap<Spec, string>["context"]>().toEqualTypeOf<Ctx>();
 });

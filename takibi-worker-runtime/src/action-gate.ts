@@ -10,15 +10,9 @@ import {
   isContextPolicy,
   type AccessGrant,
 } from "@takibi/takibi-policy";
+import type { ActionRequestData } from "@takibi/takibi-shared-types";
 
-export type ActionInvocation = {
-  kind: "action";
-  scope: string;
-  name: string;
-  /** Target document id. Present exactly for document actions. */
-  id?: string;
-  input?: unknown;
-};
+export type ActionInvocation = ActionRequestData;
 
 export async function resolveGateGrant<TCtx extends object>(
   definition: RuntimeActionDefinition,

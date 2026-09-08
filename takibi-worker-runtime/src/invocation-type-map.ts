@@ -4,12 +4,16 @@ import type {
   RuntimeActionDefinition,
 } from "@takibi/takibi-api";
 import type { CollectionOperation } from "@takibi/takibi-policy";
-import type { JsonValue } from "@takibi/takibi-shared-types";
+import type {
+  JsonValue,
+  ObserverInvocationData,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
 import type { StorageDriver } from "@takibi/takibi-storage";
 import type { ActionInvocation, ResolvedAction } from "./action-executor";
 import type { ExecuteRequest, ResolvedCollection } from "./executor";
 import type { InternalLogger } from "./logging";
-import type { CollectionReadRequest, WireFailure } from "./protocol";
+import type { CollectionReadRequest } from "./protocol";
 
 /**
  * Single-item wire payload for Durable Object and in-process execution.
@@ -21,10 +25,7 @@ export type TakibiWireInvocation = ActionInvocation | ExecuteRequest | Collectio
  * Observer-safe copy of {@link TakibiWireInvocation}. Raw client input stays
  * on `rawInput` via `getRawInput`, not here.
  */
-export type TakibiPublicInvocation =
-  | Omit<ActionInvocation, "input">
-  | Omit<ExecuteRequest, "input">
-  | CollectionReadRequest;
+export type TakibiPublicInvocation = ObserverInvocationData;
 
 export type TakibiInvocationOperation =
   | Readonly<{ kind: "action"; scope: string; name: string }>
@@ -79,5 +80,5 @@ export type TakibiInvocationTypeMap<TContext extends object = object, TServices 
   nonePrepared: TakibiPrepared<TContext>;
   applyPrepared: TakibiPrepared<TContext>;
   result: JsonValue;
-  failure: WireFailure;
+  failure: TakibiFailure<string>;
 };

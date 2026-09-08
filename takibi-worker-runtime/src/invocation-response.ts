@@ -4,6 +4,7 @@ import {
   type InvocationResult,
 } from "@takibi/takibi-worker-runtime-contract";
 import { emitFailure, requestLogFields, type InternalLogger } from "./logging";
+import type { TakibiFailure } from "@takibi/takibi-shared-types";
 import { invocationFields, toWireFailure } from "./context/runtime";
 import type { PublicRequest } from "./http";
 import type { TakibiInvocationTypeMap } from "./invocation-type-map";
@@ -69,8 +70,12 @@ export function invocationsToBatchHttpResponse(deps: ResponseConverterDeps) {
   }): Response => jsonResponseFromStatus(toWire({ invocations }), Response);
 }
 
-function wireFailureFromSettlement(failure: InternalInvocationFailure<WireFailure>): WireFailure {
-  if (failure.kind === "mapped") return failure.value;
+function wireFailureFromSettlement(
+  failure: InternalInvocationFailure<TakibiFailure<string>>,
+): WireFailure {
+  if (failure.kind === "mapped") {
+    return { ok: false, error: failure.value };
+  }
   return toWireFailure(failure.error);
 }
 
