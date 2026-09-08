@@ -62,7 +62,9 @@ receives `deps`. `runtimeCheck` wraps a failing apply with the method name.
 ## `withTracing`
 
 Wrap one async method of an existing instance. The returned object has the
-same call surface; the original instance is unchanged. `method` must already
+same call surface; construction leaves the original instance unchanged. Property
+writes through the wrapper update the original instance, including its setters.
+`method` must already
 return a `Promise`. `run` is the injected span runner so this package does
 not depend on a tracing backend.
 
