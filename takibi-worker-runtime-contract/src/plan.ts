@@ -27,11 +27,11 @@ export function transactionBoundaryOf(criteria: TransactionPlanCriteria): Transa
 }
 
 export function createActionExecutionPlan<TWork>(
-  criteria: Extract<ActionPlanCriteria, { target: "document"; atomic: true }>,
+  criteria: ActionPlanCriteria & { target: "document"; atomic: true },
   work: TWork,
 ): Extract<ExecutionPlan<TWork, TWork, TWork>, { transactionBoundary: "full" }>;
 export function createActionExecutionPlan<TWork>(
-  criteria: Extract<ActionPlanCriteria, { atomic: true }>,
+  criteria: ActionPlanCriteria & { atomic: true },
   work: TWork,
 ): Extract<ExecutionPlan<TWork, TWork, TWork>, { transactionBoundary: "apply" | "full" }>;
 export function createActionExecutionPlan<TWork>(
@@ -46,7 +46,7 @@ export function createActionExecutionPlan<TWork>(
 }
 
 export function createCollectionExecutionPlan<TWork>(
-  criteria: Extract<CollectionPlanCriteria, { operation: "add" }>,
+  criteria: CollectionPlanCriteria & { operation: "add" },
   work: TWork,
 ): Extract<ExecutionPlan<TWork, TWork, never>, { transactionBoundary: "apply" }>;
 export function createCollectionExecutionPlan<TWork>(
