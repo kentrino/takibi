@@ -342,81 +342,87 @@ export type RootActionBuilder<TCtx, TBaseArgs, TSchema extends MaybeSchema = und
   };
 };
 
-type BuilderState = {
-  kind: ActionKind;
-  target: ActionTarget;
+type BuilderState<
+  TKind extends ActionKind,
+  TSchema extends MaybeSchema,
+  TTarget extends ActionTarget,
+> = {
+  kind: TKind;
+  target: TTarget;
   scope: string;
-  inputSchema: MaybeSchema;
+  inputSchema: TSchema;
   permission: AccessPermission;
   atomic: boolean;
-  guards: ActionGuardFn[];
+  guards: readonly ActionGuardFn[];
 };
 
-function createHandlerBuilder(
-  state: BuilderState,
-  policy: ActionGatePolicy<unknown, unknown>,
-): ActionHandlerBuilder<
-  ActionKind,
-  unknown,
-  MaybeSchema,
-  ActionTarget,
-  ActionGatePolicy<unknown, unknown>
-> {
+function createHandlerBuilder<
+  TKind extends ActionKind,
+  TSchema extends MaybeSchema,
+  TTarget extends ActionTarget,
+  TPolicy,
+>(
+  state: BuilderState<TKind, TSchema, TTarget>,
+  policy: TPolicy,
+): ActionHandlerBuilder<TKind, unknown, TSchema, TTarget, TPolicy> {
   return {
     atomic() {
       return createHandlerBuilder({ ...state, atomic: true }, policy);
     },
     handler(handler) {
-      const definition = {
-        [actionDefinitionBrand]: true as const,
-        kind: state.kind,
-        target: state.target,
-        scope: state.scope,
-        inputSchema: state.inputSchema,
-        permission: state.permission,
-        atomic: state.atomic,
+      return Object.freeze({
+        [actionDefinitionBrand]: true,
+        ...state,
         guards: Object.freeze([...state.guards]),
-        policy: policy as ActionGatePolicy<never, never>,
+        policy,
         handler,
-      };
-      return Object.freeze(definition) as never;
-    },
-  } as ActionHandlerBuilder<
-    ActionKind,
-    unknown,
-    MaybeSchema,
-    ActionTarget,
-    ActionGatePolicy<unknown, unknown>
-  >;
-}
-
-function createBuilder(state: BuilderState): Record<string, unknown> {
-  return {
-    use(fn: ActionGuardFn) {
-      return createBuilder({ ...state, guards: [...state.guards, fn] });
-    },
-    input(schema: StandardSchemaV1) {
-      return createBuilder({ ...state, inputSchema: schema });
-    },
-    requires(permission: AccessPermission) {
-      return createBuilder({ ...state, permission });
-    },
-    atomic() {
-      return createBuilder({ ...state, atomic: true });
-    },
-    detached() {
-      return createBuilder({ ...state, target: "detached" });
-    },
-    policy(policy: ActionGatePolicy<unknown, unknown>) {
-      return createHandlerBuilder(state, policy);
+      });
     },
   };
 }
 
+/** Runtime builder keeps definition metadata typed across each fluent step. */
+class ActionBuilder<
+  TKind extends ActionKind,
+  TSchema extends MaybeSchema,
+  TTarget extends ActionTarget,
+> {
+  readonly #state: BuilderState<TKind, TSchema, TTarget>;
+
+  constructor(state: BuilderState<TKind, TSchema, TTarget>) {
+    this.#state = state;
+  }
+
+  use = (fn: ActionGuardFn) => {
+    return new ActionBuilder({ ...this.#state, guards: [...this.#state.guards, fn] });
+  };
+
+  input = <TNextSchema extends StandardSchemaV1>(schema: TNextSchema) => {
+    return new ActionBuilder({ ...this.#state, inputSchema: schema });
+  };
+
+  requires = (permission: AccessPermission) => {
+    return new ActionBuilder({ ...this.#state, permission });
+  };
+
+  atomic = () => {
+    return new ActionBuilder({ ...this.#state, atomic: true });
+  };
+
+  detached = () => {
+    return new ActionBuilder({ ...this.#state, target: "detached" });
+  };
+
+  policy = <TPolicy extends ActionGatePolicy<unknown, unknown>>(policy: TPolicy) => {
+    return createHandlerBuilder(this.#state, policy);
+  };
+}
+
+/** Bind application callback types at the authored-action boundary. */
 export function createDocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>(
   collection: string,
 ): DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc> {
-  return createBuilder({
+  return new ActionBuilder({
     kind: "collection",
     target: "document",
     scope: collection,
@@ -424,11 +430,12 @@ export function createDocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>
     permission: "invoke",
     atomic: false,
     guards: [],
-  }) as unknown as DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>;
+  }) as DocumentActionBuilder<TCtx, TDocArgs, TDetachedArgs, TDoc>;
 }
 
+/** Bind application callback types at the authored-action boundary. */
 export function createRootActionBuilder<TCtx, TBaseArgs>(): RootActionBuilder<TCtx, TBaseArgs> {
-  return createBuilder({
+  return new ActionBuilder({
     kind: "root",
     target: "detached",
     scope: "$",
@@ -436,7 +443,7 @@ export function createRootActionBuilder<TCtx, TBaseArgs>(): RootActionBuilder<TC
     permission: "invoke",
     atomic: false,
     guards: [],
-  }) as unknown as RootActionBuilder<TCtx, TBaseArgs>;
+  }) as RootActionBuilder<TCtx, TBaseArgs>;
 }
 
 export type CollectionDefinitionInput<
