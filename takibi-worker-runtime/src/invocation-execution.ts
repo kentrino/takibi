@@ -35,7 +35,12 @@ import type {
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import type { CollectionReadRequest, WireResponse } from "./protocol";
-import type { SpanContext, SpanKind } from "./tracing";
+import {
+  normalizeException,
+  recordSpanException,
+  type SpanContext,
+  type SpanKind,
+} from "./tracing";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
 type Notified<TContext extends object, TServices> = InvocationResult<
@@ -129,7 +134,19 @@ function createInstrumentedInvocationRun<TContext extends object, TServices>(dep
         event: "takibi.executor",
         ...debugInvocationFields(request.wireInvocation),
       },
-      () => deps.invocationCoreRun({ request, invocationRuntimeChecks }),
+      async (span) => {
+        const result = await deps.invocationCoreRun({ request, invocationRuntimeChecks });
+        if (result.settlement.outcome === "failed") {
+          const { failure } = result.settlement;
+          recordSpanException(
+            span,
+            failure.kind === "mapped"
+              ? { name: failure.value.code, message: failure.value.message }
+              : normalizeException(failure.error),
+          );
+        }
+        return result;
+      },
       deps.localParentSpan,
     );
 }

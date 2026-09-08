@@ -16,6 +16,7 @@ import {
   type SpanContext,
   type SpanException,
   type SpanKind,
+  type SpanStatus,
   type TakibiTracer,
   type TracingContextBackend,
   type WireRequest,
@@ -31,6 +32,9 @@ type RecordedSpan = {
   traceId: string;
   spanId: string;
   parentSpanId?: string;
+  status?: SpanStatus;
+  exceptions: SpanException[];
+  endCount: number;
 };
 
 const tracingStore = new AsyncLocalStorage<Parameters<TracingContextBackend["run"]>[0]>();
@@ -76,6 +80,8 @@ function createRecordingTracer(): { tracer: TakibiTracer; spans: RecordedSpan[] 
         traceFlags: parent?.traceFlags ?? 1,
       };
       const recorded: RecordedSpan = {
+        exceptions: [],
+        endCount: 0,
         name: spec.name,
         kind: spec.kind,
         attributes: { ...spec.attributes },
@@ -87,9 +93,15 @@ function createRecordingTracer(): { tracer: TakibiTracer; spans: RecordedSpan[] 
       return {
         context,
         runWithActiveContext: (fn) => fn(),
-        recordException(_exception: SpanException) {},
-        setStatus() {},
-        end() {},
+        recordException(exception) {
+          recorded.exceptions.push(exception);
+        },
+        setStatus(status) {
+          recorded.status = status;
+        },
+        end() {
+          recorded.endCount++;
+        },
       };
     },
     inject(headers, span) {
@@ -631,4 +643,36 @@ test("tracing-disabled entrypoints still return existing results", async () => {
   ]);
   expect(doResponse.status).toBe(200);
   expect(localResponse.status).toBe(200);
+});
+
+test.each([
+  { kind: "collection", collection: "missing", operation: "get", id: "p1" },
+  { kind: "action", scope: "$", name: "missing" },
+  { kind: "action", scope: "$", name: "fail" },
+] as const)("failed $kind invocation $name records its executor error", async (invocation) => {
+  const recording = createRecordingTracer();
+  const app = createTakibi()({ resolve: () => ({}) }).defineCollections(
+    { posts: { schema: Post, accessPolicy: fullAccess } },
+    { [internalTracerKey]: recording.tracer },
+  );
+  const fail = app
+    .defineAction()
+    .policy(fullAccess)
+    .handler(() => {
+      throw new Error("handler failed");
+    });
+  const handler = app.actions({ $: { fail } });
+  const storage = createSqliteDurableObjectStorage();
+  const object = new handler.DurableObject(fakeState(storage), {});
+  const response = await doFetch(object, { ...invocation, context: {} });
+  const expectedStatus = invocation.kind === "action" && invocation.name === "fail" ? 500 : 404;
+  expect(response.status).toBe(expectedStatus);
+  const wire = await response.json<WireResponse>();
+  expect(wire).toMatchObject({ ok: false, error: { status: expectedStatus } });
+  const executors = recording.spans.filter(({ name }) => name === "takibi.executor");
+  expect(executors).toHaveLength(1);
+  expect(executors[0]).toMatchObject({ status: { code: "error" }, endCount: 1 });
+  expect(executors[0]!.exceptions).toHaveLength(1);
+  if (!wire.ok) expect(executors[0]!.exceptions[0]!.message).toBe(wire.error.message);
+  storage.close();
 });
