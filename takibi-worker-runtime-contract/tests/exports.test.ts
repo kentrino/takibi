@@ -1,9 +1,11 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import * as Contract from "../src/index";
+import type { Call } from "../src/index";
 import type {
   AdapterMap,
   Adapters,
   CallAdapters,
+  EnvelopeAdapterMap,
   CallTypeMap,
   JsonResponseLike,
   LocalCallRequest,
@@ -30,7 +32,14 @@ import type { InternalInvocationState$CollectionResolvedWith } from "../src/inde
 import type { InternalInvocationInitializationView } from "../src/index";
 
 test("root exports linear call composition and the invocation orchestrator", () => {
+  expect(Contract.Call).toBeTypeOf("function");
   expect(Contract.runCall).toBeTypeOf("function");
+  expect(Contract.ENVELOPE_CALL_ADAPTER_KEYS).toContain("callDispatch");
+  expect(Contract.ENVELOPE_ADAPTER_GRAPH.call).toEqual([...Contract.ENVELOPE_CALL_ADAPTER_KEYS]);
+  expect(Contract.ENVELOPE_ADAPTER_GRAPH).not.toHaveProperty("invocationRuntime");
+  expect(Contract.ENVELOPE_ADAPTER_GRAPH).not.toHaveProperty("callRun");
+  expect(Contract.RUNTIME_ADAPTER_GRAPH).not.toHaveProperty("callDispatch");
+  expect(Contract.RUNTIME_ADAPTER_GRAPH).not.toHaveProperty("call");
   expect(Contract.InvocationState).toBeTypeOf("function");
   expect(Contract.runInvocation).toBeTypeOf("function");
   expect(Contract.executePlan).toBeTypeOf("function");
@@ -55,8 +64,24 @@ test("root exports linear call composition and the invocation orchestrator", () 
   expectTypeOf<RunCall>().toBeFunction();
   expectTypeOf<RunSingleCall>().toBeFunction();
   expectTypeOf<RunBatchCall>().toBeFunction();
-  expectTypeOf<CallAdapters<unknown, unknown, unknown, unknown>>().toHaveProperty("dispatch");
-  expectTypeOf<CallAdapters<unknown, unknown, unknown, unknown>>().toHaveProperty("resolveContext");
+  expectTypeOf<CallAdapters<unknown, unknown, unknown, unknown>>().toHaveProperty("callDispatch");
+  expectTypeOf<CallAdapters<unknown, unknown, unknown, unknown>>().toHaveProperty(
+    "callResolveContext",
+  );
+  expectTypeOf<CallAdapters<unknown, unknown, unknown, unknown>>().not.toHaveProperty("dispatch");
+  expectTypeOf<
+    EnvelopeAdapterMap<
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      Call<unknown, unknown, unknown, unknown>
+    >
+  >().toHaveProperty("call");
+  expectTypeOf<EnvelopeAdapterMap<unknown, unknown, unknown, unknown>>().not.toHaveProperty(
+    "invocationRuntime",
+  );
   expectTypeOf<InvocationAdapters<InternalInvocationTypeMap>>().not.toHaveProperty(
     "wireInvocation",
   );

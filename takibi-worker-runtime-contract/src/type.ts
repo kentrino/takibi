@@ -427,6 +427,16 @@ export const CALL_BATCH_ADAPTER_KEYS = [
   "callToBatchResponse",
 ] as const;
 
+export const ENVELOPE_CALL_ADAPTER_KEYS = [
+  "callDecode",
+  "callResolveContext",
+  "callDispatch",
+  "callToResponse",
+  "callToFailureResponse",
+  "callOnDecoded",
+  "callOnTerminal",
+] as const;
+
 /**
  * The statically declared subset an adapter factory is allowed to read.
  */
@@ -492,8 +502,8 @@ export type CallTerminalEvent<TResponseObject, TRequestLike = unknown, TDecoded 
     }>;
 
 /**
- * Envelope Call adapters. `dispatch` returns the envelope result; `toResponse`
- * is optional when that result is already the caller-facing response.
+ * Envelope Call constructor slots. Names match `ENVELOPE_CALL_ADAPTER_KEYS`
+ * so `inject(Call)` can read the same graph the runtime registers.
  */
 export type CallAdapters<
   TRequestLike,
@@ -502,26 +512,44 @@ export type CallAdapters<
   TResponseObject,
   TDispatched = TResponseObject,
 > = {
-  decode: (request: TRequestLike) => MaybePromise<TDecoded>;
-  resolveContext: (input: { request: TRequestLike; decoded: TDecoded }) => MaybePromise<TContext>;
-  dispatch: (input: {
+  callDecode: (request: TRequestLike) => MaybePromise<TDecoded>;
+  callResolveContext: (input: {
+    request: TRequestLike;
+    decoded: TDecoded;
+  }) => MaybePromise<TContext>;
+  callDispatch: (input: {
     request: TRequestLike;
     decoded: TDecoded;
     context: TContext;
   }) => MaybePromise<TDispatched>;
-  toResponse?: (input: {
+  callToResponse?: (input: {
     request: TRequestLike;
     decoded: TDecoded;
     context: TContext;
     dispatched: TDispatched;
   }) => MaybePromise<TResponseObject>;
-  toFailureResponse?: (
+  callToFailureResponse?: (
     failure: CallFailureInput<TRequestLike, TDecoded, TContext>,
   ) => MaybePromise<TResponseObject>;
-  onDecoded?: (input: { request: TRequestLike; decoded: TDecoded }) => MaybePromise<void>;
-  onTerminal?: (
+  callOnDecoded?: (input: { request: TRequestLike; decoded: TDecoded }) => MaybePromise<void>;
+  callOnTerminal?: (
     event: CallTerminalEvent<TResponseObject, TRequestLike, TDecoded>,
   ) => MaybePromise<void>;
+};
+
+/**
+ * Worker / testing envelope composition surface. `call` is the constructed
+ * `Call` instance. This map does not include invocation or storage slots.
+ */
+export type EnvelopeAdapterMap<
+  TRequestLike,
+  TDecoded,
+  TContext,
+  TResponseObject,
+  TDispatched = TResponseObject,
+  TCall = unknown,
+> = CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched> & {
+  call: TCall;
 };
 
 export type SingleCallAdapters<

@@ -1,9 +1,14 @@
-import { Call, jsonResponseFromStatus } from "@takibi/takibi-worker-runtime-contract";
-import type {
-  CallFailureInput,
-  CallTerminalEvent,
+import {
+  Call,
+  ENVELOPE_ADAPTER_GRAPH,
+  jsonResponseFromStatus,
+  type CallAdapters,
+  type CallFailureInput,
+  type CallTerminalEvent,
+  type EnvelopeAdapterMap,
 } from "@takibi/takibi-worker-runtime-contract";
 import { withTracing } from "@takibi/takibi-utility";
+import { defineContainer, inject, type DependencyGraph } from "tatenuki";
 import type { PublicRequest } from "../http";
 import { requestLogFields, withLoggedSpan, type InternalLogger } from "../logging";
 import { batchSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
@@ -29,113 +34,178 @@ export type WorkerResolvedCall = {
   readonly resolveSpan: SpanContext | undefined;
 };
 
+export type WorkerCall = Call<Request, PublicRequest, WorkerResolvedCall, Response, WireResponse>;
+
+type WorkerCallAdapters = CallAdapters<
+  Request,
+  PublicRequest,
+  WorkerResolvedCall,
+  Response,
+  WireResponse
+>;
+
+const WorkerCallClass = Call as new (adapters: WorkerCallAdapters) => WorkerCall;
+
+/**
+ * Envelope Call map plus request-scoped construction values. Resolving this
+ * graph does not require storage or invocation-execution adapters.
+ */
+export type WorkerEnvelopeAdapterMap = EnvelopeAdapterMap<
+  Request,
+  PublicRequest,
+  WorkerResolvedCall,
+  Response,
+  WireResponse,
+  WorkerCall
+> & {
+  request: Request;
+  initial: unknown;
+  requestDecoder: () => Promise<PublicRequest>;
+  contextResolver: ContextResolver<object, unknown>;
+  execute: Executor;
+  logger: InternalLogger | undefined;
+  tracer: TakibiTracer | undefined;
+  clock: () => number;
+  startedAt: number;
+  http: ReturnType<typeof requestLogFields>;
+};
+
+type Map = WorkerEnvelopeAdapterMap;
+
+export const WORKER_ENVELOPE_ADAPTER_GRAPH = {
+  ...ENVELOPE_ADAPTER_GRAPH,
+  request: [],
+  initial: [],
+  requestDecoder: [],
+  contextResolver: [],
+  execute: [],
+  logger: [],
+  tracer: [],
+  clock: [],
+  http: ["request"],
+  startedAt: ["clock"],
+  callDecode: ["requestDecoder"],
+  callResolveContext: ["contextResolver", "initial", "logger"],
+  callDispatch: ["execute", "initial", "tracer"],
+  callToResponse: [],
+  callToFailureResponse: ["logger"],
+  callOnDecoded: ["logger", "http"],
+  callOnTerminal: ["logger", "http", "startedAt", "clock"],
+} as const satisfies DependencyGraph<Map>;
+
 function batchSizeOf(decoded: PublicRequest): number | undefined {
   return decoded.kind === "batch" ? decoded.items.length : undefined;
 }
 
-/**
- * Worker HTTP adapters for one request. Logging, executor, and resolve-span
- * capture stay here; envelope progression stays on contract `Call`.
- */
-export class WorkerCallAdapter {
-  readonly #decode: () => Promise<PublicRequest>;
-  readonly #resolve: ContextResolver<object, unknown>;
-  readonly #execute: Executor;
-  readonly #logger: InternalLogger | undefined;
-  readonly #initial: unknown;
-  readonly #tracer: TakibiTracer | undefined;
-  readonly #startedAt: number;
-  readonly #http: ReturnType<typeof requestLogFields>;
+function createCallDecode({ requestDecoder }: Pick<Map, "requestDecoder">): Map["callDecode"] {
+  return (_request) => requestDecoder();
+}
 
-  constructor(input: {
-    decode: () => Promise<PublicRequest>;
-    resolve: ContextResolver<object, unknown>;
-    execute: Executor;
-    logger: InternalLogger | undefined;
-    initial: unknown;
-    tracer: TakibiTracer | undefined;
-    startedAt: number;
-    http: ReturnType<typeof requestLogFields>;
-  }) {
-    this.#decode = input.decode;
-    this.#resolve = input.resolve;
-    this.#execute = input.execute;
-    this.#logger = input.logger;
-    this.#initial = input.initial;
-    this.#tracer = input.tracer;
-    this.#startedAt = input.startedAt;
-    this.#http = input.http;
-  }
+function createCallResolveContext({
+  contextResolver,
+  initial,
+  logger,
+}: Pick<Map, "contextResolver" | "initial" | "logger">): Map["callResolveContext"] {
+  const adapter = {
+    async resolveContext(input: {
+      request: Request;
+      decoded: PublicRequest;
+    }): Promise<WorkerResolvedCall> {
+      const context = await contextResolver({
+        request: input.request,
+        context: initial,
+      });
+      assertSerializableContext(context);
+      return {
+        context,
+        resolveSpan: activeSpanContext(),
+      };
+    },
+  };
+  const traced = withTracing(adapter, {
+    method: "resolveContext",
+    span: TAKIBI_SPAN.resolve,
+    kind: "internal",
+    attributes: ({ decoded }) => {
+      const batchSize = batchSizeOf(decoded);
+      return batchSize === undefined ? undefined : batchSpanAttributes(batchSize);
+    },
+    run: (spec, fn, args) => {
+      const batchSize = batchSizeOf(args[0].decoded);
+      return withLoggedSpan(
+        logger,
+        spec,
+        {
+          event: "takibi.resolve",
+          ...(batchSize === undefined ? {} : { batchSize }),
+        },
+        fn,
+      );
+    },
+  });
+  return (input) => traced.resolveContext(input);
+}
 
-  decode(_request: Request): Promise<PublicRequest> {
-    return this.#decode();
-  }
+function createCallDispatch({
+  execute,
+  initial,
+  tracer,
+}: Pick<Map, "execute" | "initial" | "tracer">): Map["callDispatch"] {
+  return (input) =>
+    execute({
+      request: input.request,
+      initial,
+      ctx: input.context.context,
+      invocation: input.decoded,
+      tracer,
+      resolveSpan: input.context.resolveSpan,
+    });
+}
 
-  async onDecoded(input: { request: Request; decoded: PublicRequest }): Promise<void> {
-    this.#logger?.emit({
+function createCallToResponse(): Map["callToResponse"] {
+  return (input) => jsonResponseFromStatus(input.dispatched, Response);
+}
+
+function createCallToFailureResponse({
+  logger,
+}: Pick<Map, "logger">): Map["callToFailureResponse"] {
+  return (failure: CallFailureInput<Request, PublicRequest, WorkerResolvedCall>) =>
+    errorResponse(failure.error, logger, failure.decoded, failure.request);
+}
+
+function createCallOnDecoded({ logger, http }: Pick<Map, "logger" | "http">): Map["callOnDecoded"] {
+  return async (input) => {
+    logger?.emit({
       level: "info",
       event: "takibi.request",
       message: "started",
-      ...this.#http,
+      ...http,
       ...invocationFields(input.decoded),
     });
-  }
+  };
+}
 
-  async resolveContext(input: {
-    request: Request;
-    decoded: PublicRequest;
-  }): Promise<WorkerResolvedCall> {
-    const context = await this.#resolve({
-      request: input.request,
-      context: this.#initial,
-    });
-    assertSerializableContext(context);
-    return {
-      context,
-      resolveSpan: activeSpanContext(),
-    };
-  }
-
-  dispatch(input: {
-    request: Request;
-    decoded: PublicRequest;
-    context: WorkerResolvedCall;
-  }): Promise<WireResponse> {
-    return this.#execute({
-      request: input.request,
-      initial: this.#initial,
-      ctx: input.context.context,
-      invocation: input.decoded,
-      tracer: this.#tracer,
-      resolveSpan: input.context.resolveSpan,
-    });
-  }
-
-  toResponse(input: { dispatched: WireResponse }): Response {
-    return jsonResponseFromStatus(input.dispatched, Response);
-  }
-
-  toFailureResponse(
-    failure: CallFailureInput<Request, PublicRequest, WorkerResolvedCall>,
-  ): Response {
-    return errorResponse(failure.error, this.#logger, failure.decoded, failure.request);
-  }
-
-  async onTerminal(event: CallTerminalEvent<Response, Request, PublicRequest>): Promise<void> {
+function createCallOnTerminal({
+  logger,
+  http,
+  startedAt,
+  clock,
+}: Pick<Map, "logger" | "http" | "startedAt" | "clock">): Map["callOnTerminal"] {
+  return async (event: CallTerminalEvent<Response, Request, PublicRequest>) => {
     if (event.outcome !== "responded") return;
-    this.#logger?.emit({
+    logger?.emit({
       level: "info",
       event: "takibi.request",
       message: "completed",
-      ...this.#http,
+      ...http,
       ...(event.decoded === undefined ? {} : invocationFields(event.decoded)),
-      durationMs: performance.now() - this.#startedAt,
+      durationMs: clock() - startedAt,
       status: event.response.status,
     });
-  }
+  };
 }
 
-export async function serveDecodedCall<TInitial>(input: {
+export type ResolveWorkerEnvelopeArgs<TInitial = unknown> = {
   request: Request;
   initial: unknown;
   decode: () => Promise<PublicRequest>;
@@ -143,45 +213,49 @@ export async function serveDecodedCall<TInitial>(input: {
   execute: Executor;
   logger: InternalLogger | undefined;
   options: InternalCollectionsOptions;
-}): Promise<Response> {
-  const { request, initial, decode, resolve, execute, logger, options } = input;
-  const tracer = resolveTracer(options);
+  tracer?: TakibiTracer | undefined;
+  clock?: () => number;
+};
+
+export async function resolveWorkerEnvelopeMap<TInitial>(
+  args: ResolveWorkerEnvelopeArgs<TInitial>,
+  overrides?: Partial<WorkerEnvelopeAdapterMap>,
+): Promise<WorkerEnvelopeAdapterMap> {
+  const values = {
+    request: args.request,
+    initial: args.initial as unknown,
+    requestDecoder: args.decode,
+    contextResolver: args.resolve as ContextResolver<object, unknown>,
+    execute: args.execute,
+    logger: args.logger,
+    tracer: args.tracer ?? resolveTracer(args.options),
+    clock: args.clock ?? (() => performance.now()),
+  };
+  const builder = defineContainer<Map>()
+    .graph(WORKER_ENVELOPE_ADAPTER_GRAPH)
+    .factories({
+      http: ({ request }) => requestLogFields(request),
+      startedAt: ({ clock }) => clock(),
+      callDecode: createCallDecode,
+      callResolveContext: createCallResolveContext,
+      callDispatch: createCallDispatch,
+      callToResponse: createCallToResponse,
+      callToFailureResponse: createCallToFailureResponse,
+      callOnDecoded: createCallOnDecoded,
+      callOnTerminal: createCallOnTerminal,
+      call: inject(WorkerCallClass),
+    });
+  return (overrides === undefined ? builder : builder.override(overrides)).resolve(values);
+}
+
+export async function serveDecodedCall<TInitial>(
+  input: ResolveWorkerEnvelopeArgs<TInitial>,
+): Promise<Response> {
+  const tracer = input.tracer ?? resolveTracer(input.options);
   const serve = () =>
     withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, async () => {
-      const adapter = withTracing(
-        new WorkerCallAdapter({
-          decode,
-          resolve: resolve as ContextResolver<object, unknown>,
-          execute,
-          logger,
-          initial,
-          tracer,
-          startedAt: performance.now(),
-          http: requestLogFields(request),
-        }),
-        {
-          method: "resolveContext",
-          span: TAKIBI_SPAN.resolve,
-          kind: "internal",
-          attributes: ({ decoded }) => {
-            const batchSize = batchSizeOf(decoded);
-            return batchSize === undefined ? undefined : batchSpanAttributes(batchSize);
-          },
-          run: (spec, fn, args) => {
-            const batchSize = batchSizeOf(args[0].decoded);
-            return withLoggedSpan(
-              logger,
-              spec,
-              {
-                event: "takibi.resolve",
-                ...(batchSize === undefined ? {} : { batchSize }),
-              },
-              fn,
-            );
-          },
-        },
-      );
-      return new Call(adapter).run(request);
+      const { call } = await resolveWorkerEnvelopeMap({ ...input, tracer });
+      return call.run(input.request);
     });
   return tracer ? bindTracer(tracer, serve) : serve();
 }

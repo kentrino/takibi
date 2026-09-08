@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
-import { serveDecodedCall } from "../src/context/worker-call";
+import { Call } from "@takibi/takibi-worker-runtime-contract";
+import { resolveWorkerEnvelopeMap, serveDecodedCall } from "../src/context/worker-call";
 import type { Executor, ExecutorInput } from "../src/context/executors";
 import type { PublicRequest } from "../src/http";
 import type { InternalLogger, LogEvent } from "../src/logging";
@@ -100,18 +101,36 @@ function capturingLogger(events: LogEvent[]): InternalLogger {
   };
 }
 
-test("WorkerCallAdapter #private fields still work when resolveContext is traced", async () => {
+function envelopeArgs(input: {
+  request?: Request;
+  initial?: unknown;
+  decode?: () => Promise<PublicRequest>;
+  resolve?: () => Record<string, unknown>;
+  execute?: Executor;
+  logger?: InternalLogger;
+  options?: { [internalTracerKey]?: TakibiTracer };
+}) {
+  return {
+    request: input.request ?? new Request("https://takibi.test/$:echo", { method: "POST" }),
+    initial: input.initial ?? { tenantId: "tenant-a" },
+    decode: input.decode ?? (async () => actionRequest("echo")),
+    resolve: input.resolve ?? (() => ({ tenantId: "tenant-a" })),
+    execute:
+      input.execute ??
+      (async (execInput) =>
+        okResponse({ tenantId: (execInput.ctx as { tenantId: string }).tenantId })),
+    logger: input.logger,
+    options: input.options ?? {},
+  };
+}
+
+test("DI resolves a Call class instance used by the Worker HTTP path", async () => {
   const recording = createRecordingTracer();
-  const response = await serveDecodedCall({
-    request: new Request("https://takibi.test/$:echo", { method: "POST" }),
-    initial: { tenantId: "tenant-a" },
-    decode: async () => actionRequest("echo"),
-    resolve: () => ({ tenantId: "tenant-a" }),
-    execute: async (input) => {
-      expect(input.initial).toEqual({ tenantId: "tenant-a" });
-      expect(input.ctx).toEqual({ tenantId: "tenant-a" });
-      expect(input.ctx).not.toHaveProperty("resolveSpan");
-      return okResponse({ tenantId: input.ctx.tenantId });
+  let resolveCount = 0;
+  const args = envelopeArgs({
+    resolve: () => {
+      resolveCount += 1;
+      return { tenantId: "tenant-a" };
     },
     logger: {
       emit() {
@@ -120,10 +139,38 @@ test("WorkerCallAdapter #private fields still work when resolveContext is traced
     },
     options: { [internalTracerKey]: recording.tracer },
   });
+  const map = await resolveWorkerEnvelopeMap(args);
 
+  expect(map.call).toBeInstanceOf(Call);
+  expect(map).not.toHaveProperty("storage");
+  expect(map).not.toHaveProperty("invocationRuntime");
+
+  const response = await serveDecodedCall(args);
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual({ ok: true, data: { tenantId: "tenant-a" } });
-  expect(recording.spans.some((span) => span.name === TAKIBI_SPAN.resolve)).toBe(true);
+  expect(resolveCount).toBe(1);
+  expect(recording.spans.filter((span) => span.name === TAKIBI_SPAN.resolve)).toHaveLength(1);
+});
+
+test("the same resolve path swaps callDispatch without requiring execute", async () => {
+  let executeCount = 0;
+  const map = await resolveWorkerEnvelopeMap(
+    envelopeArgs({
+      execute: async () => {
+        executeCount += 1;
+        return okResponse({ skipped: true });
+      },
+    }),
+    {
+      callDispatch: async () => okResponse({ via: "override" }),
+    },
+  );
+
+  expect(map.call).toBeInstanceOf(Call);
+  const response = await map.call.run(map.request);
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, data: { via: "override" } });
+  expect(executeCount).toBe(0);
 });
 
 test("decoded failure logging does not depend on onDecoded succeeding", async () => {

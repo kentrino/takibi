@@ -20,8 +20,18 @@ export {
   TakibiContractConfigurationError,
   TakibiContractStateError,
 } from "./request";
-export { RUNTIME_ADAPTER_GRAPH, type RuntimeAdapterGraph } from "./graph";
-export { CALL_BATCH_ADAPTER_KEYS, CALL_SINGLE_ADAPTER_KEYS, INVOCATION_ADAPTER_KEYS } from "./type";
+export {
+  ENVELOPE_ADAPTER_GRAPH,
+  RUNTIME_ADAPTER_GRAPH,
+  type EnvelopeAdapterGraph,
+  type RuntimeAdapterGraph,
+} from "./graph";
+export {
+  CALL_BATCH_ADAPTER_KEYS,
+  CALL_SINGLE_ADAPTER_KEYS,
+  ENVELOPE_CALL_ADAPTER_KEYS,
+  INVOCATION_ADAPTER_KEYS,
+} from "./type";
 export type {
   AdapterMap,
   Adapters,
@@ -30,6 +40,7 @@ export type {
   BoundRunInvocation,
   CallAdapterMap,
   CallAdapters,
+  EnvelopeAdapterMap,
   CallFailureInput,
   CallFailureStage,
   CallTerminalEvent,

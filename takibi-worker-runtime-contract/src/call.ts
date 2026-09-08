@@ -95,9 +95,9 @@ const runResolvedRequest = async <TRequestLike, TDecoded, TContext, TResponseObj
   }) => MaybePromise<TResponseObject>,
 ): Promise<TResponseObject> =>
   runCall(request, {
-    decode: adapters.callDecode,
-    resolveContext: adapters.callResolveContext,
-    dispatch,
+    callDecode: adapters.callDecode,
+    callResolveContext: adapters.callResolveContext,
+    callDispatch: dispatch,
   });
 
 const resolveRuntimeChecks: ResolveRuntimeChecks = function (
