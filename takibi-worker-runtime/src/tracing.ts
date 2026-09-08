@@ -143,7 +143,7 @@ function ignoreAdapterError(fn: () => void): void {
 
 export async function withSpan<T>(
   spec: SpanSpec,
-  fn: () => Promise<T>,
+  fn: (span?: TakibiSpan) => Promise<T>,
   parentOverride?: SpanContext,
 ): Promise<T> {
   const backend = getTracingConfig().contextBackend;
@@ -160,11 +160,9 @@ export async function withSpan<T>(
   return span.runWithActiveContext(() =>
     backend.run({ tracer: store.tracer, span: span.context }, async () => {
       try {
-        return await fn();
+        return await fn(span);
       } catch (err) {
-        const exception = normalizeException(err);
-        ignoreAdapterError(() => span.recordException(exception));
-        ignoreAdapterError(() => span.setStatus({ code: "error", message: exception.message }));
+        recordSpanException(span, normalizeException(err));
         throw err;
       } finally {
         ignoreAdapterError(() => span.end());
@@ -204,7 +202,7 @@ function storageSpanSpec(operation: string, collection: string, id?: string): Sp
   };
 }
 
-function normalizeException(error: unknown): SpanException {
+export function normalizeException(error: unknown): SpanException {
   if (error instanceof Error) {
     return {
       name: error.name || "Error",
@@ -213,4 +211,11 @@ function normalizeException(error: unknown): SpanException {
     };
   }
   return { name: "Error", message: String(error) };
+}
+
+/** Records settled failures without changing the operation's return value. */
+export function recordSpanException(span: TakibiSpan | undefined, exception: SpanException): void {
+  if (!span) return;
+  ignoreAdapterError(() => span.recordException(exception));
+  ignoreAdapterError(() => span.setStatus({ code: "error", message: exception.message }));
 }

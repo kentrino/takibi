@@ -1,4 +1,4 @@
-import { withSpan, type SpanContext, type SpanSpec } from "./tracing";
+import { withSpan, type SpanContext, type SpanSpec, type TakibiSpan } from "./tracing";
 import type { QueryExpr, TakibiFailure } from "@takibi/takibi-shared-types";
 import type { StorageDriver } from "@takibi/takibi-storage";
 
@@ -124,15 +124,15 @@ export async function withLoggedSpan<T>(
     event: Exclude<LogEvent["event"], "takibi.request" | "takibi.error">;
     message?: string;
   },
-  fn: () => Promise<T>,
+  fn: (span?: TakibiSpan) => Promise<T>,
   parentOverride?: SpanContext,
 ): Promise<T> {
   return withSpan(
     spec,
-    async () => {
+    async (span) => {
       const startedAt = performance.now();
       try {
-        return await fn();
+        return await fn(span);
       } finally {
         logger?.emit({
           level: "debug",
