@@ -1,7 +1,4 @@
-import type {
-  InternalInvocationRuntime,
-  PrepareApplyInvocationContract,
-} from "@takibi/takibi-worker-runtime-contract";
+import type { PrepareApplyInvocationContract } from "@takibi/takibi-worker-runtime-contract";
 import {
   createInvocationPrepareApply,
   type InvocationPrepareApplyDeps,
@@ -9,6 +6,7 @@ import {
 import type {
   TakibiApplyWork,
   TakibiFullWork,
+  TakibiInvocationRuntime,
   TakibiInvocationTypeMap,
   TakibiNoneWork,
   TakibiPrepared,
@@ -21,7 +19,7 @@ export {
 } from "./invocation-prepare-apply";
 
 export function createInvocationTransactionBoundaryContracts<TContext extends object, TServices>(
-  runtime: InternalInvocationRuntime<TakibiInvocationTypeMap<TContext, TServices>>,
+  runtime: TakibiInvocationRuntime<TContext, TServices>,
   adapters?: Partial<InvocationPrepareApplyDeps>,
 ): {
   none: PrepareApplyInvocationContract<

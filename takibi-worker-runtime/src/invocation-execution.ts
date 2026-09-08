@@ -13,7 +13,6 @@ import {
   RUNTIME_ADAPTER_GRAPH,
   runInvocation,
   type BoundRunInvocation,
-  type InternalInvocationRuntime,
   type InvocationResult,
   type LocalCallRequest,
   type LocalCallTypeMap,
@@ -29,7 +28,11 @@ import {
 import { debugInvocationFields } from "./context/runtime";
 import type { PublicRequest } from "./http";
 import { invocationToWireResponse, invocationsToBatchWireResponse } from "./invocation-response";
-import type { TakibiInvocationTypeMap, TakibiWireInvocation } from "./invocation-type-map";
+import type {
+  TakibiInvocationRuntime,
+  TakibiInvocationTypeMap,
+  TakibiWireInvocation,
+} from "./invocation-type-map";
 import { withLoggedSpan, type InternalLogger } from "./logging";
 import { invocationSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import type { CollectionReadRequest, WireResponse } from "./protocol";
@@ -96,7 +99,7 @@ export type TakibiRuntimeAdapterMap<
 
 function localInvocationRuntime<TContext extends object, TServices>(
   args: LocalInvocationExecutionArgs<TContext, TServices>,
-): InternalInvocationRuntime<TakibiMap<TContext, TServices>> {
+): TakibiInvocationRuntime<TContext, TServices> {
   return {
     collections: args.collections,
     storage: args.storage,
@@ -109,7 +112,7 @@ function localInvocationRuntime<TContext extends object, TServices>(
 /** Executor span lives here only. Registration factories do not wrap `invocationRun`. */
 function createInstrumentedInvocationRun<TContext extends object, TServices>(deps: {
   invocationCoreRun: BoundRunInvocation<TakibiMap<TContext, TServices>>;
-  invocationRuntime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>;
+  invocationRuntime: TakibiInvocationRuntime<TContext, TServices>;
   localSpanKind: SpanKind;
   localParentSpan: SpanContext | undefined;
 }): BoundRunInvocation<TakibiMap<TContext, TServices>> {

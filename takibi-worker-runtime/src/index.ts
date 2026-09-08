@@ -65,6 +65,7 @@ export type {
   TakibiCollectionWork,
   TakibiFullWork,
   TakibiInvocationOperation,
+  TakibiInvocationRuntime,
   TakibiInvocationTypeMap,
   TakibiNoneWork,
   TakibiPrepared,

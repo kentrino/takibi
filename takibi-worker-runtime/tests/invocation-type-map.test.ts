@@ -7,6 +7,7 @@ import type {
   InvocationExecutionView,
   InternalInvocationRuntime,
   InternalInvocationTypeMap,
+  InvocationRuntime,
 } from "@takibi/takibi-worker-runtime-contract";
 import type { ActionInvocation } from "../src/action-executor";
 import type { ExecuteRequest } from "../src/executor";
@@ -15,6 +16,7 @@ import type {
   TakibiActionWork,
   TakibiApplyWork,
   TakibiCollectionWork,
+  TakibiInvocationRuntime,
   TakibiInvocationTypeMap,
   TakibiNoneWork,
   TakibiPrepared,
@@ -52,12 +54,12 @@ test("slots match current runtime types", () => {
   expectTypeOf<AppMap["invocation"]>().toEqualTypeOf<TakibiPublicInvocation>();
   expectTypeOf<AppMap["invocation"]>().not.toHaveProperty("input");
 
-  expectTypeOf<AppMap["collections"]>().toEqualTypeOf<CollectionsDef<AppContext>>();
-  expectTypeOf<AppMap["storage"]>().toEqualTypeOf<StorageDriver>();
-  expectTypeOf<AppMap["registry"]>().toEqualTypeOf<ActionRegistry>();
+  expectTypeOf<AppMap["runtime"]["collections"]>().toEqualTypeOf<CollectionsDef<AppContext>>();
+  expectTypeOf<AppMap["runtime"]["storage"]>().toEqualTypeOf<StorageDriver>();
+  expectTypeOf<AppMap["runtime"]["registry"]>().toEqualTypeOf<ActionRegistry>();
   expectTypeOf<AppMap["context"]>().toEqualTypeOf<AppContext>();
-  expectTypeOf<AppMap["logger"]>().toEqualTypeOf<InternalLogger | undefined>();
-  expectTypeOf<AppMap["services"]>().toEqualTypeOf<AppServices>();
+  expectTypeOf<AppMap["runtime"]["logger"]>().toEqualTypeOf<InternalLogger | undefined>();
+  expectTypeOf<AppMap["runtime"]["services"]>().toEqualTypeOf<AppServices>();
   expectTypeOf<AppMap["rawInput"]>().toEqualTypeOf<unknown>();
   expectTypeOf<AppMap["input"]>().toEqualTypeOf<unknown>();
   expectTypeOf<TakibiActionWork>().toExtend<AppMap["noneWork"]>();
@@ -68,13 +70,19 @@ test("slots match current runtime types", () => {
 });
 
 test("runtime bag uses pinned collections, storage, registry, logger, and services", () => {
-  expectTypeOf<InternalInvocationRuntime<AppMap>>().toEqualTypeOf<{
-    readonly collections: CollectionsDef<AppContext>;
-    readonly storage: StorageDriver;
-    readonly registry: ActionRegistry;
-    readonly logger: InternalLogger | undefined;
-    readonly services: AppServices;
-  }>();
+  expectTypeOf<TakibiInvocationRuntime<AppContext, AppServices>>().toExtend<InvocationRuntime>();
+  expectTypeOf<InternalInvocationRuntime<AppMap>>().toEqualTypeOf<
+    TakibiInvocationRuntime<AppContext, AppServices>
+  >();
+  expectTypeOf<AppMap["runtime"]>().toEqualTypeOf<
+    TakibiInvocationRuntime<AppContext, AppServices>
+  >();
+  expectTypeOf<
+    InvocationExecutionView<AppMap>["runtime"]["services"]
+  >().toEqualTypeOf<AppServices>();
+  expectTypeOf<InvocationExecutionView<AppMap>["runtime"]["collections"]>().toEqualTypeOf<
+    CollectionsDef<AppContext>
+  >();
 });
 
 test("transaction-boundary class bindings retain their map relationships", () => {

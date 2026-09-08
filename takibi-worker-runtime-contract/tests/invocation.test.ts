@@ -20,12 +20,14 @@ import {
 type Spec = {
   wireInvocation: ActionRequestData;
   invocation: ObserverActionRequestData;
-  collections: { names: string[] };
-  storage: { scope: "base" | "transaction" };
-  registry: { name: string };
+  runtime: {
+    collections: { names: string[] };
+    storage: { scope: "base" | "transaction" };
+    registry: { name: string };
+    logger: undefined;
+    services: { audit: string[] };
+  };
   context: { tenantId: string };
-  logger: undefined;
-  services: { audit: string[] };
   rawInput: unknown;
   input: { name: string };
   noneWork: { key: string };
@@ -87,8 +89,7 @@ function adapters(overrides: Partial<InvocationAdapters<Spec>> = {}): Invocation
       status: 500,
     }),
     invocationSnapshotObserverEvent(event) {
-      const { services, ...detachable } = event;
-      return { ...structuredClone(detachable), services } as InvocationObserverEvent<Spec>;
+      return structuredClone(event);
     },
     invocationNotify: undefined,
     ...overrides,
@@ -207,6 +208,65 @@ test("context update remains visible when a later adapter step fails", async () 
   });
 });
 
+test("observer uses construction-bound services and the event has none", async () => {
+  const services = { audit: [] as string[] };
+  let observedKeys: string[] | undefined;
+  const result = await runInvocation(
+    adapters({
+      invocationRuntime: { ...runtime, services },
+      invocationNotify: (event) => {
+        observedKeys = Object.keys(event);
+        services.audit.push(`${event.context.tenantId}:${event.outcome}`);
+      },
+    }),
+    { request },
+  );
+
+  expect(observedKeys).toBeDefined();
+  expect(observedKeys).not.toContain("services");
+  expect(result.runtime.services).toBe(services);
+  expect(services.audit).toEqual(["before:succeeded"]);
+});
+
+test("observer event exposes only validated input and never raw input", async () => {
+  let observed: InvocationObserverEvent<Spec> | undefined;
+  const result = await runInvocation(
+    adapters({
+      invocationNotify: (event) => {
+        observed = event;
+      },
+    }),
+    { request },
+  );
+
+  expect(result.input).toEqual({ status: "raw", value: { name: "Ada" } });
+  expect(observed?.input).toEqual({ status: "unavailable" });
+  expect(observed).not.toHaveProperty("inputAvailable");
+  expect(JSON.stringify(observed)).not.toContain("Ada");
+  expect(observed?.invocation).toEqual(publicInvocation);
+  expect(observed?.invocation).not.toHaveProperty("input");
+});
+
+test("validated undefined input is distinct from unavailable", () => {
+  type OptionalInputSpec = Omit<Spec, "input"> & { input: { name: string } | undefined };
+  const state = new InvocationState<OptionalInputSpec>(request, runtime);
+  state.start();
+  state.acceptInvocation(publicInvocation);
+  state.acceptRawInput({ name: "Ada" });
+  state.acceptPlan({
+    outcome: "succeeded",
+    value: { transactionBoundary: "none", work: { key: "work" } },
+  });
+  state.acceptAdapterResult({
+    outcome: "succeeded",
+    value: { id: "patient-1" },
+    updates: { input: { status: "validated", value: undefined } },
+  });
+  state.succeed({ id: "patient-1" });
+
+  expect(state.observerEvent().input).toEqual({ status: "validated", value: undefined });
+});
+
 test("validated input update remains visible when the handler later fails", async () => {
   let observed: InvocationObserverEvent<Spec> | undefined;
   const result = await runInvocation(
@@ -227,8 +287,7 @@ test("validated input update remains visible when the handler later fails", asyn
   );
 
   expect(result.input).toEqual({ status: "validated", value: { name: "Ada" } });
-  expect(observed?.inputAvailable).toBe(true);
-  expect(observed?.input).toEqual({ name: "Ada" });
+  expect(observed?.input).toEqual({ status: "validated", value: { name: "Ada" } });
 });
 
 test("notification failure cannot alter settlement", async () => {

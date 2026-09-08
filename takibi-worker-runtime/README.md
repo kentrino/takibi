@@ -11,10 +11,12 @@ resolves contract `RUNTIME_ADAPTER_GRAPH` plus Takibi construction slots:
 instrumentation, `callToSingleResponse` / `callToBatchResponse`, and
 `localExecution`. Policy, schema, and action-handler collaborators are
 graph nodes; `inject(InvocationPrepareApply)` builds the shared none /
-apply / full prepare-apply class. Concrete invocation adapters, defaults, and
+apply / full prepare-apply class. `TakibiInvocationRuntime` is the concrete collaborator bag on
+`TakibiInvocationTypeMap.runtime`. Concrete invocation adapters, defaults, and
 transaction wiring are registered once in
 `createTakibiInvocationAdapterFactories` /
-`TAKIBI_INVOCATION_REGISTRATION_GRAPH`. `createBoundInvocationAdapters` is the
+`TAKIBI_INVOCATION_REGISTRATION_GRAPH`. Production `invocationNotify` stays
+unbound; an observer that needs services closes over them at construction. `createBoundInvocationAdapters` is the
 async thin resolve of that same registration (tatenuki `resolve` is async).
 `resolveLocalAdapterMap` adds `invocationRun` instrumentation and Call /
 local-execution slots on top; it does not re-list those adapters. Direct
