@@ -29,18 +29,10 @@ export class TakibiContractConfigurationError extends Error {
   }
 }
 
-async function ignoreObserverFailure(work: () => MaybePromise<void>): Promise<void> {
-  try {
-    await work();
-  } catch {
-    // Observation must not replace the Call result or re-dispatch.
-  }
-}
-
 /**
- * Envelope Call runner. Platform decode / resolve / dispatch / conversion
- * live on the injected adapters. `run` owns progression so `withTracing` can
- * wrap a method such as `resolveContext` without a second control-flow copy.
+ * Envelope Call runner. Constructor slots are the envelope adapter map.
+ * `run` owns progression; observation failures are isolated here so callers
+ * do not wrap each notify site.
  */
 export class Call<
   TRequestLike,
@@ -58,11 +50,11 @@ export class Call<
   }
 
   async decode(request: TRequestLike): Promise<TDecoded> {
-    return this.#adapters.decode(request);
+    return this.#adapters.callDecode(request);
   }
 
   async resolveContext(input: { request: TRequestLike; decoded: TDecoded }): Promise<TContext> {
-    return this.#adapters.resolveContext(input);
+    return this.#adapters.callResolveContext(input);
   }
 
   async dispatch(input: {
@@ -70,7 +62,7 @@ export class Call<
     decoded: TDecoded;
     context: TContext;
   }): Promise<TDispatched> {
-    return this.#adapters.dispatch(input);
+    return this.#adapters.callDispatch(input);
   }
 
   async toResponse(input: {
@@ -79,28 +71,36 @@ export class Call<
     context: TContext;
     dispatched: TDispatched;
   }): Promise<TResponseObject> {
-    return this.#adapters.toResponse
-      ? this.#adapters.toResponse(input)
+    return this.#adapters.callToResponse
+      ? this.#adapters.callToResponse(input)
       : (input.dispatched as unknown as TResponseObject);
   }
 
   async toFailureResponse(
     failure: CallFailureInput<TRequestLike, TDecoded, TContext>,
   ): Promise<TResponseObject> {
-    if (this.#adapters.toFailureResponse === undefined) {
+    if (this.#adapters.callToFailureResponse === undefined) {
       throw failure.error;
     }
-    return this.#adapters.toFailureResponse(failure);
+    return this.#adapters.callToFailureResponse(failure);
   }
 
   async onDecoded(input: { request: TRequestLike; decoded: TDecoded }): Promise<void> {
-    await this.#adapters.onDecoded?.(input);
+    await this.#adapters.callOnDecoded?.(input);
   }
 
   async onTerminal(
     event: CallTerminalEvent<TResponseObject, TRequestLike, TDecoded>,
   ): Promise<void> {
-    await this.#adapters.onTerminal?.(event);
+    await this.#adapters.callOnTerminal?.(event);
+  }
+
+  async #observe(work: MaybePromise<void>): Promise<void> {
+    try {
+      await work;
+    } catch {
+      // Observation must not replace the Call result or re-dispatch.
+    }
   }
 
   /**
@@ -108,70 +108,54 @@ export class Call<
    * Failures go through `toFailureResponse` once; a failing converter rejects.
    */
   async run(request: TRequestLike): Promise<TResponseObject> {
-    let stage: CallFailureStage = "decode";
-    let decoded: TDecoded | undefined;
-    let context: TContext | undefined;
+    let decoded: TDecoded;
     try {
       decoded = await this.decode(request);
-      await ignoreObserverFailure(async () => {
-        await this.onDecoded({ request, decoded: decoded as TDecoded });
-      });
-      stage = "resolve";
+    } catch (error) {
+      return await this.#fail({ stage: "decode", error, request });
+    }
+    return this.#runDecoded(request, decoded);
+  }
+
+  async #runDecoded(request: TRequestLike, decoded: TDecoded): Promise<TResponseObject> {
+    await this.#observe(this.onDecoded({ request, decoded }));
+    let stage: CallFailureStage = "resolve";
+    let context: TContext | undefined;
+    try {
       context = await this.resolveContext({ request, decoded });
       stage = "dispatch";
       const dispatched = await this.dispatch({ request, decoded, context });
       stage = "response";
       const response = await this.toResponse({ request, decoded, context, dispatched });
-      await ignoreObserverFailure(async () => {
-        await this.onTerminal({
-          outcome: "responded",
-          request,
-          response,
-          ...(decoded === undefined ? {} : { decoded }),
-        });
-      });
+      await this.#observe(this.onTerminal({ outcome: "responded", request, decoded, response }));
       return response;
     } catch (error) {
-      const failure: CallFailureInput<TRequestLike, TDecoded, TContext> = {
-        stage,
-        error,
-        request,
-        ...(decoded === undefined ? {} : { decoded }),
-        ...(context === undefined ? {} : { context }),
-      };
-      if (this.#adapters.toFailureResponse === undefined) {
-        await ignoreObserverFailure(async () => {
-          await this.onTerminal({
-            outcome: "rejected",
-            request,
-            error,
-            ...(decoded === undefined ? {} : { decoded }),
-          });
-        });
-        throw error;
-      }
-      try {
-        const response = await this.toFailureResponse(failure);
-        await ignoreObserverFailure(async () => {
-          await this.onTerminal({
-            outcome: "responded",
-            request,
-            response,
-            ...(decoded === undefined ? {} : { decoded }),
-          });
-        });
-        return response;
-      } catch (conversionError) {
-        await ignoreObserverFailure(async () => {
-          await this.onTerminal({
-            outcome: "rejected",
-            request,
-            error: conversionError,
-            ...(decoded === undefined ? {} : { decoded }),
-          });
-        });
-        throw conversionError;
-      }
+      return await this.#fail({ stage, error, request, decoded, context });
+    }
+  }
+
+  async #fail(
+    failure: CallFailureInput<TRequestLike, TDecoded, TContext>,
+  ): Promise<TResponseObject> {
+    const terminal = {
+      request: failure.request,
+      ...(failure.decoded === undefined ? {} : { decoded: failure.decoded }),
+    };
+    if (this.#adapters.callToFailureResponse === undefined) {
+      await this.#observe(
+        this.onTerminal({ outcome: "rejected", error: failure.error, ...terminal }),
+      );
+      throw failure.error;
+    }
+    try {
+      const response = await this.toFailureResponse(failure);
+      await this.#observe(this.onTerminal({ outcome: "responded", response, ...terminal }));
+      return response;
+    } catch (conversionError) {
+      await this.#observe(
+        this.onTerminal({ outcome: "rejected", error: conversionError, ...terminal }),
+      );
+      throw conversionError;
     }
   }
 }

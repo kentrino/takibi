@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, expectTypeOf, test } from "vite-plus/test";
+import { ENVELOPE_CALL_ADAPTER_KEYS } from "@takibi/takibi-worker-runtime-contract";
 import * as Runtime from "../src";
 import * as Instrumentation from "../src/instrumentation";
 import * as TestingBridge from "../src/testing-bridge.server";
@@ -12,8 +13,18 @@ test("worker-runtime exports createTakibi, handler types, and pretty logging", (
   expectTypeOf(Runtime.createBoundInvocationAdapters).toBeFunction();
   expectTypeOf(Runtime.resolveLocalAdapterMap).toBeFunction();
   expectTypeOf(Runtime.resolveLocalExecution).toBeFunction();
+  expectTypeOf(Runtime.resolveWorkerEnvelopeMap).toBeFunction();
   expectTypeOf<Runtime.TakibiRuntimeAdapterMap>().not.toBeNever();
   expectTypeOf<Runtime.LocalExecution>().not.toBeNever();
+  expectTypeOf<Runtime.WorkerEnvelopeAdapterMap>().not.toBeNever();
+  expectTypeOf<Runtime.WorkerEnvelopeAdapterMap>().toHaveProperty("call");
+  expectTypeOf<Runtime.WorkerEnvelopeAdapterMap>().not.toHaveProperty("storage");
+  expectTypeOf<Runtime.WorkerEnvelopeAdapterMap>().not.toHaveProperty("invocationRuntime");
+  expectTypeOf<Runtime.WorkerEnvelopeAdapterMap>().not.toHaveProperty("localExecution");
+  expect(Runtime.WORKER_ENVELOPE_ADAPTER_GRAPH.call).toEqual([...ENVELOPE_CALL_ADAPTER_KEYS]);
+  expect(Runtime.WORKER_ENVELOPE_ADAPTER_GRAPH).not.toHaveProperty("storage");
+  expect(Runtime.WORKER_ENVELOPE_ADAPTER_GRAPH).not.toHaveProperty("invocationRuntime");
+  expectTypeOf(Runtime).not.toHaveProperty("WorkerCallAdapter");
   expectTypeOf(Runtime.toTakibiInvocation).toBeFunction();
   expectTypeOf(Runtime.getTakibiRawInput).toBeFunction();
   expectTypeOf<Runtime.TakibiHandler>().not.toBeNever();

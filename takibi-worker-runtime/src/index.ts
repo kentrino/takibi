@@ -180,3 +180,11 @@ export {
 export { createInProcessExecutor, createStubExecutor } from "./context/executors";
 export type { Executor, ExecutorInput } from "./context/executors";
 export { ownStringEntries } from "./context/own-entries";
+export {
+  resolveWorkerEnvelopeMap,
+  WORKER_ENVELOPE_ADAPTER_GRAPH,
+  type ResolveWorkerEnvelopeArgs,
+  type WorkerCall,
+  type WorkerEnvelopeAdapterMap,
+  type WorkerResolvedCall,
+} from "./context/worker-call";

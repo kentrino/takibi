@@ -1,6 +1,7 @@
 import {
   CALL_BATCH_ADAPTER_KEYS,
   CALL_SINGLE_ADAPTER_KEYS,
+  ENVELOPE_CALL_ADAPTER_KEYS,
   INVOCATION_ADAPTER_KEYS,
   type CallTypeMap,
   type InternalInvocationTypeMap,
@@ -49,3 +50,26 @@ export const RUNTIME_ADAPTER_GRAPH = {
   callBatch: CALL_BATCH_ADAPTER_KEYS,
   localExecution: ["invocationRun", "callSingle", "callBatch"],
 } as const satisfies RuntimeAdapterGraph;
+
+export type EnvelopeAdapterGraph = {
+  readonly [K in (typeof ENVELOPE_CALL_ADAPTER_KEYS)[number] | "call"]: readonly (
+    | (typeof ENVELOPE_CALL_ADAPTER_KEYS)[number]
+    | "call"
+  )[];
+};
+
+/**
+ * Worker / testing envelope Call. `call` is the `Call` class node. This graph
+ * does not read invocation or storage adapters; production dispatch forwards
+ * the whole envelope.
+ */
+export const ENVELOPE_ADAPTER_GRAPH = {
+  callDecode: [],
+  callResolveContext: [],
+  callDispatch: [],
+  callToResponse: [],
+  callToFailureResponse: [],
+  callOnDecoded: [],
+  callOnTerminal: [],
+  call: ENVELOPE_CALL_ADAPTER_KEYS,
+} as const satisfies EnvelopeAdapterGraph;
