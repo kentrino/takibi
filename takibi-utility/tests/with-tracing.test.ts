@@ -337,3 +337,81 @@ test("replacing the traced method updates its implementation and keeps tracing",
   expect(await instance.target()).toBe(2);
   expect(events).toEqual(["start:s:internal", "end"]);
 });
+
+test("frozen own methods remain callable through the tracing wrapper", async () => {
+  const events: string[] = [];
+  const instance = Object.freeze({
+    value: 2,
+    async target() {
+      return this.value;
+    },
+    async other() {
+      return this.value + 1;
+    },
+  });
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun(events) });
+  expect(await wrapped.target()).toBe(2);
+  expect(await wrapped.other()).toBe(3);
+  expect(events).toEqual(["start:s:internal", "end"]);
+  expect(Reflect.set(wrapped, "value", 4)).toBe(false);
+  expect(Object.keys(wrapped)).toEqual(Object.keys(instance));
+  expect(Object.hasOwn(wrapped, "target")).toBe(true);
+  expect("other" in wrapped).toBe(true);
+  expect(Object.isFrozen(instance)).toBe(true);
+});
+
+test("a frozen instance with an own async method retains its private receiver", async () => {
+  class FrozenProbe {
+    #value = 7;
+    target = async () => this.#value;
+    other() {
+      return this.#value + 1;
+    }
+    get shown() {
+      return this.#value;
+    }
+  }
+  const instance = Object.freeze(new FrozenProbe());
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun([]) });
+  expect(await wrapped.target()).toBe(7);
+  expect(wrapped.other()).toBe(8);
+  expect(wrapped.shown).toBe(7);
+  expect(wrapped).toBeInstanceOf(FrozenProbe);
+});
+
+test("a frozen callable instance stays callable", async () => {
+  const instance = Object.freeze(
+    Object.assign(
+      function (this: { value: number } | void, amount: number) {
+        return (this?.value ?? 0) + amount;
+      },
+      {
+        async target() {
+          return "ok";
+        },
+      },
+    ),
+  );
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun([]) });
+  expect(wrapped(2)).toBe(2);
+  expect(Reflect.apply(wrapped, { value: 3 }, [2])).toBe(5);
+  expect(await wrapped.target()).toBe("ok");
+});
+
+test("a frozen constructor stays constructible", async () => {
+  class ConstructorProbe {
+    constructor(readonly value: number) {}
+    static async target() {
+      return "ok";
+    }
+  }
+  const wrapped = withTracing(Object.freeze(ConstructorProbe), {
+    method: "target",
+    span: "s",
+    run: recordingRun([]),
+  });
+  const value = new wrapped(5);
+  expect(value).toBeInstanceOf(ConstructorProbe);
+  expect(value.value).toBe(5);
+  expect(await wrapped.target()).toBe("ok");
+});
