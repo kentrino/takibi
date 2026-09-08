@@ -144,13 +144,7 @@ export async function authorizeIdentifiedAction<
       permission: definition.permission,
       target: { id, doc },
     };
-    const grant = await policy.evaluateAction(
-      definition,
-      context,
-      invocation,
-      gateContext as ActionGateContext<object>,
-      doc,
-    );
+    const grant = await policy.evaluateAction(definition, context, invocation, gateContext, doc);
     // The document is already loaded. Concealment (ADR 0015) applies to CRUD
     // get / update / delete / set, not to a gate that denied a found target.
     if (!allows(grant, definition.permission)) {
@@ -166,12 +160,7 @@ export async function authorizeIdentifiedAction<
     invocation: { kind: "action", name: invocation.name },
     permission: definition.permission,
   };
-  const grant = await policy.evaluateAction(
-    definition,
-    context,
-    invocation,
-    gateContext as ActionGateContext<object>,
-  );
+  const grant = await policy.evaluateAction(definition, context, invocation, gateContext);
   if (!allows(grant, definition.permission)) {
     throw new ForbiddenError("Forbidden", denialReasonOf(grant, definition.permission));
   }
