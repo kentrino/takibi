@@ -448,7 +448,9 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
   logger?: InternalLogger,
   reuseTransaction = false,
 ): TrustedCollectionsApi<TCollections> {
-  const api = Object.create(null) as TrustedCollectionsApi<TCollections>;
+  const api = Object.create(null) as {
+    [K in Exclude<keyof TCollections, "$transaction">]: TrustedCollectionApi<TCollections[K]>;
+  };
   for (const name of Object.keys(collections) as (Exclude<keyof TCollections, "$transaction"> &
     string)[]) {
     const definition = collections[name]!;
@@ -519,17 +521,20 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
       },
     } as TrustedCollectionApi<TCollections[typeof name]>;
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
-    (api as unknown as Record<string, unknown>)[name] = collectionApi;
+    api[name] = collectionApi;
   }
-  api.$transaction = <T>(
-    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
-  ): Promise<T> =>
-    reuseTransaction
-      ? callback(api)
-      : storage.transaction((scoped) =>
-          callback(createTrustedCollections(collections, scoped, logger, true)),
-        );
-  return api;
+  const trustedApi = Object.assign(api, {
+    $transaction<T>(
+      callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
+    ): Promise<T> {
+      return reuseTransaction
+        ? callback(trustedApi)
+        : storage.transaction((scoped) =>
+            callback(createTrustedCollections(collections, scoped, logger, true)),
+          );
+    },
+  });
+  return trustedApi;
 }
 
 async function countDocuments(
