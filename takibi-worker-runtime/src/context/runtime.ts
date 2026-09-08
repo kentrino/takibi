@@ -1,5 +1,4 @@
 import { TakibiError } from "@takibi/takibi-api";
-import type { ExecuteRequest } from "../executor";
 import type { PublicRequest } from "../http";
 import {
   emitFailure,
@@ -8,11 +7,21 @@ import {
   type InternalLogger,
   type LoggingOptions,
 } from "../logging";
-import type { TakibiFailure } from "@takibi/takibi-shared-types";
+import type {
+  ObserverInvocationData,
+  StorageListOptions,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
 import type { WireFailure } from "../protocol";
 import { toTakibiFailure } from "../result";
 import { SchemaValidationError } from "../schema";
 import type { StorageDriver } from "@takibi/takibi-storage";
+
+/**
+ * Fields read by invocation log helpers. Shared by observer-safe values,
+ * wire invocations, and public requests; batch exists only on the last.
+ */
+type InvocationFieldSource = ObserverInvocationData | Extract<PublicRequest, { kind: "batch" }>;
 
 export function applyStorageLogging(
   driver: StorageDriver,
@@ -35,7 +44,7 @@ export function mergeLoggingOptions(
   return merged;
 }
 
-export function invocationFields(invocation: PublicRequest): {
+export function invocationFields(invocation: InvocationFieldSource): {
   collection?: string;
   operation?: string;
   documentId?: string;
@@ -57,10 +66,10 @@ export function invocationFields(invocation: PublicRequest): {
       };
 }
 
-export function debugInvocationFields(invocation: PublicRequest): ReturnType<
+export function debugInvocationFields(invocation: InvocationFieldSource): ReturnType<
   typeof invocationFields
 > & {
-  query?: NonNullable<ExecuteRequest["list"]>["where"];
+  query?: StorageListOptions["where"];
 } {
   return {
     ...invocationFields(invocation),

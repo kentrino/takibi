@@ -6,7 +6,6 @@ import {
 import { emitFailure, requestLogFields, type InternalLogger } from "./logging";
 import type { TakibiFailure } from "@takibi/takibi-shared-types";
 import { invocationFields, toWireFailure } from "./context/runtime";
-import type { PublicRequest } from "./http";
 import type { TakibiInvocationTypeMap } from "./invocation-type-map";
 import type { WireFailure, WireResponse } from "./protocol";
 
@@ -31,7 +30,7 @@ export function invocationToWireResponse(deps: ResponseConverterDeps) {
     }
     const wire = wireFailureFromSettlement(settlement.failure);
     emitFailure(deps.invocationRuntime.logger, wire.error, {
-      ...publicInvocationFields(invocation.invocation),
+      ...(invocation.invocation === undefined ? {} : invocationFields(invocation.invocation)),
       ...(deps.localRequest === undefined ? {} : requestLogFields(deps.localRequest)),
     });
     return wire;
@@ -77,16 +76,4 @@ function wireFailureFromSettlement(
     return { ok: false, error: failure.value };
   }
   return toWireFailure(failure.error);
-}
-
-function publicInvocationFields(invocation: NotifiedInvocation<object, unknown>["invocation"]) {
-  if (
-    typeof invocation === "object" &&
-    invocation !== null &&
-    "kind" in invocation &&
-    (invocation.kind === "action" || invocation.kind === "collection")
-  ) {
-    return invocationFields(invocation as PublicRequest);
-  }
-  return {};
 }
