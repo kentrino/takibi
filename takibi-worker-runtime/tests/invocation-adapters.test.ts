@@ -18,12 +18,8 @@ import {
   type RuntimeAdapterMap,
 } from "@takibi/takibi-worker-runtime-contract";
 import { createSqliteDurableObjectStorage } from "../../takibi-testing/src/sqlite-storage.server";
-import type { TakibiAdapterMap } from "../src/adapter-map";
-import {
-  createBoundInvocationAdapters,
-  getTakibiRawInput,
-  toTakibiInvocation,
-} from "../src/invocation-adapters";
+import { createBoundInvocationAdapters, type TakibiAdapterMap } from "../src/adapter-map";
+import { getTakibiRawInput, toTakibiInvocation } from "../src/invocation-adapters";
 import { executeAction } from "../src/action-executor";
 import { executeOperation } from "../src/executor";
 import {
@@ -32,6 +28,7 @@ import {
   type LocalExecution,
   type TakibiRuntimeAdapterMap,
 } from "../src/invocation-execution";
+import { InvocationPrepareApply } from "../src/invocation-paths";
 import type { CollectionReadRequest, WireResponse } from "../src/protocol";
 import { invocationToHttpResponse, invocationToWireResponse } from "../src/invocation-response";
 import type { TakibiInvocationTypeMap, TakibiWireInvocation } from "../src/invocation-type-map";
@@ -41,7 +38,7 @@ type Map = TakibiInvocationTypeMap<Ctx>;
 
 const Item = z.object({ value: z.string() });
 
-function createAdapters(actionEvents?: string[]) {
+async function createAdapters(actionEvents?: string[]) {
   const collections = {
     items: {
       schema: Item,
@@ -210,7 +207,7 @@ function createAdapters(actionEvents?: string[]) {
       }),
   });
   const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
-  const adapters: InvocationAdapters<Map> = createBoundInvocationAdapters<Ctx>({
+  const adapters: InvocationAdapters<Map> = await createBoundInvocationAdapters<Ctx>({
     collections,
     storage,
     registry,
@@ -273,13 +270,33 @@ test("toInvocation drops raw input and getRawInput reads it back", () => {
   expect(getTakibiRawInput(read)).toBeUndefined();
 });
 
-test("bound adapters satisfy the contract bag", () => {
-  const { adapters } = createAdapters();
+test("bound adapters satisfy the contract bag", async () => {
+  const { adapters } = await createAdapters();
   expectTypeOf(adapters).toExtend<InvocationAdapters<Map>>();
 });
 
+test("bound helper and production resolve the same registered adapters", async () => {
+  const { adapters, storage } = await createAdapters();
+  const map = await resolveLocalAdapterMap({
+    ...adapters.invocationRuntime,
+    storage,
+    spanKind: "internal",
+  });
+
+  expect(adapters.invocationToInvocation).toBe(map.invocationToInvocation);
+  expect(adapters.invocationGetRawInput).toBe(map.invocationGetRawInput);
+  expect(adapters.invocationCreatePlan).toBe(map.invocationCreatePlan);
+  expect(adapters.invocationToFailure).toBe(map.invocationToFailure);
+  expect(adapters.invocationSnapshotObserverEvent).toBe(map.invocationSnapshotObserverEvent);
+  expect(adapters.invocationNotify).toBe(map.invocationNotify);
+  expect(adapters.transactionClassifyFailure).toBe(map.transactionClassifyFailure);
+  expect(adapters.transactionNone).toBeInstanceOf(InvocationPrepareApply);
+  expect(map.transactionNone).toBe(map.invocationPrepareApply);
+  expect(map.invocationRun).not.toBe(map.invocationCoreRun);
+});
+
 test("tatenuki resolves an isolated adapter map without retaining invocation state", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   const first = await resolveLocalAdapterMap({
     ...adapters.invocationRuntime,
     spanKind: "internal",
@@ -317,7 +334,7 @@ test("tatenuki resolves an isolated adapter map without retaining invocation sta
 });
 
 test("runtime plans every collection operation", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   const cases = [
     {
       invocation: {
@@ -404,7 +421,7 @@ test("runtime plans every collection operation", async () => {
 });
 
 test("runtime plans action transaction boundaries from definitions", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   await run(adapters, {
     kind: "collection",
     collection: "items",
@@ -457,7 +474,7 @@ test("runtime plans action transaction boundaries from definitions", async () =>
 });
 
 test("orchestrator add writes through the runner-owned transaction", async () => {
-  const { adapters, storage } = createAdapters();
+  const { adapters, storage } = await createAdapters();
   let transactions = 0;
   const counted = {
     ...storage,
@@ -466,7 +483,7 @@ test("orchestrator add writes through the runner-owned transaction", async () =>
       return storage.transaction(callback);
     },
   };
-  const transactional = createBoundInvocationAdapters<Ctx>({
+  const transactional = await createBoundInvocationAdapters<Ctx>({
     ...adapters.invocationRuntime,
     storage: counted,
   });
@@ -499,7 +516,7 @@ test("orchestrator add writes through the runner-owned transaction", async () =>
 });
 
 test("direct add uses the same apply-boundary transaction path", async () => {
-  const { storage, collections } = createAdapters();
+  const { storage, collections } = await createAdapters();
   let transactions = 0;
   const counted = {
     ...storage,
@@ -527,7 +544,7 @@ test("direct add uses the same apply-boundary transaction path", async () => {
 });
 
 test("orchestrator runs detached and document actions from written state", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   await run(adapters, {
     kind: "collection",
     collection: "items",
@@ -567,7 +584,7 @@ test("orchestrator runs detached and document actions from written state", async
 
 test("orchestrator orders guard, document load/gate, parse, then handler", async () => {
   const events: string[] = [];
-  const { adapters, storage } = createAdapters(events);
+  const { adapters, storage } = await createAdapters(events);
   await run(adapters, {
     kind: "collection",
     collection: "items",
@@ -583,7 +600,7 @@ test("orchestrator orders guard, document load/gate, parse, then handler", async
       return storage.get(collection, id);
     },
   };
-  const ordered = createBoundInvocationAdapters<Ctx>({
+  const ordered = await createBoundInvocationAdapters<Ctx>({
     ...adapters.invocationRuntime,
     storage: observedStorage,
   });
@@ -602,9 +619,9 @@ test("orchestrator orders guard, document load/gate, parse, then handler", async
 
 test("guard failure performs no document load or later action phase", async () => {
   const events: string[] = [];
-  const { adapters, storage } = createAdapters(events);
+  const { adapters, storage } = await createAdapters(events);
   let loads = 0;
-  const guarded = createBoundInvocationAdapters<Ctx>({
+  const guarded = await createBoundInvocationAdapters<Ctx>({
     ...adapters.invocationRuntime,
     storage: {
       ...storage,
@@ -633,7 +650,7 @@ test("guard failure performs no document load or later action phase", async () =
 
 test("document gate denial prevents input parsing and handler execution", async () => {
   const events: string[] = [];
-  const { adapters } = createAdapters(events);
+  const { adapters } = await createAdapters(events);
   await run(adapters, {
     kind: "collection",
     collection: "items",
@@ -660,7 +677,7 @@ test("document gate denial prevents input parsing and handler execution", async 
 
 test("direct executeAction matches orchestrated guard, load/gate, parse, handler order", async () => {
   const events: string[] = [];
-  const { adapters, storage, collections, registry } = createAdapters(events);
+  const { adapters, storage, collections, registry } = await createAdapters(events);
   await run(adapters, {
     kind: "collection",
     collection: "items",
@@ -696,7 +713,7 @@ test("direct executeAction matches orchestrated guard, load/gate, parse, handler
 
 test("detached atomic actions gate and parse before their handler transaction", async () => {
   const events: string[] = [];
-  const { adapters, storage, collections, registry } = createAdapters(events);
+  const { adapters, storage, collections, registry } = await createAdapters(events);
   const observedStorage = {
     ...storage,
     transaction<T>(callback: (scoped: typeof storage) => Promise<T>) {
@@ -704,7 +721,7 @@ test("detached atomic actions gate and parse before their handler transaction", 
       return storage.transaction(callback);
     },
   };
-  const orchestrated = createBoundInvocationAdapters<Ctx>({
+  const orchestrated = await createBoundInvocationAdapters<Ctx>({
     ...adapters.invocationRuntime,
     storage: observedStorage,
   });
@@ -725,7 +742,7 @@ test("detached atomic actions gate and parse before their handler transaction", 
 });
 
 test("parsed input is observable when a detached transaction cannot start", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   let observedInput: unknown;
   let inputAvailable = false;
   const failing = {
@@ -756,7 +773,7 @@ test("parsed input is observable when a detached transaction cannot start", asyn
 });
 
 test("transaction-bound policy calls reuse scope, return values, and propagate failures", async () => {
-  const { adapters, storage, collections, registry } = createAdapters();
+  const { adapters, storage, collections, registry } = await createAdapters();
   let transactions = 0;
   const counted = {
     ...storage,
@@ -767,7 +784,10 @@ test("transaction-bound policy calls reuse scope, return values, and propagate f
   };
   const notified: string[] = [];
   const transactional = {
-    ...createBoundInvocationAdapters<Ctx>({ ...adapters.invocationRuntime, storage: counted }),
+    ...(await createBoundInvocationAdapters<Ctx>({
+      ...adapters.invocationRuntime,
+      storage: counted,
+    })),
     invocationNotify: (context) => {
       notified.push(context.outcome);
     },
@@ -809,7 +829,7 @@ test("transaction-bound policy calls reuse scope, return values, and propagate f
 });
 
 test("settled failure projects to a wire response with the mapped status", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   const failed = await run(adapters, {
     kind: "action",
     scope: "$",
@@ -826,7 +846,7 @@ test("settled failure projects to a wire response with the mapped status", async
 });
 
 test("observer nested result mutation cannot change wire or HTTP responses", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   const observed = await run(
     {
       ...adapters,
@@ -850,7 +870,7 @@ test("observer nested result mutation cannot change wire or HTTP responses", asy
 });
 
 test("observer nested mapped failure mutation cannot change wire or HTTP responses", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   const observed = await run(
     {
       ...adapters,
@@ -880,7 +900,7 @@ test("observer nested mapped failure mutation cannot change wire or HTTP respons
 });
 
 test("local execution returns wire success and failure without throwing", async () => {
-  const { adapters, storage } = createAdapters();
+  const { adapters, storage } = await createAdapters();
   const local = await resolveLocalExecution({
     ...adapters.invocationRuntime,
     storage,
@@ -910,7 +930,7 @@ test("local execution returns wire success and failure without throwing", async 
 });
 
 test("production local batch continues after one item failure", async () => {
-  const { adapters, storage } = createAdapters();
+  const { adapters, storage } = await createAdapters();
   const local = await resolveLocalExecution({
     ...adapters.invocationRuntime,
     storage,
@@ -953,11 +973,350 @@ test("runtime adapter map extends the contract map with assembly slots", () => {
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("callSingle");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().not.toHaveProperty("wireCallSingle");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("localExecution");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationPolicy");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationSchema");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationActionHandler");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationPrepareApply");
+});
+
+test("DI override of invocationPolicy is used by the local execution path", async () => {
+  const { adapters, storage } = await createAdapters();
+  const events: string[] = [];
+  const map = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage,
+      spanKind: "internal",
+    },
+    {
+      invocationPolicy: {
+        async evaluateCollection() {
+          events.push("collection");
+          throw new Error("overridden collection policy");
+        },
+        async evaluateAction() {
+          events.push("action");
+          throw new Error("overridden action policy");
+        },
+      },
+    },
+  );
+
+  expect(map.invocationPrepareApply).toBeInstanceOf(InvocationPrepareApply);
+  expect(map.transactionNone).toBe(map.invocationPrepareApply);
+  expect(map.transactionApply).toBe(map.invocationPrepareApply);
+  expect(map.transactionFull).toBe(map.invocationPrepareApply);
+
+  const result = await map.invocationRun({
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "ping" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(events).toEqual(["action"]);
+  expect(result.settlement.outcome).toBe("failed");
+});
+
+test("DI override of invocationPolicy is used by direct executeAction and invocationRun", async () => {
+  const authorizeError = new Error("OVERRIDDEN_POLICY");
+  const { adapters, storage, collections, registry } = await createAdapters();
+  const map = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage,
+      spanKind: "internal",
+    },
+    {
+      invocationPolicy: {
+        async evaluateCollection() {
+          throw new Error("overridden collection policy");
+        },
+        async evaluateAction() {
+          throw authorizeError;
+        },
+      },
+    },
+  );
+
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      storage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "ping" },
+      undefined,
+      {},
+      map.invocationPrepareApply,
+    ),
+  ).rejects.toBe(authorizeError);
+
+  const result = await map.invocationRun({
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "ping" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(result.settlement).toMatchObject({
+    outcome: "failed",
+    failure: { kind: "mapped", value: { message: "OVERRIDDEN_POLICY" } },
+  });
+});
+
+test("identify, authorize, and parse keep the original error on both paths", async () => {
+  const identifyError = new Error("IDENTIFY_FAILED");
+  const authorizeError = new Error("AUTHORIZE_FAILED");
+  const parseError = new Error("PARSE_FAILED");
+  const { adapters, storage, collections, registry } = await createAdapters();
+  registry.registerRootActions(
+    {
+      taggedIdentify: createRootActionBuilder<Ctx, RootActionArgs<Ctx, typeof collections>>()
+        .use(() => {
+          throw identifyError;
+        })
+        .policy(fullAccess)
+        .handler(() => ({ ok: true })),
+      taggedContext: createRootActionBuilder<Ctx, RootActionArgs<Ctx, typeof collections>>()
+        .use((ctx) => ({ ...ctx, tenantId: "after-identify" }))
+        .input(z.string())
+        .policy(fullAccess)
+        .handler(() => ({ ok: true })),
+    },
+    new Set(["items"]),
+  );
+
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      storage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "taggedIdentify" },
+    ),
+  ).rejects.toBe(identifyError);
+
+  const identified = await run(adapters, { kind: "action", scope: "$", name: "taggedIdentify" });
+  expect(identified.settlement).toMatchObject({
+    outcome: "failed",
+    failure: { kind: "mapped", value: { message: "IDENTIFY_FAILED" } },
+  });
+
+  const authorizing = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage,
+      spanKind: "internal",
+    },
+    {
+      invocationPolicy: {
+        async evaluateCollection() {
+          throw authorizeError;
+        },
+        async evaluateAction() {
+          throw authorizeError;
+        },
+      },
+    },
+  );
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      storage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "taggedContext", input: "hello" },
+      undefined,
+      {},
+      authorizing.invocationPrepareApply,
+    ),
+  ).rejects.toBe(authorizeError);
+  const authorized = await authorizing.invocationRun({
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "taggedContext", input: "hello" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(authorized.context).toEqual({ tenantId: "after-identify" });
+  expect(authorized.settlement).toMatchObject({
+    outcome: "failed",
+    failure: { kind: "mapped", value: { message: "AUTHORIZE_FAILED" } },
+  });
+
+  const parsing = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage,
+      spanKind: "internal",
+    },
+    {
+      invocationSchema: {
+        async parse() {
+          throw parseError;
+        },
+      },
+    },
+  );
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      storage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "taggedContext", input: "hello" },
+      undefined,
+      {},
+      parsing.invocationPrepareApply,
+    ),
+  ).rejects.toBe(parseError);
+  const parsed = await parsing.invocationRun({
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "taggedContext", input: "hello" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(parsed.context).toEqual({ tenantId: "after-identify" });
+  expect(parsed.input).toEqual({ status: "raw", value: "hello" });
+  expect(parsed.settlement).toMatchObject({
+    outcome: "failed",
+    failure: { kind: "mapped", value: { message: "PARSE_FAILED" } },
+  });
+});
+
+test("apply and commit failures keep parsed input and the original error", async () => {
+  const applyError = new Error("APPLY_FAILED");
+  const commitError = new Error("COMMIT_FAILED");
+  const { adapters, storage, collections, registry } = await createAdapters();
+  const applying = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage,
+      spanKind: "internal",
+    },
+    {
+      invocationActionHandler: () => ({
+        async run() {
+          throw applyError;
+        },
+      }),
+    },
+  );
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      storage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "atomicOrdered", input: "hello" },
+      undefined,
+      {},
+      applying.invocationPrepareApply,
+    ),
+  ).rejects.toBe(applyError);
+  const applied = await applying.invocationRun({
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "atomicOrdered", input: "hello" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(applied.input).toEqual({ status: "validated", value: "hello" });
+  expect(applied.settlement).toMatchObject({
+    outcome: "failed",
+    failure: { kind: "mapped", value: { message: "APPLY_FAILED" } },
+  });
+
+  const startError = new Error("TRANSACTION_START_FAILED");
+  const startingStorage = {
+    ...storage,
+    transaction() {
+      throw startError;
+    },
+  };
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      startingStorage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "atomicOrdered", input: "hello" },
+    ),
+  ).rejects.toBe(startError);
+
+  const committingStorage = {
+    ...storage,
+    transaction<T>(callback: (scoped: typeof storage) => Promise<T>) {
+      return storage.transaction(callback).then(() => {
+        throw commitError;
+      });
+    },
+  };
+  await expect(
+    executeAction(
+      registry,
+      collections,
+      committingStorage,
+      { tenantId: "tenant-a" },
+      { kind: "action", scope: "$", name: "atomicOrdered", input: "hello" },
+    ),
+  ).rejects.toBe(commitError);
+
+  const committing = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage,
+      spanKind: "internal",
+    },
+    {
+      transactionRun: async (work) => {
+        await work(storage);
+        throw commitError;
+      },
+    },
+  );
+  const committed = await committing.invocationRun({
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "atomicOrdered", input: "hello" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(committed.input).toEqual({ status: "validated", value: "hello" });
+  expect(committed.settlement).toMatchObject({
+    outcome: "failed",
+    stage: "commit",
+    failure: { kind: "mapped", value: { message: "COMMIT_FAILED" } },
+  });
+});
+
+test("concurrent local invocations keep resolved policy and context apart", async () => {
+  const { adapters, storage } = await createAdapters();
+  const seen: string[] = [];
+  const map = await resolveLocalAdapterMap({
+    ...adapters.invocationRuntime,
+    storage,
+    spanKind: "internal",
+  });
+  const [left, right] = await Promise.all([
+    map.invocationRun({
+      request: {
+        wireInvocation: { kind: "action", scope: "$", name: "ping" },
+        context: { tenantId: "left" },
+      },
+    }),
+    map.invocationRun({
+      request: {
+        wireInvocation: { kind: "action", scope: "$", name: "ping" },
+        context: { tenantId: "right" },
+      },
+    }),
+  ]);
+  seen.push(left.context.tenantId, right.context.tenantId);
+  expect(seen).toEqual(["left", "right"]);
+  expect(left.settlement.outcome).toBe("succeeded");
+  expect(right.settlement.outcome).toBe("succeeded");
 });
 
 test("local graph instruments invocationRun and leaves invocationCoreRun bare", async () => {
   const events: string[] = [];
-  const { adapters, storage } = createAdapters();
+  const { adapters, storage } = await createAdapters();
   const map = await resolveLocalAdapterMap({
     ...adapters.invocationRuntime,
     storage,
@@ -987,7 +1346,7 @@ test("local graph instruments invocationRun and leaves invocationCoreRun bare", 
 });
 
 test("resolveLocalExecution is the public entry built from the runtime map", async () => {
-  const { adapters, storage } = createAdapters();
+  const { adapters, storage } = await createAdapters();
   const execution = await resolveLocalExecution({
     ...adapters.invocationRuntime,
     storage,
@@ -1003,7 +1362,7 @@ test("resolveLocalExecution is the public entry built from the runtime map", asy
 
 test("document atomic load, gate, parse, and handler share the runner transaction", async () => {
   const events: string[] = [];
-  const { adapters, storage } = createAdapters(events);
+  const { adapters, storage } = await createAdapters(events);
   await run(adapters, {
     kind: "collection",
     collection: "items",
@@ -1036,7 +1395,7 @@ test("document atomic load, gate, parse, and handler share the runner transactio
       });
     },
   };
-  const transactional = createBoundInvocationAdapters<Ctx>({
+  const transactional = await createBoundInvocationAdapters<Ctx>({
     ...adapters.invocationRuntime,
     storage: counted,
   });
@@ -1070,7 +1429,7 @@ test("document atomic load, gate, parse, and handler share the runner transactio
 test.each(["set", "update"] as const)(
   "%s prepare failure preserves concealment through runInvocation",
   async (operation) => {
-    const { adapters, storage } = createAdapters();
+    const { adapters, storage } = await createAdapters();
     await run(adapters, {
       kind: "collection",
       collection: "items",
@@ -1079,7 +1438,7 @@ test.each(["set", "update"] as const)(
       input: { value: "hello" },
     });
     let policyCalls = 0;
-    const concealed = createBoundInvocationAdapters<Ctx>({
+    const concealed = await createBoundInvocationAdapters<Ctx>({
       ...adapters.invocationRuntime,
       storage,
       collections: {
@@ -1111,7 +1470,7 @@ test.each(["set", "update"] as const)(
 );
 
 test("unknown action settles through toFailure without throwing", async () => {
-  const { adapters } = createAdapters();
+  const { adapters } = await createAdapters();
   const failed = await run(adapters, {
     kind: "action",
     scope: "$",

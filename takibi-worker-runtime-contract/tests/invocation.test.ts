@@ -33,6 +33,7 @@ type Spec = {
   fullWork: { key: string };
   nonePrepared: Record<string, never>;
   applyPrepared: Record<string, never>;
+  fullPrepared: Record<string, never>;
   result: { id: string } | { id: string; nested: { value: string } };
   failure: TakibiFailure<string>;
 };
@@ -74,7 +75,8 @@ function adapters(overrides: Partial<InvocationAdapters<Spec>> = {}): Invocation
       apply: () => ({ outcome: "failed", error: new Error("unexpected") }),
     },
     transactionFull: {
-      prepareAndApply: () => ({ outcome: "failed", error: new Error("unexpected") }),
+      prepare: () => ({ outcome: "failed", error: new Error("unexpected") }),
+      apply: () => ({ outcome: "failed", error: new Error("unexpected") }),
     },
     transactionRun: undefined,
     transactionClassifyFailure: undefined,
@@ -555,16 +557,21 @@ test("full boundary prepares and applies inside the transaction", async () => {
       return work({ scope: "transaction" });
     },
     transactionFull: {
-      prepareAndApply: (_view, work, storage) => {
+      prepare: (_view, work, storage) => {
         expect(work.key).toBe("work");
         expect(storage.scope).toBe("transaction");
-        events.push("prepare-and-apply");
+        events.push("prepare");
+        return { outcome: "succeeded", value: {} };
+      },
+      apply: (_view, _prepared, storage) => {
+        expect(storage.scope).toBe("transaction");
+        events.push("apply");
         return { outcome: "succeeded", value: { id: "patient-1" } };
       },
     },
   });
 
-  expect(events).toEqual(["transaction", "prepare-and-apply"]);
+  expect(events).toEqual(["transaction", "prepare", "apply"]);
   expect(result.plan?.transactionBoundary).toBe("full");
   expect(result.effects.transaction).toBe("committed");
 });

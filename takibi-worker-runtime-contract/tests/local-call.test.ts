@@ -59,6 +59,7 @@ test("LocalCallTypeMap pins request and decoded to the local envelope", () => {
     fullWork: unknown;
     nonePrepared: unknown;
     applyPrepared: unknown;
+    fullPrepared: unknown;
     result: { id: string };
     failure: TakibiFailure<string>;
   };

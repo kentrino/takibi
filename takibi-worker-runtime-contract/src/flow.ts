@@ -107,6 +107,7 @@ export async function executePlan<
   TFullWork,
   TNonePrepared,
   TApplyPrepared,
+  TFullPrepared,
   TResult,
 >(
   options: ExecutePlanOptions<
@@ -116,6 +117,7 @@ export async function executePlan<
     TFullWork,
     TNonePrepared,
     TApplyPrepared,
+    TFullPrepared,
     TResult
   >,
 ): Promise<TResult> {
@@ -131,7 +133,10 @@ export async function executePlan<
     const prepared = await options.apply.prepare(plan.work, storage);
     return inTransaction((scoped) => options.apply.apply(prepared, scoped));
   }
-  return inTransaction((scoped) => options.full.prepareAndApply(plan.work, scoped));
+  return inTransaction(async (scoped) => {
+    const prepared = await options.full.prepare(plan.work, scoped);
+    return options.full.apply(prepared, scoped);
+  });
 }
 
 /**
@@ -186,9 +191,13 @@ const executeInvocationPlan = async function <T extends InternalInvocationTypeMa
         ),
     },
     full: {
-      prepareAndApply: async (work, storage) =>
+      prepare: async (work, storage) =>
         state.acceptAdapterResult(
-          await adapters.transactionFull.prepareAndApply(state.executionView(), work, storage),
+          await adapters.transactionFull.prepare(state.executionView(), work, storage),
+        ),
+      apply: async (prepared, storage) =>
+        state.acceptAdapterResult(
+          await adapters.transactionFull.apply(state.executionView(), prepared, storage),
         ),
     },
   });

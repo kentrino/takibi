@@ -28,6 +28,7 @@ type ValidMap = {
   fullWork: unknown;
   nonePrepared: unknown;
   applyPrepared: unknown;
+  fullPrepared: unknown;
   result: JsonValue;
   failure: TakibiFailure<string>;
 };

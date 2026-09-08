@@ -22,7 +22,10 @@ import type {
   StorageListOptions,
   WithMetadata,
 } from "@takibi/takibi-shared-types";
-import { executePlan } from "@takibi/takibi-worker-runtime-contract";
+import {
+  createCollectionExecutionPlan,
+  executePlan,
+} from "@takibi/takibi-worker-runtime-contract";
 import { createInvocationCollaborators, type PolicySurface } from "./invocation-collaborators";
 import type { InternalLogger } from "./logging";
 import {
@@ -36,7 +39,6 @@ import {
   storageUpdate,
 } from "./typed-storage";
 import type { StorageDriver } from "@takibi/takibi-storage";
-import { collectionExecutionPlan } from "./transaction-boundary";
 import type { TakibiCollectionWork } from "./invocation-type-map";
 
 export type ExecuteRequest = CollectionRequestData;
@@ -126,7 +128,10 @@ async function executeOperationInScope<TCtx extends object>(
         : "writes",
     request: req,
   };
-  const plan = collectionExecutionPlan(work);
+  const plan = createCollectionExecutionPlan(
+    { kind: "collection", operation: req.operation },
+    work,
+  );
   const prepare = (_work: TakibiCollectionWork, scopedStorage: StorageDriver) =>
     resolveCollection({
       collections,
@@ -146,10 +151,7 @@ async function executeOperationInScope<TCtx extends object>(
       storage.transaction(async (scopedStorage) => callback(scopedStorage)),
     none: { prepare, apply },
     apply: { prepare, apply },
-    full: {
-      prepareAndApply: async (_work, scopedStorage) =>
-        apply(await prepare(work, scopedStorage), scopedStorage),
-    },
+    full: { prepare, apply },
   });
 }
 

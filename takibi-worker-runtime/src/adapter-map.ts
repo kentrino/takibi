@@ -1,4 +1,11 @@
-import type { AdapterMap } from "@takibi/takibi-worker-runtime-contract";
+import {
+  INVOCATION_ADAPTER_KEYS,
+  INVOCATION_PREPARE_ADAPTER_KEYS,
+  type AdapterMap,
+  type InternalInvocationRuntime,
+  type InvocationAdapters,
+} from "@takibi/takibi-worker-runtime-contract";
+import { alias, defineContainer, inject, type DependencyGraph } from "tatenuki";
 import { normalizeInvocationFailure } from "./context/runtime";
 import {
   createTakibiInvocationPlan,
@@ -6,7 +13,17 @@ import {
   snapshotTakibiObserverEvent,
   toTakibiInvocation,
 } from "./invocation-adapters";
-import { createInvocationTransactionBoundaryContracts } from "./invocation-paths";
+import {
+  createActionHandler,
+  PolicyEvaluator,
+  tracePolicyEvaluator,
+  type ActionHandlerCtor,
+  type ActionHandlerSurface,
+  type PolicySurface,
+  type SchemaSurface,
+} from "./invocation-collaborators";
+import { InvocationPrepareApply, type InvocationPrepareApplyDeps } from "./invocation-paths";
+import { SchemaParser, traceSchemaParser } from "./schema";
 import type { TakibiInvocationTypeMap } from "./invocation-type-map";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
@@ -16,32 +33,85 @@ type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TCo
  */
 export type TakibiAdapterMap<TContext extends object, TServices = unknown> = AdapterMap<
   TakibiMap<TContext, TServices>
->;
+> & {
+  invocationPolicy: PolicySurface;
+  invocationSchema: SchemaSurface;
+  invocationActionHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface;
+  invocationPrepareApply: InvocationPrepareApply<TContext, TServices>;
+};
+
+/**
+ * Invocation registration without `invocationRun`. Production adds the runner
+ * and its span on `resolveLocalAdapterMap`; this helper does not.
+ */
+export type TakibiInvocationRegistrationMap<
+  TContext extends object = object,
+  TServices = unknown,
+> = Omit<TakibiAdapterMap<TContext, TServices>, "invocationRun">;
+
+/**
+ * Concrete adapter, default, and transaction wiring. Production and the
+ * bound helper resolve this graph with `createTakibiInvocationAdapterFactories`.
+ * Policy / schema / handler spans are created here; `invocationRun` tracing
+ * and notify stay off this graph so they are not doubled.
+ */
+export const TAKIBI_INVOCATION_REGISTRATION_GRAPH = {
+  invocationRuntime: [],
+  invocationToInvocation: [],
+  invocationGetRawInput: [],
+  invocationCreatePlan: [],
+  invocationPolicy: ["invocationRuntime"],
+  invocationSchema: ["invocationRuntime"],
+  invocationActionHandler: ["invocationRuntime"],
+  invocationPrepareApply: [...INVOCATION_PREPARE_ADAPTER_KEYS],
+  invocationTransactionBoundary: ["invocationPrepareApply"],
+  transactionNone: ["invocationPrepareApply"],
+  transactionApply: ["invocationPrepareApply"],
+  transactionFull: ["invocationPrepareApply"],
+  transactionRun: ["invocationRuntime"],
+  transactionClassifyFailure: [],
+  invocationToFailure: [],
+  invocationSnapshotObserverEvent: [],
+  invocationNotify: [],
+} as const satisfies DependencyGraph<TakibiInvocationRegistrationMap<object, unknown>>;
 
 export function createTakibiInvocationAdapterFactories<
   TContext extends object,
   TServices = unknown,
 >() {
+  const InvocationPrepareApplyClass = InvocationPrepareApply as new (
+    deps: InvocationPrepareApplyDeps,
+  ) => InvocationPrepareApply<TContext, TServices>;
   return {
     invocationToInvocation: () => toTakibiInvocation,
     invocationGetRawInput: () => getTakibiRawInput,
     invocationCreatePlan: () => createTakibiInvocationPlan,
-    invocationTransactionBoundary: ({
+    invocationPolicy: ({
       invocationRuntime,
     }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
-      createInvocationTransactionBoundaryContracts(invocationRuntime),
-    transactionNone: ({
-      invocationTransactionBoundary,
-    }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationTransactionBoundary">) =>
-      invocationTransactionBoundary.none,
-    transactionApply: ({
-      invocationTransactionBoundary,
-    }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationTransactionBoundary">) =>
-      invocationTransactionBoundary.apply,
-    transactionFull: ({
-      invocationTransactionBoundary,
-    }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationTransactionBoundary">) =>
-      invocationTransactionBoundary.full,
+      tracePolicyEvaluator(new PolicyEvaluator(), invocationRuntime.logger),
+    invocationSchema: ({
+      invocationRuntime,
+    }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
+      traceSchemaParser(new SchemaParser(), invocationRuntime.logger),
+    invocationActionHandler:
+      ({ invocationRuntime }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
+      (ctor: ActionHandlerCtor) =>
+        createActionHandler({
+          ...ctor,
+          logger: ctor.logger ?? invocationRuntime.logger,
+        }),
+    invocationPrepareApply: inject(InvocationPrepareApplyClass),
+    invocationTransactionBoundary: ({
+      invocationPrepareApply,
+    }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationPrepareApply">) => ({
+      none: invocationPrepareApply,
+      apply: invocationPrepareApply,
+      full: invocationPrepareApply,
+    }),
+    transactionNone: alias("invocationPrepareApply"),
+    transactionApply: alias("invocationPrepareApply"),
+    transactionFull: alias("invocationPrepareApply"),
     transactionRun:
       ({ invocationRuntime }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
       <TResult>(work: (storage: TakibiMap<TContext, TServices>["storage"]) => Promise<TResult>) =>
@@ -51,4 +121,39 @@ export function createTakibiInvocationAdapterFactories<
     invocationSnapshotObserverEvent: () => snapshotTakibiObserverEvent,
     invocationNotify: () => undefined,
   };
+}
+
+export async function resolveTakibiInvocationRegistration<
+  TContext extends object,
+  TServices = unknown,
+>(
+  runtime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>,
+  overrides?: Partial<TakibiInvocationRegistrationMap<TContext, TServices>>,
+): Promise<TakibiInvocationRegistrationMap<TContext, TServices>> {
+  type Map = TakibiInvocationRegistrationMap<TContext, TServices>;
+  const builder = defineContainer<Map>()
+    .graph(TAKIBI_INVOCATION_REGISTRATION_GRAPH)
+    .factories(createTakibiInvocationAdapterFactories<TContext, TServices>());
+  return (overrides === undefined ? builder : builder.override(overrides)).resolve({
+    invocationRuntime: runtime,
+  });
+}
+
+/**
+ * Test and in-process entry over the same registration as production.
+ * Resolves through tatenuki; it is async because that resolve is async.
+ */
+export async function createBoundInvocationAdapters<TContext extends object, TServices = unknown>(
+  runtime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>,
+  overrides?: Partial<TakibiInvocationRegistrationMap<TContext, TServices>>,
+): Promise<InvocationAdapters<TakibiMap<TContext, TServices>>> {
+  return pickInvocationAdapters(await resolveTakibiInvocationRegistration(runtime, overrides));
+}
+
+function pickInvocationAdapters<TContext extends object, TServices>(
+  map: TakibiInvocationRegistrationMap<TContext, TServices>,
+): InvocationAdapters<TakibiMap<TContext, TServices>> {
+  return Object.fromEntries(
+    INVOCATION_ADAPTER_KEYS.map((key) => [key, map[key]]),
+  ) as InvocationAdapters<TakibiMap<TContext, TServices>>;
 }

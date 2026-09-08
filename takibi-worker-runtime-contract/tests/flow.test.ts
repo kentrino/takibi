@@ -62,6 +62,7 @@ type ActionSpec = {
   fullWork: ActionWork;
   nonePrepared: Record<string, never>;
   applyPrepared: Record<string, never>;
+  fullPrepared: Record<string, never>;
   result: { id: string };
   failure: Failure;
 };
@@ -82,6 +83,7 @@ type ReadSpec = {
   fullWork: ReadWork;
   nonePrepared: { readonly id?: string };
   applyPrepared: { readonly id?: string };
+  fullPrepared: { readonly id?: string };
   result: { id: string };
   failure: Failure;
 };
@@ -212,7 +214,10 @@ test("Request -> Promise<Response> visibly composes a call and notification", as
         },
       },
       transactionFull: {
-        prepareAndApply(): never {
+        prepare(): never {
+          throw new Error("Unexpected full boundary");
+        },
+        apply(): never {
           throw new Error("Unexpected full boundary");
         },
       },
@@ -326,7 +331,10 @@ test("one HTTP batch resolves once and creates one invocation state per item", a
         },
       },
       transactionFull: {
-        prepareAndApply(): never {
+        prepare(): never {
+          throw new Error("Unexpected full boundary");
+        },
+        apply(): never {
           throw new Error("Unexpected full boundary");
         },
       },
@@ -446,7 +454,10 @@ test("Durable Object adapters take context from the decoded wire envelope", asyn
         },
       },
       transactionFull: {
-        prepareAndApply(): never {
+        prepare(): never {
+          throw new Error("Unexpected full boundary");
+        },
+        apply(): never {
           throw new Error("Unexpected full boundary");
         },
       },

@@ -23,6 +23,7 @@ export type InternalInvocationTypeMap = {
   fullWork: unknown;
   nonePrepared: unknown;
   applyPrepared: unknown;
+  fullPrepared: unknown;
   result: JsonValue;
   failure: TakibiFailure<string>;
 };
@@ -60,6 +61,7 @@ export type ExecutePlanOptions<
   TFullWork,
   TNonePrepared,
   TApplyPrepared,
+  TFullPrepared,
   TResult,
 > = {
   readonly plan: ExecutionPlan<TNoneWork, TApplyWork, TFullWork>;
@@ -75,7 +77,8 @@ export type ExecutePlanOptions<
     apply: (prepared: TApplyPrepared, storage: TStorage) => MaybePromise<TResult>;
   };
   readonly full: {
-    prepareAndApply: (work: TFullWork, storage: TStorage) => MaybePromise<TResult>;
+    prepare: (work: TFullWork, storage: TStorage) => MaybePromise<TFullPrepared>;
+    apply: (prepared: TFullPrepared, storage: TStorage) => MaybePromise<TResult>;
   };
 };
 
@@ -246,18 +249,16 @@ export type PrepareApplyInvocationContract<
   ): MaybePromise<InvocationAdapterResult<T, T["result"]>>;
 };
 
-export type FullInvocationContract<T extends InternalInvocationTypeMap, TWork> = {
-  prepareAndApply(
-    state: InvocationExecutionView<T>,
-    work: TWork,
-    storage: T["storage"],
-  ): MaybePromise<InvocationAdapterResult<T, T["result"]>>;
-};
+export type FullInvocationContract<
+  T extends InternalInvocationTypeMap,
+  TWork,
+  TPrepared,
+> = PrepareApplyInvocationContract<T, TWork, TPrepared>;
 
 export type InvocationTransactionBoundaryContracts<T extends InternalInvocationTypeMap> = {
   none: PrepareApplyInvocationContract<T, T["noneWork"], T["nonePrepared"]>;
   apply: PrepareApplyInvocationContract<T, T["applyWork"], T["applyPrepared"]>;
-  full: FullInvocationContract<T, T["fullWork"]>;
+  full: PrepareApplyInvocationContract<T, T["fullWork"], T["fullPrepared"]>;
 };
 
 /** Public runner request. Mutable lifecycle state is allocated inside the runner. */
@@ -291,6 +292,18 @@ type InvocationAdapterMap<T extends InternalInvocationTypeMap> = {
   invocationCreatePlan: (
     view: InvocationPlanningView<T>,
   ) => MaybePromise<InvocationAdapterResult<T, InvocationPlan<T>>>;
+  /**
+   * Runtime-pinned collaborators consumed by `invocationPrepareApply`.
+   * Concrete policy / schema / handler types stay in the runtime.
+   */
+  invocationPolicy: unknown;
+  invocationSchema: unknown;
+  invocationActionHandler: unknown;
+  invocationPrepareApply: PrepareApplyInvocationContract<
+    T,
+    T["noneWork"] | T["applyWork"] | T["fullWork"],
+    T["nonePrepared"] | T["applyPrepared"] | T["fullPrepared"]
+  >;
   invocationTransactionBoundary: InvocationTransactionBoundaryContracts<T>;
   transactionNone: InvocationTransactionBoundaryContracts<T>["none"];
   transactionApply: InvocationTransactionBoundaryContracts<T>["apply"];
@@ -425,6 +438,12 @@ export const CALL_BATCH_ADAPTER_KEYS = [
   "callGetWireInvocations",
   "callRuntimeChecks",
   "callToBatchResponse",
+] as const;
+
+export const INVOCATION_PREPARE_ADAPTER_KEYS = [
+  "invocationPolicy",
+  "invocationSchema",
+  "invocationActionHandler",
 ] as const;
 
 export const ENVELOPE_CALL_ADAPTER_KEYS = [
