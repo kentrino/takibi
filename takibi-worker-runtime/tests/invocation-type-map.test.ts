@@ -10,7 +10,7 @@ import type {
   InvocationRuntime,
 } from "@takibi/takibi-worker-runtime-contract";
 import type { ActionInvocation } from "../src/action-executor";
-import type { ExecuteRequest } from "../src/executor";
+import type { executeResolvedCollection, ExecuteRequest } from "../src/executor";
 import { createInvocationTransactionBoundaryContracts } from "../src/invocation-paths";
 import type {
   TakibiActionWork,
@@ -65,7 +65,9 @@ test("slots match current runtime types", () => {
   expectTypeOf<TakibiActionWork>().toExtend<AppMap["noneWork"]>();
   expectTypeOf<TakibiCollectionWork>().toExtend<AppMap["noneWork"]>();
   expectTypeOf<AppMap["fullWork"]>().toEqualTypeOf<TakibiActionWork>();
-  expectTypeOf<AppMap["result"]>().toEqualTypeOf<JsonValue>();
+  expectTypeOf<AppMap["result"]>().toEqualTypeOf<
+    JsonValue | Awaited<ReturnType<typeof executeResolvedCollection>>
+  >();
   expectTypeOf<AppMap["failure"]>().toEqualTypeOf<TakibiFailure<string>>();
 });
 

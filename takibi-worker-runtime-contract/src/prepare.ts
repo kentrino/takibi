@@ -11,7 +11,14 @@ export function mergeInvocationUpdates<T extends InternalInvocationTypeMap>(
 ): InvocationUpdates<T> | undefined {
   if (first === undefined) return second;
   if (second === undefined) return first;
-  return { ...first, ...second };
+  const merged = { ...first, ...second };
+  if (merged.context === undefined && Object.hasOwn(first, "context")) {
+    merged.context = first.context;
+  }
+  if (merged.input === undefined && Object.hasOwn(first, "input")) {
+    merged.input = first.input;
+  }
+  return merged;
 }
 
 /**

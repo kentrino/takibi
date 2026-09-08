@@ -1,6 +1,5 @@
 import type {
   InvocationRequestData,
-  JsonValue,
   ObserverInvocationData,
   TakibiFailure,
 } from "@takibi/takibi-shared-types";
@@ -32,7 +31,8 @@ export type InternalInvocationTypeMap = {
   nonePrepared: unknown;
   applyPrepared: unknown;
   fullPrepared: unknown;
-  result: JsonValue;
+  /** Execution values are carried unchanged; response adapters own serialization. */
+  result: unknown;
   failure: TakibiFailure<string>;
 };
 
@@ -230,6 +230,7 @@ export type InvocationExecutionView<T extends InternalInvocationTypeMap> = Reado
   runtime: Pick<T["runtime"], "collections" | "logger" | "services">;
 }>;
 
+/** Undefined fields leave the current state unchanged; validated input may itself hold undefined. */
 export type InvocationUpdates<T extends InternalInvocationTypeMap> = Readonly<{
   context?: T["context"];
   input?: InvocationInputState<T["rawInput"], T["input"]>;
@@ -552,7 +553,7 @@ export type CallAdapters<
     decoded: TDecoded;
     context: TContext;
   }) => MaybePromise<TDispatched>;
-  callToResponse?: (input: {
+  callToResponse: (input: {
     request: TRequestLike;
     decoded: TDecoded;
     context: TContext;
@@ -666,16 +667,16 @@ export type RunBatchCall = <
   request: TRequestLike,
 ) => Promise<TResponseObject>;
 
-export type RunCall = {
-  <TRequestLike, TDecoded, TContext, TResponseObject>(
-    request: TRequestLike,
-    adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject>,
-  ): Promise<TResponseObject>;
-  <TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>(
-    request: TRequestLike,
-    adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>,
-  ): Promise<TResponseObject>;
-};
+export type RunCall = <
+  TRequestLike,
+  TDecoded,
+  TContext,
+  TResponseObject,
+  TDispatched = TResponseObject,
+>(
+  request: TRequestLike,
+  adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>,
+) => Promise<TResponseObject>;
 
 export type RunInvocation = <T extends InternalInvocationTypeMap>(
   adapters: InvocationAdapters<T>,

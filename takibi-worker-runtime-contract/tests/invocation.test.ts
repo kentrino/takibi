@@ -683,3 +683,37 @@ test("terminal DTO is shallow-frozen without freezing payloads", async () => {
   expect(Object.isFrozen(result)).toBe(true);
   expect(Object.isFrozen(result.context)).toBe(false);
 });
+
+test("undefined update fields preserve context and input through failure settlement", () => {
+  const state = new InvocationState<Spec>(request, runtime);
+  state.start();
+  state.acceptInvocation(publicInvocation);
+  state.acceptRawInput({ name: "Ada" });
+  const error = new Error("plan failed");
+  expect(() =>
+    state.acceptPlan({
+      outcome: "failed",
+      error,
+      updates: { context: undefined, input: undefined },
+    }),
+  ).toThrow(error);
+  expect(state.planningView().context).toEqual(request.context);
+  expect(state.planningView().input).toEqual({ status: "raw", value: { name: "Ada" } });
+});
+
+test("settlement and observation preserve an execution value before response conversion", () => {
+  type DateSpec = Omit<Spec, "result"> & { result: Date };
+  const value = new Date("2026-01-01T00:00:00Z");
+  const state = new InvocationState<DateSpec>({ ...request }, runtime);
+  state.start();
+  state.acceptInvocation(publicInvocation);
+  state.acceptPlan({
+    outcome: "succeeded",
+    value: { transactionBoundary: "none", work: { key: "work" } },
+  });
+  state.succeed(value);
+  const event = state.observerEvent();
+  if (event.outcome !== "succeeded") throw new Error("expected success");
+  expectTypeOf(event.result).toEqualTypeOf<Date>();
+  expect(event.result).toBe(value);
+});

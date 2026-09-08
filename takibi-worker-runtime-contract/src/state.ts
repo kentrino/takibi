@@ -186,7 +186,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
       context: this.#context,
       input: toObservedInput(this.#input),
       transactionBoundary: plan?.transactionBoundary,
-      transaction: this.#transaction as Exclude<InternalInvocationTransaction, "open">,
+      transaction: this.#settledTransaction(),
     };
     if (this.#settlement.outcome === "succeeded") {
       const invocation = this.#initializedInvocation();
@@ -238,7 +238,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
       runtime: this.#runtime,
       context: this.#context,
       input: this.#input,
-      effects: { transaction: this.#transaction as Exclude<InternalInvocationTransaction, "open"> },
+      effects: { transaction: this.#settledTransaction() },
       notification,
     } as const;
     if (settlement.outcome === "succeeded") {
@@ -264,12 +264,19 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
 
   #applyUpdates(updates: import("./type").InvocationUpdates<T> | undefined): void {
     if (updates === undefined) return;
-    if (Object.prototype.hasOwnProperty.call(updates, "context")) {
-      this.#context = updates.context as T["context"];
+    if (Object.hasOwn(updates, "context") && updates.context !== undefined) {
+      this.#context = updates.context;
     }
-    if (Object.prototype.hasOwnProperty.call(updates, "input")) {
-      this.#input = updates.input as InvocationInputState<T["rawInput"], T["input"]>;
+    if (Object.hasOwn(updates, "input") && updates.input !== undefined) {
+      this.#input = updates.input;
     }
+  }
+
+  #settledTransaction(): Exclude<InternalInvocationTransaction, "open"> {
+    if (this.#transaction === "open") {
+      throw new TakibiContractStateError("Invocation transaction is still open");
+    }
+    return this.#transaction;
   }
 
   #assertCanSettle(): void {

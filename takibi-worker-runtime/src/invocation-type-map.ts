@@ -11,7 +11,7 @@ import type {
 } from "@takibi/takibi-shared-types";
 import type { StorageDriver } from "@takibi/takibi-storage";
 import type { ActionInvocation, ResolvedAction } from "./action-executor";
-import type { ExecuteRequest, ResolvedCollection } from "./executor";
+import type { executeResolvedCollection, ExecuteRequest, ResolvedCollection } from "./executor";
 import type { InternalLogger } from "./logging";
 import type { CollectionReadRequest } from "./protocol";
 
@@ -91,6 +91,6 @@ export type TakibiInvocationTypeMap<TContext extends object = object, TServices 
   nonePrepared: TakibiPrepared<TContext>;
   applyPrepared: TakibiPrepared<TContext>;
   fullPrepared: TakibiPrepared<TContext>;
-  result: JsonValue;
+  result: JsonValue | Awaited<ReturnType<typeof executeResolvedCollection>>;
   failure: TakibiFailure<string>;
 };
