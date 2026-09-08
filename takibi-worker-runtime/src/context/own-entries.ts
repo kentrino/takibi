@@ -1,5 +1,19 @@
 import { TakibiError } from "@takibi/takibi-api";
 
+type EntryCode = "INVALID_COLLECTION" | "INVALID_ACTION";
+type EntryLabels = { subject: string; keys: string };
+
+export function ownStringEntries<T>(
+  value: Readonly<Record<string, T>>,
+  code: EntryCode,
+  labels: EntryLabels,
+): Generator<[string, T]>;
+export function ownStringEntries(
+  value: unknown,
+  code: EntryCode,
+  labels: EntryLabels,
+): Generator<[string, unknown]>;
+
 /**
  * Walk enumerable own string keys of a plain object. Used to reject class
  * instances, symbols, getters, and non-enumerable fields at the public
@@ -7,8 +21,8 @@ import { TakibiError } from "@takibi/takibi-api";
  */
 export function* ownStringEntries(
   value: unknown,
-  code: "INVALID_COLLECTION" | "INVALID_ACTION",
-  labels: { subject: string; keys: string },
+  code: EntryCode,
+  labels: EntryLabels,
 ): Generator<[string, unknown]> {
   if (typeof value !== "object" || value === null) {
     throw new TakibiError(code, `${labels.subject} must be an object`, 500);
