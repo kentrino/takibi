@@ -85,6 +85,95 @@ test("withTracing preserves this for the original instance", async () => {
   expect(await wrapped.other("y")).toBe("self:y:other");
 });
 
+test("withTracing keeps #private fields and prototype methods on the original instance", async () => {
+  class PrivateProbe {
+    #value = 1;
+    #extra = 10;
+
+    async target(): Promise<number> {
+      this.#value += 1;
+      return this.#value;
+    }
+
+    async other(): Promise<number> {
+      return this.#value + this.#extra;
+    }
+
+    get shown(): number {
+      return this.#value;
+    }
+  }
+
+  const instance = new PrivateProbe();
+  const wrapped = withTracing(instance, {
+    method: "target",
+    span: "span",
+    run: async (_spec, fn) => fn(),
+  });
+
+  expect(await wrapped.target()).toBe(2);
+  expect(await wrapped.other()).toBe(12);
+  expect(wrapped.shown).toBe(2);
+  expect(await instance.target()).toBe(3);
+  expect(instance.shown).toBe(3);
+});
+
+test("an attributes callback failure does not skip or replace the method", async () => {
+  let runs = 0;
+  const instance = {
+    async target() {
+      runs += 1;
+      return "ok";
+    },
+  };
+  const wrapped = withTracing(instance, {
+    method: "target",
+    span: "s",
+    attributes: () => {
+      throw new Error("attributes failed");
+    },
+    run: async (_spec, fn) => fn(),
+  });
+
+  expect(await wrapped.target()).toBe("ok");
+  expect(runs).toBe(1);
+});
+
+test("a runner that calls fn twice or returns before awaiting still runs once", async () => {
+  let runs = 0;
+  const instance = {
+    async target() {
+      runs += 1;
+      await Promise.resolve();
+      return "ok";
+    },
+  };
+
+  const parallel = withTracing(instance, {
+    method: "target",
+    span: "s",
+    run: async (_spec, fn) => {
+      const [left, right] = await Promise.all([fn(), fn()]);
+      expect(left).toBe("ok");
+      expect(right).toBe("ok");
+      return left;
+    },
+  });
+  expect(await parallel.target()).toBe("ok");
+  expect(runs).toBe(1);
+
+  const detached = withTracing(instance, {
+    method: "target",
+    span: "s",
+    run: async (_spec, fn) => {
+      void fn();
+      return "forged" as never;
+    },
+  });
+  expect(await detached.target()).toBe("ok");
+  expect(runs).toBe(2);
+});
+
 test("success, throw, and reject run the method once and keep the original outcome", async () => {
   const events: string[] = [];
   let runs = 0;

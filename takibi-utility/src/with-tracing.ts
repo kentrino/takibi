@@ -10,7 +10,11 @@ export type TracingSpanSpec = {
   attributes?: TracingSpanAttributes;
 };
 
-export type TracingRunner = <T>(spec: TracingSpanSpec, fn: () => Promise<T>) => Promise<T>;
+export type TracingRunner = <T>(
+  spec: TracingSpanSpec,
+  fn: () => Promise<T>,
+  args: readonly unknown[],
+) => Promise<T>;
 
 type AsyncMethodKeys<T> = {
   [K in keyof T]-?: T[K] extends (...args: never[]) => infer R
@@ -27,13 +31,18 @@ export type WithTracingOptions<T, K extends AsyncMethodKeys<T>> = {
   readonly span: string;
   readonly kind?: TracingSpanKind;
   readonly attributes?: (...args: MethodParams<T, K>) => TracingSpanAttributes | undefined;
-  readonly run: TracingRunner;
+  readonly run: <R>(
+    spec: TracingSpanSpec,
+    fn: () => Promise<R>,
+    args: MethodParams<T, K>,
+  ) => Promise<R>;
 };
 
 /**
- * Returns a new object with the same call surface as `instance`, wrapping one
- * async method in `run`. The original instance is left unchanged. `this` is
- * the original instance when the wrapper is used as a method.
+ * Returns a proxy with the same call surface as `instance`, wrapping one async
+ * method in `run`. The original instance is left unchanged. Method calls use
+ * that instance as `this` so `#private` fields and prototype methods keep
+ * working.
  */
 export function withTracing<T extends object, const K extends AsyncMethodKeys<T>>(
   instance: T,
@@ -44,65 +53,71 @@ export function withTracing<T extends object, const K extends AsyncMethodKeys<T>
     throw new TypeError(`withTracing: "${String(options.method)}" is not a function`);
   }
 
-  const wrapper = Object.create(Object.getPrototypeOf(instance)) as T;
-  Object.defineProperties(wrapper, Object.getOwnPropertyDescriptors(instance));
-
   const wrapped = function (this: unknown, ...args: MethodParams<T, K>) {
-    const attributes = options.attributes?.(...args);
+    let attributes: TracingSpanAttributes | undefined;
+    try {
+      attributes = options.attributes?.(...args);
+    } catch {
+      // Attribute builders are instrumentation; they must not skip the method.
+    }
     const spec: TracingSpanSpec = {
       name: options.span,
       kind: options.kind ?? "internal",
       ...(attributes === undefined ? {} : { attributes }),
     };
-    const receiver = this === wrapper || this == null ? instance : this;
+    const receiver = this === proxy || this == null ? instance : this;
     const invoke = () =>
       (original as (...args: MethodParams<T, K>) => Promise<unknown>).apply(receiver, args);
-
-    return runTracedMethod(options.run, spec, invoke);
+    return runTracedMethod(options.run, spec, invoke, args);
   };
 
-  Object.defineProperty(wrapper, options.method, {
-    configurable: true,
-    enumerable: true,
-    writable: true,
-    value: wrapped,
+  const proxy = new Proxy(instance, {
+    get(target, prop, receiver) {
+      if (prop === options.method) {
+        return wrapped;
+      }
+      const value = Reflect.get(target, prop, target);
+      if (typeof value === "function") {
+        return function (this: unknown, ...args: unknown[]) {
+          const self = this === proxy || this == null ? target : this;
+          return (value as (...methodArgs: unknown[]) => unknown).apply(self, args);
+        };
+      }
+      return receiver === proxy ? value : Reflect.get(target, prop, receiver);
+    },
+    set() {
+      return true;
+    },
+    defineProperty() {
+      return false;
+    },
+    deleteProperty() {
+      return false;
+    },
   });
 
-  return wrapper;
+  return proxy;
 }
 
-type MethodOutcome<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: unknown };
-
-async function runTracedMethod<T>(
-  run: TracingRunner,
+async function runTracedMethod<T, TArgs extends readonly unknown[]>(
+  run: (spec: TracingSpanSpec, fn: () => Promise<T>, args: TArgs) => Promise<T>,
   spec: TracingSpanSpec,
   invoke: () => Promise<T>,
+  args: TArgs,
 ): Promise<T> {
-  let outcome: MethodOutcome<T> | undefined;
-  const invokeOnce = async (): Promise<T> => {
-    if (outcome?.ok) return outcome.value;
-    if (outcome && !outcome.ok) throw outcome.error;
-    try {
-      const value = await invoke();
-      outcome = { ok: true, value };
-      return value;
-    } catch (error) {
-      outcome = { ok: false, error };
-      throw error;
+  let inflight: Promise<T> | undefined;
+  const invokeOnce = (): Promise<T> => {
+    if (inflight === undefined) {
+      inflight = Promise.resolve().then(invoke);
     }
+    return inflight;
   };
 
   try {
-    await run(spec, invokeOnce);
+    await run(spec, invokeOnce, args);
   } catch {
     // Tracing/logging must not replace the method result or exception.
   }
 
-  if (outcome === undefined) {
-    return invokeOnce();
-  }
-  if (outcome.ok) return outcome.value;
-  throw outcome.error;
+  return invokeOnce();
 }

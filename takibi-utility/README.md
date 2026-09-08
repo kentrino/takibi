@@ -69,7 +69,7 @@ not depend on a tracing backend.
 ```ts
 import { withTracing } from "@takibi/takibi-utility";
 
-const adapters = withTracing(instance, {
+const call = withTracing(instance, {
   method: "resolveContext",
   span: "takibi.resolve",
   kind: "internal",
@@ -79,5 +79,9 @@ const adapters = withTracing(instance, {
 });
 ```
 
-`run` must call `fn` once and return its result or rejection. Tracing setup
-failures belong in `run`; they must not replace the method result.
+The wrapper is a proxy over the original instance. Non-target methods and
+getters keep that instance as `this`, including `#private` fields. `run`
+receives the method arguments so logs and span attributes can be built from
+the same typed input. `fn` is started at most once, including when `run`
+calls it more than once or returns before it settles. Attribute-builder and
+`run` failures must not replace the method result.
