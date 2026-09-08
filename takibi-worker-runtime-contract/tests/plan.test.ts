@@ -1,9 +1,11 @@
-import { expect, test } from "vite-plus/test";
+import { expect, expectTypeOf, test } from "vite-plus/test";
 import {
   createActionExecutionPlan,
   createCollectionExecutionPlan,
   TakibiContractConfigurationError,
   transactionBoundaryOf,
+  type ActionPlanCriteria,
+  type CollectionPlanCriteria,
 } from "../src";
 
 test("action and collection criteria select the Takibi boundary table", () => {
@@ -45,4 +47,34 @@ test("collection plans reject a full boundary at construction", () => {
       { token: "collection" },
     ),
   ).not.toThrow(TakibiContractConfigurationError);
+});
+
+test("specific criteria retain their execution boundary types", () => {
+  const work = { token: "work" };
+  const full = createActionExecutionPlan(
+    { kind: "action", target: "document", atomic: true },
+    work,
+  );
+  expectTypeOf(full.transactionBoundary).toEqualTypeOf<"full">();
+  expectTypeOf(full.work).toEqualTypeOf<typeof work>();
+
+  const atomic = (target: ActionPlanCriteria["target"]) =>
+    createActionExecutionPlan({ kind: "action", target, atomic: true }, work);
+  expectTypeOf<ReturnType<typeof atomic>["transactionBoundary"]>().toEqualTypeOf<
+    "full" | "apply"
+  >();
+
+  const add = createCollectionExecutionPlan({ kind: "collection", operation: "add" }, work);
+  expectTypeOf(add.transactionBoundary).toEqualTypeOf<"apply">();
+  expectTypeOf(add.work).toEqualTypeOf<typeof work>();
+
+  const generalAction = (criteria: ActionPlanCriteria) => createActionExecutionPlan(criteria, work);
+  expectTypeOf<ReturnType<typeof generalAction>["transactionBoundary"]>().toEqualTypeOf<
+    "none" | "apply" | "full"
+  >();
+  const generalCollection = (criteria: CollectionPlanCriteria) =>
+    createCollectionExecutionPlan(criteria, work);
+  expectTypeOf<ReturnType<typeof generalCollection>["transactionBoundary"]>().toEqualTypeOf<
+    "none" | "apply"
+  >();
 });
