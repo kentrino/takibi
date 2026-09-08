@@ -71,9 +71,7 @@ export class Call<
     context: TContext;
     dispatched: TDispatched;
   }): Promise<TResponseObject> {
-    return this.#adapters.callToResponse
-      ? this.#adapters.callToResponse(input)
-      : (input.dispatched as unknown as TResponseObject);
+    return this.#adapters.callToResponse(input);
   }
 
   async toFailureResponse(

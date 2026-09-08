@@ -102,3 +102,23 @@ test("unwrapInvocationAdapterResult rethrows the original failure", () => {
     "ok",
   );
 });
+
+test("undefined later updates do not erase completed preparation", async () => {
+  const result = await composeActionPreparation<Spec, string, string, string>({
+    identify: () => ({
+      outcome: "succeeded",
+      value: "identified",
+      updates: { context: { tenantId: "after-identify" }, input: { status: "raw", value: "Ada" } },
+    }),
+    authorize: () => ({
+      outcome: "succeeded",
+      value: "authorized",
+      updates: { context: undefined, input: undefined },
+    }),
+    parse: () => ({ outcome: "failed", error: "parse failed" }),
+  });
+  expect(result.updates).toEqual({
+    context: { tenantId: "after-identify" },
+    input: { status: "raw", value: "Ada" },
+  });
+});

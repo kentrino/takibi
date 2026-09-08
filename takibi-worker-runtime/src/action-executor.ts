@@ -83,8 +83,10 @@ export async function executeAction<TCtx extends object>(
   const bound = {
     prepare: async (_work: TakibiActionWork, scopedStorage: StorageDriver) =>
       unwrapInvocationAdapterResult(await prepareApply.prepare(view, work, scopedStorage)),
-    apply: async (prepared: TakibiPrepared<TCtx>, scopedStorage: StorageDriver) =>
-      unwrapInvocationAdapterResult(await prepareApply.apply(view, prepared, scopedStorage)),
+    apply: async (
+      prepared: Extract<TakibiPrepared<TCtx>, { kind: "action" }>,
+      scopedStorage: StorageDriver,
+    ) => unwrapInvocationAdapterResult(await prepareApply.apply(view, prepared, scopedStorage)),
   };
 
   return executePlan({

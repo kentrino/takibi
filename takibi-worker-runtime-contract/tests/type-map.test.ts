@@ -39,8 +39,8 @@ test("valid maps extend the shared invocation contract", () => {
   expectTypeOf<ValidMap>().toExtend<InternalInvocationTypeMap>();
 });
 
-test("result Date is rejected at the map constraint", () => {
-  expectTypeOf<WithSlot<"result", Date>>().not.toExtend<InternalInvocationTypeMap>();
+test("execution result types are independent of response serialization", () => {
+  expectTypeOf<WithSlot<"result", Date>>().toExtend<InternalInvocationTypeMap>();
 });
 
 test("failure string is rejected at the map constraint", () => {

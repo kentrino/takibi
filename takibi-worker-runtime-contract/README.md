@@ -104,7 +104,9 @@ target / atomic / operation criteria and work; they do not pick a boundary.
 input, result, or work types. `InternalInvocationTypeMap` names that bag as
 `runtime` and constrains `wireInvocation` to a single action or collection
 request, `invocation` to the observer-safe copy without raw `input`, `context`
-to an object, `result` to `JsonValue`, and `failure` to `TakibiFailure<string>`.
+to an object and `failure` to `TakibiFailure<string>`. Execution results retain
+the concrete runtime type; response adapters own serialization. The lifecycle
+does not assert that storage documents or other execution values are JSON.
 Concrete runtimes bind a narrower `runtime` plus result, context, and
 work/prepared types through the same map; those specifics are not replaced by
 the common bound. Views and transaction storage read `T["runtime"]` so
@@ -336,3 +338,11 @@ Production wiring lives in `@takibi/takibi-worker-runtime`: DO `fetch` and
 in-process executors resolve one runtime map that binds wire/HTTP calls around
 the shared `invocationRun`. Worker public HTTP still decodes and resolves once,
 then forwards one Call envelope through a single stub hop.
+
+Envelope `CallAdapters` require `callToResponse`, including when dispatch already
+returns the response type (`({ dispatched }) => dispatched`). Dispatch and
+response types cannot be connected by an implicit conversion.
+
+In `InvocationUpdates`, omitted or undefined fields leave state unchanged.
+`{ input: { status: "validated", value: undefined } }` explicitly records a
+validated undefined input; it is distinct from an absent input update.

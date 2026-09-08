@@ -98,6 +98,7 @@ const runResolvedRequest = async <TRequestLike, TDecoded, TContext, TResponseObj
     callDecode: adapters.callDecode,
     callResolveContext: adapters.callResolveContext,
     callDispatch: dispatch,
+    callToResponse: ({ dispatched }) => dispatched,
   });
 
 const resolveRuntimeChecks: ResolveRuntimeChecks = function (

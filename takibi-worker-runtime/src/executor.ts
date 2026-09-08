@@ -5,7 +5,7 @@ import {
   type AccessPermission,
   type CollectionOperation,
 } from "@takibi/takibi-policy";
-import { compileListOptions } from "@takibi/takibi-query";
+import { compileListOptions, type ListOptions } from "@takibi/takibi-query";
 import {
   NotFoundError,
   bindThrowingListAll,
@@ -81,7 +81,7 @@ export type ResolvedCollection<TCtx extends object> = {
 };
 
 /** Writes collate `update`/`create`. The stored document is only returned when the same grant includes `get`. */
-function writeResult(doc: WithMetadata<Record<string, unknown>>, granted: AccessGrant): unknown {
+function writeResult(doc: WithMetadata<Record<string, unknown>>, granted: AccessGrant) {
   if (allows(granted, "get")) return doc;
   return { id: doc.id, updatedAt: doc.updatedAt, rev: doc.rev };
 }
@@ -296,7 +296,7 @@ export async function resolveCollection<TCtx extends object>(args: {
 
 export async function executeResolvedCollection<TCtx extends object>(
   resolved: ResolvedCollection<TCtx>,
-): Promise<unknown> {
+) {
   const { req, storage, grant, nextDoc } = resolved;
   switch (req.operation) {
     case "add":
@@ -570,8 +570,10 @@ async function collectDocuments(
   return documents;
 }
 
-function compileConditionalWriteOptions(options: unknown): StorageListOptions {
-  const compiled = compileListOptions(options as never);
+function compileConditionalWriteOptions<TDoc, TIndexes extends Record<string, readonly string[]>>(
+  options: ListOptions<TDoc, TIndexes>,
+): StorageListOptions {
+  const compiled = compileListOptions(options);
   if (!compiled?.where) {
     throw new TypeError("Conditional writes require where");
   }

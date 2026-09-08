@@ -29,6 +29,7 @@ test("runCall composes decode, resolveContext, and dispatch in linear order", as
       expect(input.decoded).toEqual(decodedRequest("register"));
       return { status: input.context.tenantId === "tenant:register" ? 200 : 500 };
     },
+    callToResponse: ({ dispatched }) => dispatched,
   });
 
   expect(events).toEqual(["decode", "resolveContext", "dispatch"]);
@@ -59,6 +60,7 @@ test.each(["decode", "resolveContext", "dispatch"] as const)(
           if (failureStage === "dispatch") throw failure;
           return { status: 200 };
         },
+        callToResponse: ({ dispatched }) => dispatched,
       }),
     ).rejects.toBe(failure);
 
@@ -90,6 +92,7 @@ test("decode success is observed before resolve and decode failure is not starte
       events.push("dispatch");
       return { status: 200 };
     },
+    callToResponse: ({ dispatched }) => dispatched,
     callOnTerminal(event) {
       events.push(event.outcome);
     },
@@ -114,6 +117,7 @@ test("decode success is observed before resolve and decode failure is not starte
         failedEvents.push("dispatch");
         return { status: 200 };
       },
+      callToResponse: ({ dispatched }) => dispatched,
     }),
   ).rejects.toThrow("DECODE");
   expect(failedEvents).toEqual(["decode"]);
@@ -126,6 +130,7 @@ test("toFailureResponse converts once and a converter failure rejects", async ()
     },
     callResolveContext: () => ({ tenantId: "tenant-1" }),
     callDispatch: () => ({ status: 200 }),
+    callToResponse: ({ dispatched }) => dispatched,
     callToFailureResponse(failure) {
       expect(failure.stage).toBe("decode");
       expect(failure.decoded).toBeUndefined();
@@ -141,6 +146,7 @@ test("toFailureResponse converts once and a converter failure rejects", async ()
         throw new Error("RESOLVE");
       },
       callDispatch: () => ({ status: 200 }),
+      callToResponse: ({ dispatched }) => dispatched,
       callToFailureResponse() {
         throw new Error("CONVERTER");
       },
@@ -156,6 +162,7 @@ test("observer failures do not replace the Call result", async () => {
     },
     callResolveContext: () => ({ tenantId: "tenant-1" }),
     callDispatch: () => ({ status: 200 }),
+    callToResponse: ({ dispatched }) => dispatched,
     callOnTerminal() {
       throw new Error("terminal observer failed");
     },
@@ -178,6 +185,7 @@ test("decoded reaches failure and terminal even when onDecoded throws", async ()
       throw new Error("RESOLVE");
     },
     callDispatch: () => ({ status: 200 }),
+    callToResponse: ({ dispatched }) => dispatched,
     callToFailureResponse(failure) {
       failureDecoded = failure.decoded;
       expect(failure.request).toBe("request");
@@ -220,6 +228,7 @@ test("Call.run uses this.resolveContext so a subclass or withTracing wrapper is 
       events.push("dispatch");
       return { status: 200 };
     },
+    callToResponse: ({ dispatched }) => dispatched,
   }).run("request");
 
   expect(events).toEqual(["override", "adapter", "dispatch"]);
@@ -231,6 +240,7 @@ test("Call is a class instance constructed from envelope adapter-map slots", asy
     callDecode: () => ({ name: "register" }),
     callResolveContext: () => ({ tenantId: "tenant-1" }),
     callDispatch: () => ({ status: 200 }),
+    callToResponse: ({ dispatched }) => dispatched,
   });
   expect(call).toBeInstanceOf(Call);
   await expect(call.run("request")).resolves.toEqual({ status: 200 });
@@ -241,8 +251,29 @@ test("undefined values pass through without request sentinels", async () => {
     callDecode: () => undefined,
     callResolveContext: ({ decoded }) => decoded,
     callDispatch: ({ context }) => context,
+    callToResponse: ({ dispatched }) => dispatched,
   });
 
   expect(response).toBeUndefined();
   expectTypeOf(response).toEqualTypeOf<undefined>();
+});
+
+test("different dispatch and response types require an explicit converter", async () => {
+  const adapters = {
+    callDecode: (request: string) => request,
+    callResolveContext: () => ({}),
+    callDispatch: () => 123,
+  };
+  const invalid = () => {
+    // @ts-expect-error a number cannot implicitly become a Response
+    return new Call<string, string, object, Response, number>(adapters);
+  };
+  expectTypeOf(invalid).toBeFunction();
+  const call = new Call({
+    ...adapters,
+    callToResponse: ({ dispatched }) => Response.json({ value: dispatched }),
+  });
+  const response = await call.run("request");
+  expectTypeOf(response).toEqualTypeOf<Response>();
+  await expect(response.json()).resolves.toEqual({ value: 123 });
 });

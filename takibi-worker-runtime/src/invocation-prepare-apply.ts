@@ -1,3 +1,4 @@
+import type { JsonValue } from "@takibi/takibi-shared-types";
 import {
   composeActionPreparation,
   invocationStageResult,
@@ -5,7 +6,6 @@ import {
   type InvocationAdapterResult,
   type PrepareApplyInvocationContract,
 } from "@takibi/takibi-worker-runtime-contract";
-import type { JsonValue } from "@takibi/takibi-shared-types";
 import type { StorageDriver } from "@takibi/takibi-storage";
 import {
   authorizeIdentifiedAction,
@@ -35,6 +35,10 @@ import type {
 } from "./invocation-type-map";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
+type PreparedAction<TContext extends object> = Extract<
+  TakibiPrepared<TContext>,
+  { kind: "action" }
+>;
 type ExecutionView<TContext extends object, TServices> = InvocationExecutionView<
   TakibiMap<TContext, TServices>
 >;
@@ -70,6 +74,16 @@ export class InvocationPrepareApply<
 
   prepare(
     state: ExecutionView<TContext, TServices>,
+    work: TakibiActionWork,
+    storage: StorageDriver,
+  ): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, PreparedAction<TContext>>>;
+  prepare(
+    state: ExecutionView<TContext, TServices>,
+    work: TakibiNoneWork | TakibiApplyWork | TakibiFullWork,
+    storage: StorageDriver,
+  ): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, TakibiPrepared<TContext>>>;
+  prepare(
+    state: ExecutionView<TContext, TServices>,
     work: TakibiNoneWork | TakibiApplyWork | TakibiFullWork,
     storage: StorageDriver,
   ): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, TakibiPrepared<TContext>>> {
@@ -81,9 +95,29 @@ export class InvocationPrepareApply<
 
   apply(
     state: ExecutionView<TContext, TServices>,
+    prepared: PreparedAction<TContext>,
+    storage: StorageDriver,
+  ): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, JsonValue>>;
+  apply(
+    state: ExecutionView<TContext, TServices>,
     prepared: TakibiPrepared<TContext>,
     storage: StorageDriver,
-  ): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, JsonValue>> {
+  ): Promise<
+    InvocationAdapterResult<
+      TakibiMap<TContext, TServices>,
+      TakibiMap<TContext, TServices>["result"]
+    >
+  >;
+  apply(
+    state: ExecutionView<TContext, TServices>,
+    prepared: TakibiPrepared<TContext>,
+    storage: StorageDriver,
+  ): Promise<
+    InvocationAdapterResult<
+      TakibiMap<TContext, TServices>,
+      TakibiMap<TContext, TServices>["result"]
+    >
+  > {
     return applyPrepared(state, prepared, storage, this.#createActionHandler);
   }
 }
@@ -127,7 +161,7 @@ async function prepareActionWork<TContext extends object, TServices>(
   storage: StorageDriver,
   policy: PolicySurface,
   schema: SchemaSurface,
-): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, TakibiPrepared<TContext>>> {
+): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, PreparedAction<TContext>>> {
   const prepared = await composeActionPreparation<
     TakibiMap<TContext, TServices>,
     IdentifiedAction<TContext>,
@@ -162,7 +196,9 @@ async function applyPrepared<TContext extends object, TServices>(
   prepared: TakibiPrepared<TContext>,
   storage: StorageDriver,
   createHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface,
-): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, JsonValue>> {
+): Promise<
+  InvocationAdapterResult<TakibiMap<TContext, TServices>, TakibiMap<TContext, TServices>["result"]>
+> {
   if (prepared.kind === "action") {
     const resolved = { ...prepared.resolved, storage };
     return invocationStageResult(() =>
@@ -179,9 +215,7 @@ async function applyPrepared<TContext extends object, TServices>(
       ),
     );
   }
-  return invocationStageResult(
-    async () => (await executeResolvedCollection({ ...prepared.resolved, storage })) as JsonValue,
-  );
+  return invocationStageResult(() => executeResolvedCollection({ ...prepared.resolved, storage }));
 }
 
 function validatedActionInput<TContext extends object, TServices>(resolved: {
