@@ -72,22 +72,50 @@ export function withTracing<T extends object, const K extends AsyncMethodKeys<T>
     return runTracedMethod(options.run, spec, invoke, args);
   };
 
-  const proxy = new Proxy(instance, {
-    get(target, prop, receiver) {
+  // The forwarding target must not inherit frozen own-property descriptors:
+  // proxy get traps may only replace configurable or writable data properties.
+  const callable = typeof instance === "function" ? instance : undefined;
+  const facade = (
+    callable
+      ? Function.prototype.bind.call(callable, undefined)
+      : Object.create(Object.getPrototypeOf(instance))
+  ) as T;
+  const proxy: T = new Proxy(facade, {
+    get(_target, prop, receiver) {
       if (prop === options.method) {
         return wrapped;
       }
-      const value = Reflect.get(target, prop, target);
+      const value = Reflect.get(instance, prop, instance);
       if (typeof value === "function") {
         return function (this: unknown, ...args: unknown[]) {
-          const self = this === proxy || this == null ? target : this;
+          const self = this === proxy || this == null ? instance : this;
           return (value as (...methodArgs: unknown[]) => unknown).apply(self, args);
         };
       }
-      return receiver === proxy ? value : Reflect.get(target, prop, receiver);
+      return receiver === proxy ? value : Reflect.get(instance, prop, receiver);
     },
-    set(target, prop, value, receiver): boolean {
-      return Reflect.set(target, prop, value, receiver === proxy ? target : receiver);
+    set(_target, prop, value, receiver): boolean {
+      return Reflect.set(instance, prop, value, receiver === proxy ? instance : receiver);
+    },
+    apply(_target, receiver, args) {
+      return Reflect.apply(callable!, receiver, args);
+    },
+    construct(_target, args, newTarget) {
+      return Reflect.construct(callable!, args, newTarget === proxy ? callable! : newTarget);
+    },
+    has(_target, prop) {
+      return Reflect.has(instance, prop);
+    },
+    ownKeys() {
+      return Reflect.ownKeys(instance);
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(instance, prop);
+      return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
+    },
+    preventExtensions() {
+      // Virtual own properties require an extensible forwarding target.
+      return false;
     },
     defineProperty() {
       return false;

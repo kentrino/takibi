@@ -81,7 +81,8 @@ const call = withTracing(instance, {
 });
 ```
 
-The wrapper is a proxy over the original instance. Non-target methods and
+The wrapper forwards to the original instance, including frozen instances.
+Non-target methods and
 getters keep that instance as `this`, including `#private` fields. `run`
 receives the method arguments so logs and span attributes can be built from
 the same typed input. `fn` is started at most once, including when `run`
