@@ -276,3 +276,64 @@ test("createClass instances keep non-target methods and ctor-bound deps", async 
   expect(await instance.target("raw")).toBe("cls:raw");
   expect(events).toEqual(["start:takibi.resolve:internal", "end"]);
 });
+
+test("writes through the wrapper update fields read by methods", async () => {
+  const instance = {
+    value: 1,
+    async target() {
+      return this.value;
+    },
+  };
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun([]) });
+  wrapped.value = 2;
+  expect(await wrapped.target()).toBe(2);
+  expect(instance.value).toBe(2);
+});
+
+test("writes invoke setters with the original private-field receiver", async () => {
+  class MutableProbe {
+    #value = 1;
+    get value() {
+      return this.#value;
+    }
+    set value(next: number) {
+      this.#value = next;
+    }
+    async target() {
+      return this.#value;
+    }
+  }
+  const instance = new MutableProbe();
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun([]) });
+  wrapped.value = 2;
+  expect(wrapped.value).toBe(2);
+  expect(await wrapped.target()).toBe(2);
+  expect(instance.value).toBe(2);
+});
+
+test("writes report failure for a read-only property", () => {
+  const instance = {
+    value: 1,
+    async target() {
+      return this.value;
+    },
+  };
+  Object.defineProperty(instance, "value", { writable: false, configurable: true });
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun([]) });
+  expect(Reflect.set(wrapped, "value", 2)).toBe(false);
+  expect(instance.value).toBe(1);
+});
+
+test("replacing the traced method updates its implementation and keeps tracing", async () => {
+  const events: string[] = [];
+  const instance = {
+    async target() {
+      return 1;
+    },
+  };
+  const wrapped = withTracing(instance, { method: "target", span: "s", run: recordingRun(events) });
+  wrapped.target = async () => 2;
+  expect(await wrapped.target()).toBe(2);
+  expect(await instance.target()).toBe(2);
+  expect(events).toEqual(["start:s:internal", "end"]);
+});

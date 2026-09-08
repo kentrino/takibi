@@ -40,7 +40,8 @@ export type WithTracingOptions<T, K extends AsyncMethodKeys<T>> = {
 
 /**
  * Returns a proxy with the same call surface as `instance`, wrapping one async
- * method in `run`. The original instance is left unchanged. Method calls use
+ * method in `run`. Construction leaves the original instance unchanged; writes
+ * through the proxy update it. Method calls use
  * that instance as `this` so `#private` fields and prototype methods keep
  * working.
  */
@@ -48,12 +49,12 @@ export function withTracing<T extends object, const K extends AsyncMethodKeys<T>
   instance: T,
   options: WithTracingOptions<T, K>,
 ): T {
-  const original = instance[options.method];
-  if (typeof original !== "function") {
+  if (typeof instance[options.method] !== "function") {
     throw new TypeError(`withTracing: "${String(options.method)}" is not a function`);
   }
 
   const wrapped = function (this: unknown, ...args: MethodParams<T, K>) {
+    const original = instance[options.method];
     let attributes: TracingSpanAttributes | undefined;
     try {
       attributes = options.attributes?.(...args);
@@ -85,8 +86,8 @@ export function withTracing<T extends object, const K extends AsyncMethodKeys<T>
       }
       return receiver === proxy ? value : Reflect.get(target, prop, receiver);
     },
-    set() {
-      return true;
+    set(target, prop, value, receiver): boolean {
+      return Reflect.set(target, prop, value, receiver === proxy ? target : receiver);
     },
     defineProperty() {
       return false;
