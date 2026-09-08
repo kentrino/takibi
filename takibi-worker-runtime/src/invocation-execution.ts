@@ -26,7 +26,6 @@ import {
   type TakibiAdapterMap,
 } from "./adapter-map";
 import { debugInvocationFields } from "./context/runtime";
-import type { PublicRequest } from "./http";
 import { invocationToWireResponse, invocationsToBatchWireResponse } from "./invocation-response";
 import type {
   TakibiInvocationRuntime,
@@ -126,7 +125,7 @@ function createInstrumentedInvocationRun<TContext extends object, TServices>(dep
       },
       {
         event: "takibi.executor",
-        ...debugInvocationFields(request.wireInvocation as PublicRequest),
+        ...debugInvocationFields(request.wireInvocation),
       },
       () => deps.invocationCoreRun({ request, invocationRuntimeChecks }),
       deps.localParentSpan,
