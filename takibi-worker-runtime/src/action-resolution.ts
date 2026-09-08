@@ -28,6 +28,8 @@ export type ClassifiedAction = {
 export type IdentifiedAction<TCtx extends object> = {
   readonly invocation: ActionInvocation;
   readonly context: TCtx;
+  /** Collection policies keep the base context even when guards replace the action context. */
+  readonly collectionContext: TCtx;
   readonly definition: RuntimeActionDefinition;
   readonly rawInput: unknown;
   readonly collections: CollectionsDef<TCtx>;
@@ -98,6 +100,7 @@ export async function identifyClassifiedAction<TCtx extends object>(args: {
   return {
     invocation,
     context: actionCtx,
+    collectionContext: ctx,
     definition,
     rawInput: invocation.input,
     collections,
@@ -208,6 +211,7 @@ export async function executeResolvedAction<TCtx extends object>(
   const {
     invocation,
     context,
+    collectionContext,
     definition,
     input,
     document,
@@ -220,7 +224,7 @@ export async function executeResolvedAction<TCtx extends object>(
     const policyCollections = createPolicyCollections(
       collections,
       scopedStorage,
-      context,
+      collectionContext,
       logger,
       reuseTransaction,
     );
