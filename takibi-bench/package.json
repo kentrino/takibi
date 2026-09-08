@@ -5,7 +5,8 @@
   "description": "Private compatibility and performance benchmarks for Takibi.",
   "type": "module",
   "scripts": {
-    "bench:full-path": "vp test bench benchmarks/full-path.bench.ts --no-file-parallelism --maxWorkers 1",
+    "bench": "vp test bench --no-file-parallelism --maxWorkers 1",
+    "bench:json": "node src/cli/index.ts",
     "check": "vp check",
     "test": "vp test"
   },
@@ -16,8 +17,11 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "citty": "catalog:",
     "typescript": "catalog:",
-    "vite-plus": "catalog:"
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22.18.0"
