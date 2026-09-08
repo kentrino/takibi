@@ -82,11 +82,13 @@ type LocalCallType<TContext extends object, TServices, TResponse> = LocalCallTyp
 export type TakibiRuntimeAdapterMap<
   TContext extends object = object,
   TServices = unknown,
-> = RuntimeAdapterMap<
-  TakibiMap<TContext, TServices>,
-  LocalCallType<TContext, TServices, WireResponse>,
-  LocalExecution<TContext, TServices>
-> &
+> = RuntimeAdapterMap<{
+  invocation: TakibiMap<TContext, TServices>;
+  request: LocalCallType<TContext, TServices, WireResponse>["request"];
+  decoded: LocalCallType<TContext, TServices, WireResponse>["decoded"];
+  response: WireResponse;
+  localExecution: LocalExecution<TContext, TServices>;
+}> &
   Pick<
     TakibiAdapterMap<TContext, TServices>,
     "invocationPolicy" | "invocationSchema" | "invocationActionHandler" | "invocationPrepareApply"

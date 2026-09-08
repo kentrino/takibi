@@ -983,11 +983,13 @@ test("production local batch continues after one item failure", async () => {
 test("runtime adapter map extends the contract map with assembly slots", () => {
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toExtend<TakibiAdapterMap<Ctx>>();
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toExtend<
-    RuntimeAdapterMap<
-      Map,
-      LocalCallTypeMap<Map, WireResponse, CollectionReadRequest>,
-      LocalExecution<Ctx>
-    >
+    RuntimeAdapterMap<{
+      invocation: Map;
+      request: LocalCallTypeMap<Map, WireResponse, CollectionReadRequest>["request"];
+      decoded: LocalCallTypeMap<Map, WireResponse, CollectionReadRequest>["decoded"];
+      response: WireResponse;
+      localExecution: LocalExecution<Ctx>;
+    }>
   >();
   expectTypeOf<TakibiAdapterMap<Ctx>>().not.toHaveProperty("invocationCoreRun");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationCoreRun");

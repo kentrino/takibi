@@ -6,7 +6,6 @@ import type {
   Adapters,
   CallAdapters,
   EnvelopeAdapterMap,
-  CallTypeMap,
   JsonResponseLike,
   LocalCallRequest,
   LocalCallTypeMap,
@@ -16,6 +15,7 @@ import type {
   InternalInvocationTypeMap,
   InvocationAdapters,
   RuntimeAdapterMap,
+  RuntimeTypeMap,
   InvocationObserverEvent,
   InvocationPlanningView,
   InvocationRequest,
@@ -124,11 +124,7 @@ test("root exports linear call composition and the invocation orchestrator", () 
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationPrepareApply");
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationPolicy");
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().not.toHaveProperty("invocationCoreRun");
-  type RuntimeMap = RuntimeAdapterMap<
-    InternalInvocationTypeMap,
-    CallTypeMap<unknown, unknown, InternalInvocationTypeMap, unknown>,
-    unknown
-  >;
+  type RuntimeMap = RuntimeAdapterMap;
   expectTypeOf<RuntimeMap>().toHaveProperty("invocationCoreRun");
   expectTypeOf<RuntimeMap>().toHaveProperty("callSingle");
   expectTypeOf<RuntimeMap>().not.toHaveProperty("wireCallSingle");
@@ -145,7 +141,7 @@ test("root exports linear call composition and the invocation orchestrator", () 
   expect(Contract.CALL_SINGLE_ADAPTER_KEYS).toContain("callToSingleResponse");
   expect(Contract.RUNTIME_ADAPTER_GRAPH.callSingle).toEqual([...Contract.CALL_SINGLE_ADAPTER_KEYS]);
   expect(Contract.RUNTIME_ADAPTER_GRAPH).not.toHaveProperty("wireCallSingle");
-  expectTypeOf<Adapters<InternalInvocationTypeMap, "invocationCreatePlan">>().not.toHaveProperty(
+  expectTypeOf<Adapters<RuntimeTypeMap, "invocationCreatePlan">>().not.toHaveProperty(
     "invocationRuntime",
   );
 

@@ -152,3 +152,27 @@ test("work and prepared stay paired on the apply contract", () => {
 
   expectTypeOf(rejectedPrepared).toBeFunction();
 });
+
+test("one runtime type map preserves request, context, response and facade relationships", () => {
+  type Invocation = WithSlot<"context", { tenant: string }>;
+  type Types = {
+    invocation: Invocation;
+    request: { url: string };
+    decoded: { operation: string };
+    response: { status: number };
+    localExecution: { execute(): Promise<string> };
+  };
+  type Map = import("../src").RuntimeAdapterMap<Types>;
+  type Decode = import("../src").Adapters<Types, "callDecode">;
+  expectTypeOf<Parameters<Decode["callDecode"]>[0]>().toEqualTypeOf<Types["request"]>();
+  expectTypeOf<Awaited<ReturnType<Decode["callDecode"]>>>().toEqualTypeOf<Types["decoded"]>();
+  expectTypeOf<Awaited<ReturnType<Map["callResolveContext"]>>>().toEqualTypeOf<
+    Invocation["context"]
+  >();
+  expectTypeOf<Parameters<Map["callToSingleResponse"]>[0]["invocation"]>().toEqualTypeOf<
+    InvocationResult<Invocation>
+  >();
+  expectTypeOf<Awaited<ReturnType<Map["callSingle"]>>>().toEqualTypeOf<Types["response"]>();
+  expectTypeOf<Map["localExecution"]>().toEqualTypeOf<Types["localExecution"]>();
+  expectTypeOf<Decode>().not.toHaveProperty("invocationRuntime");
+});
