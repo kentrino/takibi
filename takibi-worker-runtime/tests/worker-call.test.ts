@@ -323,3 +323,28 @@ test("resolve batch attributes and request log fields stay on the existing event
   expect(resolve?.attributes).toEqual({ "takibi.batch.size": 2 });
   expect(resolve?.parentSpanId).toBe(request?.spanId);
 });
+
+test("initial context stays typed and identical through resolver and dispatch", async () => {
+  type Initial = { tenant: string };
+  const initial: Initial = { tenant: "typed" };
+  const execute: Executor<Initial> = async (input) => {
+    expect(input.initial).toBe(initial);
+    return okResponse({ tenant: input.initial.tenant });
+  };
+  const args = {
+    ...envelopeArgs({}),
+    initial,
+    resolve: ({ context }: { context: Initial }) => {
+      expect(context).toBe(initial);
+      return { tenantId: context.tenant };
+    },
+    execute,
+  };
+  const invalid = () => {
+    // @ts-expect-error resolver and executor require the same initial context
+    return resolveWorkerEnvelopeMap({ ...args, initial: 123 });
+  };
+  expect(invalid).toBeTypeOf("function");
+  const response = await serveDecodedCall(args);
+  await expect(response.json()).resolves.toEqual(okResponse({ tenant: "typed" }));
+});

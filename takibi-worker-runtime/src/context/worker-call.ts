@@ -2,7 +2,6 @@ import {
   Call,
   ENVELOPE_ADAPTER_GRAPH,
   jsonResponseFromStatus,
-  type CallAdapters,
   type CallFailureInput,
   type CallTerminalEvent,
   type EnvelopeAdapterMap,
@@ -36,21 +35,13 @@ export type WorkerResolvedCall = {
 
 export type WorkerCall = Call<Request, PublicRequest, WorkerResolvedCall, Response, WireResponse>;
 
-type WorkerCallAdapters = CallAdapters<
-  Request,
-  PublicRequest,
-  WorkerResolvedCall,
-  Response,
-  WireResponse
->;
-
-const WorkerCallClass = Call as new (adapters: WorkerCallAdapters) => WorkerCall;
+const WorkerCallClass = Call<Request, PublicRequest, WorkerResolvedCall, Response, WireResponse>;
 
 /**
  * Envelope Call map plus request-scoped construction values. Resolving this
  * graph does not require storage or invocation-execution adapters.
  */
-export type WorkerEnvelopeAdapterMap = EnvelopeAdapterMap<
+export type WorkerEnvelopeAdapterMap<TInitial = unknown> = EnvelopeAdapterMap<
   Request,
   PublicRequest,
   WorkerResolvedCall,
@@ -59,10 +50,10 @@ export type WorkerEnvelopeAdapterMap = EnvelopeAdapterMap<
   WorkerCall
 > & {
   request: Request;
-  initial: unknown;
+  initial: TInitial;
   requestDecoder: () => Promise<PublicRequest>;
-  contextResolver: ContextResolver<object, unknown>;
-  execute: Executor;
+  contextResolver: ContextResolver<object, TInitial>;
+  execute: Executor<TInitial>;
   logger: InternalLogger | undefined;
   tracer: TakibiTracer | undefined;
   clock: () => number;
@@ -70,7 +61,7 @@ export type WorkerEnvelopeAdapterMap = EnvelopeAdapterMap<
   http: ReturnType<typeof requestLogFields>;
 };
 
-type Map = WorkerEnvelopeAdapterMap;
+type Map<TInitial = unknown> = WorkerEnvelopeAdapterMap<TInitial>;
 
 export const WORKER_ENVELOPE_ADAPTER_GRAPH = {
   ...ENVELOPE_ADAPTER_GRAPH,
@@ -101,11 +92,11 @@ function createCallDecode({ requestDecoder }: Pick<Map, "requestDecoder">): Map[
   return (_request) => requestDecoder();
 }
 
-function createCallResolveContext({
+function createCallResolveContext<TInitial>({
   contextResolver,
   initial,
   logger,
-}: Pick<Map, "contextResolver" | "initial" | "logger">): Map["callResolveContext"] {
+}: Pick<Map<TInitial>, "contextResolver" | "initial" | "logger">): Map["callResolveContext"] {
   const adapter = {
     async resolveContext(input: {
       request: Request;
@@ -146,11 +137,11 @@ function createCallResolveContext({
   return (input) => traced.resolveContext(input);
 }
 
-function createCallDispatch({
+function createCallDispatch<TInitial>({
   execute,
   initial,
   tracer,
-}: Pick<Map, "execute" | "initial" | "tracer">): Map["callDispatch"] {
+}: Pick<Map<TInitial>, "execute" | "initial" | "tracer">): Map["callDispatch"] {
   return (input) =>
     execute({
       request: input.request,
@@ -207,10 +198,10 @@ function createCallOnTerminal({
 
 export type ResolveWorkerEnvelopeArgs<TInitial = unknown> = {
   request: Request;
-  initial: unknown;
+  initial: TInitial;
   decode: () => Promise<PublicRequest>;
   resolve: ContextResolver<object, TInitial>;
-  execute: Executor;
+  execute: Executor<TInitial>;
   logger: InternalLogger | undefined;
   options: InternalCollectionsOptions;
   tracer?: TakibiTracer | undefined;
@@ -219,26 +210,26 @@ export type ResolveWorkerEnvelopeArgs<TInitial = unknown> = {
 
 export async function resolveWorkerEnvelopeMap<TInitial>(
   args: ResolveWorkerEnvelopeArgs<TInitial>,
-  overrides?: Partial<WorkerEnvelopeAdapterMap>,
-): Promise<WorkerEnvelopeAdapterMap> {
+  overrides?: Partial<WorkerEnvelopeAdapterMap<TInitial>>,
+): Promise<WorkerEnvelopeAdapterMap<TInitial>> {
   const values = {
     request: args.request,
-    initial: args.initial as unknown,
+    initial: args.initial,
     requestDecoder: args.decode,
-    contextResolver: args.resolve as ContextResolver<object, unknown>,
+    contextResolver: args.resolve,
     execute: args.execute,
     logger: args.logger,
     tracer: args.tracer ?? resolveTracer(args.options),
     clock: args.clock ?? (() => performance.now()),
   };
-  const builder = defineContainer<Map>()
+  const builder = defineContainer<Map<TInitial>>()
     .graph(WORKER_ENVELOPE_ADAPTER_GRAPH)
     .factories({
       http: ({ request }) => requestLogFields(request),
       startedAt: ({ clock }) => clock(),
       callDecode: createCallDecode,
-      callResolveContext: createCallResolveContext,
-      callDispatch: createCallDispatch,
+      callResolveContext: createCallResolveContext<TInitial>,
+      callDispatch: createCallDispatch<TInitial>,
       callToResponse: createCallToResponse,
       callToFailureResponse: createCallToFailureResponse,
       callOnDecoded: createCallOnDecoded,
