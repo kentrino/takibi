@@ -89,7 +89,7 @@ export class InvocationPrepareApply<
 }
 
 export function createInvocationPrepareApply<TContext extends object, TServices = unknown>(deps?: {
-  logger?: TakibiMap<TContext, TServices>["logger"];
+  logger?: TakibiMap<TContext, TServices>["runtime"]["logger"];
   invocationPolicy?: PolicySurface;
   invocationSchema?: SchemaSurface;
   invocationActionHandler?: (ctor: ActionHandlerCtor) => ActionHandlerSurface;

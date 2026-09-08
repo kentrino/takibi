@@ -46,12 +46,14 @@ test("LocalCallTypeMap pins request and decoded to the local envelope", () => {
   type Spec = {
     wireInvocation: CollectionRequestData;
     invocation: ObserverCollectionRequestData;
-    collections: unknown;
-    storage: unknown;
-    registry: unknown;
+    runtime: {
+      collections: unknown;
+      storage: unknown;
+      registry: unknown;
+      logger: unknown;
+      services: unknown;
+    };
     context: Ctx;
-    logger: unknown;
-    services: unknown;
     rawInput: unknown;
     input: unknown;
     noneWork: unknown;

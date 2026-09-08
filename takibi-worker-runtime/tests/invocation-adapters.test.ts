@@ -741,17 +741,40 @@ test("detached atomic actions gate and parse before their handler transaction", 
   expect(events).toEqual(["guard", "gate", "parse", "transaction", "handler"]);
 });
 
+test("observer uses services bound at construction, not the event", async () => {
+  const { collections, storage, registry } = await createAdapters();
+  const services = { stamp: "bound" };
+  const seen: string[] = [];
+  const adapters = await createBoundInvocationAdapters<Ctx, typeof services>(
+    { collections, storage, registry, logger: undefined, services },
+    {
+      invocationNotify: (event) => {
+        expect(event).not.toHaveProperty("services");
+        seen.push(services.stamp);
+      },
+    },
+  );
+
+  const result = await runInvocation(adapters, {
+    request: {
+      wireInvocation: { kind: "action", scope: "$", name: "ping" },
+      context: { tenantId: "tenant-a" },
+    },
+  });
+  expect(result.settlement).toMatchObject({ outcome: "succeeded" });
+  expect(result.runtime.services).toBe(services);
+  expect(seen).toEqual(["bound"]);
+});
+
 test("parsed input is observable when a detached transaction cannot start", async () => {
   const { adapters } = await createAdapters();
   let observedInput: unknown;
-  let inputAvailable = false;
   const failing = {
     ...adapters,
     transactionRun: async () => {
       throw new Error("TRANSACTION_START_FAILED");
     },
     invocationNotify(context) {
-      inputAvailable = context.inputAvailable;
       observedInput = context.input;
     },
   } satisfies InvocationAdapters<Map>;
@@ -764,8 +787,7 @@ test("parsed input is observable when a detached transaction cannot start", asyn
   });
 
   expect(result.input).toEqual({ status: "validated", value: "hello" });
-  expect(inputAvailable).toBe(true);
-  expect(observedInput).toBe("hello");
+  expect(observedInput).toEqual({ status: "validated", value: "hello" });
   expect(result.settlement).toMatchObject({
     outcome: "failed",
     failure: { kind: "mapped", value: { message: "TRANSACTION_START_FAILED" } },

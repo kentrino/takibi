@@ -100,14 +100,17 @@ are `full`, other atomic actions and collection `add` are `apply`, and the
 remaining current operations are `none`. Classification adapters supply
 target / atomic / operation criteria and work; they do not pick a boundary.
 
-`InternalInvocationTypeMap` is the shared upper bound. It constrains
-`wireInvocation` to a single action or collection request, `invocation` to the
-observer-safe copy without raw `input`, `context` to an object, `result` to
-`JsonValue`, and `failure` to `TakibiFailure<string>`. Concrete runtimes bind
-narrower result, context, services, and work/prepared types through the same
-map; those specifics are not replaced by the common bound. Collections,
-storage, registry, logger, services, raw/validated input, and prepare/apply
-payloads stay `unknown` here so implementation types remain in the runtime.
+`InvocationRuntime` is the standalone collaborator bag. It does not require
+input, result, or work types. `InternalInvocationTypeMap` names that bag as
+`runtime` and constrains `wireInvocation` to a single action or collection
+request, `invocation` to the observer-safe copy without raw `input`, `context`
+to an object, `result` to `JsonValue`, and `failure` to `TakibiFailure<string>`.
+Concrete runtimes bind a narrower `runtime` plus result, context, and
+work/prepared types through the same map; those specifics are not replaced by
+the common bound. Views and transaction storage read `T["runtime"]` so
+collections, storage, registry, logger, and services stay at their concrete
+types. Raw/validated input and prepare/apply payloads stay `unknown` here so
+implementation types remain in the runtime.
 
 ## Adapter composition
 
@@ -195,7 +198,9 @@ The runner allocates one `InvocationState` per invocation; reusable runners do
 not retain request state between calls.
 
 `State` owns lifecycle fields and transitions. `View` is a readonly projection
-passed to adapters. `ObserverEvent` is the notification payload. The runner
+passed to adapters. `ObserverEvent` is the notification payload: settled
+facts, observer-safe invocation, `ObservedInput` (validated input or
+unavailable), and settlement outcome. It does not carry services. The runner
 owns adapter and observer calls. State does not execute business operations or
 open transactions.
 
@@ -269,13 +274,14 @@ the observed identifier for failures before plan execution; `commit` remains
 the observed identifier for actual transaction-commit failure.
 
 Notification runs at most once per invocation lifecycle, after settlement.
-`invocationSnapshotObserverEvent` creates the observer-owned data graph before
-`invocationNotify` runs. Snapshot or observer failure is recorded separately and
-must not change settlement or the HTTP/wire response. A shallow freeze alone
-cannot protect nested response data. Snapshot policy belongs to the runtime;
-generic contract payloads cannot be assumed to support structured cloning.
-Services are capabilities and may retain identity; this does not promise to
-isolate arbitrary service side effects.
+`invocationNotify` receives the event only; a runtime binds services when it
+constructs the observer. `invocationSnapshotObserverEvent` creates the
+observer-owned data graph before `invocationNotify` runs. Snapshot or observer
+failure is recorded separately and must not change settlement or the HTTP/wire
+response. A shallow freeze alone cannot protect nested response data. Snapshot
+policy belongs to the runtime; generic contract payloads cannot be assumed to
+support structured cloning. Binding services at construction does not promise
+to isolate arbitrary service side effects.
 
 `callRuntimeChecks` may be a boolean or a function. A function is evaluated once
 at call start, and the resulting boolean is passed unchanged as

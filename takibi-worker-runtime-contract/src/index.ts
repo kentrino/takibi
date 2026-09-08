@@ -14,6 +14,7 @@ export {
 export { jsonResponseFromStatus, statusOfResult } from "./status-response";
 export { executePlan, runInvocation } from "./flow";
 export { InvocationState } from "./state";
+export { toObservedInput } from "./type";
 export {
   Call,
   runCall,
@@ -71,6 +72,7 @@ export type {
   ExecutionPlan,
   FullInvocationContract,
   InternalInvocationFailure,
+  InvocationCompletion,
   InvocationExecutionView,
   InternalInvocationRuntime,
   InternalInvocationSettledTransaction,
@@ -81,6 +83,8 @@ export type {
   InvocationAdapterResult,
   InvocationInputState,
   InvocationObserverEvent,
+  InvocationRuntime,
+  ObservedInput,
   InvocationPlan,
   InvocationPlanningView,
   InvocationRequest,

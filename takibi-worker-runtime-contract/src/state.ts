@@ -1,20 +1,21 @@
 import { TakibiContractConfigurationError, TakibiContractStateError } from "./request";
-import type {
-  InternalInvocationFailure,
-  InternalInvocationFailureStage,
-  InternalInvocationNotification,
-  InternalInvocationPhase,
-  InternalInvocationRuntime,
-  InternalInvocationSettlement,
-  InternalInvocationTransaction,
-  InternalInvocationTypeMap,
-  InvocationAdapterResult,
-  InvocationInputState,
-  InvocationObserverEvent,
-  InvocationPlan,
-  InvocationPlanningView,
-  InvocationRequest,
-  InvocationResult,
+import {
+  toObservedInput,
+  type InternalInvocationFailure,
+  type InternalInvocationFailureStage,
+  type InternalInvocationNotification,
+  type InternalInvocationPhase,
+  type InternalInvocationRuntime,
+  type InternalInvocationSettlement,
+  type InternalInvocationTransaction,
+  type InternalInvocationTypeMap,
+  type InvocationAdapterResult,
+  type InvocationInputState,
+  type InvocationObserverEvent,
+  type InvocationPlan,
+  type InvocationPlanningView,
+  type InvocationRequest,
+  type InvocationResult,
 } from "./type";
 
 const UNSET = Symbol("takibi.invocation.unset");
@@ -123,7 +124,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     return result.value;
   }
 
-  storage(): T["storage"] {
+  storage(): T["runtime"]["storage"] {
     this.#assertPhase("running");
     this.#acceptedPlan();
     return this.#runtime.storage;
@@ -183,9 +184,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     const common = {
       phase: "settled" as const,
       context: this.#context,
-      services: this.#runtime.services,
-      inputAvailable: this.#input.status === "validated",
-      input: this.#input.status === "validated" ? this.#input.value : undefined,
+      input: toObservedInput(this.#input),
       transactionBoundary: plan?.transactionBoundary,
       transaction: this.#transaction as Exclude<InternalInvocationTransaction, "open">,
     };

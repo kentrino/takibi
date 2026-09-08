@@ -49,12 +49,14 @@ type WireResult<TResult> =
 type ActionSpec = {
   wireInvocation: ActionWire;
   invocation: ActionInvocation;
-  collections: Collections;
-  storage: Storage;
-  registry: Registry;
+  runtime: {
+    collections: Collections;
+    storage: Storage;
+    registry: Registry;
+    logger: Logger;
+    services: Services;
+  };
   context: AppContext;
-  logger: Logger;
-  services: Services;
   rawInput: unknown;
   input: { displayName: string };
   noneWork: ActionWork;
@@ -70,12 +72,14 @@ type ActionSpec = {
 type ReadSpec = {
   wireInvocation: ReadWire;
   invocation: ReadInvocation;
-  collections: Collections;
-  storage: Storage;
-  registry: Registry;
+  runtime: {
+    collections: Collections;
+    storage: Storage;
+    registry: Registry;
+    logger: Logger;
+    services: Services;
+  };
   context: AppContext;
-  logger: Logger;
-  services: Services;
   rawInput: never;
   input: never;
   noneWork: ReadWork;
@@ -100,11 +104,7 @@ function toFailure(error: unknown): Failure {
 function snapshotObserverEvent<T extends InternalInvocationTypeMap>(
   event: import("../src/index").InvocationObserverEvent<T>,
 ): import("../src/index").InvocationObserverEvent<T> {
-  const { services, ...detachable } = event;
-  return {
-    ...structuredClone(detachable),
-    services,
-  } as import("../src/index").InvocationObserverEvent<T>;
+  return structuredClone(event);
 }
 
 function toWireResult<T extends InternalInvocationTypeMap>(

@@ -59,6 +59,21 @@ export type TakibiPrepared<TContext extends object> =
   | Readonly<{ kind: "collection"; resolved: ResolvedCollection<TContext> }>;
 
 /**
+ * Concrete collaborator bag for Durable Object and in-process execution.
+ * Independent of input, result, and work types on the invocation map.
+ */
+export type TakibiInvocationRuntime<
+  TContext extends object = object,
+  TServices = unknown,
+> = Readonly<{
+  collections: CollectionsDef<TContext>;
+  storage: StorageDriver;
+  registry: ActionRegistry;
+  logger: InternalLogger | undefined;
+  services: TServices;
+}>;
+
+/**
  * One type map for Durable Object `fetch` and in-process execution.
  * Worker stub transport does not bind invocation adapters, so it does not
  * instantiate this map.
@@ -66,12 +81,8 @@ export type TakibiPrepared<TContext extends object> =
 export type TakibiInvocationTypeMap<TContext extends object = object, TServices = unknown> = {
   wireInvocation: TakibiWireInvocation;
   invocation: TakibiPublicInvocation;
-  collections: CollectionsDef<TContext>;
-  storage: StorageDriver;
-  registry: ActionRegistry;
+  runtime: TakibiInvocationRuntime<TContext, TServices>;
   context: TContext;
-  logger: InternalLogger | undefined;
-  services: TServices;
   rawInput: unknown;
   input: unknown;
   noneWork: TakibiNoneWork;

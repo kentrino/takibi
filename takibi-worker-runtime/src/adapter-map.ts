@@ -2,7 +2,6 @@ import {
   INVOCATION_ADAPTER_KEYS,
   INVOCATION_PREPARE_ADAPTER_KEYS,
   type AdapterMap,
-  type InternalInvocationRuntime,
   type InvocationAdapters,
 } from "@takibi/takibi-worker-runtime-contract";
 import { alias, defineContainer, inject, type DependencyGraph } from "tatenuki";
@@ -24,7 +23,7 @@ import {
 } from "./invocation-collaborators";
 import { InvocationPrepareApply, type InvocationPrepareApplyDeps } from "./invocation-paths";
 import { SchemaParser, traceSchemaParser } from "./schema";
-import type { TakibiInvocationTypeMap } from "./invocation-type-map";
+import type { TakibiInvocationRuntime, TakibiInvocationTypeMap } from "./invocation-type-map";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
 
@@ -114,7 +113,9 @@ export function createTakibiInvocationAdapterFactories<
     transactionFull: alias("invocationPrepareApply"),
     transactionRun:
       ({ invocationRuntime }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
-      <TResult>(work: (storage: TakibiMap<TContext, TServices>["storage"]) => Promise<TResult>) =>
+      <TResult>(
+        work: (storage: TakibiMap<TContext, TServices>["runtime"]["storage"]) => Promise<TResult>,
+      ) =>
         invocationRuntime.storage.transaction(work),
     transactionClassifyFailure: () => undefined,
     invocationToFailure: () => normalizeInvocationFailure,
@@ -127,7 +128,7 @@ export async function resolveTakibiInvocationRegistration<
   TContext extends object,
   TServices = unknown,
 >(
-  runtime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>,
+  runtime: TakibiInvocationRuntime<TContext, TServices>,
   overrides?: Partial<TakibiInvocationRegistrationMap<TContext, TServices>>,
 ): Promise<TakibiInvocationRegistrationMap<TContext, TServices>> {
   type Map = TakibiInvocationRegistrationMap<TContext, TServices>;
@@ -144,7 +145,7 @@ export async function resolveTakibiInvocationRegistration<
  * Resolves through tatenuki; it is async because that resolve is async.
  */
 export async function createBoundInvocationAdapters<TContext extends object, TServices = unknown>(
-  runtime: InternalInvocationRuntime<TakibiMap<TContext, TServices>>,
+  runtime: TakibiInvocationRuntime<TContext, TServices>,
   overrides?: Partial<TakibiInvocationRegistrationMap<TContext, TServices>>,
 ): Promise<InvocationAdapters<TakibiMap<TContext, TServices>>> {
   return pickInvocationAdapters(await resolveTakibiInvocationRegistration(runtime, overrides));

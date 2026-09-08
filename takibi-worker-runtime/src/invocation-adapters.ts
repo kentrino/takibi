@@ -37,17 +37,12 @@ export function getTakibiRawInput(wireInvocation: TakibiWireInvocation): unknown
 
 /**
  * Takibi invocation values cross JSON-compatible request/result boundaries, so the runtime can
- * detach their observer view. Services deliberately retain identity because they are capabilities,
- * not serializable invocation data.
+ * detach their observer view. Services are bound on the observer, not cloned from the event.
  */
 export function snapshotTakibiObserverEvent<TContext extends object, TServices>(
   event: InvocationObserverEvent<TakibiMap<TContext, TServices>>,
 ): InvocationObserverEvent<TakibiMap<TContext, TServices>> {
-  const { services, ...detachable } = event;
-  return Object.freeze({
-    ...structuredClone(detachable),
-    services,
-  }) as InvocationObserverEvent<TakibiMap<TContext, TServices>>;
+  return Object.freeze(structuredClone(event));
 }
 
 export async function createTakibiInvocationPlan<TContext extends object, TServices>(

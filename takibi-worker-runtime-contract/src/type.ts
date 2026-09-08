@@ -7,15 +7,23 @@ import type {
 
 export type MaybePromise<T> = T | Promise<T>;
 
-export type InternalInvocationTypeMap = {
-  wireInvocation: InvocationRequestData;
-  invocation: ObserverInvocationData;
+/**
+ * Collaborator bag for one invocation. Defined without input, result, or work
+ * types so a runtime can be constructed and typed on its own.
+ */
+export type InvocationRuntime = Readonly<{
   collections: unknown;
   storage: unknown;
   registry: unknown;
-  context: object;
   logger: unknown;
   services: unknown;
+}>;
+
+export type InternalInvocationTypeMap = {
+  wireInvocation: InvocationRequestData;
+  invocation: ObserverInvocationData;
+  runtime: InvocationRuntime;
+  context: object;
   rawInput: unknown;
   input: unknown;
   noneWork: unknown;
@@ -27,6 +35,9 @@ export type InternalInvocationTypeMap = {
   result: JsonValue;
   failure: TakibiFailure<string>;
 };
+
+/** One-way alias: the map names a runtime; the runtime does not name the map. */
+export type InternalInvocationRuntime<T extends InternalInvocationTypeMap> = T["runtime"];
 
 export type InternalInvocationPhase = "created" | "running" | "settled" | "notifying" | "notified";
 
@@ -94,6 +105,22 @@ export type InvocationInputState<TRawInput, TInput> =
   | Readonly<{ status: "validated"; value: TInput }>
   | Readonly<{ status: "rejected" }>;
 
+/**
+ * Observer-visible input. Raw and rejected values stay off the event.
+ * `validated` with an undefined value is distinct from `unavailable`.
+ */
+export type ObservedInput<TInput> =
+  | Readonly<{ status: "unavailable" }>
+  | Readonly<{ status: "validated"; value: TInput }>;
+
+export function toObservedInput<TRawInput, TInput>(
+  input: InvocationInputState<TRawInput, TInput>,
+): ObservedInput<TInput> {
+  return input.status === "validated"
+    ? { status: "validated", value: input.value }
+    : { status: "unavailable" };
+}
+
 export type InternalInvocationFailureStage = "classify" | "execute" | "commit" | "rollback";
 
 /**
@@ -123,36 +150,20 @@ export type InternalInvocationNotification =
   | Readonly<{ outcome: "failed"; error: unknown }>
   | Readonly<{ outcome: "skipped" }>;
 
-export type InternalInvocationRuntime<T extends InternalInvocationTypeMap> = Readonly<{
-  readonly collections: T["collections"];
-  readonly storage: T["storage"];
-  readonly registry: T["registry"];
-  readonly logger: T["logger"];
-  readonly services: T["services"];
-}>;
+export type InvocationCompletion<TInvocation, TResult, TFailure> =
+  | (Extract<InternalInvocationSettlement<TResult, TFailure>, { outcome: "succeeded" }> &
+      Readonly<{ invocation: TInvocation }>)
+  | (Extract<InternalInvocationSettlement<TResult, TFailure>, { outcome: "failed" }> &
+      Readonly<{ invocation: TInvocation | undefined }>);
 
 export type InvocationObserverEvent<T extends InternalInvocationTypeMap> = Readonly<{
   phase: "settled";
   context: T["context"];
-  services: T["services"];
-  inputAvailable: boolean;
-  input: T["input"] | undefined;
+  input: ObservedInput<T["input"]>;
   transactionBoundary: TransactionBoundary | undefined;
   transaction: InternalInvocationSettledTransaction;
 }> &
-  (
-    | Readonly<{
-        outcome: "succeeded";
-        invocation: T["invocation"];
-        result: T["result"];
-      }>
-    | Readonly<{
-        outcome: "failed";
-        invocation: T["invocation"] | undefined;
-        stage: InternalInvocationFailureStage;
-        failure: InternalInvocationFailure<T["failure"]>;
-      }>
-  );
+  InvocationCompletion<T["invocation"], T["result"], T["failure"]>;
 
 export type TakibiCall<TRequestLike, TResponseObject> = (
   request: TRequestLike,
@@ -175,7 +186,7 @@ export type JsonResponseLike<TResponse> = {
 export type InvocationPlanningView<T extends InternalInvocationTypeMap> = Readonly<{
   wireInvocation: T["wireInvocation"];
   invocation: T["invocation"];
-  runtime: InternalInvocationRuntime<T>;
+  runtime: T["runtime"];
   context: T["context"];
   input: InvocationInputState<T["rawInput"], T["input"]>;
 }>;
@@ -188,7 +199,7 @@ export type InvocationPlanningView<T extends InternalInvocationTypeMap> = Readon
 export type InvocationResult<T extends InternalInvocationTypeMap> = Readonly<{
   phase: "notified";
   wireInvocation: T["wireInvocation"];
-  runtime: InternalInvocationRuntime<T>;
+  runtime: T["runtime"];
   context: T["context"];
   input: InvocationInputState<T["rawInput"], T["input"]>;
   effects: Readonly<{ transaction: InternalInvocationSettledTransaction }>;
@@ -216,7 +227,7 @@ export type InvocationExecutionView<T extends InternalInvocationTypeMap> = Reado
   invocation: T["invocation"];
   plan: InvocationPlan<T>;
   input: InvocationInputState<T["rawInput"], T["input"]>;
-  runtime: Pick<InternalInvocationRuntime<T>, "collections" | "logger" | "services">;
+  runtime: Pick<T["runtime"], "collections" | "logger" | "services">;
 }>;
 
 export type InvocationUpdates<T extends InternalInvocationTypeMap> = Readonly<{
@@ -240,12 +251,12 @@ export type PrepareApplyInvocationContract<
   prepare(
     state: InvocationExecutionView<T>,
     work: TWork,
-    storage: T["storage"],
+    storage: T["runtime"]["storage"],
   ): MaybePromise<InvocationAdapterResult<T, TPrepared>>;
   apply(
     state: InvocationExecutionView<T>,
     prepared: TPrepared,
-    storage: T["storage"],
+    storage: T["runtime"]["storage"],
   ): MaybePromise<InvocationAdapterResult<T, T["result"]>>;
 };
 
@@ -286,7 +297,7 @@ export type BoundRunInvocation<T extends InternalInvocationTypeMap> = (
  * Composition libraries are deliberately absent from this public type.
  */
 type InvocationAdapterMap<T extends InternalInvocationTypeMap> = {
-  invocationRuntime: InternalInvocationRuntime<T>;
+  invocationRuntime: T["runtime"];
   invocationToInvocation: (wireInvocation: T["wireInvocation"]) => T["invocation"];
   invocationGetRawInput: (wireInvocation: T["wireInvocation"]) => T["rawInput"];
   invocationCreatePlan: (
@@ -309,7 +320,7 @@ type InvocationAdapterMap<T extends InternalInvocationTypeMap> = {
   transactionApply: InvocationTransactionBoundaryContracts<T>["apply"];
   transactionFull: InvocationTransactionBoundaryContracts<T>["full"];
   transactionRun:
-    | (<TResult>(work: (storage: T["storage"]) => Promise<TResult>) => Promise<TResult>)
+    | (<TResult>(work: (storage: T["runtime"]["storage"]) => Promise<TResult>) => Promise<TResult>)
     | undefined;
   transactionClassifyFailure:
     | ((input: { error: unknown; workCompleted: boolean }) => InternalInvocationTransactionFailure)

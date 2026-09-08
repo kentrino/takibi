@@ -16,10 +16,12 @@ import type {
   InternalInvocationTypeMap,
   InvocationAdapters,
   RuntimeAdapterMap,
+  InvocationObserverEvent,
   InvocationPlanningView,
   InvocationRequest,
   InvocationResult,
   InvocationRunOptions,
+  InvocationRuntime,
   RunCall,
   RunBatchCall,
   RunSingleCall,
@@ -59,6 +61,7 @@ test("root exports linear call composition and the invocation orchestrator", () 
   expect(Contract.InvocationState).toBeTypeOf("function");
   expect(Contract.runInvocation).toBeTypeOf("function");
   expect(Contract.executePlan).toBeTypeOf("function");
+  expect(Contract.toObservedInput).toBeTypeOf("function");
   expect(Contract.createSingleTakibiCall).toBeTypeOf("function");
   expect(Contract.createBatchTakibiCall).toBeTypeOf("function");
   expect(Contract.decodeLocalCallRequest).toBeTypeOf("function");
@@ -111,6 +114,12 @@ test("root exports linear call composition and the invocation orchestrator", () 
   expectTypeOf<InvocationRequest<InternalInvocationTypeMap>>().toHaveProperty("wireInvocation");
   expectTypeOf<InvocationResult<InternalInvocationTypeMap>>().toHaveProperty("settlement");
   expectTypeOf<InvocationResult<InternalInvocationTypeMap>>().toHaveProperty("plan");
+  expectTypeOf<InvocationRuntime>().toHaveProperty("services");
+  expectTypeOf<InvocationRuntime>().not.toHaveProperty("result");
+  expectTypeOf<InvocationObserverEvent<InternalInvocationTypeMap>>().not.toHaveProperty("services");
+  expectTypeOf<InvocationObserverEvent<InternalInvocationTypeMap>>().not.toHaveProperty(
+    "inputAvailable",
+  );
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationRun");
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationPrepareApply");
   expectTypeOf<AdapterMap<InternalInvocationTypeMap>>().toHaveProperty("invocationPolicy");

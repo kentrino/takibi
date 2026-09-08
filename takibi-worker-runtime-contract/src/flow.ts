@@ -213,7 +213,7 @@ const executeInvocationPlan = async function <T extends InternalInvocationTypeMa
 const createInvocationTransactionScope = function <T extends InternalInvocationTypeMap>(
   state: InvocationState<T>,
   runInTransaction:
-    | (<TResult>(work: (storage: T["storage"]) => Promise<TResult>) => Promise<TResult>)
+    | (<TResult>(work: (storage: T["runtime"]["storage"]) => Promise<TResult>) => Promise<TResult>)
     | undefined,
   classifyFailure:
     | ((input: { error: unknown; workCompleted: boolean }) => {
@@ -226,7 +226,7 @@ const createInvocationTransactionScope = function <T extends InternalInvocationT
   transactionBoundary: "none" | "apply" | "full";
   wasUsed: () => boolean;
   run<TResult>(
-    work: (scope: { readonly storage: T["storage"] }) => MaybePromise<TResult>,
+    work: (scope: { readonly storage: T["runtime"]["storage"] }) => MaybePromise<TResult>,
   ): Promise<TResult>;
 } {
   let used = false;
@@ -234,7 +234,7 @@ const createInvocationTransactionScope = function <T extends InternalInvocationT
     transactionBoundary: state.transactionBoundary(),
     wasUsed: () => used,
     async run<TResult>(
-      work: (scope: { readonly storage: T["storage"] }) => MaybePromise<TResult>,
+      work: (scope: { readonly storage: T["runtime"]["storage"] }) => MaybePromise<TResult>,
     ): Promise<TResult> {
       if (used) {
         throw new TakibiContractConfigurationError(
