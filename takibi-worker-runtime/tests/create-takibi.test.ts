@@ -136,6 +136,58 @@ test("createTakibi infers handler collections from defineCollections", () => {
   expectTypeOf<_Handler>().not.toBeNever();
 });
 
+test("Worker batch resolves once and crosses the stub transport in one hop", async () => {
+  let resolveCalls = 0;
+  const wireRequests: WireRequest[] = [];
+  const stub = {
+    async fetch(request: Request) {
+      wireRequests.push((await request.json()) as WireRequest);
+      return Response.json({
+        ok: true,
+        data: [
+          { ok: true, data: { id: "p1", title: "first", secret: false } },
+          { ok: true, data: { items: [], cursor: null } },
+        ],
+      });
+    },
+  } as unknown as DurableObjectStub;
+  const handler = createTakibi()({
+    resolve: (): AppCtx => {
+      resolveCalls += 1;
+      return { tenantId: "tenant-a", user: null };
+    },
+    stub: () => stub,
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
+
+  const response = await handler.request("http://fire.test/_batch", {
+    method: "POST",
+    body: JSON.stringify({
+      kind: "batch",
+      items: [
+        { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+        { kind: "collection", collection: "posts", operation: "list" },
+      ],
+    }),
+  });
+
+  expect(response.status).toBe(200);
+  expect(resolveCalls).toBe(1);
+  expect(wireRequests).toEqual([
+    {
+      kind: "batch",
+      context: { tenantId: "tenant-a", user: null },
+      items: [
+        { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+        { kind: "collection", collection: "posts", operation: "list" },
+      ],
+    },
+  ]);
+});
+
 test("CRUD and collection/root actions roundtrip through the SQLite test backend", async () => {
   const { handler } = createActionApp();
   expect(handler).not.toHaveProperty("$collections");
