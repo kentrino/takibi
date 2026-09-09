@@ -1,6 +1,6 @@
 import { TakibiError, type CollectionDefinition, type CollectionsDef } from "@takibi/takibi-api";
 import type { WithMetadata } from "@takibi/takibi-shared-types";
-import { assertJsonObject } from "./json";
+import { assertJsonObject } from "@takibi/takibi-utility";
 import type { InternalLogger } from "./logging";
 import { documentRevision } from "./revision";
 import { parseSchema, parseSchemaUnobserved, SchemaValidationError } from "./schema";

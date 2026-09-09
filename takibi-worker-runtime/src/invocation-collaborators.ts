@@ -14,9 +14,8 @@ import {
   type AccessContext,
   type AccessGrant,
 } from "@takibi/takibi-policy";
-import { withTracing } from "@takibi/takibi-utility";
+import { assertJsonValue, withTracing } from "@takibi/takibi-utility";
 import type { JsonValue } from "@takibi/takibi-shared-types";
-import { assertJsonValue } from "./json";
 import type { InternalLogger } from "./logging";
 import { withLoggedSpan } from "./logging";
 import { actionSpanAttributes, collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";

@@ -13,6 +13,12 @@ export {
 } from "./create-class";
 export { narrows, type Narrows } from "./narrows";
 export {
+  assertJsonObject,
+  assertJsonValue,
+  JSON_MAX_DEPTH,
+  type JsonValidationOptions,
+} from "./json";
+export {
   withTracing,
   type TracingRunner,
   type TracingSpanAttributeValue,

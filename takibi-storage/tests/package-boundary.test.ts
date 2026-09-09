@@ -119,6 +119,7 @@ test("storage package keeps a one-way dependency graph", () => {
     "@takibi/takibi-protocol": "workspace:^",
     "@takibi/takibi-query": "workspace:^",
     "@takibi/takibi-shared-types": "workspace:^",
+    "@takibi/takibi-utility": "workspace:^",
   });
   expect(api.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
   expect(protocol.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
