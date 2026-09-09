@@ -525,13 +525,13 @@ export type InvocationAdapters<T extends InternalInvocationTypeMap> = Adapters<
 
 export type CallFailureStage = "decode" | "resolve" | "dispatch" | "response";
 
-export type CallFailureInput<TRequestLike, TDecoded, TContext> = Readonly<{
-  stage: CallFailureStage;
-  error: unknown;
-  request: TRequestLike;
-  decoded?: TDecoded;
-  context?: TContext;
-}>;
+export type CallFailureInput<TRequestLike, TDecoded, TContext> = Readonly<
+  { error: unknown; request: TRequestLike } & (
+    | { stage: "decode"; decoded?: never; context?: never }
+    | { stage: "resolve"; decoded: TDecoded; context?: never }
+    | { stage: "dispatch" | "response"; decoded: TDecoded; context: TContext }
+  )
+>;
 
 export type CallTerminalEvent<TResponseObject, TRequestLike = unknown, TDecoded = unknown> =
   | Readonly<{

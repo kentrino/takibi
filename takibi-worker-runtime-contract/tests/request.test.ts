@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { Call, runCall } from "../src/index";
+import { Call, runCall, type CallFailureInput } from "../src/index";
 
 type DecodedRequest = { readonly kind: "action"; readonly name: string };
 type ResolvedContext = { readonly tenantId: string };
@@ -256,6 +256,80 @@ test("undefined values pass through without request sentinels", async () => {
 
   expect(response).toBeUndefined();
   expectTypeOf(response).toEqualTypeOf<undefined>();
+});
+
+test.each(["decode", "resolve", "dispatch", "response"] as const)(
+  "%s failures preserve presence of successful undefined values",
+  async (stage) => {
+    for (const mode of ["recover", "reject", "converter-throws"] as const) {
+      const error = new Error(stage);
+      const conversionError = new Error("converter");
+      const failures: { decoded: boolean; context: boolean }[] = [];
+      const terminals: { outcome: string; decoded: boolean }[] = [];
+      const run = runCall("request", {
+        callDecode() {
+          if (stage === "decode") throw error;
+          return undefined;
+        },
+        callResolveContext() {
+          if (stage === "resolve") throw error;
+          return undefined;
+        },
+        callDispatch() {
+          if (stage === "dispatch") throw error;
+          return undefined;
+        },
+        callToResponse() {
+          throw error;
+        },
+        ...(mode === "reject"
+          ? {}
+          : {
+              callToFailureResponse(failure: CallFailureInput<string, undefined, undefined>) {
+                failures.push({
+                  decoded: Object.hasOwn(failure, "decoded"),
+                  context: Object.hasOwn(failure, "context"),
+                });
+                if (mode === "converter-throws") throw conversionError;
+                return "recovered";
+              },
+            }),
+        callOnTerminal(event) {
+          terminals.push({ outcome: event.outcome, decoded: Object.hasOwn(event, "decoded") });
+        },
+      });
+      if (mode === "recover") await expect(run).resolves.toBe("recovered");
+      else await expect(run).rejects.toBe(mode === "reject" ? error : conversionError);
+      expect(failures).toEqual(
+        mode === "reject"
+          ? []
+          : [
+              {
+                decoded: stage !== "decode",
+                context: stage === "dispatch" || stage === "response",
+              },
+            ],
+      );
+      expect(terminals).toEqual([
+        { outcome: mode === "recover" ? "responded" : "rejected", decoded: stage !== "decode" },
+      ]);
+    }
+  },
+);
+
+test("failure input types require the values reached before each stage", () => {
+  type Failure = CallFailureInput<string, undefined, undefined>;
+  // @ts-expect-error resolve failures must carry even a successfully decoded undefined
+  const missingDecoded: Failure = { stage: "resolve", request: "request", error: "error" };
+  // @ts-expect-error dispatch failures must carry even a successfully resolved undefined
+  const missingContext: Failure = {
+    stage: "dispatch",
+    request: "request",
+    error: "error",
+    decoded: undefined,
+  };
+  void missingDecoded;
+  void missingContext;
 });
 
 test("different dispatch and response types require an explicit converter", async () => {

@@ -1,7 +1,6 @@
 import type {
   CallAdapters,
   CallFailureInput,
-  CallFailureStage,
   CallTerminalEvent,
   MaybePromise,
   RunCall,
@@ -117,18 +116,19 @@ export class Call<
 
   async #runDecoded(request: TRequestLike, decoded: TDecoded): Promise<TResponseObject> {
     await this.#observe(this.onDecoded({ request, decoded }));
-    let stage: CallFailureStage = "resolve";
-    let context: TContext | undefined;
+    let progress: { stage: "resolve" } | { stage: "dispatch" | "response"; context: TContext } = {
+      stage: "resolve",
+    };
     try {
-      context = await this.resolveContext({ request, decoded });
-      stage = "dispatch";
+      const context = await this.resolveContext({ request, decoded });
+      progress = { stage: "dispatch", context };
       const dispatched = await this.dispatch({ request, decoded, context });
-      stage = "response";
+      progress = { stage: "response", context };
       const response = await this.toResponse({ request, decoded, context, dispatched });
       await this.#observe(this.onTerminal({ outcome: "responded", request, decoded, response }));
       return response;
     } catch (error) {
-      return await this.#fail({ stage, error, request, decoded, context });
+      return await this.#fail({ ...progress, error, request, decoded });
     }
   }
 
@@ -137,7 +137,7 @@ export class Call<
   ): Promise<TResponseObject> {
     const terminal = {
       request: failure.request,
-      ...(failure.decoded === undefined ? {} : { decoded: failure.decoded }),
+      ...(failure.stage === "decode" ? {} : { decoded: failure.decoded }),
     };
     if (this.#adapters.callToFailureResponse === undefined) {
       await this.#observe(
