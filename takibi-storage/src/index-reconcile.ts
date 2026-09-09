@@ -16,6 +16,7 @@ import type { StorageDriver } from "./types";
 const BACKFILL_PAGE_SIZE = 200;
 
 type CatalogRecord = IndexCatalogRow;
+type DesiredCatalogRecord = CatalogRecord & { definition: IndexedCollectionSource };
 
 export async function backfillIndexedCollections(
   collections: Record<string, IndexedCollectionSource>,
@@ -76,11 +77,7 @@ export async function reconcileCollectionIndexes(args: {
 
     if (needsBuild) {
       if (!backfilled.has(row.collection)) {
-        const definition = args.collections[row.collection];
-        if (!definition) {
-          throw new Error(`Missing collection definition for ${row.collection}`);
-        }
-        await backfillCollection(definition, args.storage, row.collection);
+        await backfillCollection(row.definition, args.storage, row.collection);
         backfilled.add(row.collection);
       }
       args.sql.exec(compileCreateIndexSql(row));
@@ -119,11 +116,15 @@ async function backfillCollection(
 function desiredCatalog(
   collections: Record<string, IndexedCollectionSource>,
   registry: IndexRegistry,
-): CatalogRecord[] {
-  const rows: CatalogRecord[] = [];
+): DesiredCatalogRecord[] {
+  const rows: DesiredCatalogRecord[] = [];
   for (const [collection, indexes] of registry.byCollection) {
+    const definition = collections[collection];
+    if (!definition) {
+      throw new Error(`Missing collection definition for ${collection}`);
+    }
     const schemaVersion =
-      registry.schemaVersions.get(collection) ?? collectionSchemaVersion(collections[collection]!);
+      registry.schemaVersions.get(collection) ?? collectionSchemaVersion(definition);
     for (const compiled of indexes.values()) {
       rows.push({
         physicalName: physicalIndexName(collection, compiled.name, compiled.fields),
@@ -131,6 +132,7 @@ function desiredCatalog(
         publicName: compiled.name,
         fields: compiled.fields,
         schemaVersion,
+        definition,
       });
     }
   }
