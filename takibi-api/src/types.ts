@@ -68,7 +68,7 @@ export type CollectionMigrations<TCurrentInput> = {
 
 type UniqueFieldKeys<TSchema extends StandardSchemaV1> = StringKeysMatching<
   {
-    [K in keyof StandardSchemaV1.InferOutput<TSchema>]: Exclude<
+    [K in keyof StandardSchemaV1.InferOutput<TSchema>]-?: Exclude<
       StandardSchemaV1.InferOutput<TSchema>[K],
       null | undefined
     >;
