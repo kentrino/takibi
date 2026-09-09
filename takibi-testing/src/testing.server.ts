@@ -2,13 +2,14 @@ import {
   createInProcessRuntime,
   getTestingFork,
   type TestingExecutorFactory,
-  type TestingForkOptions,
+  type TestingForkHandler,
 } from "@takibi/takibi-worker-runtime/testing-bridge";
 import type {
-  ActionScopeMap,
   ContextResolverInput,
   LoggingOptions,
-  TakibiHandler,
+  TakibiBrandCarrier,
+  TakibiBrandRecord,
+  TAKIBI_BRAND,
 } from "@takibi/takibi-worker-runtime";
 import { createSqliteDurableObjectStorage } from "./sqlite-storage.server";
 
@@ -50,28 +51,28 @@ const createSqliteExecutor: TestingExecutorFactory = ({
 };
 
 export function withSqliteTestBackend<
-  TCtx extends object,
-  TCollections,
-  TInitial,
-  TActionMap extends ActionScopeMap,
-  TServices,
-  TEnv,
+  THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
 >(
-  handler: TakibiHandler<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv>,
-  ...[options]: keyof TServices extends never
-    ? [options?: SqliteTestBackendOptions<TCtx, TInitial, TServices>]
-    : [options: SqliteTestBackendOptions<TCtx, TInitial, TServices>]
-): TakibiHandler<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv> & {
-  [Symbol.dispose](): void;
-} {
+  handler: THandler,
+  ...[options]: keyof THandler[typeof TAKIBI_BRAND]["services"] extends never
+    ? [
+        options?: SqliteTestBackendOptions<
+          THandler[typeof TAKIBI_BRAND]["context"],
+          THandler[typeof TAKIBI_BRAND]["initial"],
+          THandler[typeof TAKIBI_BRAND]["services"]
+        >,
+      ]
+    : [
+        options: SqliteTestBackendOptions<
+          THandler[typeof TAKIBI_BRAND]["context"],
+          THandler[typeof TAKIBI_BRAND]["initial"],
+          THandler[typeof TAKIBI_BRAND]["services"]
+        >,
+      ]
+): TestingForkHandler<THandler> {
   const fork = getTestingFork(handler);
   if (fork === undefined) {
     throw new TypeError("Expected a Takibi handler created by createTakibi()");
   }
-  return fork(
-    (options ?? {}) as unknown as TestingForkOptions,
-    createSqliteExecutor,
-  ) as TakibiHandler<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv> & {
-    [Symbol.dispose](): void;
-  };
+  return fork(options ?? {}, createSqliteExecutor);
 }

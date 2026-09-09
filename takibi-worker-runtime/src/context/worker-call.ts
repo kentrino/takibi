@@ -28,32 +28,39 @@ import type { ContextResolver, InternalCollectionsOptions } from "./types";
  * Runtime Call context after resolve. App JSON-safe context stays in
  * `context`; resolve-span identity is only for executor/wire parentage.
  */
-export type WorkerResolvedCall = {
-  readonly context: Record<string, unknown>;
+export type WorkerResolvedCall<TCtx extends object = object> = {
+  readonly context: TCtx & Record<string, unknown>;
   readonly resolveSpan: SpanContext | undefined;
 };
 
-export type WorkerCall = Call<Request, PublicRequest, WorkerResolvedCall, Response, WireResponse>;
-
-const WorkerCallClass = Call<Request, PublicRequest, WorkerResolvedCall, Response, WireResponse>;
+export type WorkerCall<TCtx extends object = object> = Call<
+  Request,
+  PublicRequest,
+  WorkerResolvedCall<TCtx>,
+  Response,
+  WireResponse
+>;
 
 /**
  * Envelope Call map plus request-scoped construction values. Resolving this
  * graph does not require storage or invocation-execution adapters.
  */
-export type WorkerEnvelopeAdapterMap<TInitial = unknown> = EnvelopeAdapterMap<
+export type WorkerEnvelopeAdapterMap<
+  TInitial = unknown,
+  TCtx extends object = object,
+> = EnvelopeAdapterMap<
   Request,
   PublicRequest,
-  WorkerResolvedCall,
+  WorkerResolvedCall<TCtx>,
   Response,
   WireResponse,
-  WorkerCall
+  WorkerCall<TCtx>
 > & {
   request: Request;
   initial: TInitial;
   requestDecoder: () => Promise<PublicRequest>;
-  contextResolver: ContextResolver<object, TInitial>;
-  execute: Executor<TInitial>;
+  contextResolver: ContextResolver<TCtx, TInitial>;
+  execute: Executor<TInitial, TCtx>;
   logger: InternalLogger | undefined;
   tracer: TakibiTracer | undefined;
   clock: () => number;
@@ -61,7 +68,10 @@ export type WorkerEnvelopeAdapterMap<TInitial = unknown> = EnvelopeAdapterMap<
   http: ReturnType<typeof requestLogFields>;
 };
 
-type Map<TInitial = unknown> = WorkerEnvelopeAdapterMap<TInitial>;
+type Map<TInitial = unknown, TCtx extends object = object> = WorkerEnvelopeAdapterMap<
+  TInitial,
+  TCtx
+>;
 
 export const WORKER_ENVELOPE_ADAPTER_GRAPH = {
   ...ENVELOPE_ADAPTER_GRAPH,
@@ -92,16 +102,19 @@ function createCallDecode({ requestDecoder }: Pick<Map, "requestDecoder">): Map[
   return (_request) => requestDecoder();
 }
 
-function createCallResolveContext<TInitial>({
+function createCallResolveContext<TInitial, TCtx extends object>({
   contextResolver,
   initial,
   logger,
-}: Pick<Map<TInitial>, "contextResolver" | "initial" | "logger">): Map["callResolveContext"] {
+}: Pick<Map<TInitial, TCtx>, "contextResolver" | "initial" | "logger">): Map<
+  TInitial,
+  TCtx
+>["callResolveContext"] {
   const adapter = {
     async resolveContext(input: {
       request: Request;
       decoded: PublicRequest;
-    }): Promise<WorkerResolvedCall> {
+    }): Promise<WorkerResolvedCall<TCtx>> {
       const context = await contextResolver({
         request: input.request,
         context: initial,
@@ -137,11 +150,14 @@ function createCallResolveContext<TInitial>({
   return (input) => traced.resolveContext(input);
 }
 
-function createCallDispatch<TInitial>({
+function createCallDispatch<TInitial, TCtx extends object>({
   execute,
   initial,
   tracer,
-}: Pick<Map<TInitial>, "execute" | "initial" | "tracer">): Map["callDispatch"] {
+}: Pick<Map<TInitial, TCtx>, "execute" | "initial" | "tracer">): Map<
+  TInitial,
+  TCtx
+>["callDispatch"] {
   return (input) =>
     execute({
       request: input.request,
@@ -196,22 +212,22 @@ function createCallOnTerminal({
   };
 }
 
-export type ResolveWorkerEnvelopeArgs<TInitial = unknown> = {
+export type ResolveWorkerEnvelopeArgs<TInitial = unknown, TCtx extends object = object> = {
   request: Request;
   initial: TInitial;
   decode: () => Promise<PublicRequest>;
-  resolve: ContextResolver<object, TInitial>;
-  execute: Executor<TInitial>;
+  resolve: ContextResolver<TCtx, TInitial>;
+  execute: Executor<TInitial, TCtx>;
   logger: InternalLogger | undefined;
   options: InternalCollectionsOptions;
   tracer?: TakibiTracer | undefined;
   clock?: () => number;
 };
 
-export async function resolveWorkerEnvelopeMap<TInitial>(
-  args: ResolveWorkerEnvelopeArgs<TInitial>,
-  overrides?: Partial<WorkerEnvelopeAdapterMap<TInitial>>,
-): Promise<WorkerEnvelopeAdapterMap<TInitial>> {
+export async function resolveWorkerEnvelopeMap<TInitial, TCtx extends object>(
+  args: ResolveWorkerEnvelopeArgs<TInitial, TCtx>,
+  overrides?: Partial<WorkerEnvelopeAdapterMap<TInitial, TCtx>>,
+): Promise<WorkerEnvelopeAdapterMap<TInitial, TCtx>> {
   const values = {
     request: args.request,
     initial: args.initial,
@@ -222,25 +238,25 @@ export async function resolveWorkerEnvelopeMap<TInitial>(
     tracer: args.tracer ?? resolveTracer(args.options),
     clock: args.clock ?? (() => performance.now()),
   };
-  const builder = defineContainer<Map<TInitial>>()
+  const builder = defineContainer<Map<TInitial, TCtx>>()
     .graph(WORKER_ENVELOPE_ADAPTER_GRAPH)
     .factories({
       http: ({ request }) => requestLogFields(request),
       startedAt: ({ clock }) => clock(),
       callDecode: createCallDecode,
-      callResolveContext: createCallResolveContext<TInitial>,
-      callDispatch: createCallDispatch<TInitial>,
+      callResolveContext: createCallResolveContext<TInitial, TCtx>,
+      callDispatch: createCallDispatch<TInitial, TCtx>,
       callToResponse: createCallToResponse,
       callToFailureResponse: createCallToFailureResponse,
       callOnDecoded: createCallOnDecoded,
       callOnTerminal: createCallOnTerminal,
-      call: inject(WorkerCallClass),
+      call: inject(Call<Request, PublicRequest, WorkerResolvedCall<TCtx>, Response, WireResponse>),
     });
   return (overrides === undefined ? builder : builder.override(overrides)).resolve(values);
 }
 
-export async function serveDecodedCall<TInitial>(
-  input: ResolveWorkerEnvelopeArgs<TInitial>,
+export async function serveDecodedCall<TInitial, TCtx extends object>(
+  input: ResolveWorkerEnvelopeArgs<TInitial, TCtx>,
 ): Promise<Response> {
   const tracer = input.tracer ?? resolveTracer(input.options);
   const serve = () =>

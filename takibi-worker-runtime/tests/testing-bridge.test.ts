@@ -5,7 +5,7 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "../../takibi-testing/src/index";
 import { fullAccess } from "@takibi/takibi-policy";
-import { createTakibi } from "../src";
+import { createTakibi, assignTakibiBrand } from "../src";
 import {
   createInProcessRuntime,
   getTestingFork,
@@ -52,7 +52,11 @@ test("withSqliteTestBackend looks up the same WeakMap registration", async () =>
 });
 
 test("register and get share one WeakMap even across duplicate module evaluation", () => {
-  const handler = { id: "probe" };
+  const target = { id: "probe", [Symbol.dispose]() {} };
+  const handler = assignTakibiBrand<typeof target, {}, {}, object>(target, {
+    collections: {},
+    actions: {},
+  });
   const fork = () => handler;
   registerTestingFork(handler, fork);
   expect(getTestingFork(handler)).toBe(fork);

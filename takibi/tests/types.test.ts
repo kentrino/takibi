@@ -1310,7 +1310,7 @@ test("policy context uses the widened permission vocabulary", () => {
 
 test("createTakibi binds TInitial then infers execution context from resolve", () => {
   type Initial = { token: string };
-  const takibi = createTakibi<Initial>()({
+  const takibi = createTakibi.withInitial<Initial>()({
     resolve: ({ context }) => {
       expectTypeOf(context).toEqualTypeOf<Initial>();
       return { tenantId: "acme" as const, user: { id: context.token } };
@@ -1517,7 +1517,7 @@ test("execution context keys are application-owned across resolve, stub, and pol
     clinic: { slug: string };
     actor: { id: string };
   };
-  const takibi = createTakibi<Initial>()({
+  const takibi = createTakibi.withInitial<Initial>()({
     resolve: ({ context }): ClinicContext => {
       expectTypeOf(context.namespace).toEqualTypeOf<DurableObjectNamespace>();
       return { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
@@ -1641,7 +1641,7 @@ test("withSqliteTestBackend keeps ClientOf collection action names", () => {
 
 test("services factory return type reaches action handler args", () => {
   type Env = { FLAG: string };
-  const takibi = createTakibi<Record<string, never>, Env>()({
+  const takibi = createTakibi<Env>()({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
     services: ({ env }) => ({ flag: env.FLAG, send: (to: string) => to }),
   });

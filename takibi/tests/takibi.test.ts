@@ -2310,12 +2310,13 @@ test("two SQLite test backends do not share documents or seeds", async () => {
 test("SQLite test backend keeps the production resolve and handle context", async () => {
   type Initial = { token: string };
   const seen: Initial[] = [];
-  const production = createTakibi<Initial>()({
-    resolve: ({ context }) => {
-      seen.push(context);
-      return { tenantId: "tenant-a", user: { id: "u1", role: "member" as const } };
-    },
-  })
+  const production = createTakibi
+    .withInitial<Initial>()({
+      resolve: ({ context }) => {
+        seen.push(context);
+        return { tenantId: "tenant-a", user: { id: "u1", role: "member" as const } };
+      },
+    })
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
   const handler = withSqliteTestBackend(production);
@@ -2525,7 +2526,7 @@ test("services factory exception fails Durable Object construction", () => {
 
 test("generated Durable Object action reads instance services from env", async () => {
   type Env = { LABEL: string };
-  const context = createTakibi<Record<string, never>, Env>()({
+  const context = createTakibi<Env>()({
     resolve: () => ({ tenantId: "tenant-a" }),
     services: ({ env }) => ({ label: env.LABEL }),
   });

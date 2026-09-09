@@ -5,9 +5,10 @@ import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";
 
 test("withSqliteTestBackend rejects a non-Takibi handler", () => {
-  expect(() => withSqliteTestBackend({} as never)).toThrow(
-    new TypeError("Expected a Takibi handler created by createTakibi()"),
-  );
+  expect(() => {
+    // @ts-expect-error a plain object is not a branded Takibi handler
+    return withSqliteTestBackend({}, {});
+  }).toThrow(new TypeError("Expected a Takibi handler created by createTakibi()"));
 });
 
 test("SQLite test handlers inherit definitions without sharing storage", async () => {

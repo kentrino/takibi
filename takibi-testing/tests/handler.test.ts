@@ -156,7 +156,7 @@ test("SQLite-backed handler Durable Object exports and restores a snapshot", asy
 test("action handler receives SQLite test backend services and keeps production resolve", async () => {
   type Initial = { token: string };
   const seen: Initial[] = [];
-  const context = createTakibi<Initial>()({
+  const context = createTakibi.withInitial<Initial>()({
     resolve: ({ context: initial }) => {
       seen.push(initial);
       return { tenantId: "tenant-a" };
@@ -176,7 +176,13 @@ test("action handler receives SQLite test backend services and keeps production 
   });
   const handler = withSqliteTestBackend(production, { services: { stamp: "from-sqlite-test" } });
   const client = createClient<typeof handler>("https://takibi.test", {
-    fetch: (input, init) => handler.request(input, init),
+    fetch: async (input, init) => {
+      const result = await handler.handle(new Request(input, init), {
+        context: { token: "action-session" },
+      });
+      if (!result.matched) throw new Error("Expected a matching request");
+      return result.response;
+    },
   });
   await expect(client.ping()).resolves.toMatchObject({
     ok: true,

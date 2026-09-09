@@ -1,3 +1,6 @@
+import type { Hono } from "hono";
+import type { TakibiBrandCarrier, TakibiBrandRecord, TAKIBI_BRAND } from "./brand";
+import type { ContextResolver } from "./context/types";
 import type { ActionRegistry, CollectionsDef } from "@takibi/takibi-api";
 import {
   compileIndexRegistry,
@@ -11,41 +14,76 @@ import { seedCollections } from "./durable-object";
 import type { InternalLogger, LoggingOptions } from "./logging";
 import { createMigratingStorage } from "./migrations";
 
-export type TestingForkOptions = LoggingOptions & {
-  resolve?: (input: { request: Request; context: unknown }) => object | Promise<object>;
-  services?: unknown;
+export type TestingForkOptions<
+  TCtx extends object = object,
+  TInitial = unknown,
+  TServices = unknown,
+> = LoggingOptions & {
+  resolve?: ContextResolver<TCtx, TInitial>;
+  services?: TServices;
 };
 
-export type TestingExecutorFactory = (input: {
-  collections: CollectionsDef<object>;
+export type TestingExecutorFactory = <TCtx extends object>(input: {
+  collections: CollectionsDef<TCtx>;
   registry: ActionRegistry;
   logger: InternalLogger | undefined;
   services: unknown;
 }) => {
-  execute: Executor;
+  execute: Executor<unknown, TCtx>;
   dispose(): void;
 };
 
-export type TestingFork = (
-  options: TestingForkOptions,
+export type TestingFork<
+  TCtx extends object = object,
+  TInitial = unknown,
+  TServices = unknown,
+  THandler = unknown,
+> = (
+  options: TestingForkOptions<TCtx, TInitial, TServices>,
   createExecutor: TestingExecutorFactory,
-) => unknown;
+) => THandler;
+
+type BrandedHandler = TakibiBrandCarrier<TakibiBrandRecord<object>>;
+/** Forks recreate the standard handler surface, not user-added properties. */
+export type TestingForkHandler<THandler extends BrandedHandler> = Pick<
+  THandler,
+  Extract<keyof THandler, typeof TAKIBI_BRAND | "handle" | "DurableObject">
+> &
+  (THandler extends Hono<{ Bindings: Record<string, unknown> }>
+    ? Hono<{ Bindings: Record<string, unknown> }>
+    : {}) &
+  Disposable;
+
+type ForkOf<THandler extends BrandedHandler, TResult = THandler & Disposable> = TestingFork<
+  THandler[typeof TAKIBI_BRAND]["context"],
+  THandler[typeof TAKIBI_BRAND]["initial"],
+  THandler[typeof TAKIBI_BRAND]["services"],
+  TResult
+>;
 
 const TESTING_FORKS_SYMBOL = Symbol.for("takibi.testingForks");
 
-function testingForks(): WeakMap<object, TestingFork> {
+function testingForks(): WeakMap<object, unknown> {
   const holder = globalThis as typeof globalThis & {
-    [TESTING_FORKS_SYMBOL]?: WeakMap<object, TestingFork>;
+    [TESTING_FORKS_SYMBOL]?: WeakMap<object, unknown>;
   };
   holder[TESTING_FORKS_SYMBOL] ??= new WeakMap();
   return holder[TESTING_FORKS_SYMBOL];
 }
 
-export function registerTestingFork(handler: object, fork: TestingFork): void {
+export function registerTestingFork<THandler extends BrandedHandler>(
+  handler: THandler,
+  fork: ForkOf<NoInfer<THandler>>,
+): void {
   testingForks().set(handler, fork);
 }
 
-export function getTestingFork(handler: object): TestingFork | undefined {
+export function getTestingFork<THandler extends BrandedHandler>(
+  handler: THandler,
+): ForkOf<THandler, TestingForkHandler<THandler>> | undefined;
+export function getTestingFork(handler: object): TestingFork | undefined;
+export function getTestingFork(handler: object): unknown {
+  // The heterogeneous registry restores the callback registered for this exact handler.
   return testingForks().get(handler);
 }
 
@@ -54,14 +92,14 @@ export function getTestingFork(handler: object): TestingFork | undefined {
  * wrappers, and in-process execution around a supplied Durable Object storage
  * backend. Callers own the backend lifetime.
  */
-export function createInProcessRuntime(input: {
-  collections: CollectionsDef<object>;
+export function createInProcessRuntime<TCtx extends object>(input: {
+  collections: CollectionsDef<TCtx>;
   registry: ActionRegistry;
   logger: InternalLogger | undefined;
   services: unknown;
   storage: DurableObjectStorage;
 }): {
-  execute: Executor;
+  execute: Executor<unknown, TCtx>;
 } {
   const { collections, registry, logger, services, storage } = input;
   const indexRegistry = compileIndexRegistry(collections);

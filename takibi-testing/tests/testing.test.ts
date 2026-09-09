@@ -102,9 +102,10 @@ test("SQLite test handlers isolate concurrent requests from rolled-back atomic a
 });
 
 test("withSqliteTestBackend rejects a non-Takibi handler", () => {
-  expect(() => withSqliteTestBackend({} as never)).toThrow(
-    new TypeError("Expected a Takibi handler created by createTakibi()"),
-  );
+  expect(() => {
+    // @ts-expect-error a plain object is not a branded Takibi handler
+    return withSqliteTestBackend({}, {});
+  }).toThrow(new TypeError("Expected a Takibi handler created by createTakibi()"));
 });
 
 test("disposing one handler does not close another handler's storage", async () => {
