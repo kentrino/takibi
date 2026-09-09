@@ -1,4 +1,3 @@
-import { createHttpHandler, createInitialHttpHandler } from "./http-handler";
 import { createContext } from "./definition";
 import type { ContextConfig, CreateContextFn } from "./types";
 
@@ -15,23 +14,12 @@ export type {
   TakibiHandler,
 } from "./types";
 
-/** Build a Hono application whose resolver needs no initial dependencies. */
-export function createTakibi<TEnv = unknown>(): CreateContextFn<
-  Record<string, never>,
-  TEnv,
-  ReturnType<typeof createHttpHandler>
->;
-/** Require caller-supplied context through handle(), without exposing a Hono entry. */
-export function createTakibi<TInput, TEnv = unknown>(options: {
-  entry: "handle";
-}): CreateContextFn<TInput, TEnv>;
-export function createTakibi<TInput, TEnv = unknown>(options?: { entry: "handle" }) {
-  if (options?.entry === "handle") {
-    return <TCtx extends object, TServices = Record<never, never>>(
-      config: ContextConfig<TCtx, TInput, TEnv, TServices>,
-    ) => createContext(config, createInitialHttpHandler<TInput>);
-  }
+/** Bind the caller's request context and Durable Object environment types. */
+export function createTakibi<TInput = Record<string, never>, TEnv = unknown>(): CreateContextFn<
+  TInput,
+  TEnv
+> {
   return <TCtx extends object, TServices = Record<never, never>>(
-    config: ContextConfig<TCtx, Record<string, never>, TEnv, TServices>,
-  ) => createContext(config, createHttpHandler);
+    config: ContextConfig<TCtx, TInput, TEnv, TServices>,
+  ) => createContext(config);
 }

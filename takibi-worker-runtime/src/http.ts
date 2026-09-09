@@ -39,8 +39,8 @@ export function publicPathRemainder(pathname: string, prefix: string | undefined
 }
 
 /**
- * Trailing raw (still percent-encoded) segments of a matched route. Used by
- * the Hono mounts, whose params are decoded too early for raw colon routing.
+ * Trailing raw (still percent-encoded) segments of a path. Keeping raw colons
+ * distinct from encoded colons allows action routing before ID decoding.
  */
 export function rawPathSegments(pathname: string, count: number): string[] {
   const path = normalizePathname(pathname);

@@ -8,7 +8,7 @@ import {
   type TestingForkOptions,
 } from "../testing-bridge.server";
 import { testingBackend, type BackendFactory } from "./backend";
-import type { InitialHttpHandler, ServeCall } from "./http-handler";
+import { createHttpHandler } from "./http-handler";
 import { mergeLoggingOptions } from "./runtime";
 import { serveDecodedCall } from "./worker-call";
 import type {
@@ -24,10 +24,9 @@ type ApplicationDefinition<TCollections extends CollectionsDef, TActions extends
   registry: ActionRegistry;
 };
 
-type ApplicationConfig<TCtx extends object, TInitial, TEnv, TServices, THttp> = {
+type ApplicationConfig<TCtx extends object, TInitial, TEnv, TServices> = {
   resolve: ContextResolver<TCtx, TInitial>;
   services?: ServicesFactory<TEnv, TServices>;
-  http: (serve: ServeCall<TInitial>) => THttp;
   options: InternalCollectionsOptions;
 };
 
@@ -39,11 +38,10 @@ export class Application<
   TServices,
   TCollections extends CollectionsDef<TCtx>,
   TActions extends ActionScopeMap,
-  THttp extends InitialHttpHandler<TInitial>,
 > {
   constructor(
     private readonly definition: ApplicationDefinition<TCollections, TActions>,
-    private readonly config: ApplicationConfig<TCtx, TInitial, TEnv, TServices, THttp>,
+    private readonly config: ApplicationConfig<TCtx, TInitial, TEnv, TServices>,
   ) {}
 
   mount(createBackend: BackendFactory<TInitial, TCtx>) {
@@ -59,7 +57,7 @@ export class Application<
     );
     const backend = createBackend({ collections, registry, logger });
     const http = Object.assign(
-      this.config.http((request, initial, decode) =>
+      createHttpHandler<TInitial>((request, initial, decode) =>
         serveDecodedCall({
           request,
           initial,

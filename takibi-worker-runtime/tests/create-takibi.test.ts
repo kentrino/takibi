@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "@takibi/takibi-api";
@@ -105,7 +106,7 @@ function clientFor(
 ) {
   return createClient<typeof handler>("http://fire.test", {
     headers: () => headers(user),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 }
 
@@ -163,7 +164,7 @@ test("Worker batch resolves once and crosses the stub transport in one hop", asy
     })
     .actions({});
 
-  const response = await handler.request("http://fire.test/_batch", {
+  const response = await requestTakibi(handler, "http://fire.test/_batch", {
     method: "POST",
     body: JSON.stringify({
       kind: "batch",
@@ -361,7 +362,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
 
   const badRequest = { ok: false, error: { kind: "operation", code: "BAD_REQUEST", status: 400 } };
@@ -390,7 +391,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     expect(doResponse.status).toBe(400);
     await expect(doResponse.json()).resolves.toMatchObject(badRequest);
 
-    const workerResponse = await handler.request("http://fire.test/", {
+    const workerResponse = await requestTakibi(handler, "http://fire.test/", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -422,7 +423,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
     .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
 
   const notFound = { ok: false, error: { kind: "operation", code: "NOT_FOUND", status: 404 } };
@@ -462,7 +463,7 @@ test("MISSING_STUB is thrown when production handle has no stub", async () => {
       posts: { schema: Post, accessPolicy: fullAccess },
     })
     .actions({});
-  const response = await handler.request("http://fire.test/posts/p1");
+  const response = await requestTakibi(handler, "http://fire.test/posts/p1");
   expect(response.status).toBe(500);
   await expect(response.json()).resolves.toMatchObject({
     ok: false,

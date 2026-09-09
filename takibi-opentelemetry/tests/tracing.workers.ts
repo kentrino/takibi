@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { env } from "cloudflare:workers";
 import { context, propagation, SpanKind } from "@opentelemetry/api";
 import { expect, test } from "vite-plus/test";
@@ -25,7 +26,7 @@ test("integration propagates OTel spans through a real Durable Object namespace"
     }),
   );
   const response = await context.with(baggageContext, () =>
-    handler.request("https://takibi.test/posts", {
+    requestTakibi(handler, "https://takibi.test/posts", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "workers-otel" }),

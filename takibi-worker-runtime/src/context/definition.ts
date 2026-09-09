@@ -1,4 +1,3 @@
-import type { InitialHttpHandler, ServeCall } from "./http-handler";
 import {
   ActionRegistry,
   TakibiError,
@@ -56,16 +55,9 @@ function registerActions(map: ActionScopeMap, collections: ReadonlySet<string>):
 }
 
 /** Runtime implementation of the typed, dynamically keyed definition API. */
-export function createContext<
-  TCtx extends object,
-  TInitial,
-  TEnv,
-  TServices,
-  THttp extends InitialHttpHandler<TInitial>,
->(
+export function createContext<TCtx extends object, TInitial, TEnv, TServices>(
   config: ContextConfig<TCtx, TInitial, TEnv, TServices>,
-  http: (serve: ServeCall<TInitial>) => THttp,
-): CreateContextBuilder<TCtx, TInitial, TServices, TEnv, THttp> {
+): CreateContextBuilder<TCtx, TInitial, TServices, TEnv> {
   const { resolve, services, stub } = config;
   const defaults = mergeLoggingOptions({}, config);
   return {
@@ -74,7 +66,7 @@ export function createContext<
     defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
       collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
       options: InternalCollectionsOptions = {},
-    ): AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv, THttp> {
+    ): AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv> {
       // The public mapped constraint checks each schema/policy pair; the runtime
       // map needs a homogeneous view for validation and storage construction.
       const runtimeCollections = collections as TCollections & CollectionsDef<TCtx>;
@@ -93,7 +85,7 @@ export function createContext<
         };
       }
       // Collection names were checked against these API members before merging.
-      type Definition = AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv, THttp>;
+      type Definition = AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv>;
       // Only generated collection members need a structural assertion. The fixed
       // action methods below are checked against the public definition normally.
       const members = scoped as Pick<Definition, keyof TCollections & string>;
@@ -110,7 +102,6 @@ export function createContext<
             {
               resolve,
               services,
-              http,
               options: settings,
             },
           );

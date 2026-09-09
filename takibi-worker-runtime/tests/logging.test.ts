@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "../../takibi-testing/src/index";
@@ -42,7 +43,7 @@ function createSqliteTestHandler(
 test("custom logger receives filtered stage events without request data", async () => {
   const events: LogEvent[] = [];
   const handler = createSqliteTestHandler(events);
-  const response = await handler.request("https://takibi.test/posts/p1", {
+  const response = await requestTakibi(handler, "https://takibi.test/posts/p1", {
     method: "POST",
     headers: {
       authorization: "Bearer private-token",
@@ -52,7 +53,7 @@ test("custom logger receives filtered stage events without request data", async 
   });
 
   expect(response.status).toBe(200);
-  const actionResponse = await handler.request("https://takibi.test/$:ping", {
+  const actionResponse = await requestTakibi(handler, "https://takibi.test/$:ping", {
     method: "POST",
   });
   expect(actionResponse.status).toBe(200);
@@ -83,7 +84,7 @@ test("custom logger receives filtered stage events without request data", async 
 test("errors match the public failure and logger throws never change results", async () => {
   const events: LogEvent[] = [];
   const handler = createSqliteTestHandler(events, "error");
-  const missing = await handler.request("https://takibi.test/posts/missing");
+  const missing = await requestTakibi(handler, "https://takibi.test/posts/missing");
 
   expect(missing.status).toBe(404);
   const failure = (await missing.json()) as {
@@ -115,7 +116,7 @@ test("errors match the public failure and logger throws never change results", a
     .actions({});
   const throwing = withSqliteTestBackend(throwingProduction);
   await expect(
-    throwing.request("https://takibi.test/posts/p1", {
+    requestTakibi(throwing, "https://takibi.test/posts/p1", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "still succeeds" }),
@@ -127,7 +128,7 @@ test("failure logging emits one error before the request completion", async () =
   const events: LogEvent[] = [];
   const handler = createSqliteTestHandler(events, "info");
 
-  const response = await handler.request("https://takibi.test/posts/missing");
+  const response = await requestTakibi(handler, "https://takibi.test/posts/missing");
   const body = (await response.json()) as {
     ok: false;
     error: { code: string; status: number };

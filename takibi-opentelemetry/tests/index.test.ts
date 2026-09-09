@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -93,7 +94,7 @@ test("integration enables Takibi spans and preserves OTel context semantics", as
       })
       .actions({});
     const handler = withSqliteTestBackend(baseHandler);
-    const response = await handler.request("https://takibi.test/posts", {
+    const response = await requestTakibi(handler, "https://takibi.test/posts", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "observed" }),

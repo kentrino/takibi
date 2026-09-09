@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
@@ -91,7 +92,7 @@ function createApp() {
 function clientFor(handler: ReturnType<typeof createApp>["handler"], user: User | null) {
   return createClient<typeof handler>("http://fire.test", {
     headers: () => headers(user),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 }
 
@@ -206,7 +207,7 @@ test("action guards replace gate and handler context while nested CRUD keeps res
     }));
   const handler = withSqliteTestBackend(app.actions({ bookings, $: { inspectRoot } }));
   const client = createClient<typeof handler>("http://fire.test", {
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   expect(await client.bookings.inspect("b1")).toMatchObject({

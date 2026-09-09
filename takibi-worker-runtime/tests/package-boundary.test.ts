@@ -144,9 +144,9 @@ test("worker-runtime package keeps a one-way dependency graph", () => {
     "@takibi/takibi-storage": "workspace:^",
     "@takibi/takibi-utility": "workspace:^",
     "@takibi/takibi-worker-runtime-contract": "workspace:^",
-    hono: "catalog:",
     tatenuki: "catalog:",
   });
+  expect(runtime.dependencies?.hono).toBeUndefined();
   expect(runtime.dependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(runtime.devDependencies?.["@takibi/takibi"]).toBeUndefined();
   expect(runtime.devDependencies?.["@takibi/takibi-testing"]).toBeUndefined();

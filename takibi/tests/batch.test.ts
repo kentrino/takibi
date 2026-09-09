@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -80,7 +81,7 @@ test("SQLite test backend batch uses one public HTTP request, one resolve, and c
   const { handler, resolveCount } = createSqliteHandler();
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const missing = client.posts.get("missing");
@@ -114,7 +115,7 @@ test("malformed public batches execute no items and return 400", async () => {
     .actions({});
   const handler = withSqliteTestBackend(production);
 
-  const rejected = await handler.request("http://fire.test/_batch", {
+  const rejected = await requestTakibi(handler, "http://fire.test/_batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -125,7 +126,7 @@ test("malformed public batches execute no items and return 400", async () => {
   expect(rejected.status).toBe(400);
   expect(policyCalls).toBe(0);
 
-  const empty = await handler.request("http://fire.test/_batch", {
+  const empty = await requestTakibi(handler, "http://fire.test/_batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ kind: "batch", items: [] }),
@@ -144,7 +145,7 @@ test("resolve failure is a top-level batch error and does not run items", async 
   const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   const first = client.posts.get("p1");
   const second = client.posts.get("p2");
@@ -159,7 +160,7 @@ test("batch logs request/resolve once with size and executor once per item", asy
   const { handler } = createSqliteHandler({ events });
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   const reads = Promise.all([client.posts.get("p1"), client.posts.get("p2")]);
   await vi.advanceTimersByTimeAsync(0);
@@ -188,7 +189,7 @@ test("batch logs request/resolve once with size and executor once per item", asy
 test("single collection requests keep their HTTP status, envelope, and log fields", async () => {
   const events: LogEvent[] = [];
   const { handler } = createSqliteHandler({ events });
-  const missing = await handler.request("http://fire.test/posts/missing");
+  const missing = await requestTakibi(handler, "http://fire.test/posts/missing");
   expect(missing.status).toBe(404);
   await expect(missing.json()).resolves.toMatchObject({
     ok: false,
@@ -236,7 +237,7 @@ test("Durable Object wire sends one batch fetch and continues after item failure
   );
   const client = createClient<typeof handler>("http://fire.test", {
     batch: { maxWaitMs: 0 },
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const missing = client.posts.get("missing");
@@ -311,7 +312,7 @@ test("batch tracing records size on resolve/wire and invocation attributes per e
     );
     const client = createClient<typeof handler>("http://fire.test", {
       batch: { maxWaitMs: 0 },
-      fetch: (input, init) => handler.request(input, init),
+      fetch: (input, init) => requestTakibi(handler, input, init),
     });
     const reads = Promise.all([client.posts.get("p1"), client.posts.get("missing")]);
     await vi.advanceTimersByTimeAsync(0);

@@ -1,3 +1,5 @@
+import { Hono } from "hono";
+import { takibiServer } from "@takibi/takibi-hono-adapter";
 import {
   and,
   createTakibi,
@@ -855,13 +857,14 @@ export let fullPathBenchmarkSink = 0;
 export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
   const production = buildProductionHandler();
   const handler = withSqliteTestBackend(production);
+  const app = new Hono().use("*", takibiServer({ handler, createContext: () => ({}) }));
   const requestCounts = { list: 0, batch: 0 };
   const fetch = (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (url.pathname === "/_batch") requestCounts.batch += 1;
     if (request.method === "GET" && url.pathname === "/tasks") requestCounts.list += 1;
-    return handler.request(request);
+    return app.request(request);
   };
   const editorContext: BenchmarkContext = {
     tenantId: TENANT_ID,

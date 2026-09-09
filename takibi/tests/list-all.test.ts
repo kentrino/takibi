@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
@@ -30,7 +31,7 @@ function clientFor(
 ) {
   return createClient<typeof handler>("http://takibi.test", {
     headers: () => ({ "x-test-tenant": "tenant-a", "x-test-user": JSON.stringify({ id: "u1" }) }),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
     ...options,
   });
 }
@@ -136,7 +137,7 @@ test("trusted $collections.listAll follows cursors and throws ListAllLimitError"
   const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://takibi.test", {
     headers: () => ({ "x-test-tenant": "tenant-a" }),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   await seedPosts(client, ["a", "b", "c", "d"]);
 
