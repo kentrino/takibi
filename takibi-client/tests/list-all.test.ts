@@ -1,6 +1,6 @@
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
-import { LIST_ALL_PAGE_SIZE_DEFAULT, LIST_PAGE_MAX } from "@takibi/takibi-api";
+import { LIST_PAGE_MAX } from "@takibi/takibi-api";
 import { createClient } from "../src";
 
 const Post = z.object({ title: z.string() });
@@ -13,28 +13,28 @@ type PostsCarrier = {
   };
 };
 
-test("createClient rejects invalid listAll caps", () => {
-  expect(() =>
-    createClient<PostsCarrier>("http://takibi.test", { listAll: { pageSize: 0 } }),
-  ).toThrow(TypeError);
-  expect(() =>
-    createClient<PostsCarrier>("http://takibi.test", {
-      listAll: { pageSize: LIST_PAGE_MAX + 1 },
-    }),
-  ).toThrow(TypeError);
-  expect(() =>
-    createClient<PostsCarrier>("http://takibi.test", { listAll: { maxItems: 0 } }),
-  ).toThrow(TypeError);
+test.each([
+  { name: "zero page size", caps: { pageSize: 0 } },
+  { name: "page size above the server maximum", caps: { pageSize: LIST_PAGE_MAX + 1 } },
+  { name: "zero item limit", caps: { maxItems: 0 } },
+])("createClient rejects $name", ({ caps }) => {
+  expect(() => createClient<PostsCarrier>("http://takibi.test", { listAll: caps })).toThrow(
+    TypeError,
+  );
 });
 
-test("listAll call-site caps cannot exceed createClient caps", () => {
+test.each([
+  { name: "item limit", caps: { maxItems: 6 } },
+  { name: "page size", caps: { pageSize: 11 } },
+])("listAll rejects a call-site $name above the client cap", ({ caps }) => {
+  const fetch = vi.fn(() => Response.json({ ok: true, data: { items: [] } }));
   const client = createClient<PostsCarrier>("http://takibi.test", {
     listAll: { maxItems: 5, pageSize: 10 },
-    fetch: () => Response.json({ ok: true, data: { items: [] } }),
+    fetch,
   });
-  expect(() => client.posts.listAll({ maxItems: 6 })).toThrow(TypeError);
-  expect(() => client.posts.listAll({ pageSize: 11 })).toThrow(TypeError);
-  expect(() => client.posts.listAll({ pageSize: LIST_ALL_PAGE_SIZE_DEFAULT })).toThrow(TypeError);
+
+  expect(() => client.posts.listAll(caps)).toThrow(TypeError);
+  expect(fetch).not.toHaveBeenCalled();
 });
 
 test("listAll walks cursors, compiles where, and stops at the last page", async () => {
@@ -92,10 +92,54 @@ test("listAll walks cursors, compiles where, and stops at the last page", async 
   });
 });
 
-test("listAll fails with LIST_ALL_LIMIT when matching documents remain", async () => {
-  const client = createClient<PostsCarrier>("http://takibi.test", {
-    listAll: { maxItems: 3, pageSize: 2 },
-    fetch: () =>
+test.each([
+  {
+    name: "returns every item when the final page reaches the cap",
+    finalPage: { items: [{ id: "p3", title: "c" }] },
+    expected: {
+      ok: true,
+      data: [
+        { id: "p1", title: "a" },
+        { id: "p2", title: "b" },
+        { id: "p3", title: "c" },
+      ],
+    },
+  },
+  {
+    name: "fails instead of truncating when another page remains at the cap",
+    finalPage: { items: [{ id: "p3", title: "c" }], nextCursor: "more" },
+    expected: {
+      ok: false,
+      error: {
+        kind: "operation",
+        code: "LIST_ALL_LIMIT",
+        message: "listAll exceeded the maximum of 3 documents",
+        status: 400,
+      },
+    },
+  },
+  {
+    name: "fails when the server returns more items than the remaining allowance",
+    finalPage: {
+      items: [
+        { id: "p3", title: "c" },
+        { id: "p4", title: "d" },
+      ],
+    },
+    expected: {
+      ok: false,
+      error: {
+        kind: "operation",
+        code: "LIST_ALL_LIMIT",
+        message: "listAll exceeded the maximum of 3 documents",
+        status: 400,
+      },
+    },
+  },
+])("listAll $name", async ({ finalPage, expected }) => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
       Response.json({
         ok: true,
         data: {
@@ -103,17 +147,30 @@ test("listAll fails with LIST_ALL_LIMIT when matching documents remain", async (
             { id: "p1", title: "a" },
             { id: "p2", title: "b" },
           ],
-          nextCursor: "more",
+          nextCursor: "c1",
         },
       }),
+    )
+    .mockResolvedValueOnce(Response.json({ ok: true, data: finalPage }));
+  const client = createClient<PostsCarrier>("http://takibi.test", {
+    listAll: { maxItems: 3, pageSize: 2 },
+    fetch,
   });
 
-  await expect(client.posts.listAll()).resolves.toMatchObject({
-    ok: false,
-    error: {
-      kind: "operation",
-      code: "LIST_ALL_LIMIT",
-      status: 400,
-    },
-  });
+  const result = await client.posts.listAll();
+
+  expect(result).toEqual(expected);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  const requests = fetch.mock.calls.map(
+    ([input]) => new URL(input instanceof Request ? input.url : String(input)),
+  );
+  expect(
+    requests.map((url) => ({
+      limit: url.searchParams.get("limit"),
+      cursor: url.searchParams.get("cursor"),
+    })),
+  ).toEqual([
+    { limit: "2", cursor: null },
+    { limit: "1", cursor: "c1" },
+  ]);
 });

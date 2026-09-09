@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { createClass, withTracing, type TracingSpanSpec } from "../src/index";
+import { createClass, withTracing, type TracingRunner, type TracingSpanSpec } from "../src/index";
 
 type Probe = {
   target: (label: string) => Promise<string>;
@@ -68,21 +68,8 @@ test("withTracing wraps only the named async method and keeps types", async () =
 
   expect(await wrapped.target("one")).toBe("orig:one");
   expect(await wrapped.other("two")).toBe("orig:two:other");
-  expect(instance.target === wrapped.target).toBe(false);
   expect(await instance.target("raw")).toBe("orig:raw");
   expect(events).toEqual(["start:takibi.resolve:internal", 'attributes:{"label":"one"}', "end"]);
-});
-
-test("withTracing preserves this for the original instance", async () => {
-  const instance = new ProbeClass("self");
-  const wrapped = withTracing(instance, {
-    method: "target",
-    span: "span",
-    run: async (_spec, fn) => fn(),
-  });
-
-  expect(await wrapped.target("x")).toBe("self:x");
-  expect(await wrapped.other("y")).toBe("self:y:other");
 });
 
 test("withTracing keeps #private fields and prototype methods on the original instance", async () => {
@@ -139,8 +126,9 @@ test("an attributes callback failure does not skip or replace the method", async
   expect(runs).toBe(1);
 });
 
-test("a runner that calls fn twice or returns before awaiting still runs once", async () => {
+test("concurrent runner callbacks receive the original result with one method invocation", async () => {
   let runs = 0;
+  const callbackResults: unknown[] = [];
   const instance = {
     async target() {
       runs += 1;
@@ -148,30 +136,21 @@ test("a runner that calls fn twice or returns before awaiting still runs once", 
       return "ok";
     },
   };
-
-  const parallel = withTracing(instance, {
+  const wrapped = withTracing(instance, {
     method: "target",
     span: "s",
     run: async (_spec, fn) => {
-      const [left, right] = await Promise.all([fn(), fn()]);
-      expect(left).toBe("ok");
-      expect(right).toBe("ok");
-      return left;
+      const results = await Promise.all([fn(), fn()]);
+      callbackResults.push(...results);
+      return results[0];
     },
   });
-  expect(await parallel.target()).toBe("ok");
+
+  const result = await wrapped.target();
+
+  expect(result).toBe("ok");
   expect(runs).toBe(1);
-
-  const detached = withTracing(instance, {
-    method: "target",
-    span: "s",
-    run: async (_spec, fn) => {
-      void fn();
-      return "forged" as never;
-    },
-  });
-  expect(await detached.target()).toBe("ok");
-  expect(runs).toBe(2);
+  expect(callbackResults).toEqual(["ok", "ok"]);
 });
 
 test("success, throw, and reject run the method once and keep the original outcome", async () => {
@@ -214,44 +193,50 @@ test("success, throw, and reject run the method once and keep the original outco
   ]);
 });
 
-test("a failing or silent runner does not replace the method result or re-run it", async () => {
-  let runs = 0;
-  const instance = {
-    async target() {
-      runs += 1;
-      return "ok";
-    },
-  };
-
-  const throwing = withTracing(instance, {
-    method: "target",
-    span: "s",
+test.each([
+  {
+    name: "throws before invoking the method",
     run: async () => {
       throw new Error("tracer failed");
     },
-  });
-  expect(await throwing.target()).toBe("ok");
-  expect(runs).toBe(1);
-
-  const silent = withTracing(instance, {
-    method: "target",
-    span: "s",
+  },
+  {
+    name: "returns a forged result without invoking the method",
     run: async () => "forged" as never,
-  });
-  expect(await silent.target()).toBe("ok");
-  expect(runs).toBe(2);
-
-  const afterInvoke = withTracing(instance, {
-    method: "target",
-    span: "s",
+  },
+  {
+    name: "throws after invoking the method",
     run: async (_spec, fn) => {
       await fn();
       throw new Error("span end failed");
     },
-  });
-  expect(await afterInvoke.target()).toBe("ok");
-  expect(runs).toBe(3);
-});
+  },
+  {
+    name: "returns a forged result before the invoked method settles",
+    run: async (_spec, fn) => {
+      void fn();
+      return "forged" as never;
+    },
+  },
+] satisfies Array<{ name: string; run: TracingRunner }>)(
+  "preserves the result and runs once when the runner $name",
+  async ({ run }) => {
+    let runs = 0;
+    const instance = {
+      async target() {
+        runs += 1;
+        await Promise.resolve();
+        return "ok";
+      },
+    };
+    const wrapped = withTracing(instance, { method: "target", span: "s", run });
+
+    const result = await wrapped.target();
+
+    expect(result).toBe("ok");
+    expect(runs).toBe(1);
+  },
+);
 
 test("createClass instances keep non-target methods and ctor-bound deps", async () => {
   const defined = createClass<Probe>()

@@ -13,14 +13,18 @@ test("public error classes keep their codes, status, and names", () => {
   expect(exists.code).toBe("ALREADY_EXISTS");
   expect(exists.status).toBe(409);
   expect(exists.name).toBe("AlreadyExistsError");
+  expect(exists.message).toBe("Already exists");
 
   const stale = new StaleWriteError();
   expect(stale.code).toBe("STALE_WRITE");
   expect(stale.status).toBe(409);
+  expect(stale.name).toBe("StaleWriteError");
+  expect(stale.message).toBe("Stale write");
 
   const limit = new ListAllLimitError(10);
   expect(limit.code).toBe("LIST_ALL_LIMIT");
   expect(limit.status).toBe(400);
+  expect(limit.name).toBe("ListAllLimitError");
   expect(limit.message).toBe("listAll exceeded the maximum of 10 documents");
 
   const forbidden = new ForbiddenError("no", { code: "DENIED" });
