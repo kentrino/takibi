@@ -14,7 +14,9 @@ export type OtelMethodSpec<TCtor, M extends AnyMethod> = {
 };
 
 export type OtelSpec<T extends MethodMap, TCtor> = {
-  readonly [K in keyof T]?: OtelMethodSpec<TCtor, T[K]>;
+  readonly [K in keyof T]?: ReturnType<T[K]> extends Promise<unknown>
+    ? OtelMethodSpec<TCtor, T[K]>
+    : never;
 };
 
 /**
@@ -25,7 +27,7 @@ export function otel<T extends MethodMap, TCtor>(
   logger: InternalLogger | undefined,
   spec: OtelSpec<T, TCtor>,
 ): Partial<InterceptMap<T, TCtor>> {
-  const interceptors = {} as Partial<InterceptMap<T, TCtor>>;
+  const interceptors: Partial<InterceptMap<T, TCtor>> = {};
   for (const key of Object.keys(spec) as (keyof T & string)[]) {
     const methodSpec = spec[key];
     if (methodSpec === undefined) continue;
