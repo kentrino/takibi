@@ -40,9 +40,7 @@ export type IndexRangeBound = {
 
 export type IndexRangePlan = {
   equalities: { field: string; value: QueryScalar }[];
-  rangeField?: string;
-  range?: IndexRangeBound;
-};
+} & ({ rangeField?: never; range?: never } | { rangeField: string; range?: IndexRangeBound });
 
 export type ResolvedIndexScan = {
   index: CompiledIndex;
@@ -172,25 +170,22 @@ export function planIndexRange(
   where: QueryExpr | undefined,
 ): IndexRangePlan {
   const equalities: { field: string; value: QueryScalar }[] = [];
-  let rangeField: string | undefined;
-  let range: IndexRangeBound | undefined;
 
   for (const field of fields) {
     const equality = impliedEqualityValue(where, field);
-    if (equality !== undefined && rangeField === undefined) {
+    if (equality !== undefined) {
       equalities.push({ field, value: equality });
       continue;
     }
-    rangeField = field;
-    range = extractRangeBounds(where, field);
-    break;
+    const range = extractRangeBounds(where, field);
+    return {
+      equalities,
+      rangeField: field,
+      ...(range === undefined ? {} : { range }),
+    };
   }
 
-  return {
-    equalities,
-    ...(rangeField === undefined ? {} : { rangeField }),
-    ...(range === undefined ? {} : { range }),
-  };
+  return { equalities };
 }
 
 export function impliedEqualityValue(

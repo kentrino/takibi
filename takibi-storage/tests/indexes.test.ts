@@ -8,6 +8,7 @@ import {
   impliedEqualityValue,
   planIndexRange,
   resolveIndexedList,
+  type IndexRangePlan,
 } from "../src";
 
 test("assertCollectionIndexes rejects empty, duplicate, and reserved fields", () => {
@@ -41,6 +42,20 @@ test("planner extracts equality prefix and a single range field", () => {
     rangeField: "createdAt",
     range: { gte: "2026-01-01" },
   });
+});
+
+test("range bounds require a field, but equality-only and unbounded plans remain valid", () => {
+  // @ts-expect-error bounds without a field would be silently ignored by index scans
+  const invalid: IndexRangePlan = { equalities: [], range: { gte: 1 } };
+  void invalid;
+
+  const equalityOnly: IndexRangePlan = { equalities: [{ field: "ownerId", value: "u1" }] };
+  const unbounded: IndexRangePlan = { equalities: [], rangeField: "createdAt" };
+  expect(planIndexRange(["ownerId"], { field: "ownerId", op: "eq", value: "u1" })).toEqual(
+    equalityOnly,
+  );
+  expect(planIndexRange(["createdAt"], undefined)).toEqual(unbounded);
+  expect(planIndexRange([], undefined)).toEqual({ equalities: [] });
 });
 
 test("resolveIndexedList rejects unknown indexes and missing equality prefix", () => {
