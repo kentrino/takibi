@@ -19,7 +19,7 @@ interceptors. The instance is only the method surface.
 `ctor` is the value passed to `new` or `newWithInterceptors`. Interceptors
 receive that whole `ctor` so cross-cutting wrappers such as OpenTelemetry
 can read fields the method View dropped. `deps` is only for `run`: the
-constructor value after `define`'s identity cast or apply function. `args`
+constructor value passed directly by `define(name, run)` or transformed by an apply function. `args`
 is always the method argument tuple. Call `next(...args)` to keep earlier
 interceptors; `run(...args)` is the raw `define` body.
 
@@ -35,8 +35,8 @@ const defined = createClass<Pair>()
   .constructor<{ prefix: string }>({
     runtimeCheck: true,
   })
-  .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
-  .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
+  .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define("count", (deps) => deps.prefix.length);
 
 const instance = defined.newWithInterceptors(
   { prefix: "hi" },
@@ -53,8 +53,8 @@ Compare construction and method calls with a native class:
 vp run bench:create-class
 ```
 
-`define<To>(name, run)` is an identity cast; `define<To>(name, fn, run)`
-transforms at construction.
+`define(name, run)` passes the constructor value as dependencies;
+`define<To>(name, fn, run)` transforms it at construction.
 
 The apply function (or identity) always runs at construction so `run`
 receives `deps`. `runtimeCheck` wraps a failing apply with the method name.

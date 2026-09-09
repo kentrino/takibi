@@ -124,11 +124,11 @@ test("method arguments reach run and a single-argument hook", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define<{ prefix: string }>("greet", (deps, name) => {
+    .define("greet", (deps, name) => {
       expectTypeOf(deps).toEqualTypeOf<{ prefix: string }>();
       return `${deps.prefix} ${name}`;
     })
-    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
+    .define("count", (deps) => deps.prefix.length);
 
   const instance = defined.newWithInterceptors(
     { prefix: "hi" },
@@ -153,7 +153,7 @@ test("hook replays multi-argument methods with args", () => {
     .constructor<Record<string, never>>({
       runtimeCheck: true,
     })
-    .define<Record<string, never>>("add", (_deps, left, right) => left + right);
+    .define("add", (_deps, left, right) => left + right);
 
   const instance = defined.newWithInterceptors(
     {},
@@ -171,7 +171,7 @@ test("hook can skip run", async () => {
     .constructor<ConstructorArg>({
       runtimeCheck: true,
     })
-    .define<ConstructorArg>("bar", async () => {
+    .define("bar", async () => {
       ran += 1;
     });
 
@@ -192,8 +192,8 @@ test("newWithInterceptors merges layers and wraps the previous hook via next", (
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
-    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
+    .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+    .define("count", (deps) => deps.prefix.length);
 
   const instance = defined.newWithInterceptors(
     { prefix: "hi" },
@@ -222,8 +222,8 @@ test("a later layer that calls run skips earlier layers", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
-    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
+    .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+    .define("count", (deps) => deps.prefix.length);
 
   const instance = defined.newWithInterceptors(
     { prefix: "hi" },
@@ -268,14 +268,11 @@ test("define rejects leftover or unknown method names", () => {
   const incomplete = createClass<Pair>().constructor<{ prefix: string }>({
     runtimeCheck: false,
   });
-  const greet = incomplete.define<{ prefix: string }>(
-    "greet",
-    (deps, name) => `${deps.prefix} ${name}`,
-  );
+  const greet = incomplete.define("greet", (deps, name) => `${deps.prefix} ${name}`);
   expectTypeOf(greet).not.toHaveProperty("new");
   expectTypeOf(greet).not.toHaveProperty("newWithInterceptors");
 
-  const defined = greet.define<{ prefix: string }>("count", (deps) => deps.prefix.length);
+  const defined = greet.define("count", (deps) => deps.prefix.length);
   expectTypeOf(defined).toHaveProperty("new");
   expectTypeOf(defined).toHaveProperty("newWithInterceptors");
 
@@ -284,6 +281,25 @@ test("define rejects leftover or unknown method names", () => {
 
   // @ts-expect-error already defined
   greet.define("greet", (deps) => deps.prefix.length);
+});
+
+test("identity define cannot substitute constructor dependencies", () => {
+  const incomplete = createClass<Pair>().constructor<{ prefix: string }>({
+    runtimeCheck: true,
+  });
+
+  // @ts-expect-error identity define receives the constructor value
+  incomplete.define<{ count: number }>("greet", (deps, name) => `${deps.count}:${name}`);
+
+  const defined = incomplete
+    .define<{ count: number }>(
+      "greet",
+      (ctor) => ({ count: ctor.prefix.length }),
+      (deps, name) => `${deps.count}:${name}`,
+    )
+    .define("count", (deps) => deps.prefix.length);
+
+  expect(defined.new({ prefix: "hi" }).greet("ada")).toBe("2:ada");
 });
 
 test("prototype method names are not treated as interceptors", () => {
@@ -297,9 +313,9 @@ test("prototype method names are not treated as interceptors", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define<{ prefix: string }>("constructor", (deps) => `${deps.prefix} ctor`)
-    .define<{ prefix: string }>("toString", (deps) => `${deps.prefix} string`)
-    .define<{ prefix: string }>("valueOf", (deps) => deps.prefix.length);
+    .define("constructor", (deps) => `${deps.prefix} ctor`)
+    .define("toString", (deps) => `${deps.prefix} string`)
+    .define("valueOf", (deps) => deps.prefix.length);
 
   const instance = defined.new({ prefix: "hi" });
   expect(instance.constructor()).toBe("hi ctor");
@@ -312,8 +328,8 @@ test("newWithInterceptors accepts only a partial of the method surface", () => {
     .constructor<{ prefix: string }>({
       runtimeCheck: true,
     })
-    .define<{ prefix: string }>("greet", (deps, name) => `${deps.prefix} ${name}`)
-    .define<{ prefix: string }>("count", (deps) => deps.prefix.length);
+    .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+    .define("count", (deps) => deps.prefix.length);
 
   const instance = defined.newWithInterceptors(
     { prefix: "hi" },

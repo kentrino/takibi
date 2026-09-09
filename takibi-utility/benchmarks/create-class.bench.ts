@@ -77,15 +77,15 @@ const defined = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: false,
   })
-  .define<Ctor>("greet", (deps, name) => `${deps.prefix} ${name}`)
-  .define<Ctor>("count", (deps) => deps.prefix.length);
+  .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define("count", (deps) => deps.prefix.length);
 
 const definedWithCheck = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: true,
   })
-  .define<Ctor>("greet", (deps, name) => `${deps.prefix} ${name}`)
-  .define<Ctor>("count", (deps) => deps.prefix.length);
+  .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define("count", (deps) => deps.prefix.length);
 
 const passthroughInterceptors = {
   greet: ({ args, run }: { args: [name: string]; run: (name: string) => string }) => run(...args),
@@ -96,8 +96,8 @@ const definedWithInterceptors = createClass<Pair>()
   .constructor<Ctor>({
     runtimeCheck: false,
   })
-  .define<Ctor>("greet", (deps, name) => `${deps.prefix} ${name}`)
-  .define<Ctor>("count", (deps) => deps.prefix.length);
+  .define("greet", (deps, name) => `${deps.prefix} ${name}`)
+  .define("count", (deps) => deps.prefix.length);
 const nativeInstance = new NativePair(ctor);
 const createClassInstance = defined.new(ctor);
 const interceptedNativeInstance = new InterceptedNativePair(ctor, passthroughInterceptors);
