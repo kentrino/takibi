@@ -191,7 +191,7 @@ export function and<
     const permissions = new Set<AccessPermission>(ALL_PERMISSIONS);
     const reasons = new Map<AccessPermission, PolicyReason>();
     for (const policy of policies) {
-      const next = await evaluateAccessPolicy(policy, ctx as AccessContext<TCtx, TDoc>);
+      const next = await evaluateAccessPolicy(policy, ctx);
       for (const permission of permissions) {
         if (allows(next, permission)) continue;
         permissions.delete(permission);
@@ -216,14 +216,12 @@ export function or<
 >(
   ...policies: TPolicies & [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>> {
+  const inputPolicies: readonly CombinablePolicy<TCtx, TDoc>[] = policies;
   return brandConstrainedPolicy(async (ctx: AccessContext<TCtx, TDoc>) => {
     const permissions = new Set<AccessPermission>();
     const firstReasons = new Map<AccessPermission, PolicyReason>();
-    for (const [index, policy] of policies.entries()) {
-      const next = await evaluateAccessPolicy(
-        policy as CombinablePolicy<TCtx, TDoc>,
-        ctx as AccessContext<TCtx, TDoc>,
-      );
+    for (const [index, policy] of inputPolicies.entries()) {
+      const next = await evaluateAccessPolicy(policy, ctx);
       if (index === 0) {
         for (const permission of ALL_PERMISSIONS) {
           const reason = denialReasonOf(next, permission);
