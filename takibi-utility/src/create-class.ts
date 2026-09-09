@@ -49,9 +49,9 @@ type DefineForKey<
   TRuntimeCheck extends boolean,
   K extends TRemaining,
 > = {
-  <TDeps = TCtor>(
+  (
     name: K,
-    run: MethodRun<TDeps, T[K]>,
+    run: MethodRun<TCtor, T[K]>,
   ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
   <TDeps>(
     name: K,
