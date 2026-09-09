@@ -238,13 +238,11 @@ async function identifiedAction<TContext extends object, TServices>(
   policy: PolicySurface,
   schema: SchemaSurface,
 ) {
-  const { invocation, definition } = work;
   return identifyClassifiedAction({
-    classified: { invocation, definition },
+    classified: work,
     collections: state.runtime.collections,
     storage,
     ctx: state.context,
-    invocation,
     logger: state.runtime.logger,
     services: state.runtime.services,
     policy,

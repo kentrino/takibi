@@ -20,7 +20,8 @@ import {
 import { createSqliteDurableObjectStorage } from "../../takibi-testing/src/sqlite-storage.server";
 import { createBoundInvocationAdapters, type TakibiAdapterMap } from "../src/adapter-map";
 import { getTakibiRawInput, toTakibiInvocation } from "../src/invocation-adapters";
-import { executeAction } from "../src/action-executor";
+import { executeAction, classifyAction, identifyClassifiedAction } from "../src/action-executor";
+import { createInvocationCollaborators } from "../src/invocation-collaborators";
 import { executeOperation } from "../src/executor";
 import {
   resolveLocalAdapterMap,
@@ -28,7 +29,7 @@ import {
   type LocalExecution,
   type TakibiRuntimeAdapterMap,
 } from "../src/invocation-execution";
-import { InvocationPrepareApply } from "../src/invocation-paths";
+import { InvocationPrepareApply } from "../src/invocation-prepare-apply";
 import type { CollectionReadRequest, WireResponse } from "../src/protocol";
 import { invocationToHttpResponse, invocationToWireResponse } from "../src/invocation-response";
 import type { TakibiInvocationTypeMap, TakibiWireInvocation } from "../src/invocation-type-map";
@@ -343,17 +344,14 @@ test("runtime plans every collection operation", async () => {
         operation: "get",
         id: "missing",
       },
-      capability: "read-only",
       transactionBoundary: "none",
     },
     {
       invocation: { kind: "collection", collection: "items", operation: "list" },
-      capability: "read-only",
       transactionBoundary: "none",
     },
     {
       invocation: { kind: "collection", collection: "items", operation: "count" },
-      capability: "read-only",
       transactionBoundary: "none",
     },
     {
@@ -364,7 +362,6 @@ test("runtime plans every collection operation", async () => {
         id: "added",
         input: { value: "added" },
       },
-      capability: "writes",
       transactionBoundary: "apply",
     },
     {
@@ -375,7 +372,6 @@ test("runtime plans every collection operation", async () => {
         id: "set",
         input: { value: "set" },
       },
-      capability: "writes",
       transactionBoundary: "none",
     },
     {
@@ -386,7 +382,6 @@ test("runtime plans every collection operation", async () => {
         id: "missing",
         input: { value: "updated" },
       },
-      capability: "writes",
       transactionBoundary: "none",
     },
     {
@@ -396,12 +391,10 @@ test("runtime plans every collection operation", async () => {
         operation: "delete",
         id: "missing",
       },
-      capability: "writes",
       transactionBoundary: "none",
     },
   ] as const satisfies readonly {
     invocation: TakibiWireInvocation;
-    capability: "read-only" | "writes";
     transactionBoundary: "none" | "apply" | "full";
   }[];
 
@@ -411,7 +404,6 @@ test("runtime plans every collection operation", async () => {
       transactionBoundary: expected.transactionBoundary,
       work: {
         kind: "collection",
-        capability: expected.capability,
         request: {
           operation: expected.invocation.operation,
         },
@@ -462,7 +454,6 @@ test("runtime plans action transaction boundaries from definitions", async () =>
       transactionBoundary: expected.transactionBoundary,
       work: {
         kind: "action",
-        capability: "may-write",
         definition: { target: expected.target },
       },
     });
@@ -1508,4 +1499,21 @@ test("unknown action settles through toFailure without throwing", async () => {
       value: { code: "NOT_FOUND", status: 404 },
     },
   });
+});
+
+test("identify uses the classified invocation as the input source", async () => {
+  const { registry, collections, storage } = await createAdapters();
+  const invocation = { kind: "action", scope: "$", name: "atomicOrdered", input: "hello" } as const;
+  const classified = classifyAction(registry, invocation);
+  const { policy, schema } = createInvocationCollaborators({});
+  const identified = await identifyClassifiedAction({
+    classified,
+    collections,
+    storage,
+    ctx: { tenantId: "tenant-a" },
+    policy,
+    schema,
+  });
+  expect(identified.invocation).toBe(invocation);
+  expect(identified.rawInput).toBe("hello");
 });

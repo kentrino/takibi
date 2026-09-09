@@ -83,15 +83,14 @@ export async function identifyClassifiedAction<TCtx extends object>(args: {
   collections: CollectionsDef<TCtx>;
   storage: StorageDriver;
   ctx: TCtx;
-  invocation: ActionInvocation;
   logger?: InternalLogger;
   services?: unknown;
   policy: PolicySurface;
   schema: SchemaSurface;
 }): Promise<IdentifiedAction<TCtx>> {
-  const { classified, collections, storage, ctx, invocation, logger, policy, schema } = args;
+  const { classified, collections, storage, ctx, logger, policy, schema } = args;
   const services = args.services ?? {};
-  const { definition } = classified;
+  const { definition, invocation } = classified;
 
   // Guards run before document load and gate evaluation so auth failures do
   // not reveal whether a target id exists.

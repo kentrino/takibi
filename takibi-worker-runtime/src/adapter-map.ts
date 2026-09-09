@@ -20,7 +20,7 @@ import {
   type PolicySurface,
   type SchemaSurface,
 } from "./invocation-collaborators";
-import { InvocationPrepareApply } from "./invocation-paths";
+import { InvocationPrepareApply } from "./invocation-prepare-apply";
 import { SchemaParser, traceSchemaParser } from "./schema";
 import type { TakibiInvocationRuntime, TakibiInvocationTypeMap } from "./invocation-type-map";
 
@@ -62,7 +62,6 @@ export const TAKIBI_INVOCATION_REGISTRATION_GRAPH = {
   invocationSchema: ["invocationRuntime"],
   invocationActionHandler: ["invocationRuntime"],
   invocationPrepareApply: [...INVOCATION_PREPARE_ADAPTER_KEYS],
-  invocationTransactionBoundary: ["invocationPrepareApply"],
   transactionNone: ["invocationPrepareApply"],
   transactionApply: ["invocationPrepareApply"],
   transactionFull: ["invocationPrepareApply"],
@@ -97,13 +96,6 @@ export function createTakibiInvocationAdapterFactories<
           logger: ctor.logger ?? invocationRuntime.logger,
         }),
     invocationPrepareApply: inject(InvocationPrepareApply<TContext, TServices>),
-    invocationTransactionBoundary: ({
-      invocationPrepareApply,
-    }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationPrepareApply">) => ({
-      none: invocationPrepareApply,
-      apply: invocationPrepareApply,
-      full: invocationPrepareApply,
-    }),
     transactionNone: alias("invocationPrepareApply"),
     transactionApply: alias("invocationPrepareApply"),
     transactionFull: alias("invocationPrepareApply"),

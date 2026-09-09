@@ -3,7 +3,6 @@ import type {
   CollectionsDef,
   RuntimeActionDefinition,
 } from "@takibi/takibi-api";
-import type { CollectionOperation } from "@takibi/takibi-policy";
 import type {
   JsonValue,
   ObserverInvocationData,
@@ -27,26 +26,14 @@ export type TakibiWireInvocation = ActionInvocation | ExecuteRequest | Collectio
  */
 export type TakibiPublicInvocation = ObserverInvocationData;
 
-export type TakibiInvocationOperation =
-  | Readonly<{ kind: "action"; scope: string; name: string }>
-  | Readonly<{
-      kind: "collection";
-      collection: string;
-      operation: CollectionOperation;
-    }>;
-
 export type TakibiActionWork = Readonly<{
   kind: "action";
-  operation: TakibiInvocationOperation;
-  capability: "may-write";
   invocation: ActionInvocation;
   definition: RuntimeActionDefinition;
 }>;
 
 export type TakibiCollectionWork = Readonly<{
   kind: "collection";
-  operation: TakibiInvocationOperation;
-  capability: "read-only" | "writes";
   request: ExecuteRequest;
 }>;
 
