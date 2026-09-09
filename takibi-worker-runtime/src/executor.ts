@@ -14,6 +14,7 @@ import {
   type CollectionDefinition,
   type CollectionsApi,
   type CollectionsDef,
+  type ConditionalWriteOptions,
   type TrustedCollectionApi,
   type TrustedCollectionsApi,
 } from "@takibi/takibi-api";
@@ -576,7 +577,7 @@ async function collectDocuments(
 }
 
 function compileConditionalWriteOptions<TDoc, TIndexes extends Record<string, readonly string[]>>(
-  options: ListOptions<TDoc, TIndexes>,
+  options: ConditionalWriteOptions<TDoc, TIndexes> & ListOptions<TDoc, TIndexes>,
 ): StorageListOptions {
   const compiled = compileListOptions(options);
   if (!compiled?.where) {
