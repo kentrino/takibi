@@ -53,33 +53,29 @@ export function attachSnapshotOperations<TCollections extends CollectionsDef>(
   ready: Promise<void>,
   lifecycle: SnapshotLifecycle,
 ): DurableObjectCollectionsApi<TCollections> {
-  const api = trusted as DurableObjectCollectionsApi<TCollections>;
-  defineOwnerOperation(api, "$exportSnapshot", async () => {
-    await ready;
-    return exportSnapshot(lifecycle, maintenance);
-  });
-  defineOwnerOperation(api, "$restoreSnapshot", async (source: ReadableStream<Uint8Array>) => {
-    await ready;
-    return restoreSnapshot(lifecycle, maintenance, source);
-  });
-  defineOwnerOperation(api, "$resetAll", async () => {
-    await ready;
-    return resetAll(lifecycle, maintenance);
-  });
-  return api;
-}
-
-function defineOwnerOperation(
-  api: object,
-  name: "$exportSnapshot" | "$restoreSnapshot" | "$resetAll",
-  value: (...args: never[]) => unknown,
-): void {
-  Object.defineProperty(api, name, {
-    value,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
+  const operations = {
+    async $exportSnapshot() {
+      await ready;
+      return exportSnapshot(lifecycle, maintenance);
+    },
+    async $restoreSnapshot(source: ReadableStream<Uint8Array>) {
+      await ready;
+      return restoreSnapshot(lifecycle, maintenance, source);
+    },
+    async $resetAll() {
+      await ready;
+      return resetAll(lifecycle, maintenance);
+    },
+  } satisfies Omit<DurableObjectCollectionsApi<Record<never, never>>, "$transaction">;
+  for (const [name, value] of Object.entries(operations)) {
+    Object.defineProperty(trusted, name, {
+      value,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+  }
+  return trusted as DurableObjectCollectionsApi<TCollections>;
 }
 
 async function exportSnapshot(
