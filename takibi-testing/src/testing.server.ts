@@ -1,5 +1,3 @@
-import type { CollectionsDef } from "@takibi/takibi-api";
-import type { StorageDriver } from "@takibi/takibi-storage";
 import {
   createInProcessRuntime,
   getTestingFork,
@@ -25,12 +23,6 @@ type ServicesOption<TServices> = keyof TServices extends never
 export type SqliteTestBackendOptions<TCtx extends object, TInitial, TServices> = LoggingOptions & {
   resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
 } & ServicesOption<TServices>;
-
-/** Documents the layers the adapter consumes through the runtime bridge. */
-export type SqliteTestBackendRuntimeLayers = {
-  collections: CollectionsDef<object>;
-  driver: StorageDriver;
-};
 
 const createSqliteExecutor: TestingExecutorFactory = ({
   collections,
