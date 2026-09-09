@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 /// <reference types="node" />
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -53,7 +54,7 @@ test("createTakibi consumes API-owned builders and policy-owned grants", async (
   }));
   const handler = withSqliteTestBackend(app.actions({ posts: postsActions }));
   const client = createClient<typeof handler>("http://takibi.test", {
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   const added = await client.posts.add({ title: "hello" }, { id: "p1" });
   expect(added).toMatchObject({ ok: true });

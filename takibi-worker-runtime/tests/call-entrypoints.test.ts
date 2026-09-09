@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { z } from "zod";
@@ -264,7 +265,7 @@ test("in-process handler entry matches DO single and batch results", async () =>
     }),
   );
 
-  const added = await handler.request("http://fire.test/posts/p2", {
+  const added = await requestTakibi(handler, "http://fire.test/posts/p2", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "two" }),
@@ -275,7 +276,7 @@ test("in-process handler entry matches DO single and batch results", async () =>
     data: { id: "p2", title: "two" },
   });
 
-  const echoed = await handler.request("http://fire.test/$:echo", {
+  const echoed = await requestTakibi(handler, "http://fire.test/$:echo", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ marker: "local-action" }),
@@ -286,7 +287,7 @@ test("in-process handler entry matches DO single and batch results", async () =>
     data: { marker: "local-action", tenantId: "tenant-a" },
   });
 
-  const batch = await handler.request("http://fire.test/_batch", {
+  const batch = await requestTakibi(handler, "http://fire.test/_batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -338,7 +339,7 @@ test("Worker production dispatch resolves once and sends one stub fetch per Call
     stub: () => stub,
   });
 
-  const response = await handler.request("http://fire.test/_batch", {
+  const response = await requestTakibi(handler, "http://fire.test/_batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -512,7 +513,7 @@ test("executor spans stay one-per-invocation with DO server and in-process inter
   expect(doExecutors.every((span) => span.traceId === parent.traceId)).toBe(true);
 
   const local = withSqliteTestBackend(handler);
-  const localResponse = await local.request("http://fire.test/posts/p1");
+  const localResponse = await requestTakibi(local, "http://fire.test/posts/p1");
   expect(localResponse.status).toBe(200);
   const localExecutors = recording.spans.filter(
     (span) => span.name === "takibi.executor" && span.kind === "internal",
@@ -594,7 +595,7 @@ test("concurrent Calls on one executor keep distinct context and request tracing
 
   const local = withSqliteTestBackend(handler);
   const [leftLocal, rightLocal] = await Promise.all([
-    local.request("http://fire.test/$:echo", {
+    requestTakibi(local, "http://fire.test/$:echo", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -603,7 +604,7 @@ test("concurrent Calls on one executor keep distinct context and request tracing
       },
       body: JSON.stringify({ marker: "local-left" }),
     }),
-    local.request("http://fire.test/$:echo", {
+    requestTakibi(local, "http://fire.test/$:echo", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -635,7 +636,7 @@ test("tracing-disabled entrypoints still return existing results", async () => {
       input: { marker: "no-trace" },
       context: { tenantId: "tenant-a" },
     }),
-    local.request("http://fire.test/$:echo", {
+    requestTakibi(local, "http://fire.test/$:echo", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ marker: "no-trace" }),

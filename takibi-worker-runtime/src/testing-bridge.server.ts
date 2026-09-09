@@ -1,4 +1,3 @@
-import type { Hono } from "hono";
 import type { TakibiBrandCarrier, TakibiBrandRecord, TAKIBI_BRAND } from "./brand";
 import type { ContextResolver } from "./context/types";
 import type { ActionRegistry, CollectionsDef } from "@takibi/takibi-api";
@@ -49,9 +48,6 @@ export type TestingForkHandler<THandler extends BrandedHandler> = Pick<
   THandler,
   Extract<keyof THandler, typeof TAKIBI_BRAND | "handle" | "DurableObject">
 > &
-  (THandler extends Hono<{ Bindings: Record<string, unknown> }>
-    ? Hono<{ Bindings: Record<string, unknown> }>
-    : {}) &
   Disposable;
 
 type ForkOf<THandler extends BrandedHandler, TResult = THandler & Disposable> = TestingFork<

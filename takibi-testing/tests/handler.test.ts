@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { createClient } from "@takibi/takibi-client";
 import { fullAccess, none } from "@takibi/takibi-policy";
 import { createDurableObjectStorage } from "@takibi/takibi-storage";
@@ -36,11 +37,11 @@ test("SQLite test backend runs CRUD, actions, policies, unique constraints, and 
   const handler = withSqliteTestBackend(app.actions({ $: { ping } }));
   const admin = createClient<typeof handler>("https://takibi.test", {
     headers: () => headers("admin"),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   const guest = createClient<typeof handler>("https://takibi.test", {
     headers: () => headers("guest"),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   await expect(admin.posts.get("seeded")).resolves.toMatchObject({
@@ -156,7 +157,7 @@ test("SQLite-backed handler Durable Object exports and restores a snapshot", asy
 test("action handler receives SQLite test backend services and keeps production resolve", async () => {
   type Initial = { token: string };
   const seen: Initial[] = [];
-  const context = createTakibi<Initial>({ entry: "handle" })({
+  const context = createTakibi<Initial>()({
     resolve: ({ context: initial }) => {
       seen.push(initial);
       return { tenantId: "tenant-a" };

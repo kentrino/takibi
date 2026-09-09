@@ -81,6 +81,8 @@
     "@cloudflare/workers-types": "^4.20250803.0",
     "@noble/hashes": "catalog:",
     "@types/node": "catalog:",
+    "@takibi/takibi-hono-adapter": "workspace:*",
+    "hono": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",

@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -165,7 +166,7 @@ test("Takibi request and stage logs carry their active span", async () => {
       })
       .actions({});
     const handler = withSqliteTestBackend(baseHandler);
-    const response = await handler.request("https://takibi.test/posts/p1", {
+    const response = await requestTakibi(handler, "https://takibi.test/posts/p1", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "observed" }),
@@ -217,7 +218,7 @@ test("request failures correlate one error record to the request trace", async (
     cases.push({
       name: "decode",
       request: async () =>
-        decodeHandler.request("https://takibi.test/posts", {
+        requestTakibi(decodeHandler, "https://takibi.test/posts", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: "{",
@@ -238,7 +239,7 @@ test("request failures correlate one error record to the request trace", async (
     const resolveHandler = withSqliteTestBackend(resolveProductionHandler);
     cases.push({
       name: "resolve",
-      request: async () => resolveHandler.request("https://takibi.test/posts/p1"),
+      request: async () => requestTakibi(resolveHandler, "https://takibi.test/posts/p1"),
     });
 
     const sqliteApp = createTakibi()({
@@ -260,7 +261,7 @@ test("request failures correlate one error record to the request trace", async (
     cases.push({
       name: "SQLite executor",
       request: async () =>
-        sqliteHandler.request("https://takibi.test/$:boom", {
+        requestTakibi(sqliteHandler, "https://takibi.test/$:boom", {
           method: "POST",
         }),
     });

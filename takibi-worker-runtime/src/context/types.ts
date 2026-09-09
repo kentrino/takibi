@@ -22,7 +22,6 @@ import type {
   UniqueConstraintDeclaration,
 } from "@takibi/takibi-api";
 import type { PolicyHelper } from "@takibi/takibi-policy";
-import type { InitialHttpHandler } from "./http-handler";
 import type { TakibiBrandCarrier, TakibiBrandRecord } from "../brand";
 import type { LoggingOptions } from "../logging";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
@@ -103,7 +102,7 @@ export type TakibiBrand<
   };
   /**
    * oRPC-style entry: pass framework deps as typed initial `context`.
-   * Prefer this over `app.route` when AuthN needs DI / request-scoped services.
+   * Hono applications connect this entry with takibiServer from the Hono adapter.
    */
   handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
 };
@@ -115,8 +114,7 @@ export type TakibiHandler<
   TActionMap extends ActionScopeMap = Record<never, never>,
   TServices = Record<never, never>,
   TEnv = unknown,
-  THttp extends InitialHttpHandler<TInitial> = InitialHttpHandler<TInitial>,
-> = THttp & TakibiBrand<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv>;
+> = TakibiBrand<TCtx, TCollections, TInitial, TActionMap, TServices, TEnv>;
 
 type RootActionsConstraint<TActions, TCollections> = Record<
   Extract<keyof TActions, keyof TCollections | ReservedPublicName> | InvalidPublicKeys<TActions>,
@@ -142,7 +140,6 @@ export type AppDefinition<
   TInitial,
   TServices = Record<never, never>,
   TEnv = unknown,
-  THttp extends InitialHttpHandler<TInitial> = InitialHttpHandler<TInitial>,
 > = {
   [K in keyof TCollections & string]: {
     /**
@@ -170,7 +167,7 @@ export type AppDefinition<
    */
   actions<const TMap extends ActionScopeMap>(
     map: TMap & ActionsMapConstraint<TMap, TCollections>,
-  ): TakibiHandler<TCtx, TCollections, TInitial, TMap, TServices, TEnv, THttp>;
+  ): TakibiHandler<TCtx, TCollections, TInitial, TMap, TServices, TEnv>;
 };
 
 type PublicCollectionUniqueConstraint<C, TSchema extends StandardSchemaV1> = C extends {
@@ -229,7 +226,6 @@ export type CreateContextBuilder<
   TInitial,
   TServices = Record<never, never>,
   TEnv = unknown,
-  THttp extends InitialHttpHandler<TInitial> = InitialHttpHandler<TInitial>,
 > = {
   policy: PolicyHelper<TCtx>;
   defineCollection<
@@ -253,25 +249,21 @@ export type CreateContextBuilder<
     ] extends [never]
       ? []
       : ["Collection names must be safe TypeScript identifiers"]
-  ): AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv, THttp>;
+  ): AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv>;
 };
 
-export type CreateContextFn<
-  TInitial,
-  TEnv = unknown,
-  THttp extends InitialHttpHandler<TInitial> = InitialHttpHandler<TInitial>,
-> = {
+export type CreateContextFn<TInitial, TEnv = unknown> = {
   <R extends object | Promise<object>, TServices>(config: {
     resolve: (input: ContextResolverInput<TInitial>) => R;
     stub?: ContextStubResolver<Awaited<R>, TInitial>;
     services: ServicesFactory<TEnv, TServices>;
     logger?: LoggingOptions["logger"];
     logLevel?: LoggingOptions["logLevel"];
-  }): CreateContextBuilder<Awaited<R>, TInitial, TServices, TEnv, THttp>;
+  }): CreateContextBuilder<Awaited<R>, TInitial, TServices, TEnv>;
   <R extends object | Promise<object>>(config: {
     resolve: (input: ContextResolverInput<TInitial>) => R;
     stub?: ContextStubResolver<Awaited<R>, TInitial>;
     logger?: LoggingOptions["logger"];
     logLevel?: LoggingOptions["logLevel"];
-  }): CreateContextBuilder<Awaited<R>, TInitial, Record<never, never>, TEnv, THttp>;
+  }): CreateContextBuilder<Awaited<R>, TInitial, Record<never, never>, TEnv>;
 };

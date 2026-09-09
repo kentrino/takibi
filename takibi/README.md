@@ -43,26 +43,22 @@ name (`idFromString` and similar) skip that check.
 
 ## Server
 
-Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
-deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
-`createTakibi<Initial, Env>({ entry: "handle" })`, then call the returned factory with
-`{ resolve, stub?, services? }`. `TCtx` is inferred from `resolve`'s return
-(annotate with `Promise<AppCtx>` when you want a named / wider type). `stub`
-receives the same input plus the complete application-owned context as
-`resolved` and returns a Durable Object stub — no library-side `env` /
-`bindings` option. Empty initial uses `createTakibi()`; use `createTakibi<Env>()` when its services factory needs typed bindings.
+`createTakibi<Input, Env>()({ resolve, stub?, services? })` creates a framework-independent
+handler. Every request supplies its input through `handle(request, { context, prefix? })`.
+`resolve` infers the execution context; `stub` receives both the original input and
+that resolved context. `Env` describes the Durable Object bindings used by `services`.
+For empty input use `createTakibi()` and pass `context: {}`; with typed bindings use
+`createTakibi<Record<string, never>, Env>()`.
 
-`createTakibi()` builds a Hono application: `request`, `fetch`, Hono mounting, and
-`handle(request, {})` all use an empty initial object. `createTakibi<Initial, Env>({ entry: "handle" })`
-builds a handler with `handle(request, { context })` and `DurableObject`, without a Hono
-surface. It requires an explicit context even if `Initial` has only optional fields or
-includes `null`. This is a runtime distinction, not a conditional cast of an empty object.
+For Hono, install `@takibi/takibi-hono-adapter` and mount `takibiServer` on a static
+prefix wildcard. The application chooses the prefix and supplies request context;
+Takibi interprets all collection, action and batch paths beneath it. The adapter
+checks the context supplier against the handler's required input type.
 
-Migration: replace `createTakibi<Initial, Env>()` with
-`createTakibi<Initial, Env>({ entry: "handle" })` and pass initial dependencies through `handle`.
-Replace `createTakibi<Record<string, never>, Env>()` with `createTakibi<Env>()` for the
-empty-initial Hono mode. SQLite test forks preserve their source handler's entry mode;
-initial-mode tests must also pass a context through `handle`.
+Migration: remove factory entry options. Handlers and SQLite test forks expose
+`handle` and `DurableObject`, without Hono's `request` or `fetch` methods. Use
+`takibiServer({ handler, createContext })` with a Hono application for those methods,
+or call `handle` directly with an explicit context.
 
 `services` is a synchronous factory `({ env }) => TServices` that runs once per
 Durable Object instance in the generated constructor. Action handlers receive
@@ -75,7 +71,8 @@ JSON-safe-checked, and is invisible to collection `accessPolicy`, action
 
 ```ts
 import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "@takibi/takibi";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { takibiServer } from "@takibi/takibi-hono-adapter";
 import { z } from "zod";
 
 type User = { id: string; role: "admin" | "member"; clinicIds: string[] };
@@ -85,7 +82,7 @@ type Initial = {
 };
 type AppCtx = { tenantId: string; principal: User | null };
 
-const takibi = createTakibi<Initial>({ entry: "handle" })({
+const takibi = createTakibi<Initial>()({
   resolve: async ({ request, context }): Promise<AppCtx> => {
     const user = await context.di.getSession(request);
     const requested = request.headers.get("x-clinic-id"); // optional hint only
@@ -125,18 +122,16 @@ const handler = takibiApp.actions({});
 export type Handler = typeof handler;
 export class TenantStore extends handler.DurableObject {}
 
-const app = new Hono<{ Bindings: { TENANT_STORE: DurableObjectNamespace } }>();
-app.all("/foo/*", async (c) => {
-  const { matched, response } = await handler.handle(c.req.raw, {
-    prefix: "/foo",
-    context: {
-      di: c.get("di"),
-      env: c.env,
-    },
-  });
-  if (matched) return response;
-  return c.notFound();
-});
+type HonoEnv = { Bindings: Initial["env"]; Variables: { di: Initial["di"] } };
+const app = new Hono<HonoEnv>();
+// Register your middleware that sets c.var.di before this route.
+app.use(
+  "/foo/*",
+  takibiServer({
+    handler,
+    createContext: (c: Context<HonoEnv>) => ({ di: c.var.di, env: c.env }),
+  }),
+);
 export default app;
 ```
 

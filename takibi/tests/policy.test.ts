@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 /// <reference types="node" />
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -78,7 +79,9 @@ test("collection and action policies accept direct-package grants", async () => 
       .handler(({ id }) => ({ id })),
   }));
   const handler = withSqliteTestBackend(app.actions({ items: actions }));
-  const client = createClient<typeof handler>("http://takibi.test", { fetch: handler.request });
+  const client = createClient<typeof handler>("http://takibi.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
   const created = await client.items.add({ name: "alpha" }, { id: "item-1" });
   expect(created.ok).toBe(true);
   const pinged = await client.items.ping("item-1");

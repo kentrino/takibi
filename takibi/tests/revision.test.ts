@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
@@ -25,7 +26,9 @@ function createApp() {
 }
 
 function clientOf(handler: ReturnType<typeof createApp>) {
-  return createClient<typeof handler>("http://fire.test", { fetch: handler.request });
+  return createClient<typeof handler>("http://fire.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
 }
 
 test("add and create-via-set start at rev 1 and successful writes increment", async () => {

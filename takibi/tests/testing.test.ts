@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { createClient } from "@takibi/takibi/client";
 import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { expect, test } from "vite-plus/test";
@@ -26,10 +27,10 @@ test("SQLite test handlers inherit definitions without sharing storage", async (
   const first = withSqliteTestBackend(production);
   const second = withSqliteTestBackend(production);
   const firstClient = createClient<typeof production>("https://takibi.test", {
-    fetch: (input, init) => first.request(input, init),
+    fetch: (input, init) => requestTakibi(first, input, init),
   });
   const secondClient = createClient<typeof production>("https://takibi.test", {
-    fetch: (input, init) => second.request(input, init),
+    fetch: (input, init) => requestTakibi(second, input, init),
   });
 
   await firstClient.posts.add({ title: "first only" }, { id: "first-only" });
@@ -81,7 +82,7 @@ test("SQLite test handlers isolate concurrent requests from rolled-back atomic a
   const production = app.actions({ $: { failAfterWrite } });
   const handler = withSqliteTestBackend(production);
   const client = createClient<typeof production>("https://takibi.test", {
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const failing = client.failAfterWrite();

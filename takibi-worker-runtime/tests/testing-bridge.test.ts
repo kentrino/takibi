@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,7 +40,7 @@ test("withSqliteTestBackend looks up the same WeakMap registration", async () =>
     })
     .actions({});
   const forked = withSqliteTestBackend(handler);
-  const response = await forked.request("https://takibi.test/posts/p1", {
+  const response = await requestTakibi(forked, "https://takibi.test/posts/p1", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "via-bridge" }),

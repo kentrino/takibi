@@ -1,10 +1,11 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "@takibi/takibi-policy";
 import { createTakibi, readTakibiBrand, TAKIBI_BRAND, type LogEvent } from "../src";
 import { getTestingFork, type TestingExecutorFactory } from "../src/testing-bridge.server";
 import { Hono } from "hono";
-import { createHttpHandler, createInitialHttpHandler } from "../src/context/http-handler";
+import { createHttpHandler } from "../src/context/http-handler";
 import { createContext } from "../src/context/definition";
 import { ownStringEntries } from "../src/context/own-entries";
 
@@ -13,7 +14,7 @@ import { ownStringEntries } from "../src/context/own-entries";
 test("definition facade preserves initial, env, services, documents and actions", () => {
   type Initial = { auth: { tenant: string } };
   type Env = { PREFIX: string };
-  const context = createTakibi<Initial, Env>({ entry: "handle" })({
+  const context = createTakibi<Initial, Env>()({
     resolve: async ({ context }) => {
       expectTypeOf(context).toEqualTypeOf<Initial>();
       return { tenantId: context.auth.tenant };
@@ -50,9 +51,7 @@ test("definition facade preserves initial, env, services, documents and actions"
   >();
   expectTypeOf(readTakibiBrand(handler).actions.posts).toEqualTypeOf<typeof actions>();
   const invalid = () => {
-    // @ts-expect-error input and env type arguments require an explicit handle entry
-    createTakibi<Initial, Env>();
-    // @ts-expect-error input-context factories cannot select the empty Hono entry
+    // @ts-expect-error factory does not accept entry modes
     createTakibi<Initial, Env>({ entry: "hono" });
     // @ts-expect-error initial context is required
     void handler.handle(new Request("https://test/posts"), {});
@@ -69,14 +68,11 @@ test("definition facade preserves initial, env, services, documents and actions"
 test("forks own their registry, services, logger and backend disposal", async () => {
   const originalEvents: LogEvent[] = [];
   const forkEvents: LogEvent[] = [];
-  const source = createContext(
-    {
-      resolve: () => ({ tenant: "original" }),
-      services: (): { name: string } | null => ({ name: "production" }),
-      logger: { log: (event) => originalEvents.push(event) },
-    },
-    createHttpHandler,
-  )
+  const source = createContext({
+    resolve: () => ({ tenant: "original" }),
+    services: (): { name: string } | null => ({ name: "production" }),
+    logger: { log: (event) => originalEvents.push(event) },
+  })
     .defineCollections({
       posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
     })
@@ -108,11 +104,11 @@ test("forks own their registry, services, logger and backend disposal", async ()
     createBackend,
   );
   const right = fork({ services: { name: "right" } }, createBackend);
+  expect(Object.hasOwn(right, "handle")).toBe(true);
   expect(allocations[0].registry).not.toBe(allocations[1].registry);
   expect(allocations[0].services).toBeNull();
   expect(allocations[1].services).toEqual({ name: "right" });
-  if (!(left instanceof Hono) || !(right instanceof Hono)) throw new Error("not a Hono app");
-  const response = await left.request("https://test/posts/p1");
+  const response = await requestTakibi(left, "https://test/posts/p1");
   await expect(response.json()).resolves.toEqual({
     ok: true,
     data: { tenant: "left", initial: "present" },
@@ -167,12 +163,10 @@ test("typed own entries preserve descriptor values and never invoke accessors", 
 
 test("HTTP adapter preserves explicit null context and skips unmatched prefixes", async () => {
   const initialValues: unknown[] = [];
-  const handler = createInitialHttpHandler<null | Record<string, never>>(
-    async (_request, initial) => {
-      initialValues.push(initial);
-      return Response.json({ ok: true });
-    },
-  );
+  const handler = createHttpHandler<null | Record<string, never>>(async (_request, initial) => {
+    initialValues.push(initial);
+    return Response.json({ ok: true });
+  });
   expect(
     await handler.handle(new Request("https://test/posts/p1"), { prefix: "/api", context: {} }),
   ).toEqual({
@@ -184,9 +178,9 @@ test("HTTP adapter preserves explicit null context and skips unmatched prefixes"
   expect(initialValues).toEqual([null, {}]);
 });
 
-test("initial HTTP entry preserves its value and rejects the Hono surface", async () => {
+test("core HTTP entry preserves its value and rejects the Hono surface", async () => {
   const seen: ({ token: string } | null)[] = [];
-  const handler = createTakibi<{ token: string } | null>({ entry: "handle" })({
+  const handler = createTakibi<{ token: string } | null>()({
     resolve: async ({ context }) => {
       seen.push(context);
       return { tenantId: context?.token ?? "anonymous" };
@@ -208,11 +202,11 @@ test("initial HTTP entry preserves its value and rejects the Hono surface", asyn
   expect(handler).not.toBeInstanceOf(Hono);
   expect(Object.hasOwn(handler, "request")).toBe(false);
   const invalid = () => {
-    // @ts-expect-error explicit initial mode has no Hono request entry
+    // @ts-expect-error the core handler has no Hono request entry
     handler.request("https://test/");
-    // @ts-expect-error explicit initial mode cannot be mounted as a Hono app
+    // @ts-expect-error the core handler cannot be mounted as a Hono app
     new Hono().route("/api", handler);
-    // @ts-expect-error explicit initial mode requires context, including for nullable initial
+    // @ts-expect-error the core handler requires context, including for nullable initial
     void handler.handle(new Request("https://test/posts/p1"), {});
     // @ts-expect-error initial token has the wrong type
     void handler.handle(new Request("https://test/posts/p1"), { context: { token: 1 } });
@@ -226,21 +220,18 @@ test("initial HTTP entry preserves its value and rejects the Hono surface", asyn
   local[Symbol.dispose]();
 });
 
-test("empty initial HTTP entry remains mountable and supplies an empty object", async () => {
+test("empty input also requires an explicit context and exposes no Hono surface", async () => {
   const seen: Record<string, never>[] = [];
-  const handler = createHttpHandler(async (_request, initial) => {
+  const handler = createHttpHandler<Record<string, never>>(async (_request, initial) => {
     seen.push(initial);
     return Response.json({ ok: true });
   });
-  const parent = new Hono().route("/api", handler);
-  expect((await parent.request("https://test/api/posts/p1")).status).toBe(200);
-  await handler.handle(new Request("https://test/posts/p1"), {});
-  expect(seen).toEqual([{}, {}]);
+  await handler.handle(new Request("https://test/posts/p1"), { context: {} });
+  expect(seen).toEqual([{}]);
+  expect(Object.hasOwn(handler, "request")).toBe(false);
   const invalid = () => {
-    // @ts-expect-error a resolver requiring a token cannot be used by the empty entry
-    createHttpHandler(async (_request: Request, initial: { token: string }) =>
-      Response.json(initial),
-    );
+    // @ts-expect-error empty input is still supplied explicitly
+    void handler.handle(new Request("https://test/posts/p1"), {});
   };
   expectTypeOf(invalid).toBeFunction();
 });
