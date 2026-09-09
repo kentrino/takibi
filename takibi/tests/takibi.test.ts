@@ -2310,13 +2310,12 @@ test("two SQLite test backends do not share documents or seeds", async () => {
 test("SQLite test backend keeps the production resolve and handle context", async () => {
   type Initial = { token: string };
   const seen: Initial[] = [];
-  const production = createTakibi
-    .withInitial<Initial>()({
-      resolve: ({ context }) => {
-        seen.push(context);
-        return { tenantId: "tenant-a", user: { id: "u1", role: "member" as const } };
-      },
-    })
+  const production = createTakibi<Initial>({ entry: "handle" })({
+    resolve: ({ context }) => {
+      seen.push(context);
+      return { tenantId: "tenant-a", user: { id: "u1", role: "member" as const } };
+    },
+  })
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
   const handler = withSqliteTestBackend(production);

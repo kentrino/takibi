@@ -1310,7 +1310,7 @@ test("policy context uses the widened permission vocabulary", () => {
 
 test("createTakibi binds TInitial then infers execution context from resolve", () => {
   type Initial = { token: string };
-  const takibi = createTakibi.withInitial<Initial>()({
+  const takibi = createTakibi<Initial>({ entry: "handle" })({
     resolve: ({ context }) => {
       expectTypeOf(context).toEqualTypeOf<Initial>();
       return { tenantId: "acme" as const, user: { id: context.token } };
@@ -1517,7 +1517,7 @@ test("execution context keys are application-owned across resolve, stub, and pol
     clinic: { slug: string };
     actor: { id: string };
   };
-  const takibi = createTakibi.withInitial<Initial>()({
+  const takibi = createTakibi<Initial>({ entry: "handle" })({
     resolve: ({ context }): ClinicContext => {
       expectTypeOf(context.namespace).toEqualTypeOf<DurableObjectNamespace>();
       return { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
