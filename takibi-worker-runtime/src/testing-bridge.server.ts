@@ -62,7 +62,6 @@ export function createInProcessRuntime(input: {
   storage: DurableObjectStorage;
 }): {
   execute: Executor;
-  dispose(): void;
 } {
   const { collections, registry, logger, services, storage } = input;
   const indexRegistry = compileIndexRegistry(collections);
@@ -83,6 +82,5 @@ export function createInProcessRuntime(input: {
   })();
   return {
     execute: createInProcessExecutor(collections, registry, logger, services, driver, ready),
-    dispose() {},
   };
 }
