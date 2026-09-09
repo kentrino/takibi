@@ -11,7 +11,6 @@ import type {
 } from "@takibi/takibi-worker-runtime-contract";
 import type { ActionInvocation } from "../src/action-executor";
 import type { executeResolvedCollection, ExecuteRequest } from "../src/executor";
-import { createInvocationTransactionBoundaryContracts } from "../src/invocation-paths";
 import type {
   TakibiActionWork,
   TakibiApplyWork,
@@ -87,23 +86,27 @@ test("runtime bag uses pinned collections, storage, registry, logger, and servic
   >();
 });
 
-test("transaction-boundary class bindings retain their map relationships", () => {
-  type Contracts = ReturnType<
-    typeof createInvocationTransactionBoundaryContracts<AppContext, AppServices>
-  >;
+test("transaction adapter bindings retain their map relationships", () => {
+  type Contracts = InvocationAdapters<AppMap>;
   type State = InvocationExecutionView<AppMap>;
   type OtherContext = { readonly clinicId: number };
   type OtherMap = TakibiInvocationTypeMap<OtherContext, AppServices>;
   type OtherState = InvocationExecutionView<OtherMap>;
 
-  expectTypeOf<Contracts["none"]["prepare"]>().parameter(0).toEqualTypeOf<State>();
-  expectTypeOf<Contracts["none"]["prepare"]>().parameter(1).toEqualTypeOf<TakibiNoneWork>();
-  expectTypeOf<Contracts["none"]["apply"]>()
+  expectTypeOf<Contracts["transactionNone"]["prepare"]>().parameter(0).toEqualTypeOf<State>();
+  expectTypeOf<Contracts["transactionNone"]["prepare"]>()
+    .parameter(1)
+    .toEqualTypeOf<TakibiNoneWork>();
+  expectTypeOf<Contracts["transactionNone"]["apply"]>()
     .parameter(1)
     .toEqualTypeOf<TakibiPrepared<AppContext>>();
-  expectTypeOf<Contracts["apply"]["prepare"]>().parameter(1).toEqualTypeOf<TakibiApplyWork>();
-  expectTypeOf<Contracts["full"]["prepare"]>().parameter(1).toEqualTypeOf<TakibiActionWork>();
-  expectTypeOf<Contracts["full"]["apply"]>()
+  expectTypeOf<Contracts["transactionApply"]["prepare"]>()
+    .parameter(1)
+    .toEqualTypeOf<TakibiApplyWork>();
+  expectTypeOf<Contracts["transactionFull"]["prepare"]>()
+    .parameter(1)
+    .toEqualTypeOf<TakibiActionWork>();
+  expectTypeOf<Contracts["transactionFull"]["apply"]>()
     .parameter(1)
     .toEqualTypeOf<TakibiPrepared<AppContext>>();
 
@@ -117,14 +120,14 @@ test("transaction-boundary class bindings retain their map relationships", () =>
     otherWork: Readonly<{ kind: "foreign" }>,
     storage: StorageDriver,
   ) => {
-    void contracts.none.prepare(state, work, storage);
-    void contracts.none.apply(state, prepared, storage);
+    void contracts.transactionNone.prepare(state, work, storage);
+    void contracts.transactionNone.apply(state, prepared, storage);
     // @ts-expect-error A phase view from another context map cannot be rebound.
-    void contracts.none.prepare(otherState, work, storage);
+    void contracts.transactionNone.prepare(otherState, work, storage);
     // @ts-expect-error Prepared work must carry the same context as the bound contract.
-    void contracts.none.apply(state, otherPrepared, storage);
+    void contracts.transactionNone.apply(state, otherPrepared, storage);
     // @ts-expect-error Work must match the none work slot bound to the class.
-    void contracts.none.prepare(state, otherWork, storage);
+    void contracts.transactionNone.prepare(state, otherWork, storage);
   };
 
   expectTypeOf(rejectedBindings).toBeFunction();

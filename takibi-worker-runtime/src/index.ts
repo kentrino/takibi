@@ -59,7 +59,7 @@ export {
   createActionHandler,
   createInvocationCollaborators,
 } from "./invocation-collaborators";
-export { createInvocationPrepareApply, InvocationPrepareApply } from "./invocation-paths";
+export { createInvocationPrepareApply, InvocationPrepareApply } from "./invocation-prepare-apply";
 export {
   resolveLocalAdapterMap,
   resolveLocalExecution,
@@ -71,7 +71,6 @@ export type {
   TakibiApplyWork,
   TakibiCollectionWork,
   TakibiFullWork,
-  TakibiInvocationOperation,
   TakibiInvocationRuntime,
   TakibiInvocationTypeMap,
   TakibiNoneWork,

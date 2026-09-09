@@ -1,12 +1,12 @@
 import { ActionRegistry, type CollectionsDef } from "@takibi/takibi-api";
 import type { JsonValue } from "@takibi/takibi-shared-types";
 import {
-  createActionExecutionPlan,
   executePlan,
   unwrapInvocationAdapterResult,
   type InvocationExecutionView,
 } from "@takibi/takibi-worker-runtime-contract";
 import { classifyAction } from "./action-resolution";
+import { createTakibiActionPlan } from "./invocation-plan";
 import { toTakibiInvocation } from "./invocation-adapters";
 import {
   createInvocationPrepareApply,
@@ -55,22 +55,8 @@ export async function executeAction<TCtx extends object>(
   services: unknown = {},
   prepareApply: InvocationPrepareApply<TCtx> = createInvocationPrepareApply({ logger }),
 ): Promise<JsonValue> {
-  const classified = classifyAction(registry, invocation);
-  const work: TakibiActionWork = {
-    kind: "action",
-    operation: { kind: "action", scope: invocation.scope, name: invocation.name },
-    capability: "may-write",
-    invocation,
-    definition: classified.definition,
-  };
-  const plan = createActionExecutionPlan(
-    {
-      kind: "action",
-      target: classified.definition.target,
-      atomic: classified.definition.atomic,
-    },
-    work,
-  );
+  const plan = createTakibiActionPlan(classifyAction(registry, invocation));
+  const { work } = plan;
   const view: InvocationExecutionView<TakibiInvocationTypeMap<TCtx>> = {
     context: ctx,
     invocation: toTakibiInvocation(invocation),

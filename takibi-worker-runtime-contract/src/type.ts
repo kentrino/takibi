@@ -330,7 +330,6 @@ export type RuntimeAdapterMap<T extends RuntimeTypeMap = RuntimeTypeMap> = {
     | T["invocation"]["applyPrepared"]
     | T["invocation"]["fullPrepared"]
   >;
-  invocationTransactionBoundary: InvocationTransactionBoundaryContracts<T["invocation"]>;
   transactionNone: InvocationTransactionBoundaryContracts<T["invocation"]>["none"];
   transactionApply: InvocationTransactionBoundaryContracts<T["invocation"]>["apply"];
   transactionFull: InvocationTransactionBoundaryContracts<T["invocation"]>["full"];
@@ -436,7 +435,6 @@ type InvocationCompositionKeys =
   | "invocationSchema"
   | "invocationActionHandler"
   | "invocationPrepareApply"
-  | "invocationTransactionBoundary"
   | "invocationRun";
 
 type CallCompositionKeys =

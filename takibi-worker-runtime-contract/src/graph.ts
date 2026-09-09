@@ -27,7 +27,6 @@ export const RUNTIME_ADAPTER_GRAPH = {
   invocationSchema: [],
   invocationActionHandler: [],
   invocationPrepareApply: INVOCATION_PREPARE_ADAPTER_KEYS,
-  invocationTransactionBoundary: ["invocationPrepareApply"],
   transactionNone: ["invocationPrepareApply"],
   transactionApply: ["invocationPrepareApply"],
   transactionFull: ["invocationPrepareApply"],
