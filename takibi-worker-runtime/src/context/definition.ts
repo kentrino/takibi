@@ -1,3 +1,4 @@
+import type { InitialHttpHandler, ServeCall } from "./http-handler";
 import {
   ActionRegistry,
   TakibiError,
@@ -8,6 +9,7 @@ import {
   defineCollection,
   type ActionDefinitions,
   type CollectionsDef,
+  type RootActionArgs,
 } from "@takibi/takibi-api";
 import { createPolicyHelper } from "@takibi/takibi-policy";
 import { assertCollectionIndexes } from "@takibi/takibi-storage";
@@ -21,14 +23,13 @@ import type {
   ActionScopeMap,
   AppDefinition,
   ContextConfig,
-  ContextResolver,
-  ContextStubResolver,
   CreateContextBuilder,
+  PublicCollectionsMap,
+  CollectionsWithMatchingDefinitions,
   InternalCollectionsOptions,
-  ServicesFactory,
 } from "./types";
 
-function validateCollections(collections: CollectionsDef<object>): void {
+function validateCollections<TCtx extends object>(collections: CollectionsDef<TCtx>): void {
   for (const [name, definition] of ownStringEntries(collections, "INVALID_COLLECTION", {
     subject: "Collections",
     keys: "Collection names",
@@ -55,19 +56,28 @@ function registerActions(map: ActionScopeMap, collections: ReadonlySet<string>):
 }
 
 /** Runtime implementation of the typed, dynamically keyed definition API. */
-export function createContext<TCtx extends object, TInitial, TEnv, TServices>(
+export function createContext<
+  TCtx extends object,
+  TInitial,
+  TEnv,
+  TServices,
+  THttp extends InitialHttpHandler<TInitial>,
+>(
   config: ContextConfig<TCtx, TInitial, TEnv, TServices>,
-): CreateContextBuilder<TCtx, TInitial, TServices, TEnv> {
+  http: (serve: ServeCall<TInitial>) => THttp,
+): CreateContextBuilder<TCtx, TInitial, TServices, TEnv, THttp> {
   const { resolve, services, stub } = config;
   const defaults = mergeLoggingOptions({}, config);
   return {
     policy: createPolicyHelper<TCtx>(),
     defineCollection,
-    defineCollections<TCollections extends CollectionsDef<TCtx>>(
-      collections: TCollections,
+    defineCollections<const TCollections extends PublicCollectionsMap<TCollections, TCtx>>(
+      collections: TCollections & CollectionsWithMatchingDefinitions<TCollections, TCtx>,
       options: InternalCollectionsOptions = {},
-    ) {
-      const runtimeCollections = collections as unknown as CollectionsDef<object>;
+    ): AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv, THttp> {
+      // The public mapped constraint checks each schema/policy pair; the runtime
+      // map needs a homogeneous view for validation and storage construction.
+      const runtimeCollections = collections as TCollections & CollectionsDef<TCtx>;
       validateCollections(runtimeCollections);
       const names = new Set(Object.keys(collections));
       const settings = { ...defaults, ...options };
@@ -83,9 +93,14 @@ export function createContext<TCtx extends object, TInitial, TEnv, TServices>(
         };
       }
       // Collection names were checked against these API members before merging.
-      return Object.assign(scoped, {
-        defineAction: createRootActionBuilder,
-        actions(map: ActionScopeMap) {
+      type Definition = AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv, THttp>;
+      // Only generated collection members need a structural assertion. The fixed
+      // action methods below are checked against the public definition normally.
+      const members = scoped as Pick<Definition, keyof TCollections & string>;
+      return Object.assign(members, {
+        defineAction: () =>
+          createRootActionBuilder<TCtx, RootActionArgs<TCtx, TCollections, TServices>>(),
+        actions<const TMap extends ActionScopeMap>(map: TMap) {
           const application = new Application(
             {
               collections: runtimeCollections,
@@ -93,18 +108,15 @@ export function createContext<TCtx extends object, TInitial, TEnv, TServices>(
               registry: registerActions(map, names),
             },
             {
-              // The runtime transports opaque context and services; these
-              // callbacks belong to this builder's typed configuration.
-              resolve: resolve as ContextResolver<object, unknown>,
-              services: services as ServicesFactory<unknown, unknown> | undefined,
+              resolve,
+              services,
+              http,
               options: settings,
             },
           );
-          return application.mount(
-            stubBackend(stub as ContextStubResolver<object, unknown> | undefined),
-          );
+          return application.mount(stubBackend(stub));
         },
-      }) as unknown as AppDefinition<TCtx, TCollections, TInitial, TServices, TEnv>;
+      });
     },
   };
 }

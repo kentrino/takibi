@@ -45,12 +45,24 @@ name (`idFromString` and similar) skip that check.
 
 Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
 deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
-`createTakibi<Initial, Env>()`, then call the returned factory with
+`createTakibi.withInitial<Initial, Env>()`, then call the returned factory with
 `{ resolve, stub?, services? }`. `TCtx` is inferred from `resolve`'s return
 (annotate with `Promise<AppCtx>` when you want a named / wider type). `stub`
 receives the same input plus the complete application-owned context as
 `resolved` and returns a Durable Object stub — no library-side `env` /
-`bindings` option. Empty initial uses `createTakibi()` (no type argument).
+`bindings` option. Empty initial uses `createTakibi()`; use `createTakibi<Env>()` when its services factory needs typed bindings.
+
+`createTakibi()` builds a Hono application: `request`, `fetch`, Hono mounting, and
+`handle(request, {})` all use an empty initial object. `createTakibi.withInitial<Initial, Env>()`
+builds a handler with `handle(request, { context })` and `DurableObject`, without a Hono
+surface. It requires an explicit context even if `Initial` has only optional fields or
+includes `null`. This is a runtime distinction, not a conditional cast of an empty object.
+
+Migration: replace `createTakibi<Initial, Env>()` with
+`createTakibi.withInitial<Initial, Env>()` and pass initial dependencies through `handle`.
+Replace `createTakibi<Record<string, never>, Env>()` with `createTakibi<Env>()` for the
+empty-initial Hono mode. SQLite test forks preserve their source handler's entry mode;
+initial-mode tests must also pass a context through `handle`.
 
 `services` is a synchronous factory `({ env }) => TServices` that runs once per
 Durable Object instance in the generated constructor. Action handlers receive
@@ -73,7 +85,7 @@ type Initial = {
 };
 type AppCtx = { tenantId: string; principal: User | null };
 
-const takibi = createTakibi<Initial>()({
+const takibi = createTakibi.withInitial<Initial>()({
   resolve: async ({ request, context }): Promise<AppCtx> => {
     const user = await context.di.getSession(request);
     const requested = request.headers.get("x-clinic-id"); // optional hint only

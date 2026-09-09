@@ -28,29 +28,33 @@ import { createDurableObjectCollectionsApi } from "./snapshot";
 import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
 import { storageAdd } from "./typed-storage";
 
-type DurableObjectClass<TCollections> = new (
+type DurableObjectClass<TCollections, TEnv> = new (
   state: DurableObjectState,
-  env: unknown,
+  env: TEnv,
 ) => DurableObject & {
   $collections: DurableObjectCollectionsApi<TCollections>;
 };
 
-export function createDurableObjectClass<TCollections extends CollectionsDef>(
+export function createDurableObjectClass<
+  TCollections extends CollectionsDef,
+  TEnv = unknown,
+  TServices = unknown,
+>(
   collections: TCollections,
   registry: ActionRegistry,
   options: InternalCollectionsOptions,
   logger: InternalLogger | undefined,
-  createServices?: (input: { env: unknown }) => unknown,
-): DurableObjectClass<TCollections> {
+  createServices?: (input: { env: TEnv }) => TServices,
+): DurableObjectClass<TCollections, TEnv> {
   return class TakibiTenantObject implements DurableObject {
     readonly #state: DurableObjectState;
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
-    readonly #services: unknown;
+    readonly #services: TServices | Record<never, never>;
     readonly #maintenance: MaintenanceController;
     readonly $collections: DurableObjectCollectionsApi<TCollections>;
 
-    constructor(state: DurableObjectState, env: unknown) {
+    constructor(state: DurableObjectState, env: TEnv) {
       this.#services = createServices ? createServices({ env }) : {};
       this.#state = state;
       const registry = compileIndexRegistry(collections);

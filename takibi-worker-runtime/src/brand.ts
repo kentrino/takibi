@@ -25,13 +25,21 @@ export type TakibiBrandCarrier<TBrand = TakibiBrandRecord> = {
  * `context` / `initial` / `services` stay null; only collections and
  * actions are runtime values.
  */
-export function assignTakibiBrand<T extends object, TCollections, TActions>(
+export function assignTakibiBrand<
+  T extends object,
+  TCollections,
+  TActions,
+  TContext = null,
+  TInitial = null,
+  TServices = null,
+>(
   target: T,
   definitions: {
     collections: TCollections;
     actions: TActions;
   },
-): T & TakibiBrandCarrier<TakibiBrandRecord<null, null, TCollections, TActions, null>> {
+): T &
+  TakibiBrandCarrier<TakibiBrandRecord<TContext, TInitial, TCollections, TActions, TServices>> {
   const brand: TakibiBrandRecord<null, null, TCollections, TActions, null> = {
     context: null,
     initial: null,
@@ -46,7 +54,7 @@ export function assignTakibiBrand<T extends object, TCollections, TActions>(
     enumerable: false,
   });
   return target as T &
-    TakibiBrandCarrier<TakibiBrandRecord<null, null, TCollections, TActions, null>>;
+    TakibiBrandCarrier<TakibiBrandRecord<TContext, TInitial, TCollections, TActions, TServices>>;
 }
 
 export function readTakibiBrand<TBrand>(target: TakibiBrandCarrier<TBrand>): TBrand {

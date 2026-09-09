@@ -16,12 +16,12 @@ import type { StorageDriver } from "@takibi/takibi-storage";
 import { debugInvocationFields } from "./runtime";
 import type { ContextStubResolver } from "./types";
 
-export type ExecutorInput<TInitial = unknown> = {
+export type ExecutorInput<TInitial = unknown, TCtx extends object = object> = {
   request: Request;
   /** Initial context from `handle(..., { context })`, before `resolve` ran. */
   initial: TInitial;
   /** Resolved execution context (already asserted serializable). */
-  ctx: Record<string, unknown>;
+  ctx: TCtx & Record<string, unknown>;
   invocation: PublicRequest;
   tracer: TakibiTracer | undefined;
   resolveSpan: SpanContext | undefined;
@@ -31,18 +31,18 @@ export type ExecutorInput<TInitial = unknown> = {
  * Runs a decoded invocation against one storage backend and returns the
  * wire-level result.
  */
-export type Executor<TInitial = unknown> = (
-  input: ExecutorInput<TInitial>,
+export type Executor<TInitial = unknown, TCtx extends object = object> = (
+  input: ExecutorInput<TInitial, TCtx>,
 ) => Promise<WireResponse>;
 
-export function createInProcessExecutor(
-  collections: CollectionsDef<object>,
+export function createInProcessExecutor<TCtx extends object>(
+  collections: CollectionsDef<TCtx>,
   registry: ActionRegistry,
   logger: InternalLogger | undefined,
   services: unknown,
   driver: StorageDriver,
   ready: Promise<void>,
-): Executor {
+): Executor<unknown, TCtx> {
   return async ({ request, ctx, invocation, tracer, resolveSpan }) => {
     await ready;
     const local = await resolveLocalExecution({
@@ -62,10 +62,10 @@ export function createInProcessExecutor(
   };
 }
 
-export function createStubExecutor<TInitial>(
-  resolveStub: ContextStubResolver<object, TInitial> | undefined,
+export function createStubExecutor<TInitial, TCtx extends object>(
+  resolveStub: ContextStubResolver<TCtx, TInitial> | undefined,
   logger: InternalLogger | undefined,
-): Executor<TInitial> {
+): Executor<TInitial, TCtx> {
   return async ({ request, initial, ctx, invocation, resolveSpan }) => {
     if (!resolveStub) {
       throw new TakibiError(

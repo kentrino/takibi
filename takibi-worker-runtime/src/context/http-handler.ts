@@ -8,16 +8,38 @@ import {
   readRequestJson,
   type PublicRequest,
 } from "../http";
-import type { HandleResult } from "./types";
+import type { HandleOptions, HandleResult } from "./types";
 
-export type ServeCall = (
+export type ServeCall<TInitial = unknown> = (
   request: Request,
-  initial: unknown,
+  initial: TInitial,
   decode: () => Promise<PublicRequest>,
 ) => Promise<Response>;
 
 /** The two HTTP entry points share a Call; Hono alone owns route matching. */
-export function createHttpHandler(serve: ServeCall) {
+export type InitialHttpHandler<TInitial> = {
+  handle(request: Request, options: HandleOptions<TInitial>): Promise<HandleResult>;
+};
+
+/** This entry always receives the initial value from its caller. */
+export function createInitialHttpHandler<TInitial>(
+  serve: ServeCall<TInitial>,
+): InitialHttpHandler<TInitial> {
+  return {
+    async handle(request, options) {
+      if (!matchesPublicPrefix(new URL(request.url).pathname, options.prefix)) {
+        return { matched: false };
+      }
+      const response = await serve(request, options.context, () =>
+        decodePublicHttp(request, options.prefix),
+      );
+      return { matched: true, response };
+    },
+  };
+}
+
+/** Only a resolver accepting an empty initial value can enter through Hono. */
+export function createHttpHandler(serve: ServeCall<Record<string, never>>) {
   const app = new Hono<{ Bindings: Record<string, unknown> }>();
   const mount = (path: string, segmentCount: number) => {
     app.all(path, async (c) => {
@@ -48,20 +70,13 @@ export function createHttpHandler(serve: ServeCall) {
     return c.newResponse(response.body, response);
   });
 
+  const initialHandler = createInitialHttpHandler(serve);
   return Object.assign(app, {
-    async handle(
+    handle(
       request: Request,
-      options: { prefix?: string; context?: unknown },
+      options: { prefix?: string; context?: Record<string, never> },
     ): Promise<HandleResult> {
-      if (!matchesPublicPrefix(new URL(request.url).pathname, options.prefix)) {
-        return { matched: false };
-      }
-      const response = await serve(
-        request,
-        options.context === undefined ? {} : options.context,
-        () => decodePublicHttp(request, options.prefix),
-      );
-      return { matched: true, response };
+      return initialHandler.handle(request, { ...options, context: options.context ?? {} });
     },
   });
 }

@@ -4,7 +4,7 @@ import { fullAccess } from "@takibi/takibi-policy";
 import { createTakibi, readTakibiBrand, TAKIBI_BRAND, type LogEvent } from "../src";
 import { getTestingFork, type TestingExecutorFactory } from "../src/testing-bridge.server";
 import { Hono } from "hono";
-import { createHttpHandler } from "../src/context/http-handler";
+import { createHttpHandler, createInitialHttpHandler } from "../src/context/http-handler";
 import { createContext } from "../src/context/definition";
 import { ownStringEntries } from "../src/context/own-entries";
 
@@ -13,7 +13,7 @@ import { ownStringEntries } from "../src/context/own-entries";
 test("definition facade preserves initial, env, services, documents and actions", () => {
   type Initial = { auth: { tenant: string } };
   type Env = { PREFIX: string };
-  const context = createTakibi<Initial, Env>()({
+  const context = createTakibi.withInitial<Initial, Env>()({
     resolve: async ({ context }) => {
       expectTypeOf(context).toEqualTypeOf<Initial>();
       return { tenantId: context.auth.tenant };
@@ -65,18 +65,21 @@ test("definition facade preserves initial, env, services, documents and actions"
 test("forks own their registry, services, logger and backend disposal", async () => {
   const originalEvents: LogEvent[] = [];
   const forkEvents: LogEvent[] = [];
-  const source = createContext({
-    resolve: () => ({ tenant: "original" }),
-    services: () => ({ name: "production" }),
-    logger: { log: (event) => originalEvents.push(event) },
-  })
+  const source = createContext(
+    {
+      resolve: () => ({ tenant: "original" }),
+      services: (): { name: string } | null => ({ name: "production" }),
+      logger: { log: (event) => originalEvents.push(event) },
+    },
+    createHttpHandler,
+  )
     .defineCollections({
       posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
     })
     .actions({});
   const fork = getTestingFork(source);
   if (!fork) throw new Error("testing fork is missing");
-  const allocations: Parameters<TestingExecutorFactory>[0][] = [];
+  const allocations: Pick<Parameters<TestingExecutorFactory>[0], "registry" | "services">[] = [];
   const disposals: number[] = [];
   const createBackend: TestingExecutorFactory = (input) => {
     const id = allocations.push(input);
@@ -160,15 +163,98 @@ test("typed own entries preserve descriptor values and never invoke accessors", 
 
 test("HTTP adapter preserves explicit null context and skips unmatched prefixes", async () => {
   const initialValues: unknown[] = [];
-  const handler = createHttpHandler(async (_request, initial) => {
-    initialValues.push(initial);
-    return Response.json({ ok: true });
-  });
-  expect(await handler.handle(new Request("https://test/posts/p1"), { prefix: "/api" })).toEqual({
+  const handler = createInitialHttpHandler<null | Record<string, never>>(
+    async (_request, initial) => {
+      initialValues.push(initial);
+      return Response.json({ ok: true });
+    },
+  );
+  expect(
+    await handler.handle(new Request("https://test/posts/p1"), { prefix: "/api", context: {} }),
+  ).toEqual({
     matched: false,
   });
   expect(initialValues).toEqual([]);
   await handler.handle(new Request("https://test/posts/p1"), { context: null });
-  await handler.handle(new Request("https://test/posts/p1"), {});
+  await handler.handle(new Request("https://test/posts/p1"), { context: {} });
   expect(initialValues).toEqual([null, {}]);
+});
+
+test("initial HTTP entry preserves its value and rejects the Hono surface", async () => {
+  const seen: ({ token: string } | null)[] = [];
+  const handler = createTakibi
+    .withInitial<{ token: string } | null>()({
+      resolve: async ({ context }) => {
+        seen.push(context);
+        return { tenantId: context?.token ?? "anonymous" };
+      },
+    })
+    .defineCollections({})
+    .actions({});
+  const fork = getTestingFork(handler);
+  if (!fork) throw new Error("missing fork");
+  const local = fork({}, () => ({
+    execute: async ({ ctx }) => ({ ok: true, data: ctx }),
+    dispose() {},
+  }));
+  for (const context of [{ token: "session" }, null]) {
+    const result = await local.handle(new Request("https://test/posts/p1"), { context });
+    expect(result.matched).toBe(true);
+  }
+  expect(seen).toEqual([{ token: "session" }, null]);
+  expect(handler).not.toBeInstanceOf(Hono);
+  expect(Object.hasOwn(handler, "request")).toBe(false);
+  const invalid = () => {
+    // @ts-expect-error explicit initial mode has no Hono request entry
+    handler.request("https://test/");
+    // @ts-expect-error explicit initial mode cannot be mounted as a Hono app
+    new Hono().route("/api", handler);
+    // @ts-expect-error explicit initial mode requires context, including for nullable initial
+    void handler.handle(new Request("https://test/posts/p1"), {});
+    // @ts-expect-error initial token has the wrong type
+    void handler.handle(new Request("https://test/posts/p1"), { context: { token: 1 } });
+    // @ts-expect-error fork resolver must produce this handler's resolved context
+    fork({ resolve: () => ({ tenantId: 1 }) }, () => ({
+      execute: async () => ({ ok: true, data: null }),
+      dispose() {},
+    }));
+  };
+  expectTypeOf(invalid).toBeFunction();
+  local[Symbol.dispose]();
+});
+
+test("empty initial HTTP entry remains mountable and supplies an empty object", async () => {
+  const seen: Record<string, never>[] = [];
+  const handler = createHttpHandler(async (_request, initial) => {
+    seen.push(initial);
+    return Response.json({ ok: true });
+  });
+  const parent = new Hono().route("/api", handler);
+  expect((await parent.request("https://test/api/posts/p1")).status).toBe(200);
+  await handler.handle(new Request("https://test/posts/p1"), {});
+  expect(seen).toEqual([{}, {}]);
+  const invalid = () => {
+    // @ts-expect-error a resolver requiring a token cannot be used by the empty entry
+    createHttpHandler(async (_request: Request, initial: { token: string }) =>
+      Response.json(initial),
+    );
+  };
+  expectTypeOf(invalid).toBeFunction();
+});
+
+test("testing forks do not promise user-added handler properties", () => {
+  const handler = createTakibi()({ resolve: () => ({ tenantId: "test" }) })
+    .defineCollections({})
+    .actions({});
+  const decorated = Object.assign(handler, { extra: () => 42 });
+  const fork = getTestingFork(decorated);
+  if (!fork) throw new Error("missing fork");
+  const local = fork({}, () => ({ execute: async () => ({ ok: true, data: null }), dispose() {} }));
+  expect(Object.hasOwn(local, "extra")).toBe(false);
+  const invalid = () => {
+    // @ts-expect-error a fork recreates the standard handler, not arbitrary extensions
+    local.extra();
+  };
+  expectTypeOf(invalid).toBeFunction();
+  local[Symbol.dispose]();
 });

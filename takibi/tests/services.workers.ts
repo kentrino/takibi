@@ -8,7 +8,7 @@ import type { StorageTestObject } from "./worker";
 
 test("generated DO runs services factory per instance from env", async () => {
   type Env = { LABEL: string };
-  const context = createTakibi<Record<string, never>, Env>()({
+  const context = createTakibi<Env>()({
     resolve: () => ({ tenantId: "unused" }),
     services: ({ env: servicesEnv }) => ({ label: servicesEnv.LABEL }),
   });
