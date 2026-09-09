@@ -1,3 +1,10 @@
+export {
+  TAKIBI_BRAND,
+  assignTakibiBrand,
+  readTakibiBrand,
+  type TakibiBrandCarrier,
+  type TakibiBrandRecord,
+} from "./brand";
 export { createTakibi } from "./context";
 export type {
   ActionScopeMap,

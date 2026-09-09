@@ -1,4 +1,5 @@
 import { TakibiError, type ActionRegistry, type CollectionsDef } from "@takibi/takibi-api";
+import { assignTakibiBrand } from "../brand";
 import { createDurableObjectClass } from "../durable-object";
 import { resolveLogging } from "../logging";
 import { registerTestingFork, type TestingForkOptions } from "../testing-bridge.server";
@@ -44,35 +45,23 @@ export class Application {
       services,
     );
     const backend = createBackend({ collections, registry, logger });
-    const brand: {
-      context: unknown;
-      initial: unknown;
-      services: unknown;
-      collections: CollectionsDef<object>;
-      actions: ActionScopeMap;
-    } = { context: null, initial: null, services: null, collections, actions };
-    const handler = Object.assign(
-      createHttpHandler((request, initial, decode) =>
-        serveDecodedCall({
-          request,
-          initial,
-          decode,
-          resolve,
-          execute: backend.execute,
-          logger,
-          options,
-        }),
+    const handler = assignTakibiBrand(
+      Object.assign(
+        createHttpHandler((request, initial, decode) =>
+          serveDecodedCall({
+            request,
+            initial,
+            decode,
+            resolve,
+            execute: backend.execute,
+            logger,
+            options,
+          }),
+        ),
+        { DurableObject },
       ),
-      { DurableObject, "~takibi": brand },
+      { collections, actions },
     );
-    // These null markers carry public type information only. The runtime reads
-    // collections/actions; no fake TContext/TServices values are constructed.
-    Object.defineProperty(handler, "~takibi", {
-      value: brand,
-      writable: false,
-      configurable: false,
-      enumerable: false,
-    });
     if (backend.dispose) {
       Object.defineProperty(handler, Symbol.dispose, { value: backend.dispose, enumerable: false });
     }

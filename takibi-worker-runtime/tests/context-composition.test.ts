@@ -1,7 +1,7 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "@takibi/takibi-policy";
-import { createTakibi, type LogEvent } from "../src";
+import { createTakibi, readTakibiBrand, TAKIBI_BRAND, type LogEvent } from "../src";
 import { getTestingFork, type TestingExecutorFactory } from "../src/testing-bridge.server";
 import { Hono } from "hono";
 import { createHttpHandler } from "../src/context/http-handler";
@@ -48,7 +48,7 @@ test("definition facade preserves initial, env, services, documents and actions"
   expectTypeOf(handler.DurableObject).constructorParameters.toEqualTypeOf<
     [DurableObjectState, Env]
   >();
-  expectTypeOf(handler["~takibi"].actions.posts).toEqualTypeOf<typeof actions>();
+  expectTypeOf(readTakibiBrand(handler).actions.posts).toEqualTypeOf<typeof actions>();
   const invalid = () => {
     // @ts-expect-error initial context is required
     void handler.handle(new Request("https://test/posts"), {});
@@ -117,7 +117,7 @@ test("forks own their registry, services, logger and backend disposal", async ()
   dispose?.value();
   expect(disposals).toEqual([1]);
   expect(Object.hasOwn(source, Symbol.dispose)).toBe(false);
-  expect(Object.getOwnPropertyDescriptor(source, "~takibi")).toMatchObject({
+  expect(Object.getOwnPropertyDescriptor(source, TAKIBI_BRAND)).toMatchObject({
     enumerable: false,
     writable: false,
     configurable: false,

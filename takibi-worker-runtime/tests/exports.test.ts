@@ -34,6 +34,11 @@ test("worker-runtime exports createTakibi, handler types, and pretty logging", (
   expectTypeOf(Runtime).not.toHaveProperty("WorkerCallAdapter");
   expectTypeOf(Runtime.toTakibiInvocation).toBeFunction();
   expectTypeOf(Runtime.getTakibiRawInput).toBeFunction();
+  expect(Runtime.TAKIBI_BRAND).toBe("~takibi");
+  expectTypeOf(Runtime.assignTakibiBrand).toBeFunction();
+  expectTypeOf(Runtime.readTakibiBrand).toBeFunction();
+  expectTypeOf<Runtime.TakibiBrandCarrier>().not.toBeNever();
+  expectTypeOf<Runtime.TakibiBrandRecord>().not.toBeNever();
   expectTypeOf<Runtime.TakibiHandler>().not.toBeNever();
   expectTypeOf<Runtime.CollectionsOptions>().not.toBeNever();
   expectTypeOf<Runtime.HandleOptions<Record<string, never>>>().not.toBeNever();

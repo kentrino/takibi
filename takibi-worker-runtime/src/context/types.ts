@@ -23,6 +23,7 @@ import type {
 } from "@takibi/takibi-api";
 import type { PolicyHelper } from "@takibi/takibi-policy";
 import type { Hono } from "hono";
+import type { TakibiBrandCarrier, TakibiBrandRecord } from "../brand";
 import type { LoggingOptions } from "../logging";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
 
@@ -93,14 +94,7 @@ export type TakibiBrand<
   TActionMap extends ActionScopeMap = Record<never, never>,
   TServices = Record<never, never>,
   TEnv = unknown,
-> = {
-  readonly "~takibi": {
-    context: TCtx;
-    initial: TInitial;
-    collections: TCollections;
-    actions: TActionMap;
-    services: TServices;
-  };
+> = TakibiBrandCarrier<TakibiBrandRecord<TCtx, TInitial, TCollections, TActionMap, TServices>> & {
   DurableObject: new (
     state: DurableObjectState,
     env: TEnv,
