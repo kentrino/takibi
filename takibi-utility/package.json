@@ -44,6 +44,9 @@
     "bench:create-class": "vp test bench benchmarks/create-class.bench.ts --no-file-parallelism --maxWorkers 1",
     "check": "vp check"
   },
+  "dependencies": {
+    "@takibi/takibi-shared-types": "workspace:^"
+  },
   "devDependencies": {
     "typescript": "catalog:",
     "vite": "catalog:",

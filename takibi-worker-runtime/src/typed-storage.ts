@@ -10,7 +10,7 @@ import {
   type CollectionDefinition,
 } from "@takibi/takibi-api";
 import type { DocumentId, TakibiResult, WithMetadata } from "@takibi/takibi-shared-types";
-import { assertJsonObject } from "./json";
+import { assertJsonObject } from "@takibi/takibi-utility";
 import type { InternalLogger } from "./logging";
 import {
   assertRevisionPrecondition,

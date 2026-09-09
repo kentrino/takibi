@@ -1,5 +1,6 @@
 import { normalizeQueryExpr } from "@takibi/takibi-protocol";
 import { matchesQuery } from "@takibi/takibi-query";
+import { assertJsonObject } from "@takibi/takibi-utility";
 import {
   BadRequestError,
   LIST_PAGE_DEFAULT,
@@ -13,7 +14,6 @@ import {
   type IndexRegistry,
   type ResolvedIndexScan,
 } from "./indexes";
-import { assertJsonObject } from "./json";
 import { compileQueryToSql } from "./sql-query";
 import type { QueryExpr, StorageListOptions, WithMetadata } from "@takibi/takibi-shared-types";
 import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "@takibi/takibi-shared-types";

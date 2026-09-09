@@ -50,7 +50,8 @@
     "@takibi/takibi-api": "workspace:^",
     "@takibi/takibi-protocol": "workspace:^",
     "@takibi/takibi-query": "workspace:^",
-    "@takibi/takibi-shared-types": "workspace:^"
+    "@takibi/takibi-shared-types": "workspace:^",
+    "@takibi/takibi-utility": "workspace:^"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",

@@ -133,8 +133,12 @@ export {
 export { assertCollectionUniqueConstraints, assertUniqueDocument } from "./unique";
 export { parseSchema, parseSchemaUnobserved, SchemaParser, SchemaValidationError } from "./schema";
 export { generateUlid, isUlid, resetUlidStateForTests } from "./ulid";
-export { assertJsonObject, assertJsonValue, JSON_MAX_DEPTH } from "./json";
-export type { JsonValidationOptions } from "./json";
+export {
+  assertJsonObject,
+  assertJsonValue,
+  JSON_MAX_DEPTH,
+  type JsonValidationOptions,
+} from "@takibi/takibi-utility";
 export { asTakibiResult, normalizeValidationIssues, toTakibiFailure } from "./result";
 export { otel } from "./otel";
 export type { OtelMethodSpec, OtelSpec } from "./otel";
