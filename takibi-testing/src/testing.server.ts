@@ -51,7 +51,6 @@ const createSqliteExecutor: TestingExecutorFactory = ({
     if (disposed) return;
     disposed = true;
     storageFinalizer.unregister(runtime.execute);
-    runtime.dispose();
     storage.close();
   };
   storageFinalizer.register(runtime.execute, storage, runtime.execute);
