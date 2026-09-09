@@ -13,7 +13,7 @@ import { ownStringEntries } from "../src/context/own-entries";
 test("definition facade preserves initial, env, services, documents and actions", () => {
   type Initial = { auth: { tenant: string } };
   type Env = { PREFIX: string };
-  const context = createTakibi.withInitial<Initial, Env>()({
+  const context = createTakibi<Initial, Env>({ entry: "handle" })({
     resolve: async ({ context }) => {
       expectTypeOf(context).toEqualTypeOf<Initial>();
       return { tenantId: context.auth.tenant };
@@ -50,6 +50,10 @@ test("definition facade preserves initial, env, services, documents and actions"
   >();
   expectTypeOf(readTakibiBrand(handler).actions.posts).toEqualTypeOf<typeof actions>();
   const invalid = () => {
+    // @ts-expect-error input and env type arguments require an explicit handle entry
+    createTakibi<Initial, Env>();
+    // @ts-expect-error input-context factories cannot select the empty Hono entry
+    createTakibi<Initial, Env>({ entry: "hono" });
     // @ts-expect-error initial context is required
     void handler.handle(new Request("https://test/posts"), {});
     // @ts-expect-error unknown collection names must not become any
@@ -182,13 +186,12 @@ test("HTTP adapter preserves explicit null context and skips unmatched prefixes"
 
 test("initial HTTP entry preserves its value and rejects the Hono surface", async () => {
   const seen: ({ token: string } | null)[] = [];
-  const handler = createTakibi
-    .withInitial<{ token: string } | null>()({
-      resolve: async ({ context }) => {
-        seen.push(context);
-        return { tenantId: context?.token ?? "anonymous" };
-      },
-    })
+  const handler = createTakibi<{ token: string } | null>({ entry: "handle" })({
+    resolve: async ({ context }) => {
+      seen.push(context);
+      return { tenantId: context?.token ?? "anonymous" };
+    },
+  })
     .defineCollections({})
     .actions({});
   const fork = getTestingFork(handler);

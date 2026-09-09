@@ -20,17 +20,18 @@ export function createTakibi<TEnv = unknown>(): CreateContextFn<
   Record<string, never>,
   TEnv,
   ReturnType<typeof createHttpHandler>
-> {
+>;
+/** Require caller-supplied context through handle(), without exposing a Hono entry. */
+export function createTakibi<TInput, TEnv = unknown>(options: {
+  entry: "handle";
+}): CreateContextFn<TInput, TEnv>;
+export function createTakibi<TInput, TEnv = unknown>(options?: { entry: "handle" }) {
+  if (options?.entry === "handle") {
+    return <TCtx extends object, TServices = Record<never, never>>(
+      config: ContextConfig<TCtx, TInput, TEnv, TServices>,
+    ) => createContext(config, createInitialHttpHandler<TInput>);
+  }
   return <TCtx extends object, TServices = Record<never, never>>(
     config: ContextConfig<TCtx, Record<string, never>, TEnv, TServices>,
   ) => createContext(config, createHttpHandler);
 }
-
-/** Bind caller-supplied initial dependencies; the resulting handler has only handle(). */
-function withInitial<TInitial, TEnv = unknown>(): CreateContextFn<TInitial, TEnv> {
-  return <TCtx extends object, TServices = Record<never, never>>(
-    config: ContextConfig<TCtx, TInitial, TEnv, TServices>,
-  ) => createContext(config, createInitialHttpHandler<TInitial>);
-}
-
-createTakibi.withInitial = withInitial;

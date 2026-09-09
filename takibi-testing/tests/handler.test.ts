@@ -156,7 +156,7 @@ test("SQLite-backed handler Durable Object exports and restores a snapshot", asy
 test("action handler receives SQLite test backend services and keeps production resolve", async () => {
   type Initial = { token: string };
   const seen: Initial[] = [];
-  const context = createTakibi.withInitial<Initial>()({
+  const context = createTakibi<Initial>({ entry: "handle" })({
     resolve: ({ context: initial }) => {
       seen.push(initial);
       return { tenantId: "tenant-a" };
