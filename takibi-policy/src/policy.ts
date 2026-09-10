@@ -65,6 +65,12 @@ function brandConstrainedPolicy<T extends object>(policy: T): T {
   return policy;
 }
 
+function createComposedPolicy<TCtx extends object, TDoc, TReasonCode extends string>(
+  policy: AccessPolicyFn<TCtx, TDoc>,
+): ConstrainedPolicy<TCtx, TDoc, TReasonCode> {
+  return brandConstrainedPolicy(policy) as unknown as ConstrainedPolicy<TCtx, TDoc, TReasonCode>;
+}
+
 const WRITE_PERMISSIONS = [
   "create",
   "update",
@@ -187,7 +193,7 @@ export function and<
 >(
   ...policies: TPolicies & [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>> {
-  return brandConstrainedPolicy(async (ctx: AccessContext<TCtx, TDoc>) => {
+  return createComposedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>>(async (ctx) => {
     const permissions = new Set<AccessPermission>(ALL_PERMISSIONS);
     const reasons = new Map<AccessPermission, PolicyReason>();
     for (const policy of policies) {
@@ -202,7 +208,7 @@ export function and<
       if (isEmpty(acc)) return acc;
     }
     return composedGrant(permissions, reasons);
-  }) as unknown as ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>>;
+  });
 }
 
 /**
@@ -217,7 +223,7 @@ export function or<
   ...policies: TPolicies & [CombinablePolicy<TCtx, TDoc>, ...CombinablePolicy<TCtx, TDoc>[]]
 ): ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>> {
   const inputPolicies: readonly CombinablePolicy<TCtx, TDoc>[] = policies;
-  return brandConstrainedPolicy(async (ctx: AccessContext<TCtx, TDoc>) => {
+  return createComposedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>>(async (ctx) => {
     const permissions = new Set<AccessPermission>();
     const firstReasons = new Map<AccessPermission, PolicyReason>();
     for (const [index, policy] of inputPolicies.entries()) {
@@ -239,7 +245,7 @@ export function or<
       if (reason) reasons.set(permission, reason);
     }
     return composedGrant(permissions, reasons);
-  }) as unknown as ConstrainedPolicy<TCtx, TDoc, PolicyReasonCodeOf<TPolicies[number]>>;
+  });
 }
 
 type SchemaPolicyOptions<TSchema extends StandardSchemaV1, TCode extends string> = {
