@@ -23,6 +23,8 @@ export type ListAllBounds = {
 
 type ListPage<T> = { items: T[]; nextCursor?: string };
 
+const LIST_QUERY_OPTION_KEYS = new Set(["index", "orderBy", "where"]);
+
 export function listAllLimitFailure(maxItems: number): TakibiOperationFailure {
   return {
     kind: "operation",
@@ -67,15 +69,20 @@ function pageOptions<TDoc, TIndexes extends Record<string, readonly string[]>>(
   cursor: string | undefined,
   limit: number,
 ): ListOptions<TDoc, TIndexes> {
-  const index = options && "index" in options ? options.index : undefined;
-  const orderBy = options && "orderBy" in options ? options.orderBy : undefined;
+  if (options === undefined) {
+    return { limit, ...(cursor === undefined ? {} : { cursor }) };
+  }
+  const queryOptions = { ...options };
+  for (const key of Object.keys(queryOptions)) {
+    if (!LIST_QUERY_OPTION_KEYS.has(key) || Reflect.get(queryOptions, key) === undefined) {
+      Reflect.deleteProperty(queryOptions, key);
+    }
+  }
   return {
+    ...queryOptions,
     limit,
     ...(cursor === undefined ? {} : { cursor }),
-    ...(options?.where === undefined ? {} : { where: options.where }),
-    ...(typeof index === "string" ? { index } : {}),
-    ...(orderBy === undefined ? {} : { orderBy }),
-  } as ListOptions<TDoc, TIndexes>;
+  };
 }
 
 export async function collectListPages<T>(
