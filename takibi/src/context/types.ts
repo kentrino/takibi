@@ -7,6 +7,7 @@ export type {
   ContextResolverInput,
   ContextStubResolver,
   ContextStubResolverInput,
+  DurableObjectFetchStub,
   CreateContextBuilder,
   CreateContextFn,
   HandleOptions,

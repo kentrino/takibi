@@ -1733,7 +1733,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
   let object: DurableObject;
   const context = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-    stub: () => object as unknown as DurableObjectStub,
+    stub: () => object,
   });
   const handler = context
     .defineCollections({
@@ -1794,7 +1794,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
   let object: DurableObject;
   const context = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-    stub: () => object as unknown as DurableObjectStub,
+    stub: () => object,
   });
   const handler = context
     .defineCollections({
@@ -1853,13 +1853,12 @@ test("Worker forwards only the action invocation and resolved context", async ()
       user: { id: "u1", role: "admin" as const },
       traceId: "trace",
     }),
-    stub: () =>
-      ({
-        fetch: async (request: Request) => {
-          captured = await request.json();
-          return Response.json({ ok: true, data: { pong: true } } satisfies WireResponse);
-        },
-      }) as DurableObjectStub,
+    stub: () => ({
+      fetch: async (request: Request) => {
+        captured = await request.json();
+        return Response.json({ ok: true, data: { pong: true } } satisfies WireResponse);
+      },
+    }),
   });
   const app = context.defineCollections({
     posts: { schema: Post, accessPolicy: fullAccess },
@@ -1902,7 +1901,7 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
     }),
     stub: ({ resolved }) => {
       routedContext = resolved;
-      return object as unknown as DurableObjectStub;
+      return object;
     },
   });
   const handler = context
@@ -2228,7 +2227,7 @@ test("non-JSON resolved context is rejected equally before SQLite test or DO dis
         stubCalls += 1;
         return {
           fetch: () => Response.json({ ok: true, data: null }),
-        } as unknown as DurableObjectStub;
+        };
       },
     });
     return context
@@ -2351,13 +2350,12 @@ test("original handle still requires stub after creating a SQLite test backend",
   let stubFetches = 0;
   const production = createTakibi()({
     resolve: resolveTestContext,
-    stub: () =>
-      ({
-        fetch: async () => {
-          stubFetches += 1;
-          return Response.json({ ok: true, data: { id: "from-stub" } });
-        },
-      }) as unknown as DurableObjectStub,
+    stub: () => ({
+      fetch: async () => {
+        stubFetches += 1;
+        return Response.json({ ok: true, data: { id: "from-stub" } });
+      },
+    }),
   })
     .defineCollections({
       posts: { schema: Post, accessPolicy: fullAccess },
@@ -2473,13 +2471,12 @@ test("wire request body does not carry services", async () => {
   const context = createTakibi()({
     resolve: resolveTestContext,
     services: () => ({ secret: "not-on-wire" }),
-    stub: () =>
-      ({
-        fetch: async (request: Request) => {
-          captured = await request.json();
-          return Response.json({ ok: true, data: { seen: true } });
-        },
-      }) as unknown as DurableObjectStub,
+    stub: () => ({
+      fetch: async (request: Request) => {
+        captured = await request.json();
+        return Response.json({ ok: true, data: { seen: true } });
+      },
+    }),
   });
   const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
   const handler = app.actions({
