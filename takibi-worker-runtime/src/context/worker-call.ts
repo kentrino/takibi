@@ -2,8 +2,6 @@ import {
   Call,
   ENVELOPE_ADAPTER_GRAPH,
   jsonResponseFromStatus,
-  type CallFailureInput,
-  type CallTerminalEvent,
   type EnvelopeAdapterMap,
 } from "@takibi/takibi-worker-runtime-contract";
 import { withTracing } from "@takibi/takibi-utility";
@@ -91,10 +89,6 @@ function batchSizeOf(decoded: PublicRequest): number | undefined {
   return decoded.kind === "batch" ? decoded.items.length : undefined;
 }
 
-function createCallDecode({ requestDecoder }: Pick<Map, "requestDecoder">): Map["callDecode"] {
-  return (_request) => requestDecoder();
-}
-
 function createCallResolveContext<TInitial, TCtx extends object>({
   contextResolver,
   initial,
@@ -143,68 +137,6 @@ function createCallResolveContext<TInitial, TCtx extends object>({
   return (input) => traced.resolveContext(input);
 }
 
-function createCallDispatch<TInitial, TCtx extends object>({
-  execute,
-  initial,
-  tracer,
-}: Pick<Map<TInitial, TCtx>, "execute" | "initial" | "tracer">): Map<
-  TInitial,
-  TCtx
->["callDispatch"] {
-  return (input) =>
-    execute({
-      request: input.request,
-      initial,
-      ctx: input.context.context,
-      invocation: input.decoded,
-      tracer,
-      resolveSpan: input.context.resolveSpan,
-    });
-}
-
-function createCallToResponse(): Map["callToResponse"] {
-  return (input) => jsonResponseFromStatus(input.dispatched, Response);
-}
-
-function createCallToFailureResponse({
-  logger,
-}: Pick<Map, "logger">): Map["callToFailureResponse"] {
-  return (failure: CallFailureInput<Request, PublicRequest, WorkerResolvedCall>) =>
-    errorResponse(failure.error, logger, failure.decoded, failure.request);
-}
-
-function createCallOnDecoded({ logger, http }: Pick<Map, "logger" | "http">): Map["callOnDecoded"] {
-  return async (input) => {
-    logger?.emit({
-      level: "info",
-      event: "takibi.request",
-      message: "started",
-      ...http,
-      ...invocationFields(input.decoded),
-    });
-  };
-}
-
-function createCallOnTerminal({
-  logger,
-  http,
-  startedAt,
-  clock,
-}: Pick<Map, "logger" | "http" | "startedAt" | "clock">): Map["callOnTerminal"] {
-  return async (event: CallTerminalEvent<Response, Request, PublicRequest>) => {
-    if (event.outcome !== "responded") return;
-    logger?.emit({
-      level: "info",
-      event: "takibi.request",
-      message: "completed",
-      ...http,
-      ...(event.decoded === undefined ? {} : invocationFields(event.decoded)),
-      durationMs: clock() - startedAt,
-      status: event.response.status,
-    });
-  };
-}
-
 export type ResolveWorkerEnvelopeArgs<TInitial = unknown, TCtx extends object = object> = {
   request: Request;
   initial: TInitial;
@@ -236,13 +168,57 @@ export async function resolveWorkerEnvelopeMap<TInitial, TCtx extends object>(
     .factories({
       http: ({ request }) => requestLogFields(request),
       startedAt: ({ clock }) => clock(),
-      callDecode: createCallDecode,
+      // Call.run owns execution order; the graph only constructs these slots.
+      // Success: decode -> started log -> resolve span -> dispatch -> response -> terminal.
+      callDecode:
+        ({ requestDecoder }) =>
+        (_request) =>
+          requestDecoder(),
+      callOnDecoded:
+        ({ logger, http }) =>
+        async (input) => {
+          logger?.emit({
+            level: "info",
+            event: "takibi.request",
+            message: "started",
+            ...http,
+            ...invocationFields(input.decoded),
+          });
+        },
       callResolveContext: createCallResolveContext<TInitial, TCtx>,
-      callDispatch: createCallDispatch<TInitial, TCtx>,
-      callToResponse: createCallToResponse,
-      callToFailureResponse: createCallToFailureResponse,
-      callOnDecoded: createCallOnDecoded,
-      callOnTerminal: createCallOnTerminal,
+      callDispatch:
+        ({ execute, initial, tracer }) =>
+        (input) =>
+          execute({
+            request: input.request,
+            initial,
+            ctx: input.context.context,
+            invocation: input.decoded,
+            tracer,
+            resolveSpan: input.context.resolveSpan,
+          }),
+      callToResponse: () => (input) => jsonResponseFromStatus(input.dispatched, Response),
+      // Stage failure: error response (with error log) -> terminal.
+      // Decode failure skips the started log. A failing converter rejects once.
+      callToFailureResponse:
+        ({ logger }) =>
+        (failure) =>
+          errorResponse(failure.error, logger, failure.decoded, failure.request),
+      // Call isolates observer failures. Only a response emits the completed log.
+      callOnTerminal:
+        ({ logger, http, startedAt, clock }) =>
+        async (event) => {
+          if (event.outcome !== "responded") return;
+          logger?.emit({
+            level: "info",
+            event: "takibi.request",
+            message: "completed",
+            ...http,
+            ...(event.decoded === undefined ? {} : invocationFields(event.decoded)),
+            durationMs: clock() - startedAt,
+            status: event.response.status,
+          });
+        },
       call: inject(Call<Request, PublicRequest, WorkerResolvedCall<TCtx>, Response, WireResponse>),
     });
   return (overrides === undefined ? builder : builder.override(overrides)).resolve(values);
