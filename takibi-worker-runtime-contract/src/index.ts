@@ -3,14 +3,6 @@
  * invocation lifecycle controls and runner.
  */
 export { createBatchTakibiCall, createSingleTakibiCall, runBatchCall, runSingleCall } from "./call";
-export {
-  decodeLocalCallRequest,
-  getLocalCallWireInvocation,
-  getLocalCallWireInvocations,
-  localBatchCall,
-  localSingleCall,
-  resolveLocalCallContext,
-} from "./local-call";
 export { jsonResponseFromStatus, statusOfResult } from "./status-response";
 export { executePlan, runInvocation } from "./flow";
 export { InvocationState } from "./state";
@@ -67,8 +59,6 @@ export type {
   CallFailureStage,
   CallTerminalEvent,
   CallTypeMap,
-  LocalCallRequest,
-  LocalCallTypeMap,
   CreateBatchTakibiCall,
   CreateSingleTakibiCall,
   ExecutePlanOptions,
