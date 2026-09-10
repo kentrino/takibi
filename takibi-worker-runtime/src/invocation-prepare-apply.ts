@@ -143,7 +143,7 @@ async function prepareCollectionWork<TContext extends object, TServices>(
     const resolved = await resolveCollection({
       collections: state.runtime.collections,
       storage,
-      ctx: state.context,
+      ctx: state.baseContext,
       req: work.request,
       logger: state.runtime.logger,
       policy,
@@ -239,7 +239,7 @@ async function identifiedAction<TContext extends object, TServices>(
     classified: work,
     collections: state.runtime.collections,
     storage,
-    ctx: state.context,
+    ctx: state.baseContext,
     logger: state.runtime.logger,
     services: state.runtime.services,
     policy,

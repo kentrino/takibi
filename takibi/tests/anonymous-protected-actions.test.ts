@@ -2,6 +2,7 @@ import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
+import { createPolicyHelper } from "@takibi/takibi-policy";
 import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { createTakibi, fullAccess, grant, none, UnauthorizedError } from "../src/index";
 
@@ -190,11 +191,18 @@ test("action guards replace gate and handler context while nested CRUD keeps res
       seed: () => ({ b1: { title: "existing", status: "pending" as const } }),
     },
   });
+  const schemaGate = createPolicyHelper<object>()(Booking, ({ doc }) =>
+    doc?.status === "pending" ? fullAccess : none,
+  );
   const bookings = app.bookings.actions((defineAction) => ({
     inspect: defineAction()
       .use(() => "guarded")
       .policy(({ ctx }) => (ctx === "guarded" ? fullAccess : none))
       .handler(async ({ ctx, collection, id }) => ({ ctx, booking: await collection.get(id) })),
+    inspectWithSchemaGate: defineAction()
+      .use(() => "guarded")
+      .policy(schemaGate)
+      .handler(({ ctx, id }) => ({ ctx, id })),
   }));
   const inspectRoot = app
     .defineAction()
@@ -217,6 +225,10 @@ test("action guards replace gate and handler context while nested CRUD keeps res
   expect(await client.inspectRoot()).toMatchObject({
     ok: true,
     data: { ctx: { identity: "guarded" }, booking: { title: "existing" } },
+  });
+  expect(await client.bookings.inspectWithSchemaGate("b1")).toEqual({
+    ok: true,
+    data: { ctx: "guarded", id: "b1" },
   });
   expect(policyContexts).toMatchObject([baseContext, baseContext]);
 });

@@ -1312,7 +1312,6 @@ test("apply and commit failures keep parsed input and the original error", async
 
 test("concurrent local invocations keep resolved policy and context apart", async () => {
   const { adapters, storage } = await createAdapters();
-  const seen: string[] = [];
   const map = await resolveLocalAdapterMap({
     ...adapters.invocationRuntime,
     storage,
@@ -1332,8 +1331,8 @@ test("concurrent local invocations keep resolved policy and context apart", asyn
       },
     }),
   ]);
-  seen.push(left.context.tenantId, right.context.tenantId);
-  expect(seen).toEqual(["left", "right"]);
+  expect(left.context).toEqual({ tenantId: "left" });
+  expect(right.context).toEqual({ tenantId: "right" });
   expect(left.settlement.outcome).toBe("succeeded");
   expect(right.settlement.outcome).toBe("succeeded");
 });

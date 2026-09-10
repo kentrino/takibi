@@ -9,6 +9,7 @@ import {
   type InternalInvocationSettlement,
   type InternalInvocationTransaction,
   type InternalInvocationTypeMap,
+  type InvocationCurrentContext,
   type InvocationAdapterResult,
   type InvocationInputState,
   type InvocationObserverEvent,
@@ -31,7 +32,8 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
   readonly #runtime: InternalInvocationRuntime<T>;
   #invocation: T["invocation"] | typeof UNSET = UNSET;
   #plan: InvocationPlan<T> | typeof UNSET = UNSET;
-  #context: T["context"];
+  readonly #baseContext: T["context"];
+  #context: InvocationCurrentContext<T>;
   #input: InvocationInputState<T["rawInput"], T["input"]> = {
     status: "not-applicable",
   };
@@ -46,6 +48,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     runtimeChecks = true,
   ) {
     this.#wireInvocation = request.wireInvocation;
+    this.#baseContext = request.context;
     this.#context = request.context;
     this.#runtime = runtime;
     this.#runtimeChecks = runtimeChecks;
@@ -83,7 +86,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
       wireInvocation: this.#wireInvocation,
       invocation,
       runtime: this.#runtime,
-      context: this.#context,
+      context: this.#baseContext,
       input: this.#input,
     };
   }
@@ -104,6 +107,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     const invocation = this.#initializedInvocation();
     const plan = this.#acceptedPlan();
     return {
+      baseContext: this.#baseContext,
       context: this.#context,
       invocation,
       plan,

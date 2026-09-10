@@ -28,7 +28,8 @@ export type ClassifiedAction = {
 
 export type IdentifiedAction<TCtx extends object> = {
   readonly invocation: ActionInvocation;
-  readonly context: TCtx;
+  /** Guards can replace the action context with any value. */
+  readonly context: unknown;
   /** Collection policies keep the base context even when guards replace the action context. */
   readonly collectionContext: TCtx;
   readonly definition: RuntimeActionDefinition;
@@ -95,7 +96,7 @@ export async function identifyClassifiedAction<TCtx extends object>(args: {
 
   // Guards run before document load and gate evaluation so auth failures do
   // not reveal whether a target id exists.
-  const actionCtx = (await applyGuards(definition.guards, ctx)) as TCtx;
+  const actionCtx = await applyGuards(definition.guards, ctx);
 
   return {
     invocation,
@@ -140,7 +141,7 @@ export async function authorizeIdentifiedAction<
     }
     const doc = await storage.get(invocation.scope, id);
     if (!doc) throw new NotFoundError(`Document not found: ${id}`);
-    const gateContext: ActionGateContext<TCtx> = {
+    const gateContext: ActionGateContext<unknown> = {
       ctx: context,
       scope: { kind: "collection", name: invocation.scope },
       invocation: { kind: "action", name: invocation.name },
@@ -156,7 +157,7 @@ export async function authorizeIdentifiedAction<
     return { ...identified, storage, grant, document: doc };
   }
 
-  const gateContext: ActionGateContext<TCtx> = {
+  const gateContext: ActionGateContext<unknown> = {
     ctx: context,
     scope:
       invocation.scope === "$" ? { kind: "root" } : { kind: "collection", name: invocation.scope },

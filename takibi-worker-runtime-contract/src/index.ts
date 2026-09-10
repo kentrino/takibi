@@ -76,6 +76,7 @@ export type {
   FullInvocationContract,
   InternalInvocationFailure,
   InvocationCompletion,
+  InvocationCurrentContext,
   InvocationExecutionView,
   InternalInvocationRuntime,
   InternalInvocationSettledTransaction,

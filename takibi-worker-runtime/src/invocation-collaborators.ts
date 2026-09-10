@@ -60,9 +60,9 @@ export class PolicyEvaluator implements PolicySurface {
 
   async evaluateAction(
     definition: RuntimeActionDefinition,
-    actionCtx: object,
+    actionCtx: unknown,
     invocation: ActionInvocation,
-    gateContext: ActionGateContext<object>,
+    gateContext: ActionGateContext<unknown>,
     doc?: unknown,
   ): Promise<AccessGrant> {
     const grant = await resolveGateGrant(definition, actionCtx, invocation, gateContext, doc);
