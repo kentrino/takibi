@@ -3,11 +3,17 @@ import {
   LIST_ALL_PAGE_SIZE_DEFAULT,
   LIST_PAGE_MAX,
   assertListAllConfig,
+  bindThrowingListAll,
   collectListPages,
   collectListPagesResult,
   listAllLimitFailure,
   resolveListAllBounds,
 } from "../src";
+import type { ListAllOptions } from "../src";
+
+type TestDocument = { id: string; name: string };
+type TestIndexes = { byName: readonly ["name"] };
+type IndexedTestOptions = Extract<ListAllOptions<TestDocument, TestIndexes>, { index: "byName" }>;
 
 test("listAll bounds reject non-positive page sizes and clamp to the caller cap", () => {
   expect(LIST_ALL_PAGE_SIZE_DEFAULT).toBe(LIST_PAGE_MAX);
@@ -58,4 +64,51 @@ test("collectListPagesResult returns a LIST_ALL_LIMIT operation failure", async 
     { pageSize: 2, maxItems: 3 },
   );
   expect(result).toEqual({ ok: false, error: listAllLimitFailure(3) });
+});
+
+test("listAll forwards only defined list query options on every page", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const where: NonNullable<IndexedTestOptions["where"]> = (query) => query.name.eq("Ada");
+  const orderBy: NonNullable<IndexedTestOptions["orderBy"]> = (query) => query.name.asc();
+  const listAll = bindThrowingListAll<TestDocument, TestIndexes>(async (options) => {
+    calls.push(options ?? {});
+    return calls.length === 1
+      ? { items: [{ id: "1", name: "Ada" }], nextCursor: "next" }
+      : { items: [{ id: "2", name: "Ada" }] };
+  });
+  const options: ListAllOptions<TestDocument, TestIndexes> & {
+    cursor?: undefined;
+    limit?: undefined;
+    unknown: string;
+  } = {
+    index: "byName",
+    orderBy,
+    where,
+    pageSize: 2,
+    maxItems: 4,
+    cursor: undefined,
+    limit: undefined,
+    unknown: "drop me",
+  };
+
+  await expect(listAll(options)).resolves.toEqual([
+    { id: "1", name: "Ada" },
+    { id: "2", name: "Ada" },
+  ]);
+  expect(calls).toEqual([
+    { index: "byName", orderBy, where, limit: 2 },
+    { index: "byName", orderBy, where, limit: 2, cursor: "next" },
+  ]);
+});
+
+test("listAll omits explicit undefined query options", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const listAll = bindThrowingListAll<TestDocument, TestIndexes>(async (options) => {
+    calls.push(options ?? {});
+    return { items: [] };
+  });
+
+  await listAll({ index: "byName", orderBy: undefined, where: undefined, pageSize: 3 });
+
+  expect(calls).toEqual([{ index: "byName", limit: 3 }]);
 });
