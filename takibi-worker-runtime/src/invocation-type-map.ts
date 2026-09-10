@@ -70,6 +70,8 @@ export type TakibiInvocationTypeMap<TContext extends object = object, TServices 
   invocation: TakibiPublicInvocation;
   runtime: TakibiInvocationRuntime<TContext, TServices>;
   context: TContext;
+  /** Guard output published through action lifecycle updates. */
+  currentContext: unknown;
   rawInput: unknown;
   input: unknown;
   noneWork: TakibiNoneWork;

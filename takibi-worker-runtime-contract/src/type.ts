@@ -26,9 +26,9 @@ export type PolicySurface = {
   ) => Promise<AccessGrant>;
   evaluateAction: (
     definition: RuntimeActionDefinition,
-    actionCtx: object,
+    actionCtx: unknown,
     invocation: ActionRequestData,
-    gateContext: ActionGateContext<object>,
+    gateContext: ActionGateContext<unknown>,
     doc?: unknown,
   ) => Promise<AccessGrant>;
 };
@@ -42,7 +42,7 @@ export type SchemaSurface = {
 
 /** Common runtime arguments; schema-specific input and services remain opaque here. */
 export type ActionHandlerArgs = {
-  ctx: object;
+  ctx: unknown;
   collections: object;
   $collections: object;
   services: unknown;
@@ -96,6 +96,11 @@ export type InternalInvocationTypeMap = {
   result: unknown;
   failure: TakibiFailure<string>;
 };
+
+/** Current context after runtime updates. Maps can widen it with a currentContext slot. */
+export type InvocationCurrentContext<T extends InternalInvocationTypeMap> =
+  | T["context"]
+  | ("currentContext" extends keyof T ? T["currentContext" & keyof T] : never);
 
 /** One-way alias: the map names a runtime; the runtime does not name the map. */
 export type InternalInvocationRuntime<T extends InternalInvocationTypeMap> = T["runtime"];
@@ -219,7 +224,7 @@ export type InvocationCompletion<TInvocation, TResult, TFailure> =
 
 export type InvocationObserverEvent<T extends InternalInvocationTypeMap> = Readonly<{
   phase: "settled";
-  context: T["context"];
+  context: InvocationCurrentContext<T>;
   input: ObservedInput<T["input"]>;
   transactionBoundary: TransactionBoundary | undefined;
   transaction: InternalInvocationSettledTransaction;
@@ -261,7 +266,7 @@ export type InvocationResult<T extends InternalInvocationTypeMap> = Readonly<{
   phase: "notified";
   wireInvocation: T["wireInvocation"];
   runtime: T["runtime"];
-  context: T["context"];
+  context: InvocationCurrentContext<T>;
   input: InvocationInputState<T["rawInput"], T["input"]>;
   effects: Readonly<{ transaction: InternalInvocationSettledTransaction }>;
   notification: InternalInvocationNotification;
@@ -284,7 +289,10 @@ export type InvocationResult<T extends InternalInvocationTypeMap> = Readonly<{
   );
 
 export type InvocationExecutionView<T extends InternalInvocationTypeMap> = Readonly<{
-  context: T["context"];
+  /** Original context from resolution. */
+  baseContext: T["context"];
+  /** Current context after runtime updates. */
+  context: InvocationCurrentContext<T>;
   invocation: T["invocation"];
   plan: InvocationPlan<T>;
   input: InvocationInputState<T["rawInput"], T["input"]>;
@@ -293,7 +301,7 @@ export type InvocationExecutionView<T extends InternalInvocationTypeMap> = Reado
 
 /** Undefined fields leave the current state unchanged; validated input may itself hold undefined. */
 export type InvocationUpdates<T extends InternalInvocationTypeMap> = Readonly<{
-  context?: T["context"];
+  context?: InvocationCurrentContext<T>;
   input?: InvocationInputState<T["rawInput"], T["input"]>;
 }>;
 

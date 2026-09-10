@@ -58,6 +58,7 @@ export async function executeAction<TCtx extends object>(
   const plan = createTakibiActionPlan(classifyAction(registry, invocation));
   const { work } = plan;
   const view: InvocationExecutionView<TakibiInvocationTypeMap<TCtx>> = {
+    baseContext: ctx,
     context: ctx,
     invocation: toTakibiInvocation(invocation),
     plan,

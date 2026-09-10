@@ -219,6 +219,13 @@ test("adapter collaborators and logger are typed on the contract map", () => {
   expectTypeOf(optionalLogger).toBeFunction();
 });
 
+test("execution context updates default to the resolved context type", () => {
+  type Map = import("../src").InternalInvocationTypeMap;
+  type View = import("../src").InvocationExecutionView<Map>;
+  expectTypeOf<View["baseContext"]>().toEqualTypeOf<Map["context"]>();
+  expectTypeOf<View["context"]>().toEqualTypeOf<Map["context"]>();
+});
+
 test("schema parse keeps Standard Schema output inference", () => {
   type LengthSchema = import("@standard-schema/spec").StandardSchemaV1<string, number>;
   const parse = async <S extends import("@standard-schema/spec").StandardSchemaV1>(
@@ -267,6 +274,10 @@ test("envelope call is derived from the envelope type arguments", () => {
 
 test("action handler arguments require the common execution context", () => {
   type Args = Parameters<import("../src").ActionHandlerSurface["run"]>[0];
+  expectTypeOf<Args["ctx"]>().toEqualTypeOf<unknown>();
+  type PolicyArgs = Parameters<import("../src").PolicySurface["evaluateAction"]>;
+  expectTypeOf<PolicyArgs[1]>().toEqualTypeOf<unknown>();
+  expectTypeOf<PolicyArgs[3]["ctx"]>().toEqualTypeOf<unknown>();
   type CommonArgs = {
     ctx: { tenantId: string };
     collections: {};

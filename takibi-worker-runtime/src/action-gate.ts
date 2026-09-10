@@ -14,11 +14,11 @@ import type { ActionRequestData } from "@takibi/takibi-shared-types";
 
 export type ActionInvocation = ActionRequestData;
 
-export async function resolveGateGrant<TCtx extends object>(
+export async function resolveGateGrant(
   definition: RuntimeActionDefinition,
-  ctx: TCtx,
+  ctx: unknown,
   invocation: ActionInvocation,
-  gateContext: ActionGateContext<TCtx>,
+  gateContext: ActionGateContext<unknown>,
   doc: unknown,
 ): Promise<AccessGrant> {
   if (isAccessGrant(definition.policy)) return definition.policy;
@@ -34,7 +34,7 @@ export async function resolveGateGrant<TCtx extends object>(
       );
     }
     return evaluateAccessPolicy(definition.policy, {
-      ...ctx,
+      ...contextProperties(ctx),
       collection: invocation.scope,
       operation: "invoke",
       permission: definition.permission,
@@ -42,6 +42,11 @@ export async function resolveGateGrant<TCtx extends object>(
     });
   }
   return (
-    definition.policy as (ctx: ActionGateContext<TCtx>) => AccessGrant | Promise<AccessGrant>
+    definition.policy as (ctx: ActionGateContext<unknown>) => AccessGrant | Promise<AccessGrant>
   )(gateContext);
+}
+
+/** Convert any guard output with the same property rules as an object spread. */
+function contextProperties(ctx: unknown): object {
+  return ctx == null ? {} : Object(ctx);
 }

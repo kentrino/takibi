@@ -57,6 +57,7 @@ test("slots match current runtime types", () => {
   expectTypeOf<AppMap["runtime"]["storage"]>().toEqualTypeOf<StorageDriver>();
   expectTypeOf<AppMap["runtime"]["registry"]>().toEqualTypeOf<ActionRegistry>();
   expectTypeOf<AppMap["context"]>().toEqualTypeOf<AppContext>();
+  expectTypeOf<AppMap["currentContext"]>().toEqualTypeOf<unknown>();
   expectTypeOf<AppMap["runtime"]["logger"]>().toEqualTypeOf<InternalLogger | undefined>();
   expectTypeOf<InternalLogger>().toEqualTypeOf<import("@takibi/takibi-logger").InternalLogger>();
   expectTypeOf<AppMap["runtime"]["services"]>().toEqualTypeOf<AppServices>();
@@ -85,6 +86,8 @@ test("runtime bag uses pinned collections, storage, registry, logger, and servic
   expectTypeOf<InvocationExecutionView<AppMap>["runtime"]["collections"]>().toEqualTypeOf<
     CollectionsDef<AppContext>
   >();
+  expectTypeOf<InvocationExecutionView<AppMap>["baseContext"]>().toEqualTypeOf<AppContext>();
+  expectTypeOf<InvocationExecutionView<AppMap>["context"]>().toEqualTypeOf<unknown>();
 });
 
 test("transaction adapter bindings retain their map relationships", () => {
