@@ -1,10 +1,71 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type {
+  ActionGateContext,
+  CollectionDefinition,
+  RuntimeActionDefinition,
+} from "@takibi/takibi-api";
+import type { InternalLogger } from "@takibi/takibi-logger";
+import type { AccessContext, AccessGrant } from "@takibi/takibi-policy";
+import type {
+  ActionRequestData,
   InvocationRequestData,
+  JsonValue,
   ObserverInvocationData,
   TakibiFailure,
 } from "@takibi/takibi-shared-types";
 
+export type { InternalLogger, LogEvent, LogLevel } from "@takibi/takibi-logger";
+
 export type MaybePromise<T> = T | Promise<T>;
+
+export type PolicySurface = {
+  evaluateCollection: (
+    def: CollectionDefinition,
+    accessCtx: AccessContext<any, any>,
+    options: { conceal: boolean; id?: string },
+  ) => Promise<AccessGrant>;
+  evaluateAction: (
+    definition: RuntimeActionDefinition,
+    actionCtx: object,
+    invocation: ActionRequestData,
+    gateContext: ActionGateContext<object>,
+    doc?: unknown,
+  ) => Promise<AccessGrant>;
+};
+
+export type SchemaSurface = {
+  parse: <S extends StandardSchemaV1>(
+    schema: S,
+    value: unknown,
+  ) => Promise<StandardSchemaV1.InferOutput<S>>;
+};
+
+/** Common runtime arguments; schema-specific input and services remain opaque here. */
+export type ActionHandlerArgs = {
+  ctx: object;
+  collections: object;
+  $collections: object;
+  services: unknown;
+  input: unknown;
+  collection?: object;
+  $collection?: object;
+  id?: string;
+  doc?: unknown;
+};
+
+export type ActionHandlerSurface = {
+  run: (args: ActionHandlerArgs) => Promise<JsonValue>;
+};
+
+export type ActionHandlerCtor = {
+  readonly definition: RuntimeActionDefinition;
+  readonly logger?: InternalLogger;
+  readonly collection?: string;
+  readonly operation?: string;
+  readonly documentId?: string;
+  readonly actionName?: string;
+  readonly actionScope?: string;
+};
 
 /**
  * Collaborator bag for one invocation. Defined without input, result, or work
@@ -14,7 +75,7 @@ export type InvocationRuntime = Readonly<{
   collections: unknown;
   storage: unknown;
   registry: unknown;
-  logger: unknown;
+  logger: InternalLogger | undefined;
   services: unknown;
 }>;
 
@@ -318,11 +379,11 @@ export type RuntimeAdapterMap<T extends RuntimeTypeMap = RuntimeTypeMap> = {
   ) => MaybePromise<InvocationAdapterResult<T["invocation"], InvocationPlan<T["invocation"]>>>;
   /**
    * Runtime-pinned collaborators consumed by `invocationPrepareApply`.
-   * Concrete policy / schema / handler types stay in the runtime.
+   * Implementations and tracing stay in the runtime.
    */
-  invocationPolicy: unknown;
-  invocationSchema: unknown;
-  invocationActionHandler: unknown;
+  invocationPolicy: PolicySurface;
+  invocationSchema: SchemaSurface;
+  invocationActionHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface;
   invocationPrepareApply: PrepareApplyInvocationContract<
     T["invocation"],
     T["invocation"]["noneWork"] | T["invocation"]["applyWork"] | T["invocation"]["fullWork"],
@@ -477,6 +538,11 @@ export const INVOCATION_PREPARE_ADAPTER_KEYS = [
   "invocationActionHandler",
 ] as const;
 
+export type InvocationPrepareApplyDeps<T extends RuntimeTypeMap = RuntimeTypeMap> = Pick<
+  RuntimeAdapterMap<T>,
+  (typeof INVOCATION_PREPARE_ADAPTER_KEYS)[number]
+>;
+
 export const ENVELOPE_CALL_ADAPTER_KEYS = [
   "callDecode",
   "callResolveContext",
@@ -579,21 +645,6 @@ export type CallAdapters<
   callOnTerminal?: (
     event: CallTerminalEvent<TResponseObject, TRequestLike, TDecoded>,
   ) => MaybePromise<void>;
-};
-
-/**
- * Worker / testing envelope composition surface. `call` is the constructed
- * `Call` instance. This map does not include invocation or storage slots.
- */
-export type EnvelopeAdapterMap<
-  TRequestLike,
-  TDecoded,
-  TContext,
-  TResponseObject,
-  TDispatched = TResponseObject,
-  TCall = unknown,
-> = CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched> & {
-  call: TCall;
 };
 
 export type SingleCallAdapters<

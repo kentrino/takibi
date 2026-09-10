@@ -1,5 +1,6 @@
 import {
   INVOCATION_PREPARE_ADAPTER_KEYS,
+  type ActionHandlerCtor,
   type AdapterMap,
   type InvocationAdapters,
 } from "@takibi/takibi-worker-runtime-contract";
@@ -15,10 +16,6 @@ import {
   createActionHandler,
   PolicyEvaluator,
   tracePolicyEvaluator,
-  type ActionHandlerCtor,
-  type ActionHandlerSurface,
-  type PolicySurface,
-  type SchemaSurface,
 } from "./invocation-collaborators";
 import { InvocationPrepareApply } from "./invocation-prepare-apply";
 import { SchemaParser, traceSchemaParser } from "./schema";
@@ -32,9 +29,6 @@ type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TCo
 export type TakibiAdapterMap<TContext extends object, TServices = unknown> = AdapterMap<
   TakibiMap<TContext, TServices>
 > & {
-  invocationPolicy: PolicySurface;
-  invocationSchema: SchemaSurface;
-  invocationActionHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface;
   invocationPrepareApply: InvocationPrepareApply<TContext, TServices>;
 };
 

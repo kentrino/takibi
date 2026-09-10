@@ -35,7 +35,6 @@ type AppContext = { readonly tenantId: string };
 type Collections = { readonly names: readonly string[] };
 type Storage = { readonly scope: "base" | "transaction" };
 type Registry = { readonly name: "actions" };
-type Logger = { readonly name: "test" };
 type Services = { readonly audit: string[] };
 type Failure = TakibiFailure<string>;
 type ActionOperation = { readonly key: "action:register" };
@@ -53,7 +52,7 @@ type ActionSpec = {
     collections: Collections;
     storage: Storage;
     registry: Registry;
-    logger: Logger;
+    logger: undefined;
     services: Services;
   };
   context: AppContext;
@@ -76,7 +75,7 @@ type ReadSpec = {
     collections: Collections;
     storage: Storage;
     registry: Registry;
-    logger: Logger;
+    logger: undefined;
     services: Services;
   };
   context: AppContext;
@@ -166,7 +165,7 @@ test("Request -> Promise<Response> visibly composes a call and notification", as
         collections: { names: ["patients"] },
         storage: { scope: "base" },
         registry: { name: "actions" },
-        logger: { name: "test" },
+        logger: undefined,
         services,
       },
       invocationGetRawInput: (wireInvocation) => wireInvocation.input,
@@ -297,7 +296,7 @@ test("one HTTP batch resolves once and creates one invocation state per item", a
         collections: { names: ["patients"] },
         storage: { scope: "base" },
         registry: { name: "actions" },
-        logger: { name: "test" },
+        logger: undefined,
         services,
       },
       invocationGetRawInput: () => undefined as never,
@@ -425,7 +424,7 @@ test("Durable Object adapters take context from the decoded wire envelope", asyn
         collections: { names: ["patients"] },
         storage: { scope: "base" },
         registry: { name: "actions" },
-        logger: { name: "test" },
+        logger: undefined,
         services: { audit: [] },
       },
       invocationGetRawInput: (wireInvocation) => wireInvocation.input,

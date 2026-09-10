@@ -94,10 +94,7 @@ export type TakibiRuntimeAdapterMap<
   response: WireResponse;
   localExecution: LocalExecution<TContext, TServices>;
 }> &
-  Pick<
-    TakibiAdapterMap<TContext, TServices>,
-    "invocationPolicy" | "invocationSchema" | "invocationActionHandler" | "invocationPrepareApply"
-  > & {
+  Pick<TakibiAdapterMap<TContext, TServices>, "invocationPrepareApply"> & {
     localSpanKind: SpanKind;
     localParentSpan: SpanContext | undefined;
     localRequest: Request | undefined;

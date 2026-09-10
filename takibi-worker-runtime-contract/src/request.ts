@@ -159,6 +159,21 @@ export class Call<
 }
 
 /**
+ * Worker / testing envelope composition surface. `call` is the constructed
+ * `Call` instance derived from the envelope type arguments. This map does
+ * not include invocation or storage slots.
+ */
+export type EnvelopeAdapterMap<
+  TRequestLike,
+  TDecoded,
+  TContext,
+  TResponseObject,
+  TDispatched = TResponseObject,
+> = CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched> & {
+  call: Call<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>;
+};
+
+/**
  * Thin entry around `Call.run` for callers that still pass a bare adapter map.
  */
 export const runCall: RunCall = function runCall<

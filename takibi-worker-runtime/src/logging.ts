@@ -1,37 +1,9 @@
 import { withSpan, type SpanContext, type SpanSpec, type TakibiSpan } from "./tracing";
 import type { QueryExpr, TakibiFailure } from "@takibi/takibi-shared-types";
 import type { StorageDriver } from "@takibi/takibi-storage";
+import type { InternalLogger, LogEvent, Logger, LogLevel } from "@takibi/takibi-logger";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
-
-export type LogEvent = {
-  level: LogLevel;
-  message: string;
-  event:
-    | "takibi.request"
-    | "takibi.resolve"
-    | "takibi.wire"
-    | "takibi.executor"
-    | "takibi.policy"
-    | "takibi.schema"
-    | "takibi.storage"
-    | "takibi.action"
-    | "takibi.error";
-  durationMs?: number;
-  collection?: string;
-  operation?: string;
-  documentId?: string;
-  method?: string;
-  path?: string;
-  batchSize?: number;
-  errorCode?: string;
-  status?: number;
-  query?: QueryExpr;
-};
-
-export type Logger = {
-  log(event: LogEvent): void;
-};
+export type { InternalLogger, LogEvent, Logger, LogLevel } from "@takibi/takibi-logger";
 
 export type LoggingOptions = {
   logger?: boolean | Logger;
@@ -40,10 +12,6 @@ export type LoggingOptions = {
 
 export type PrettyConsoleLoggerOptions = {
   colors?: boolean;
-};
-
-export type InternalLogger = {
-  emit(event: LogEvent): void;
 };
 
 const LEVEL_PRIORITY: Record<LogLevel, number> = {

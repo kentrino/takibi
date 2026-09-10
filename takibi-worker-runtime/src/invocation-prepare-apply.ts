@@ -4,6 +4,7 @@ import {
   invocationStageResult,
   type InvocationExecutionView,
   type InvocationAdapterResult,
+  type InvocationPrepareApplyDeps,
   type PrepareApplyInvocationContract,
 } from "@takibi/takibi-worker-runtime-contract";
 import type { StorageDriver } from "@takibi/takibi-storage";
@@ -43,11 +44,7 @@ type ExecutionView<TContext extends object, TServices> = InvocationExecutionView
   TakibiMap<TContext, TServices>
 >;
 
-export type InvocationPrepareApplyDeps = {
-  invocationPolicy: PolicySurface;
-  invocationSchema: SchemaSurface;
-  invocationActionHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface;
-};
+export type { InvocationPrepareApplyDeps } from "@takibi/takibi-worker-runtime-contract";
 
 /**
  * One prepare/apply implementation for none / apply / full. Direct

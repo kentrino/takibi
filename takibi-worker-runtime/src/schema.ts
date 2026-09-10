@@ -1,15 +1,11 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { withTracing } from "@takibi/takibi-utility";
+import type { SchemaSurface } from "@takibi/takibi-worker-runtime-contract";
 import type { InternalLogger } from "./logging";
 import { withLoggedSpan } from "./logging";
 import { TAKIBI_SPAN } from "./otel-helper";
 
-export type SchemaSurface = {
-  parse: <S extends StandardSchemaV1>(
-    schema: S,
-    value: unknown,
-  ) => Promise<StandardSchemaV1.InferOutput<S>>;
-};
+export type { SchemaSurface } from "@takibi/takibi-worker-runtime-contract";
 
 export type SchemaParserCtor = {
   readonly logger?: InternalLogger;

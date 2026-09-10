@@ -21,6 +21,7 @@ export {
   TakibiContractConfigurationError,
   TakibiContractStateError,
 } from "./request";
+export type { EnvelopeAdapterMap } from "./request";
 export {
   createActionExecutionPlan,
   createCollectionExecutionPlan,
@@ -52,6 +53,9 @@ export type {
   TransactionPlanCriteria,
 } from "./plan";
 export type {
+  ActionHandlerArgs,
+  ActionHandlerCtor,
+  ActionHandlerSurface,
   AdapterMap,
   Adapters,
   BatchCallAdapters,
@@ -59,7 +63,6 @@ export type {
   BoundRunInvocation,
   CallAdapterMap,
   CallAdapters,
-  EnvelopeAdapterMap,
   CallFailureInput,
   CallFailureStage,
   CallTerminalEvent,
@@ -78,13 +81,19 @@ export type {
   InternalInvocationSettledTransaction,
   InternalInvocationTransactionFailure,
   InternalInvocationTypeMap,
+  InternalLogger,
   InvocationAdapters,
   InvocationAdapterKeys,
   InvocationAdapterResult,
   InvocationInputState,
   InvocationObserverEvent,
+  InvocationPrepareApplyDeps,
   InvocationRuntime,
+  LogEvent,
+  LogLevel,
   ObservedInput,
+  PolicySurface,
+  SchemaSurface,
   InvocationPlan,
   InvocationPlanningView,
   InvocationRequest,

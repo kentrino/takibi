@@ -43,8 +43,8 @@ or `execute`. It
 depends on `@takibi/takibi-api`, `@takibi/takibi-policy`,
 `@takibi/takibi-query`, `@takibi/takibi-protocol`,
 `@takibi/takibi-storage`, `@takibi/takibi-snapshot`,
-`@takibi/takibi-shared-types`, `@takibi/takibi-utility`,
-`@takibi/takibi-worker-runtime-contract`,
+`@takibi/takibi-shared-types`, `@takibi/takibi-logger`,
+`@takibi/takibi-utility`, `@takibi/takibi-worker-runtime-contract`,
 `@standard-schema/spec`, `hono`, and `tatenuki`.
 
 It does not own browser `createClient`, Node SQLite test adapters, query AST

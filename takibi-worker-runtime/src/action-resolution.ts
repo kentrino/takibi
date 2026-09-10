@@ -8,6 +8,7 @@ import {
   type CollectionsDef,
   type RuntimeActionDefinition,
 } from "@takibi/takibi-api";
+import type { ActionHandlerArgs } from "@takibi/takibi-worker-runtime-contract";
 import type { JsonValue } from "@takibi/takibi-shared-types";
 import { allows, denialReasonOf, type AccessGrant } from "@takibi/takibi-policy";
 import { createPolicyCollections, createTrustedCollections } from "./executor";
@@ -233,7 +234,7 @@ export async function executeResolvedAction<TCtx extends object>(
       logger,
       definition.atomic,
     );
-    const args: Record<string, unknown> = {
+    const args: Omit<ActionHandlerArgs, "input"> = {
       ctx: context,
       collections: policyCollections,
       $collections: trustedCollections,

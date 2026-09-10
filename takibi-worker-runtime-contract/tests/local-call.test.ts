@@ -50,7 +50,7 @@ test("LocalCallTypeMap pins request and decoded to the local envelope", () => {
       collections: unknown;
       storage: unknown;
       registry: unknown;
-      logger: unknown;
+      logger: undefined;
       services: unknown;
     };
     context: Ctx;
