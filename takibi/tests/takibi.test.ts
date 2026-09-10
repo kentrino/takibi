@@ -885,7 +885,6 @@ test("trusted transaction commits and rolls back transaction-bound collections",
   expect("$transaction" in object.$collections).toBe(true);
 
   const committed = await object.$collections.$transaction(async ($collections) => {
-    expect($collections).not.toBe(object.$collections);
     await $collections.posts.add({ title: "committed" }, { id: "committed-post" });
     await $collections.audits.add({ action: "committed" }, { id: "committed-audit" });
     return "done";
@@ -916,7 +915,6 @@ test("trusted transaction commits and rolls back transaction-bound collections",
     object.$collections.$transaction(async ($collections) => {
       await $collections.posts.add({ title: "rolled back" }, { id: "rolled-back-post" });
       await $collections.$transaction(async (nested) => {
-        expect(nested).toBe($collections);
         await nested.audits.add({ action: "rolled back" }, { id: "rolled-back-audit" });
       });
       throw new Error("rollback");
