@@ -17,7 +17,7 @@ import {
   type SchemaSurface,
 } from "./invocation-collaborators";
 import type { InternalLogger } from "./logging";
-import type { StorageDriver } from "@takibi/takibi-storage";
+import type { StorageDriver, StoredDocument } from "@takibi/takibi-storage";
 import type { ActionInvocation } from "./action-gate";
 
 export type ClassifiedAction = {
@@ -42,7 +42,7 @@ export type IdentifiedAction<TCtx extends object> = {
 
 export type AuthorizedAction<TCtx extends object> = IdentifiedAction<TCtx> & {
   readonly grant: AccessGrant;
-  readonly document?: unknown;
+  readonly document?: StoredDocument;
 };
 
 export type ResolvedAction<TCtx extends object> = AuthorizedAction<TCtx> & {
