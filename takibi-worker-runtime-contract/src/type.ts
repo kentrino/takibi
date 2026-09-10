@@ -12,6 +12,7 @@ import type {
   JsonValue,
   ObserverInvocationData,
   TakibiFailure,
+  WithMetadata,
 } from "@takibi/takibi-shared-types";
 
 export type { InternalLogger, LogEvent, LogLevel } from "@takibi/takibi-logger";
@@ -19,11 +20,13 @@ export type { InternalLogger, LogEvent, LogLevel } from "@takibi/takibi-logger";
 export type MaybePromise<T> = T | Promise<T>;
 
 export type PolicySurface = {
-  evaluateCollection: (
-    def: CollectionDefinition,
-    accessCtx: AccessContext<any, any>,
+  /** Infer from the definition only; callers cannot widen it through accessCtx. */
+  evaluateCollection: <S extends StandardSchemaV1, TCtx extends object>(
+    def: CollectionDefinition<S, TCtx>,
+    accessCtx: AccessContext<NoInfer<TCtx>, WithMetadata<StandardSchemaV1.InferOutput<NoInfer<S>>>>,
     options: { conceal: boolean; id?: string },
   ) => Promise<AccessGrant>;
+  /** Registry dispatch only. eraseForRegistry has already erased authored input types. */
   evaluateAction: (
     definition: RuntimeActionDefinition,
     actionCtx: unknown,

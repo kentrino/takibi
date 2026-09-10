@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
   ForbiddenError,
   NotFoundError,
@@ -15,7 +16,7 @@ import {
   type AccessGrant,
 } from "@takibi/takibi-policy";
 import { assertJsonValue, withTracing } from "@takibi/takibi-utility";
-import type { JsonValue } from "@takibi/takibi-shared-types";
+import type { JsonValue, WithMetadata } from "@takibi/takibi-shared-types";
 import type {
   ActionHandlerArgs,
   ActionHandlerCtor,
@@ -45,9 +46,9 @@ export type InvocationSpanCtor = {
 };
 
 export class PolicyEvaluator implements PolicySurface {
-  async evaluateCollection(
-    def: CollectionDefinition,
-    accessCtx: AccessContext<any, any>,
+  async evaluateCollection<S extends StandardSchemaV1, TCtx extends object>(
+    def: CollectionDefinition<S, TCtx>,
+    accessCtx: AccessContext<NoInfer<TCtx>, WithMetadata<StandardSchemaV1.InferOutput<NoInfer<S>>>>,
     options: { conceal: boolean; id?: string },
   ): Promise<AccessGrant> {
     const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
