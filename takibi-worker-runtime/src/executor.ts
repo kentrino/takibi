@@ -96,7 +96,7 @@ export async function executeOperation<TCtx extends object>(
   ctx: TCtx,
   req: ExecuteRequest,
   logger?: InternalLogger,
-): Promise<unknown> {
+): ReturnType<typeof executeResolvedCollection<TCtx>> {
   return executeOperationInScope(collections, storage, ctx, req, logger, false);
 }
 
@@ -107,7 +107,7 @@ async function executeOperationInScope<TCtx extends object>(
   req: ExecuteRequest,
   logger: InternalLogger | undefined,
   reuseTransaction: boolean,
-): Promise<unknown> {
+): ReturnType<typeof executeResolvedCollection<TCtx>> {
   const { policy } = createInvocationCollaborators({
     logger,
     collection: req.collection,

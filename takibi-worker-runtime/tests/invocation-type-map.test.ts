@@ -132,3 +132,13 @@ test("transaction adapter bindings retain their map relationships", () => {
 
   expectTypeOf(rejectedBindings).toBeFunction();
 });
+
+test("collection execution and authorized documents retain their concrete types", () => {
+  type OperationResult = Awaited<ReturnType<typeof import("../src/executor").executeOperation>>;
+  type ResolvedResult = Awaited<ReturnType<typeof executeResolvedCollection>>;
+  expectTypeOf<OperationResult>().not.toBeUnknown();
+  expectTypeOf<OperationResult>().toEqualTypeOf<ResolvedResult>();
+  expectTypeOf<
+    import("../src/action-resolution").AuthorizedAction<AppContext>["document"]
+  >().toEqualTypeOf<import("@takibi/takibi-storage").StoredDocument | undefined>();
+});
