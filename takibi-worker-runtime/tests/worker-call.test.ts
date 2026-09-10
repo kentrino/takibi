@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { afterEach, beforeEach, expect, test } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { Call } from "@takibi/takibi-worker-runtime-contract";
 import { resolveWorkerEnvelopeMap, serveDecodedCall } from "../src/context/worker-call";
 import type { Executor, ExecutorInput } from "../src/context/executors";
@@ -8,6 +8,9 @@ import type { InternalLogger, LogEvent } from "../src/logging";
 import { TAKIBI_SPAN } from "../src/otel-helper";
 import type { WireResponse } from "../src/protocol";
 import {
+  activeSpanContext,
+  bindTracer,
+  withSpan,
   formatTraceparent,
   internalTracerKey,
   registerGlobalTracer,
@@ -52,10 +55,14 @@ function okResponse(data: unknown): WireResponse {
   return { ok: true, data };
 }
 
-function createRecordingTracer(): { tracer: TakibiTracer; spans: RecordedSpan[] } {
+function createRecordingTracer(onBoundary?: (event: string) => void): {
+  tracer: TakibiTracer;
+  spans: RecordedSpan[];
+} {
   const spans: RecordedSpan[] = [];
   const tracer: TakibiTracer = {
     startSpan(spec, parent) {
+      onBoundary?.("start:" + spec.name);
       const context: SpanContext = {
         traceId: parent?.traceId ?? randomHex(16),
         spanId: randomHex(8),
@@ -74,7 +81,9 @@ function createRecordingTracer(): { tracer: TakibiTracer; spans: RecordedSpan[] 
         runWithActiveContext: (fn) => fn(),
         recordException(_exception: SpanException) {},
         setStatus() {},
-        end() {},
+        end() {
+          onBoundary?.("end:" + spec.name);
+        },
       };
     },
     inject(headers, span) {
@@ -348,3 +357,126 @@ test("initial context stays typed and identical through resolver and dispatch", 
   const response = await serveDecodedCall(args);
   await expect(response.json()).resolves.toEqual(okResponse({ tenant: "typed" }));
 });
+
+test.each(["single", "batch", "decode", "resolve", "dispatch"] as const)(
+  "Worker lifecycle order for %s with defaults and a dispatch override",
+  async (scenario) => {
+    for (const overrideDispatch of [false, true]) {
+      const sequence: string[] = [];
+      const recording = createRecordingTracer((event) => sequence.push(event));
+      const record = (event: string) => {
+        const active = recording.spans.find((span) => span.spanId === activeSpanContext()?.spanId);
+        sequence.push(event + "@" + active?.name);
+      };
+      const decoded: PublicRequest =
+        scenario === "batch"
+          ? {
+              kind: "batch",
+              items: [
+                { kind: "collection", collection: "posts", operation: "get", id: "p1" },
+                { kind: "collection", collection: "posts", operation: "get", id: "p2" },
+              ],
+            }
+          : actionRequest("echo");
+      const wire = okResponse({ via: overrideDispatch ? "override" : "default" });
+      const dispatch: Executor = async (input) => {
+        record("dispatch");
+        expect(input.invocation).toBe(decoded);
+        expect(input.ctx).toEqual({ tenantId: "tenant-a" });
+        expect(input.resolveSpan?.spanId).toBe(
+          recording.spans.find((span) => span.name === TAKIBI_SPAN.resolve)?.spanId,
+        );
+        if (scenario === "dispatch") throw new Error("dispatch failed");
+        return wire;
+      };
+      const args = envelopeArgs({
+        decode: async () => {
+          record("decode");
+          if (scenario === "decode") throw new Error("decode failed");
+          return decoded;
+        },
+        resolve: () => {
+          record("resolve");
+          if (scenario === "resolve") throw new Error("resolve failed");
+          return { tenantId: "tenant-a" };
+        },
+        execute: overrideDispatch
+          ? async () => {
+              throw new Error("overridden execute must not run");
+            }
+          : dispatch,
+        logger: {
+          emit(event) {
+            record(
+              "log:" + event.event + (event.event === "takibi.request" ? ":" + event.message : ""),
+            );
+          },
+        },
+        options: { [internalTracerKey]: recording.tracer },
+      });
+      const json = Response.json.bind(Response);
+      const mapping = vi.spyOn(Response, "json").mockImplementation((body, init) => {
+        record("response");
+        return json(body, init);
+      });
+      try {
+        const response = overrideDispatch
+          ? await bindTracer(recording.tracer, () =>
+              withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, async () => {
+                const map = await resolveWorkerEnvelopeMap(args, {
+                  callDispatch: (input) =>
+                    dispatch({
+                      request: input.request,
+                      initial: args.initial,
+                      ctx: input.context.context,
+                      invocation: input.decoded,
+                      tracer: recording.tracer,
+                      resolveSpan: input.context.resolveSpan,
+                    }),
+                });
+                return map.call.run(map.request);
+              }),
+            )
+          : await serveDecodedCall(args);
+        const failed = !["single", "batch"].includes(scenario);
+        expect(response.status).toBe(failed ? 500 : 200);
+        await expect(response.json()).resolves.toEqual(
+          failed
+            ? {
+                ok: false,
+                error: {
+                  kind: "operation",
+                  code: "INTERNAL",
+                  message: scenario + " failed",
+                  status: 500,
+                },
+              }
+            : wire,
+        );
+        expect(mapping).toHaveBeenCalledTimes(1);
+        const request = (event: string) => event + "@" + TAKIBI_SPAN.request;
+        const resolve = (event: string) => event + "@" + TAKIBI_SPAN.resolve;
+        expect(sequence).toEqual([
+          "start:" + TAKIBI_SPAN.request,
+          request("decode"),
+          ...(scenario === "decode"
+            ? []
+            : [
+                request("log:takibi.request:started"),
+                "start:" + TAKIBI_SPAN.resolve,
+                resolve("resolve"),
+                resolve("log:takibi.resolve"),
+                "end:" + TAKIBI_SPAN.resolve,
+                ...(scenario === "resolve" ? [] : [request("dispatch")]),
+              ]),
+          ...(failed ? [request("log:takibi.error")] : []),
+          request("response"),
+          request("log:takibi.request:completed"),
+          "end:" + TAKIBI_SPAN.request,
+        ]);
+      } finally {
+        mapping.mockRestore();
+      }
+    }
+  },
+);

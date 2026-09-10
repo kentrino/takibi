@@ -168,8 +168,11 @@ export async function resolveLocalAdapterMap<TContext extends object, TServices 
     .graph(graph)
     .factories({
       ...createTakibiInvocationAdapterFactories<TContext, TServices>(),
+      // runInvocation owns createPlan -> executePlan -> settle -> notify.
       invocationCoreRun: inject(runInvocation<Invocation>),
+      // The executor span encloses that sequence and records failed settlement.
       invocationRun: createInstrumentedInvocationRun,
+      // Run one invocation (or each batch item in order), then project the response.
       localExecution: createLocalExecution,
     });
   return (overrides === undefined ? builder : builder.override(overrides)).resolve({
