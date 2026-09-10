@@ -7,6 +7,8 @@ test("root entry exposes the Worker runtime contract", () => {
   expectTypeOf(Runtime.createTakibi).toBeFunction();
   expectTypeOf(Runtime.createDurableObjectClass).toBeFunction();
   expectTypeOf<Runtime.HandleResult>().not.toBeNever();
+  expectTypeOf(Runtime).not.toHaveProperty("assignTakibiBrand");
+  expectTypeOf(Runtime).not.toHaveProperty("readTakibiBrand");
 });
 
 test("dedicated subpaths expose instrumentation and test integration", () => {

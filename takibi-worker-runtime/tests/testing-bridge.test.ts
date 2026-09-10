@@ -6,7 +6,8 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "../../takibi-testing/src/index";
 import { fullAccess } from "@takibi/takibi-policy";
-import { createTakibi, assignTakibiBrand } from "../src";
+import { createTakibi } from "../src";
+import { assignTakibiBrand } from "../src/brand";
 import {
   createInProcessRuntime,
   getTestingFork,

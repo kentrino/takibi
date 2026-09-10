@@ -15,6 +15,7 @@ export type TakibiBrandRecord<
 };
 
 export type TakibiBrandCarrier<TBrand = TakibiBrandRecord> = {
+  /** This property carries types. Do not read it as runtime application data. */
   readonly [TAKIBI_BRAND]: TBrand;
 };
 
@@ -57,6 +58,16 @@ export function assignTakibiBrand<
     TakibiBrandCarrier<TakibiBrandRecord<TContext, TInitial, TCollections, TActions, TServices>>;
 }
 
-export function readTakibiBrand<TBrand>(target: TakibiBrandCarrier<TBrand>): TBrand {
-  return target[TAKIBI_BRAND];
+/** Read the internal runtime representation without exposing phantom types as values. */
+export function readTakibiBrand<TBrand extends TakibiBrandRecord>(
+  target: TakibiBrandCarrier<TBrand>,
+): TakibiBrandRecord<null, null, TBrand["collections"], TBrand["actions"], null> {
+  const { collections, actions } = target[TAKIBI_BRAND];
+  return {
+    context: null,
+    initial: null,
+    collections,
+    actions,
+    services: null,
+  };
 }
