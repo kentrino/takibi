@@ -2,13 +2,8 @@ import { requestTakibi } from "./helpers/request";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "@takibi/takibi-policy";
-import {
-  createTakibi,
-  readTakibiBrand,
-  TAKIBI_BRAND,
-  type DurableObjectFetchStub,
-  type LogEvent,
-} from "../src";
+import { createTakibi, TAKIBI_BRAND, type DurableObjectFetchStub, type LogEvent } from "../src";
+import { readTakibiBrand } from "../src/brand";
 import { getTestingFork, type TestingExecutorFactory } from "../src/testing-bridge.server";
 import { Hono } from "hono";
 import { createHttpHandler } from "../src/context/http-handler";
