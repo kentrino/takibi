@@ -125,10 +125,8 @@ argument permits `keyof RuntimeAdapterMap` without constructing placeholder type
 `AdapterMap<TInvocation>`, `CallAdapterMap<T>`, and `Adapters<T, K>` are `Pick`
 projections of that full map, not building blocks used to assemble it.
 Call composers stay on the map as
-`callSingle` / `callBatch`; a runtime facade may wrap their wire result for
-HTTP. In-process Calls use `LocalCallRequest` (`kind: "single" | "batch"`,
-`context`, and `invocation` or `items`) via `LocalCallTypeMap` and the default
-local-call adapters. A wire or HTTP body that is `StatusBearingResult`
+`callSingle` / `callBatch`; a runtime facade can select that projection when
+it needs a Call pipeline. A wire or HTTP body that is `StatusBearingResult`
 (`ok` plus `error.status` on failure) can be projected with
 `jsonResponseFromStatus` and a `JsonResponseLike` factory; Fetch `Response`
 is not part of this package. `RUNTIME_ADAPTER_GRAPH` is the local-execution dependency graph

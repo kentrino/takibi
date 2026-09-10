@@ -14,7 +14,6 @@ import { createDurableObjectStorage } from "@takibi/takibi-storage";
 import {
   runInvocation,
   type InvocationAdapters,
-  type LocalCallTypeMap,
   type RuntimeAdapterMap,
 } from "@takibi/takibi-worker-runtime-contract";
 import { createSqliteDurableObjectStorage } from "../../takibi-testing/src/sqlite-storage.server";
@@ -26,11 +25,9 @@ import { executeOperation } from "../src/executor";
 import {
   resolveLocalAdapterMap,
   resolveLocalExecution,
-  type LocalExecution,
   type TakibiRuntimeAdapterMap,
 } from "../src/invocation-execution";
 import { InvocationPrepareApply } from "../src/invocation-prepare-apply";
-import type { CollectionReadRequest, WireResponse } from "../src/protocol";
 import { invocationToHttpResponse, invocationToWireResponse } from "../src/invocation-response";
 import type { TakibiInvocationTypeMap, TakibiWireInvocation } from "../src/invocation-type-map";
 
@@ -942,6 +939,45 @@ test("local execution returns wire success and failure without throwing", async 
   });
 });
 
+test("local execution keeps invocation notification and transaction overrides", async () => {
+  const { adapters, storage } = await createAdapters();
+  const notifications: string[] = [];
+  let transactions = 0;
+  const map = await resolveLocalAdapterMap(
+    {
+      ...adapters.invocationRuntime,
+      storage: {
+        ...storage,
+        transaction<T>(callback: (scoped: typeof storage) => Promise<T>) {
+          transactions += 1;
+          return storage.transaction(callback);
+        },
+      },
+      spanKind: "internal",
+    },
+    {
+      invocationNotify(event) {
+        notifications.push(event.outcome);
+      },
+    },
+  );
+
+  await expect(
+    map.localExecution.execute(
+      { tenantId: "tenant-a" },
+      {
+        kind: "collection",
+        collection: "items",
+        operation: "add",
+        id: "i1",
+        input: { value: "hello" },
+      },
+    ),
+  ).resolves.toMatchObject({ ok: true, data: { id: "i1", value: "hello" } });
+  expect(transactions).toBe(1);
+  expect(notifications).toEqual(["succeeded"]);
+});
+
 test("production local batch continues after one item failure", async () => {
   const { adapters, storage } = await createAdapters();
   const local = await resolveLocalExecution({
@@ -971,22 +1007,14 @@ test("production local batch continues after one item failure", async () => {
   });
 });
 
-test("runtime adapter map extends the contract map with assembly slots", () => {
+test("runtime adapter map contains invocation and local execution slots", () => {
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toExtend<TakibiAdapterMap<Ctx>>();
-  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toExtend<
-    RuntimeAdapterMap<{
-      invocation: Map;
-      request: LocalCallTypeMap<Map, WireResponse, CollectionReadRequest>["request"];
-      decoded: LocalCallTypeMap<Map, WireResponse, CollectionReadRequest>["decoded"];
-      response: WireResponse;
-      localExecution: LocalExecution<Ctx>;
-    }>
-  >();
   expectTypeOf<TakibiAdapterMap<Ctx>>().not.toHaveProperty("invocationCoreRun");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationCoreRun");
-  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("callDecode");
-  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("callSingle");
-  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().not.toHaveProperty("wireCallSingle");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().not.toHaveProperty("callDecode");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().not.toHaveProperty("callResolveContext");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().not.toHaveProperty("callSingle");
+  expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().not.toHaveProperty("callBatch");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("localExecution");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationPolicy");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationSchema");

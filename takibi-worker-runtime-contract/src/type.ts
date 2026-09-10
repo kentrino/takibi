@@ -471,33 +471,6 @@ export type CallTypeMap<
   response: TResponseObject;
 };
 
-/**
- * Already-decoded in-process Call envelope. `items` may be a narrower wire
- * than `invocation` when a runtime only batches a subset of operations.
- */
-export type LocalCallRequest<TContext, TWireInvocation, TBatchItem = TWireInvocation> =
-  | Readonly<{
-      kind: "single";
-      context: TContext;
-      invocation: TWireInvocation;
-    }>
-  | Readonly<{
-      kind: "batch";
-      context: TContext;
-      items: readonly TBatchItem[];
-    }>;
-
-export type LocalCallTypeMap<
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
-  TBatchItem = TInvocation["wireInvocation"],
-> = CallTypeMap<
-  LocalCallRequest<TInvocation["context"], TInvocation["wireInvocation"], TBatchItem>,
-  LocalCallRequest<TInvocation["context"], TInvocation["wireInvocation"], TBatchItem>,
-  TInvocation,
-  TResponseObject
->;
-
 type InvocationCompositionKeys =
   | InvocationAdapterKeys
   | "invocationPolicy"

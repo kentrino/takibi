@@ -7,9 +7,10 @@ adaptation, CRUD/action dispatch, document lifecycle (schema validation,
 prepareAdd/Set/Update, revision preconditions, unique enforcement, lazy
 migrations, seeds), logging/tracing, and Durable Object composition. DO
 `fetch` and in-process executors share `resolveLocalExecution`, which
-resolves contract `RUNTIME_ADAPTER_GRAPH` plus Takibi construction slots:
-instrumentation, `callToSingleResponse` / `callToBatchResponse`, and
-`localExecution`. Policy, schema, and action-handler collaborators are
+resolves Takibi invocation adapters plus instrumentation and local-execution
+slots. The local executor runs decoded invocations directly. It maps settled
+single and batch results to wire responses without a second Call envelope.
+Policy, schema, and action-handler collaborators are
 graph nodes; `inject(InvocationPrepareApply)` builds the shared none /
 apply / full prepare-apply class. `TakibiInvocationRuntime` is the concrete collaborator bag on
 `TakibiInvocationTypeMap.runtime`. Concrete invocation adapters, defaults, and
@@ -18,8 +19,8 @@ transaction wiring are registered once in
 `TAKIBI_INVOCATION_REGISTRATION_GRAPH`. Production `invocationNotify` stays
 unbound; an observer that needs services closes over them at construction. `createBoundInvocationAdapters` is the
 async thin resolve of that same registration (tatenuki `resolve` is async).
-`resolveLocalAdapterMap` adds `invocationRun` instrumentation and Call /
-local-execution slots on top; it does not re-list those adapters. Direct
+`resolveLocalAdapterMap` adds `invocationRun` instrumentation and the
+local-execution slot on top; it does not re-list those adapters. Direct
 `executeAction` and top-level invocation call the same prepare-apply instance:
 the public difference is throw versus settlement of the original adapter error.
 Production and tests share this path and can override a collaborator. Policy /
