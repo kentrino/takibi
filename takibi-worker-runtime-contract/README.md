@@ -137,6 +137,18 @@ one prepare/apply node. Those three slots, and `InvocationRuntime.logger`,
 are typed on this map (`PolicySurface`, `SchemaSurface`, the handler factory,
 and `InternalLogger` from `@takibi/takibi-logger`). Implementations and
 tracing stay in the runtime.
+`PolicySurface.evaluateCollection` infers context and document types from the
+collection definition. Its access context cannot widen those types. This protects
+calls with typed definitions, including calls through a contract-typed adapter.
+The runtime collection registry uses `CollectionDefinition<any, TCtx>`. Its schema
+has already been erased, so these calls cannot prove document correspondence.
+
+`PolicySurface.evaluateAction` is an erased registry dispatch boundary.
+`eraseForRegistry` converts authored actions to `RuntimeActionDefinition` before
+this method runs. Action builders check the authored policy relationships.
+The evaluator receives unknown guard output and document values. It does not
+recover or prove the original action context and document types.
+
 `InvocationPrepareApplyDeps` is `Pick` of those collaborator slots.
 `ENVELOPE_ADAPTER_GRAPH` is the Worker / testing envelope
 Call graph: `call` depends on `ENVELOPE_CALL_ADAPTER_KEYS` and does not
