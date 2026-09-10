@@ -20,6 +20,7 @@ export class UnauthorizedError extends TakibiError {
 }
 
 export class ForbiddenError<TCode extends string = string> extends TakibiError {
+  declare private readonly reasonCodeType: TCode;
   readonly reason?: PolicyReason<TCode>;
 
   constructor(message = "Forbidden", reason?: PolicyReason<TCode>) {

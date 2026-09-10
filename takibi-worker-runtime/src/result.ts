@@ -1,12 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { ForbiddenError, TakibiError } from "@takibi/takibi-api";
 import { SchemaValidationError } from "./schema";
-import type {
-  PolicyReason,
-  TakibiFailure,
-  TakibiResult,
-  ValidationIssue,
-} from "@takibi/takibi-shared-types";
+import type { TakibiFailure, TakibiResult, ValidationIssue } from "@takibi/takibi-shared-types";
 
 /** Copy only JSON-safe message/path from Standard Schema issues. */
 export function normalizeValidationIssues(
@@ -33,9 +28,11 @@ export function normalizeValidationIssues(
   });
 }
 
-export function toTakibiFailure<TReasonCode extends string = string>(
-  err: SchemaValidationError | TakibiError,
-): TakibiFailure<TReasonCode> {
+export function toTakibiFailure<TReasonCode extends string>(
+  err: ForbiddenError<TReasonCode>,
+): TakibiFailure<TReasonCode>;
+export function toTakibiFailure(err: SchemaValidationError | TakibiError): TakibiFailure<string>;
+export function toTakibiFailure(err: SchemaValidationError | TakibiError): TakibiFailure<string> {
   if (err instanceof SchemaValidationError) {
     return {
       kind: "validation",
@@ -50,21 +47,17 @@ export function toTakibiFailure<TReasonCode extends string = string>(
     code: err.code,
     message: err.message,
     status: err.status,
-    ...(err instanceof ForbiddenError && err.reason
-      ? { reason: err.reason as PolicyReason<TReasonCode> }
-      : {}),
+    ...(err instanceof ForbiddenError && err.reason ? { reason: err.reason } : {}),
   };
   return failure;
 }
 
-export async function asTakibiResult<T, TReasonCode extends string = never>(
-  fn: () => Promise<T>,
-): Promise<TakibiResult<T, TReasonCode>> {
+export async function asTakibiResult<T>(fn: () => Promise<T>): Promise<TakibiResult<T, string>> {
   try {
     return { ok: true, data: await fn() };
   } catch (err) {
     if (err instanceof SchemaValidationError || err instanceof TakibiError) {
-      return { ok: false, error: toTakibiFailure<TReasonCode>(err) };
+      return { ok: false, error: toTakibiFailure(err) };
     }
     throw err;
   }
