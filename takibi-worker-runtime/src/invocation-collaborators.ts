@@ -16,13 +16,24 @@ import {
 } from "@takibi/takibi-policy";
 import { assertJsonValue, withTracing } from "@takibi/takibi-utility";
 import type { JsonValue } from "@takibi/takibi-shared-types";
-import type { InternalLogger } from "./logging";
+import type {
+  ActionHandlerArgs,
+  ActionHandlerCtor,
+  ActionHandlerSurface,
+  InternalLogger,
+  PolicySurface,
+} from "@takibi/takibi-worker-runtime-contract";
 import { withLoggedSpan } from "./logging";
 import { actionSpanAttributes, collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { SchemaParser, traceSchemaParser } from "./schema";
 import { resolveGateGrant, type ActionInvocation } from "./action-gate";
 
 export type { SchemaSurface } from "./schema";
+export type {
+  ActionHandlerCtor,
+  ActionHandlerSurface,
+  PolicySurface,
+} from "@takibi/takibi-worker-runtime-contract";
 
 export type InvocationSpanCtor = {
   readonly logger?: InternalLogger;
@@ -31,29 +42,6 @@ export type InvocationSpanCtor = {
   readonly documentId?: string;
   readonly actionName?: string;
   readonly actionScope?: string;
-};
-
-export type PolicySurface = {
-  evaluateCollection: (
-    def: CollectionDefinition,
-    accessCtx: AccessContext<any, any>,
-    options: { conceal: boolean; id?: string },
-  ) => Promise<AccessGrant>;
-  evaluateAction: (
-    definition: RuntimeActionDefinition,
-    actionCtx: object,
-    invocation: ActionInvocation,
-    gateContext: ActionGateContext<object>,
-    doc?: unknown,
-  ) => Promise<AccessGrant>;
-};
-
-export type ActionHandlerSurface = {
-  run: (args: Record<string, unknown>) => Promise<JsonValue>;
-};
-
-export type ActionHandlerCtor = InvocationSpanCtor & {
-  readonly definition: RuntimeActionDefinition;
 };
 
 export class PolicyEvaluator implements PolicySurface {
@@ -92,7 +80,7 @@ export class ActionHandler implements ActionHandlerSurface {
     this.#definition = deps.definition;
   }
 
-  async run(args: Record<string, unknown>): Promise<JsonValue> {
+  async run(args: ActionHandlerArgs): Promise<JsonValue> {
     const output = await this.#definition.handler(args);
     if (output === undefined) return null;
     assertJsonValue(output, {

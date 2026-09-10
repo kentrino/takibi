@@ -3,9 +3,11 @@
 Internal call and invocation contracts for Takibi Worker runtimes.
 
 The package is platform-independent. It owns lifecycle state, storage-isolation
-dispatch, settlement, notification, and the function contracts implemented by a
-runtime. Schema, policy, persistence, tracing, concrete storage, and wire
-protocol implementations stay in `@takibi/takibi-worker-runtime`.
+dispatch, settlement, notification, and the policy / schema / handler
+interfaces those contracts name. `LogEvent`, `LogLevel`, and `InternalLogger`
+come from `@takibi/takibi-logger` and are re-exported here. Schema, policy,
+persistence, tracing, log output, concrete storage, and wire protocol
+implementations stay in `@takibi/takibi-worker-runtime`.
 
 These are internal execution contracts, not an application-facing compatibility
 promise. The observer boundary supports a future public `onResponse` option;
@@ -133,10 +135,16 @@ is not part of this package. `RUNTIME_ADAPTER_GRAPH` is the local-execution depe
 for those slots. `invocationPrepareApply` depends on
 `invocationPolicy`, `invocationSchema`, and `invocationActionHandler`;
 `transactionNone` / `transactionApply` / `transactionFull` alias that
-one prepare/apply node. Concrete collaborator types stay in the runtime. `ENVELOPE_ADAPTER_GRAPH` is the Worker / testing envelope
+one prepare/apply node. Those three slots, and `InvocationRuntime.logger`,
+are typed on this map (`PolicySurface`, `SchemaSurface`, the handler factory,
+and `InternalLogger` from `@takibi/takibi-logger`). Implementations and
+tracing stay in the runtime.
+`InvocationPrepareApplyDeps` is `Pick` of those collaborator slots.
+`ENVELOPE_ADAPTER_GRAPH` is the Worker / testing envelope
 Call graph: `call` depends on `ENVELOPE_CALL_ADAPTER_KEYS` and does not
 require invocation or storage adapters. `EnvelopeAdapterMap` is that
-surface plus the constructed `call` instance.
+surface plus the constructed `Call` instance derived from the same type
+arguments.
 Instrumentation values stay off this type. Keys use flat camelCase prefixes
 such as `callDecode`, `invocationCreatePlan`, `transactionNone`, and
 `transactionRun`. `INVOCATION_ADAPTER_KEYS` lists the slots `runInvocation`
@@ -310,8 +318,9 @@ does not disable slot-integrity or notification single-shot checks.
 
 `Call` is a normal TypeScript class and a DI graph node. Platform decode,
 context resolve, dispatch, conversion, and observation stay on runtime
-adapter factories; the contract does not import HTTP, logger, or tracing
-types. `createClass` remains a
+adapter factories; the contract re-exports the logger interface from
+`@takibi/takibi-logger` and does not import HTTP or tracing types.
+`createClass` remains a
 runtime tool for separating business method views from OTEL interceptors.
 Interceptors use constructor metadata and compose through `next`; business
 methods see their narrow views. Instances capturing phase data are

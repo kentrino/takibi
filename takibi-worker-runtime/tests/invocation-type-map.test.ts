@@ -58,6 +58,7 @@ test("slots match current runtime types", () => {
   expectTypeOf<AppMap["runtime"]["registry"]>().toEqualTypeOf<ActionRegistry>();
   expectTypeOf<AppMap["context"]>().toEqualTypeOf<AppContext>();
   expectTypeOf<AppMap["runtime"]["logger"]>().toEqualTypeOf<InternalLogger | undefined>();
+  expectTypeOf<InternalLogger>().toEqualTypeOf<import("@takibi/takibi-logger").InternalLogger>();
   expectTypeOf<AppMap["runtime"]["services"]>().toEqualTypeOf<AppServices>();
   expectTypeOf<AppMap["rawInput"]>().toEqualTypeOf<unknown>();
   expectTypeOf<AppMap["input"]>().toEqualTypeOf<unknown>();

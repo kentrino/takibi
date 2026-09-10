@@ -33,13 +33,13 @@ export type WorkerResolvedCall<TCtx extends object = object> = {
   readonly resolveSpan: SpanContext | undefined;
 };
 
-export type WorkerCall<TCtx extends object = object> = Call<
+export type WorkerCall<TCtx extends object = object> = EnvelopeAdapterMap<
   Request,
   PublicRequest,
   WorkerResolvedCall<TCtx>,
   Response,
   WireResponse
->;
+>["call"];
 
 /**
  * Envelope Call map plus request-scoped construction values. Resolving this
@@ -48,14 +48,7 @@ export type WorkerCall<TCtx extends object = object> = Call<
 export type WorkerEnvelopeAdapterMap<
   TInitial = unknown,
   TCtx extends object = object,
-> = EnvelopeAdapterMap<
-  Request,
-  PublicRequest,
-  WorkerResolvedCall<TCtx>,
-  Response,
-  WireResponse,
-  WorkerCall<TCtx>
-> & {
+> = EnvelopeAdapterMap<Request, PublicRequest, WorkerResolvedCall<TCtx>, Response, WireResponse> & {
   request: Request;
   initial: TInitial;
   requestDecoder: () => Promise<PublicRequest>;

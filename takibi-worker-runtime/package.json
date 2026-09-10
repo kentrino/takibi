@@ -60,6 +60,7 @@
   "dependencies": {
     "@standard-schema/spec": "catalog:",
     "@takibi/takibi-api": "workspace:^",
+    "@takibi/takibi-logger": "workspace:^",
     "@takibi/takibi-policy": "workspace:^",
     "@takibi/takibi-protocol": "workspace:^",
     "@takibi/takibi-query": "workspace:^",

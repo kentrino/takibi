@@ -992,6 +992,15 @@ test("runtime adapter map extends the contract map with assembly slots", () => {
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationSchema");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationActionHandler");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationPrepareApply");
+  expectTypeOf<TakibiAdapterMap<Ctx>["invocationPolicy"]>().toEqualTypeOf<
+    RuntimeAdapterMap["invocationPolicy"]
+  >();
+  expectTypeOf<TakibiAdapterMap<Ctx>["invocationSchema"]>().toEqualTypeOf<
+    RuntimeAdapterMap["invocationSchema"]
+  >();
+  expectTypeOf<TakibiAdapterMap<Ctx>["invocationActionHandler"]>().toEqualTypeOf<
+    RuntimeAdapterMap["invocationActionHandler"]
+  >();
 });
 
 test("DI override of invocationPolicy is used by the local execution path", async () => {

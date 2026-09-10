@@ -176,3 +176,108 @@ test("one runtime type map preserves request, context, response and facade relat
   expectTypeOf<Map["localExecution"]>().toEqualTypeOf<Types["localExecution"]>();
   expectTypeOf<Decode>().not.toHaveProperty("invocationRuntime");
 });
+
+test("adapter collaborators and logger are typed on the contract map", () => {
+  type Map = import("../src").RuntimeAdapterMap;
+  type Policy = import("../src").PolicySurface;
+  type Schema = import("../src").SchemaSurface;
+  type HandlerCtor = import("../src").ActionHandlerCtor;
+  type Handler = import("../src").ActionHandlerSurface;
+  type Logger = import("../src").InternalLogger;
+  type PrepareDeps = import("../src").InvocationPrepareApplyDeps;
+
+  expectTypeOf<import("../src").InvocationRuntime["logger"]>().toEqualTypeOf<Logger | undefined>();
+  expectTypeOf<Logger>().toEqualTypeOf<import("@takibi/takibi-logger").InternalLogger>();
+  expectTypeOf<import("../src").LogEvent>().toEqualTypeOf<
+    import("@takibi/takibi-logger").LogEvent
+  >();
+  expectTypeOf<Map["invocationPolicy"]>().toEqualTypeOf<Policy>();
+  expectTypeOf<Map["invocationSchema"]>().toEqualTypeOf<Schema>();
+  expectTypeOf<Map["invocationActionHandler"]>().toEqualTypeOf<(ctor: HandlerCtor) => Handler>();
+  expectTypeOf<PrepareDeps>().toEqualTypeOf<
+    Pick<Map, "invocationPolicy" | "invocationSchema" | "invocationActionHandler">
+  >();
+
+  const rejectedPolicy = (policy: Policy) => {
+    void policy;
+    const incomplete = {
+      evaluateCollection: policy.evaluateCollection,
+    };
+    // @ts-expect-error policy adapters must implement evaluateAction
+    const assigned: Policy = incomplete;
+    void assigned;
+  };
+  expectTypeOf(rejectedPolicy).toBeFunction();
+
+  const optionalLogger = (runtime: import("../src").InvocationRuntime) => {
+    runtime.logger?.emit({
+      level: "debug",
+      event: "takibi.schema",
+      message: "completed",
+    });
+  };
+  expectTypeOf(optionalLogger).toBeFunction();
+});
+
+test("schema parse keeps Standard Schema output inference", () => {
+  type LengthSchema = import("@standard-schema/spec").StandardSchemaV1<string, number>;
+  const parse = async <S extends import("@standard-schema/spec").StandardSchemaV1>(
+    schema: S,
+    value: unknown,
+  ): Promise<import("@standard-schema/spec").StandardSchemaV1.InferOutput<S>> => {
+    void schema;
+    void value;
+    return undefined as never;
+  };
+  const schemaSurface: import("../src").SchemaSurface = { parse };
+  const lengthSchema = {} as LengthSchema;
+  expectTypeOf(schemaSurface.parse(lengthSchema, "hello")).toEqualTypeOf<Promise<number>>();
+});
+
+test("envelope call is derived from the envelope type arguments", () => {
+  type RequestLike = { readonly url: string };
+  type Decoded = { readonly name: string };
+  type Context = { readonly tenantId: string };
+  type ResponseObject = { readonly status: number };
+  type Dispatched = { readonly ok: true };
+  type Envelope = import("../src").EnvelopeAdapterMap<
+    RequestLike,
+    Decoded,
+    Context,
+    ResponseObject,
+    Dispatched
+  >;
+  type ExpectedCall = import("../src").Call<
+    RequestLike,
+    Decoded,
+    Context,
+    ResponseObject,
+    Dispatched
+  >;
+
+  expectTypeOf<Envelope["call"]>().toEqualTypeOf<ExpectedCall>();
+  expectTypeOf<Envelope["call"]["run"]>().toEqualTypeOf<
+    (request: RequestLike) => Promise<ResponseObject>
+  >();
+  expectTypeOf<Envelope["call"]["decode"]>().toEqualTypeOf<
+    (request: RequestLike) => Promise<Decoded>
+  >();
+  expectTypeOf<Envelope>().not.toHaveProperty("invocationRuntime");
+});
+
+test("action handler arguments require the common execution context", () => {
+  type Args = Parameters<import("../src").ActionHandlerSurface["run"]>[0];
+  type CommonArgs = {
+    ctx: { tenantId: string };
+    collections: {};
+    $collections: {};
+    services: { audit: string[] };
+    input: undefined;
+  };
+  expectTypeOf<CommonArgs>().toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "ctx">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "collections">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "$collections">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "services">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "input">>().not.toExtend<Args>();
+});

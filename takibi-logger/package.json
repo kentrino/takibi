@@ -1,14 +1,13 @@
 {
-  "name": "@takibi/takibi-worker-runtime-contract",
+  "name": "@takibi/takibi-logger",
   "version": "0.0.0",
-  "description": "Call and invocation contracts for Takibi Worker runtimes.",
+  "description": "Shared logger and log-event contracts for Takibi packages.",
   "keywords": [
-    "contract",
-    "internal",
-    "runtime",
-    "takibi"
+    "logger",
+    "takibi",
+    "types"
   ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/takibi-worker-runtime-contract",
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/takibi-logger",
   "bugs": {
     "url": "https://github.com/kentrino/takibi/issues"
   },
@@ -16,7 +15,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/takibi-worker-runtime-contract"
+    "directory": "packages/takibi-logger"
   },
   "files": [
     "dist",
@@ -46,10 +45,6 @@
     "check": "vp check"
   },
   "dependencies": {
-    "@standard-schema/spec": "catalog:",
-    "@takibi/takibi-api": "workspace:^",
-    "@takibi/takibi-logger": "workspace:^",
-    "@takibi/takibi-policy": "workspace:^",
     "@takibi/takibi-shared-types": "workspace:^"
   },
   "devDependencies": {
