@@ -560,12 +560,12 @@ async function collectDocuments(
 
 function compileConditionalWriteOptions<TDoc, TIndexes extends Record<string, readonly string[]>>(
   options: ConditionalWriteOptions<TDoc, TIndexes> & ListOptions<TDoc, TIndexes>,
-): StorageListOptions {
+): StorageListOptions & { where: NonNullable<StorageListOptions["where"]> } {
   const compiled = compileListOptions(options);
   if (!compiled?.where) {
     throw new TypeError("Conditional writes require where");
   }
-  return compiled;
+  return { ...compiled, where: compiled.where };
 }
 
 function runTrustedMutation<T>(
