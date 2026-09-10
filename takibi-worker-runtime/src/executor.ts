@@ -425,15 +425,17 @@ export function createPolicyCollections<
   return api;
 }
 
-export function createTrustedCollections<TCollections extends CollectionsDef>(
+type TrustedCollectionApis<TCollections extends CollectionsDef> = {
+  [K in Exclude<keyof TCollections, "$transaction">]: TrustedCollectionApi<TCollections[K]>;
+};
+
+function createTrustedCollectionApis<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,
   logger?: InternalLogger,
   reuseTransaction = false,
-): TrustedCollectionsApi<TCollections> {
-  const api = Object.create(null) as {
-    [K in Exclude<keyof TCollections, "$transaction">]: TrustedCollectionApi<TCollections[K]>;
-  };
+): TrustedCollectionApis<TCollections> {
+  const api = Object.create(null) as TrustedCollectionApis<TCollections>;
   for (const name of Object.keys(collections) as (Exclude<keyof TCollections, "$transaction"> &
     string)[]) {
     const definition = collections[name]!;
@@ -506,18 +508,46 @@ export function createTrustedCollections<TCollections extends CollectionsDef>(
     collectionApi.listAll = bindThrowingListAll(collectionApi.list);
     api[name] = collectionApi;
   }
-  const trustedApi = Object.assign(api, {
+  return api;
+}
+
+function createTransactionAwareTrustedApi<TCollections extends CollectionsDef>(
+  collections: TCollections,
+  storage: StorageDriver,
+  logger: InternalLogger | undefined,
+  reuseTransaction: boolean,
+): TrustedCollectionsApi<TCollections> {
+  const collectionApis = createTrustedCollectionApis(
+    collections,
+    storage,
+    logger,
+    reuseTransaction,
+  );
+  const scope: { api?: TrustedCollectionsApi<TCollections> } = {};
+  const trustedApi: TrustedCollectionsApi<TCollections> = Object.assign(collectionApis, {
     $transaction<T>(
       callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<T>,
     ): Promise<T> {
-      return reuseTransaction
-        ? callback(trustedApi)
-        : storage.transaction((scoped) =>
-            callback(createTrustedCollections(collections, scoped, logger, true)),
-          );
+      if (!reuseTransaction) {
+        return storage.transaction((scoped) =>
+          callback(createTransactionAwareTrustedApi(collections, scoped, logger, true)),
+        );
+      }
+      if (!scope.api) throw new Error("Trusted collections API is not initialized");
+      return callback(scope.api);
     },
   });
+  scope.api = trustedApi;
   return trustedApi;
+}
+
+export function createTrustedCollections<TCollections extends CollectionsDef>(
+  collections: TCollections,
+  storage: StorageDriver,
+  logger?: InternalLogger,
+  reuseTransaction = false,
+): TrustedCollectionsApi<TCollections> {
+  return createTransactionAwareTrustedApi(collections, storage, logger, reuseTransaction);
 }
 
 async function countDocuments(
