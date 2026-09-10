@@ -8,6 +8,7 @@ export type {
   ContextResolverInput,
   ContextStubResolver,
   ContextStubResolverInput,
+  DurableObjectFetchStub,
   HandleOptions,
   HandleResult,
   TakibiBrand,

@@ -13,6 +13,7 @@ import {
   registerTracingContextBackend,
   type LogEvent,
   type Logger,
+  type DurableObjectFetchStub,
   type SpanAttributes,
   type SpanContext,
   type SpanException,
@@ -137,7 +138,7 @@ function createApp(
   options: {
     events?: LogEvent[];
     resolve?: (input: { request: Request }) => { tenantId: string; marker?: string };
-    stub?: () => DurableObjectStub;
+    stub?: () => DurableObjectFetchStub;
     seed?: () => Promise<Record<string, { title: string }>> | Record<string, { title: string }>;
     tracer?: TakibiTracer;
   } = {},
@@ -330,7 +331,7 @@ test("Worker production dispatch resolves once and sends one stub fetch per Call
         ],
       });
     },
-  } as unknown as DurableObjectStub;
+  };
   const handler = createApp({
     resolve: () => {
       resolveCalls += 1;

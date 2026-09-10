@@ -2,7 +2,13 @@ import { requestTakibi } from "./helpers/request";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "@takibi/takibi-policy";
-import { createTakibi, readTakibiBrand, TAKIBI_BRAND, type LogEvent } from "../src";
+import {
+  createTakibi,
+  readTakibiBrand,
+  TAKIBI_BRAND,
+  type DurableObjectFetchStub,
+  type LogEvent,
+} from "../src";
 import { getTestingFork, type TestingExecutorFactory } from "../src/testing-bridge.server";
 import { Hono } from "hono";
 import { createHttpHandler } from "../src/context/http-handler";
@@ -11,6 +17,21 @@ import { ownStringEntries } from "../src/context/own-entries";
 
 // The public facade is the only dynamic type boundary. These tests cover the
 // relationships that must survive it, including arguments to stored callbacks.
+test("stub resolver accepts platform stubs and requires fetch", () => {
+  expectTypeOf<DurableObjectStub>().toExtend<DurableObjectFetchStub>();
+
+  const acceptStub = (_stub: DurableObjectFetchStub) => undefined;
+  acceptStub({ fetch: async () => new Response() });
+
+  const invalid = () => {
+    // @ts-expect-error A stub must provide fetch.
+    acceptStub({});
+    // @ts-expect-error Fetch must return a Response.
+    acceptStub({ fetch: async () => "invalid" });
+  };
+  expectTypeOf(invalid).toBeFunction();
+});
+
 test("definition facade preserves initial, env, services, documents and actions", () => {
   type Initial = { auth: { tenant: string } };
   type Env = { PREFIX: string };

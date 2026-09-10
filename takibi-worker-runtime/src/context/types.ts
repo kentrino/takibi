@@ -40,9 +40,12 @@ export type ContextStubResolverInput<
   TInitial = Record<string, never>,
 > = ContextResolverInput<TInitial> & { resolved: TCtx };
 
+/** The Durable Object operation used by the Worker execution backend. */
+export type DurableObjectFetchStub = Pick<DurableObject, "fetch">;
+
 export type ContextStubResolver<TCtx extends object, TInitial = Record<string, never>> = (
   input: ContextStubResolverInput<TCtx, TInitial>,
-) => DurableObjectStub | Promise<DurableObjectStub>;
+) => DurableObjectFetchStub | Promise<DurableObjectFetchStub>;
 
 export type ServicesFactory<TEnv, TServices> = (input: { env: TEnv }) => TServices;
 
