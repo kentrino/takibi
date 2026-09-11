@@ -1,6 +1,8 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
+import { createPolicyHelper } from "@takibi/takibi-policy";
 import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { createTakibi, fullAccess, grant, none, UnauthorizedError } from "../src/index";
 
@@ -91,7 +93,7 @@ function createApp() {
 function clientFor(handler: ReturnType<typeof createApp>["handler"], user: User | null) {
   return createClient<typeof handler>("http://fire.test", {
     headers: () => headers(user),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 }
 
@@ -173,4 +175,60 @@ test("anonymous CRUD stays denied when accessPolicy does not grant", async () =>
     ok: false,
     error: { code: "FORBIDDEN", status: 403 },
   });
+});
+
+test("action guards replace gate and handler context while nested CRUD keeps resolve context", async () => {
+  const baseContext: AppCtx = { tenantId: "tenant-a", user: { id: "s1", role: "staff" } };
+  const context = createTakibi()({ resolve: () => baseContext });
+  const policyContexts: AppCtx[] = [];
+  const app = context.defineCollections({
+    bookings: {
+      schema: Booking,
+      accessPolicy: context.policy((ctx) => {
+        policyContexts.push(ctx);
+        return ctx.tenantId === "tenant-a" && ctx.user?.role === "staff" ? fullAccess : none;
+      }),
+      seed: () => ({ b1: { title: "existing", status: "pending" as const } }),
+    },
+  });
+  const schemaGate = createPolicyHelper<object>()(Booking, ({ doc }) =>
+    doc?.status === "pending" ? fullAccess : none,
+  );
+  const bookings = app.bookings.actions((defineAction) => ({
+    inspect: defineAction()
+      .use(() => "guarded")
+      .policy(({ ctx }) => (ctx === "guarded" ? fullAccess : none))
+      .handler(async ({ ctx, collection, id }) => ({ ctx, booking: await collection.get(id) })),
+    inspectWithSchemaGate: defineAction()
+      .use(() => "guarded")
+      .policy(schemaGate)
+      .handler(({ ctx, id }) => ({ ctx, id })),
+  }));
+  const inspectRoot = app
+    .defineAction()
+    .use(() => "guarded")
+    .use((identity) => ({ identity }))
+    .policy(({ ctx }) => (ctx.identity === "guarded" ? fullAccess : none))
+    .handler(async ({ ctx, collections }) => ({
+      ctx,
+      booking: await collections.bookings.get("b1"),
+    }));
+  const handler = withSqliteTestBackend(app.actions({ bookings, $: { inspectRoot } }));
+  const client = createClient<typeof handler>("http://fire.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
+
+  expect(await client.bookings.inspect("b1")).toMatchObject({
+    ok: true,
+    data: { ctx: "guarded", booking: { title: "existing" } },
+  });
+  expect(await client.inspectRoot()).toMatchObject({
+    ok: true,
+    data: { ctx: { identity: "guarded" }, booking: { title: "existing" } },
+  });
+  expect(await client.bookings.inspectWithSchemaGate("b1")).toEqual({
+    ok: true,
+    data: { ctx: "guarded", id: "b1" },
+  });
+  expect(policyContexts).toMatchObject([baseContext, baseContext]);
 });

@@ -1,4 +1,4 @@
-import { createSqliteDurableObjectStorage } from "../../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 
 export function createFailingDocumentWriteStorage(): DurableObjectStorage {
   const storage = createSqliteDurableObjectStorage();

@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/takibi/client";
@@ -7,7 +8,7 @@ import { nextDocumentRevision } from "../src/revision";
 import { createDurableObjectStorage } from "../src/storage";
 import { storageSet } from "../src/typed-storage";
 import type { StoredDocument } from "../src/types";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 
 type AppCtx = { tenantId: string };
 
@@ -25,7 +26,9 @@ function createApp() {
 }
 
 function clientOf(handler: ReturnType<typeof createApp>) {
-  return createClient<typeof handler>("http://fire.test", { fetch: handler.request });
+  return createClient<typeof handler>("http://fire.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
 }
 
 test("add and create-via-set start at rev 1 and successful writes increment", async () => {

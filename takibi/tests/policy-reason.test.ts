@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { createClient } from "@takibi/takibi/client";
 import { withSqliteTestBackend } from "@takibi/takibi/testing";
 import { expect, expectTypeOf, test } from "vite-plus/test";
@@ -186,11 +187,11 @@ test("generated CRUD clients expose reasons only on add and list", () => {
 test("public failures serialize reason only on unconcealed FORBIDDEN paths", async () => {
   const handler = createReasonHandler();
   const admin = createClient<typeof handler>("http://takibi.test", {
-    fetch: handler.request,
+    fetch: (input, init) => requestTakibi(handler, input, init),
     headers: { authorization: "admin" },
   });
   const anonymous = createClient<typeof handler>("http://takibi.test", {
-    fetch: handler.request,
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   const created = await admin.items.add({ locked: true }, { id: "locked" });
   expect(created.ok).toBe(true);
@@ -232,16 +233,16 @@ test("concealed existing and missing document responses are byte-equivalent", as
   const existingHandler = createReasonHandler();
   const missingHandler = createReasonHandler();
   const admin = createClient<typeof existingHandler>("http://takibi.test", {
-    fetch: existingHandler.request,
+    fetch: (input, init) => requestTakibi(existingHandler, input, init),
     headers: { authorization: "admin" },
   });
   await admin.items.add({ locked: true }, { id: "same-id" });
 
   const deniedExisting = await createClient<typeof existingHandler>("http://takibi.test", {
-    fetch: existingHandler.request,
+    fetch: (input, init) => requestTakibi(existingHandler, input, init),
   }).items.get("same-id");
   const missing = await createClient<typeof missingHandler>("http://takibi.test", {
-    fetch: missingHandler.request,
+    fetch: (input, init) => requestTakibi(missingHandler, input, init),
   }).items.get("same-id");
 
   expect(JSON.stringify(deniedExisting)).toBe(JSON.stringify(missing));

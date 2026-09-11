@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
@@ -15,7 +16,7 @@ import {
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import { MaintenanceController } from "../src/maintenance";
 import { createDurableObjectStorage } from "../src/storage";
 
@@ -130,7 +131,7 @@ function clientFor(
 ) {
   return createClient<typeof handler>("http://fire.test", {
     headers: () => headers(user),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 }
 
@@ -163,7 +164,7 @@ test("bounded array fields roundtrip through whole-document add, get, and update
   const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const created = await client.posts.add(
@@ -243,7 +244,7 @@ test("document actions reuse a schema-bound accessPolicy as a doc-aware gate", a
   const handler = withSqliteTestBackend(app.actions({ posts: postsActions }));
   const member = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "u1", role: "member" }),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   expect(await member.posts.touch("open")).toEqual({ ok: true, data: { touched: "open" } });
   expect(await member.posts.touch("hidden")).toMatchObject({
@@ -257,7 +258,7 @@ test("document actions reuse a schema-bound accessPolicy as a doc-aware gate", a
 
   const denied = createClient<typeof handler>("http://fire.test", {
     headers: () => headers(null),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   expect(await denied.posts.touch("open")).toMatchObject({
     ok: false,
@@ -306,7 +307,7 @@ test("named unique constraints cover public and trusted writes atomically", asyn
   const handler = withSqliteTestBackend(app.actions({ records: trustedCreate }));
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   expect(
@@ -394,7 +395,7 @@ test("action input is validated and client routes document actions by id", async
         url: request.url,
         ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) } : {}),
       });
-      const result = await handler.handle(request, { prefix: "/api/fire" });
+      const result = await handler.handle(request, { prefix: "/api/fire", context: {} });
       return result.response!;
     },
   });
@@ -445,7 +446,7 @@ test("document action ids containing colons roundtrip as %3A on the wire", async
     fetch: async (input, init) => {
       const request = new Request(input, init);
       calls.push(request.url);
-      return handler.request(request, init);
+      return requestTakibi(handler, request, init);
     },
   });
 
@@ -457,7 +458,7 @@ test("document action ids containing colons roundtrip as %3A on the wire", async
 
 test("no-input document actions accept a zero-length POST body", async () => {
   const { handler } = createActionApp();
-  const created = await handler.request("http://fire.test/posts/p1", {
+  const created = await requestTakibi(handler, "http://fire.test/posts/p1", {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ title: "first" }),
@@ -470,7 +471,7 @@ test("no-input document actions accept a zero-length POST body", async () => {
       headers: headers(),
       body: new Uint8Array(),
     }),
-    { prefix: "/api/fire" },
+    { prefix: "/api/fire", context: {} },
   );
   expect(result.matched).toBe(true);
   expect(result.response?.status).toBe(200);
@@ -499,7 +500,7 @@ test("action input schema refinements become validation failures", async () => {
   const handler = withSqliteTestBackend(app.actions({ $: { register } }));
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const blocked = await client.register({ email: "user@example.invalid" });
@@ -587,14 +588,14 @@ test("owner policy only grants list when the whole query implies the caller owne
   const handler = withSqliteTestBackend(production);
   const admin = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "admin", role: "admin" }),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   await admin.notes.add({ ownerId: "u1", status: "open" }, { id: "n1" });
   await admin.notes.add({ ownerId: "u2", status: "open" }, { id: "n2" });
   await admin.notes.add({ ownerId: "u1", status: "closed" }, { id: "n3" });
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const own = await client.notes.list({
@@ -769,7 +770,7 @@ test("action gate keeps resolved context under ctx without claim collisions", as
     .handler(({ ctx }) => ({ permission: ctx.permission, scope: ctx.scope }));
   const handler = withSqliteTestBackend(app.actions({ $: { inspect } }));
   const client = createClient<typeof handler>("http://fire.test", {
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   expect(await client.inspect()).toEqual({
@@ -788,11 +789,11 @@ test("set policy denial conceals existence for new and existing ids", async () =
   const handler = withSqliteTestBackend(production);
   const admin = createClient<typeof handler>("http://fire.test", {
     headers: () => headers({ id: "admin", role: "admin" }),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   const guest = createClient<typeof handler>("http://fire.test", {
     headers: () => headers(null),
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   expect(await admin.posts.add({ title: "kept" }, { id: "exists" })).toMatchObject({
@@ -849,7 +850,7 @@ test("actions execute inside the generated Durable Object", async () => {
   const { handler } = createActionApp();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   await object.$collections.posts.add({ title: "inside" }, { id: "p1" });
 
@@ -877,7 +878,7 @@ test("trusted transaction commits and rolls back transaction-bound collections",
   const { handler } = createActionApp();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   expect("$transaction" in object).toBe(false);
   expect("transaction" in object).toBe(false);
@@ -950,7 +951,7 @@ test("trusted count and conditional writes are atomic and schema-checked", async
     .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   const records = object.$collections.records;
   await records.add({ group: "a", value: "one", counter: 1 }, { id: "r1" });
@@ -1019,7 +1020,7 @@ test("owner snapshot round-trips metadata and reset restores collection seeds", 
   const handler = createProductionPostsHandler();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   await object.$collections.posts.add({ title: "temporary", secret: false }, { id: "temporary" });
   await object.$collections.posts.update("temporary", { title: "snapshot", rev: 1 });
@@ -1096,7 +1097,7 @@ test("owner snapshot lease blocks normal operations until completion or cancella
   const handler = createProductionPostsHandler();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   await object.$collections.posts.get("seeded");
 
@@ -1161,7 +1162,7 @@ test("maintenance admission drains an active action and rejects newer operations
   const handler = app.actions({ $: { wait } });
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   const action = object.fetch(
     new Request("https://takibi.internal", {
@@ -1216,7 +1217,7 @@ test("maintenance drains trusted add after async schema validation starts", asyn
     .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
 
   const addition = object.$collections.records.add({ value: "validated" }, { id: "completed" });
@@ -1262,7 +1263,7 @@ test("owner reset keeps normal operations locked while seeds are prepared", asyn
     .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   await object.$collections.records.get("seed");
 
@@ -1363,7 +1364,7 @@ test("invalid snapshot leaves live documents unchanged and releases its lease", 
   const handler = createProductionPostsHandler();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   const encoded = await new Response(await object.$collections.$exportSnapshot()).text();
   await object.$collections.posts.add({ title: "live", secret: false }, { id: "live" });
@@ -1511,7 +1512,7 @@ test("wire id is required for document actions and rejected elsewhere", async ()
   const { handler } = createActionApp();
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   await object.$collections.posts.add({ title: "target" }, { id: "p1" });
   const context = { tenantId: "tenant-a", user: { id: "u1", role: "member" } };
@@ -1587,7 +1588,7 @@ test("named Durable Object fetch accepts a matching tenantId", async () => {
     .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
-    {},
+    { context: {} },
   );
 
   const response = await object.fetch(
@@ -1633,7 +1634,7 @@ test("named Durable Object fetch rejects a tenant mismatch before storage", asyn
     .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(watched, { name: "tenant-a" }),
-    {},
+    { context: {} },
   );
 
   const response = await object.fetch(
@@ -1667,7 +1668,7 @@ test("named Durable Object fetch rejects an empty tenantId", async () => {
     .actions({});
   const object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
-    {},
+    { context: {} },
   );
 
   const response = await object.fetch(
@@ -1699,11 +1700,11 @@ test("unnamed Durable Object fetch skips the tenant name check", async () => {
     .actions({});
   const unnamed = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   const emptyName = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "" }),
-    {},
+    { context: {} },
   );
 
   for (const object of [unnamed, emptyName]) {
@@ -1732,7 +1733,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
   let object: DurableObject;
   const context = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-    stub: () => object as unknown as DurableObjectStub,
+    stub: () => object,
   });
   const handler = context
     .defineCollections({
@@ -1741,7 +1742,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
 
   const badRequest = { ok: false, error: { kind: "operation", code: "BAD_REQUEST", status: 400 } };
@@ -1770,7 +1771,7 @@ test("invalid wire envelopes are BAD_REQUEST on Worker and DO paths", async () =
     expect(doResponse.status).toBe(400);
     await expect(doResponse.json()).resolves.toMatchObject(badRequest);
 
-    const workerResponse = await handler.request("http://fire.test/", {
+    const workerResponse = await requestTakibi(handler, "http://fire.test/", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -1793,7 +1794,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
   let object: DurableObject;
   const context = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-    stub: () => object as unknown as DurableObjectStub,
+    stub: () => object,
   });
   const handler = context
     .defineCollections({
@@ -1802,7 +1803,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
     .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
 
   const notFound = { ok: false, error: { kind: "operation", code: "NOT_FOUND", status: 404 } };
@@ -1821,7 +1822,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
   expect(doCollection.status).toBe(404);
   await expect(doCollection.json()).resolves.toMatchObject(notFound);
 
-  const workerCollection = await handler.request("http://fire.test/ghosts/g1");
+  const workerCollection = await requestTakibi(handler, "http://fire.test/ghosts/g1");
   expect(workerCollection.status).toBe(404);
   await expect(workerCollection.json()).resolves.toMatchObject(notFound);
 
@@ -1839,7 +1840,7 @@ test("unknown collection and action names stay NOT_FOUND after decode", async ()
   expect(doAction.status).toBe(404);
   await expect(doAction.json()).resolves.toMatchObject(notFound);
 
-  const workerAction = await handler.request("http://fire.test/$:haunt", { method: "POST" });
+  const workerAction = await requestTakibi(handler, "http://fire.test/$:haunt", { method: "POST" });
   expect(workerAction.status).toBe(404);
   await expect(workerAction.json()).resolves.toMatchObject(notFound);
 });
@@ -1852,13 +1853,12 @@ test("Worker forwards only the action invocation and resolved context", async ()
       user: { id: "u1", role: "admin" as const },
       traceId: "trace",
     }),
-    stub: () =>
-      ({
-        fetch: async (request: Request) => {
-          captured = await request.json();
-          return Response.json({ ok: true, data: { pong: true } } satisfies WireResponse);
-        },
-      }) as DurableObjectStub,
+    stub: () => ({
+      fetch: async (request: Request) => {
+        captured = await request.json();
+        return Response.json({ ok: true, data: { pong: true } } satisfies WireResponse);
+      },
+    }),
   });
   const app = context.defineCollections({
     posts: { schema: Post, accessPolicy: fullAccess },
@@ -1872,7 +1872,7 @@ test("Worker forwards only the action invocation and resolved context", async ()
   expect(handler).not.toHaveProperty("$collections");
 
   const client = createClient<typeof handler>("http://fire.test", {
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   expect(await client.ping()).toEqual({ ok: true, data: { pong: true } });
   expect(captured).toEqual({
@@ -1901,7 +1901,7 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
     }),
     stub: ({ resolved }) => {
       routedContext = resolved;
-      return object as unknown as DurableObjectStub;
+      return object;
     },
   });
   const handler = context
@@ -1915,11 +1915,11 @@ test("resolved context routes to a Durable Object and authorizes without tenantI
     .actions({});
   object = new handler.DurableObject(
     createFakeDurableObjectState(createSqliteDurableObjectStorage()),
-    {},
+    { context: {} },
   );
   const client = createClient<typeof handler>("http://fire.test", {
     headers: { "x-clinic": "clinic-a", "x-actor": "u1" },
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   await expect(client.posts.add({ title: "routed" }, { id: "p1" })).resolves.toMatchObject({
@@ -2119,7 +2119,7 @@ test("non-JSON action output is rejected before the success envelope", async () 
     .policy(fullAccess)
     .handler((() => new Date()) as never);
   const handler = withSqliteTestBackend(app.actions({ $: { invalid } }));
-  const response = await handler.request("http://fire.test/$:invalid", {
+  const response = await requestTakibi(handler, "http://fire.test/$:invalid", {
     method: "POST",
   });
   expect(response.status).toBe(500);
@@ -2148,7 +2148,7 @@ test("custom serialization hooks are rejected from action output", async () => {
       return output;
     });
   const handler = withSqliteTestBackend(app.actions({ $: { serialize } }));
-  const response = await handler.request("http://fire.test/$:serialize", {
+  const response = await requestTakibi(handler, "http://fire.test/$:serialize", {
     method: "POST",
   });
   expect(response.status).toBe(500);
@@ -2204,7 +2204,7 @@ test("action output arrays reject ignored custom and accessor properties", async
       return output;
     });
   const handler = withSqliteTestBackend(app.actions({ $: { invalidArray } }));
-  const response = await handler.request("http://fire.test/$:invalidArray", {
+  const response = await requestTakibi(handler, "http://fire.test/$:invalidArray", {
     method: "POST",
   });
   expect(response.status).toBe(500);
@@ -2227,7 +2227,7 @@ test("non-JSON resolved context is rejected equally before SQLite test or DO dis
         stubCalls += 1;
         return {
           fetch: () => Response.json({ ok: true, data: null }),
-        } as unknown as DurableObjectStub;
+        };
       },
     });
     return context
@@ -2237,7 +2237,7 @@ test("non-JSON resolved context is rejected equally before SQLite test or DO dis
 
   const production = create();
   for (const handler of [withSqliteTestBackend(production), production]) {
-    const response = await handler.request("http://fire.test/posts");
+    const response = await requestTakibi(handler, "http://fire.test/posts");
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
@@ -2269,7 +2269,7 @@ test("SQLite test backend reuses collection actions on an isolated store", async
   const handler = withSqliteTestBackend(production, { resolve: resolveTestContext });
   const client = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   const ping = await client.posts.ping();
@@ -2289,11 +2289,11 @@ test("two SQLite test backends do not share documents or seeds", async () => {
   const second = withSqliteTestBackend(production, { resolve: resolveTestContext });
   const clientA = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => first.request(input, init),
+    fetch: (input, init) => requestTakibi(first, input, init),
   });
   const clientB = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => second.request(input, init),
+    fetch: (input, init) => requestTakibi(second, input, init),
   });
 
   await clientA.posts.add({ title: "only-a" }, { id: "p1" });
@@ -2338,7 +2338,7 @@ test("replaced resolve UnauthorizedError stays HTTP 401", async () => {
       throw new UnauthorizedError("Sign in required");
     },
   });
-  const response = await handler.request("http://fire.test/posts/p1");
+  const response = await requestTakibi(handler, "http://fire.test/posts/p1");
   expect(response.status).toBe(401);
   await expect(response.json()).resolves.toMatchObject({
     ok: false,
@@ -2350,13 +2350,12 @@ test("original handle still requires stub after creating a SQLite test backend",
   let stubFetches = 0;
   const production = createTakibi()({
     resolve: resolveTestContext,
-    stub: () =>
-      ({
-        fetch: async () => {
-          stubFetches += 1;
-          return Response.json({ ok: true, data: { id: "from-stub" } });
-        },
-      }) as unknown as DurableObjectStub,
+    stub: () => ({
+      fetch: async () => {
+        stubFetches += 1;
+        return Response.json({ ok: true, data: { id: "from-stub" } });
+      },
+    }),
   })
     .defineCollections({
       posts: { schema: Post, accessPolicy: fullAccess },
@@ -2365,13 +2364,13 @@ test("original handle still requires stub after creating a SQLite test backend",
   const sqlite = withSqliteTestBackend(production, { resolve: resolveTestContext });
   const sqliteClient = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => sqlite.request(input, init),
+    fetch: (input, init) => requestTakibi(sqlite, input, init),
   });
   await sqliteClient.posts.add({ title: "in-sqlite" }, { id: "p1" });
 
   const result = await production.handle(
     new Request("http://fire.test/posts/p1", { headers: headers() }),
-    {},
+    { context: {} },
   );
   expect(result.matched).toBe(true);
   expect(stubFetches).toBe(1);
@@ -2384,7 +2383,7 @@ test("original handle still requires stub after creating a SQLite test backend",
   withSqliteTestBackend(withoutStub, { resolve: resolveTestContext });
   const missing = await withoutStub.handle(
     new Request("http://fire.test/posts/p1", { headers: headers() }),
-    {},
+    { context: {} },
   );
   expect(missing.response?.status).toBe(500);
   await expect(missing.response!.json()).resolves.toMatchObject({
@@ -2414,7 +2413,7 @@ test("action handler receives SQLite test backend services", async () => {
   });
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
   await expect(client.ping()).resolves.toMatchObject({
     ok: true,
@@ -2457,11 +2456,11 @@ test("SQLite test backends isolate services from each other", async () => {
   const second = withSqliteTestBackend(production, { services: { stamp: "beta" } });
   const clientA = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => first.request(input, init),
+    fetch: (input, init) => requestTakibi(first, input, init),
   });
   const clientB = createClient<typeof production>("http://fire.test", {
     headers,
-    fetch: (input, init) => second.request(input, init),
+    fetch: (input, init) => requestTakibi(second, input, init),
   });
   await expect(clientA.ping()).resolves.toMatchObject({ ok: true, data: { stamp: "alpha" } });
   await expect(clientB.ping()).resolves.toMatchObject({ ok: true, data: { stamp: "beta" } });
@@ -2472,13 +2471,12 @@ test("wire request body does not carry services", async () => {
   const context = createTakibi()({
     resolve: resolveTestContext,
     services: () => ({ secret: "not-on-wire" }),
-    stub: () =>
-      ({
-        fetch: async (request: Request) => {
-          captured = await request.json();
-          return Response.json({ ok: true, data: { seen: true } });
-        },
-      }) as unknown as DurableObjectStub,
+    stub: () => ({
+      fetch: async (request: Request) => {
+        captured = await request.json();
+        return Response.json({ ok: true, data: { seen: true } });
+      },
+    }),
   });
   const app = context.defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } });
   const handler = app.actions({
@@ -2490,7 +2488,7 @@ test("wire request body does not carry services", async () => {
     },
   });
 
-  const response = await handler.request("http://fire.test/$:ping", {
+  const response = await requestTakibi(handler, "http://fire.test/$:ping", {
     method: "POST",
     headers: { "content-type": "application/json", ...Object.fromEntries(headers()) },
   });
@@ -2579,7 +2577,7 @@ test("indexed list is available on public clients and trusted collections", asyn
   const handler = withSqliteTestBackend(production);
   const client = createClient<typeof handler>("http://fire.test", {
     headers,
-    fetch: (input, init) => handler.request(input, init),
+    fetch: (input, init) => requestTakibi(handler, input, init),
   });
 
   vi.useFakeTimers();

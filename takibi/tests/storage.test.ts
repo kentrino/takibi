@@ -1,7 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
@@ -276,20 +276,46 @@ test("DO SQLite layout stores revision in a dedicated REAL column", async () => 
   await expect(durable.get("posts", "p1")).resolves.toEqual(document);
 });
 
-test("layout version 3 adds maintenance tables without changing documents", async () => {
+test("storage layout initialization does not own maintenance tables", async () => {
+  const { initializeMaintenanceLayout } = await import("../src/maintenance");
   const backing = createSqliteDurableObjectStorage();
   const storage = createDurableObjectStorage(backing);
   await storage.put("posts", meta({ id: "p1", title: "preserved" }));
+
+  expect(
+    backing.sql
+      .exec<{ name: string }>(
+        `SELECT name FROM sqlite_master
+         WHERE type = 'table' AND name LIKE 'takibi_%'
+         ORDER BY name`,
+      )
+      .toArray()
+      .map(({ name }) => name),
+  ).toEqual(["takibi_documents", "takibi_index_catalog", "takibi_metadata"]);
+
   backing.transactionSync(() => {
-    backing.sql.exec("DROP TABLE takibi_restore_staging_unique");
-    backing.sql.exec("DROP TABLE takibi_restore_staging_documents");
-    backing.sql.exec("DROP TABLE takibi_maintenance_lease");
     backing.sql.exec("UPDATE takibi_metadata SET value = ? WHERE key = ?", 3, "layout_version");
   });
 
   const migrated = createDurableObjectStorage(backing);
-
   await expect(migrated.get("posts", "p1")).resolves.toMatchObject({ title: "preserved" });
+  expect(
+    backing.sql
+      .exec<{ name: string }>(
+        `SELECT name FROM sqlite_master
+         WHERE type = 'table' AND name LIKE 'takibi_%'
+         ORDER BY name`,
+      )
+      .toArray()
+      .map(({ name }) => name),
+  ).toEqual(["takibi_documents", "takibi_index_catalog", "takibi_metadata"]);
+  expect(
+    backing.sql
+      .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
+      .one().value,
+  ).toBe(4);
+
+  initializeMaintenanceLayout(backing.sql);
   expect(
     backing.sql
       .exec<{ name: string }>(

@@ -1,4 +1,10 @@
-import type { StorageListOptions, TakibiFailure } from "@takibi/takibi-shared-types";
+import type {
+  ActionRequestData,
+  CollectionOperation,
+  CollectionRequestData,
+  StorageListOptions,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
 import { TakibiProtocolError } from "./error";
 import { normalizeOrderBy, normalizeQueryExpr } from "./query";
 
@@ -8,25 +14,14 @@ export const MAX_BATCH_ITEMS = 20;
 
 export const COLLECTION_READ_OPERATIONS = ["get", "list"] as const;
 export type CollectionReadOperation = (typeof COLLECTION_READ_OPERATIONS)[number];
-export type CollectionWireOperation =
-  | "add"
-  | "set"
-  | "get"
-  | "update"
-  | "delete"
-  | "list"
-  | "count";
+export type CollectionWireOperation = CollectionOperation;
 
 export function isCollectionReadOperation(operation: string): operation is CollectionReadOperation {
   return operation === "get" || operation === "list";
 }
 
-export type CollectionReadRequest = {
-  kind: "collection";
-  collection: string;
+export type CollectionReadRequest = Omit<CollectionRequestData, "operation" | "input"> & {
   operation: CollectionReadOperation;
-  id?: string;
-  list?: StorageListOptions;
 };
 
 export type PublicBatchRequest = {
@@ -34,24 +29,9 @@ export type PublicBatchRequest = {
   items: CollectionReadRequest[];
 };
 
-export type CollectionWireRequest = {
-  kind: "collection";
-  collection: string;
-  operation: CollectionWireOperation;
-  id?: string;
-  input?: unknown;
-  list?: StorageListOptions;
-  context: WireContext;
-};
+export type CollectionWireRequest = CollectionRequestData & { context: WireContext };
 
-export type ActionWireRequest = {
-  kind: "action";
-  scope: string;
-  name: string;
-  id?: string;
-  input?: unknown;
-  context: WireContext;
-};
+export type ActionWireRequest = ActionRequestData & { context: WireContext };
 
 export type BatchWireRequest = PublicBatchRequest & { context: WireContext };
 export type WireRequest = CollectionWireRequest | ActionWireRequest | BatchWireRequest;
