@@ -8,7 +8,7 @@ import { createTakibi, fullAccess } from "takibi";
 import { createClient } from "takibi/client";
 ```
 
-The public SDK is the unscoped `takibi` package. Adapters and internals live
+The public SDK is the unscoped `takibi` package. Optional adapters live
 under `@takibi/*`.
 
 ```sh
@@ -24,8 +24,8 @@ pnpm add takibi
 | [`@takibi/better-auth-adapter`](./packages/better-auth-adapter) | Better Auth adapter                                          |
 | [`@takibi/opentelemetry`](./packages/opentelemetry)             | Optional OpenTelemetry integration                           |
 
-Internal packages (`@takibi/policy`, `@takibi/storage`, `@takibi/client`, …)
-are published for the SDK graph. Application code should import `takibi`.
+Internal workspace packages are private and are not published. Import
+`takibi` or an adapter, not `@takibi/policy` and friends.
 
 See the [SDK guide](./packages/takibi/README.md) for AuthN/AuthZ, collections,
 actions, and HTTP.

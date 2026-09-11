@@ -1,6 +1,6 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
 import { routePath } from "hono/route";
-import type { HandleResult } from "@takibi/worker-runtime";
+import type { HandleResult } from "takibi";
 
 export type TakibiHttpHandler<TInput> = {
   handle: (

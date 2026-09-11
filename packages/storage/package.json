@@ -1,6 +1,7 @@
 {
   "name": "@takibi/storage",
   "version": "0.0.0",
+  "private": true,
   "description": "Durable Object SQLite storage engine for Takibi.",
   "keywords": [
     "durable-objects",
@@ -36,8 +37,7 @@
         "import": "./dist/index.mjs"
       },
       "./package.json": "./package.json"
-    },
-    "access": "public"
+    }
   },
   "scripts": {
     "build": "vp pack",

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { takibiServer, type TakibiHttpHandler } from "@takibi/hono-adapter";
+import { takibiServer, type TakibiHttpHandler } from "../../../hono-adapter/src/index";
 
 export function requestTakibi(
   handler: TakibiHttpHandler<Record<string, never>>,

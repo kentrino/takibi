@@ -1,6 +1,7 @@
 {
   "name": "@takibi/query",
   "version": "0.0.0",
+  "private": true,
   "description": "Typed query construction and evaluation for Takibi.",
   "keywords": [
     "query",
@@ -35,8 +36,7 @@
         "import": "./dist/index.mjs"
       },
       "./package.json": "./package.json"
-    },
-    "access": "public"
+    }
   },
   "scripts": {
     "build": "vp pack",
