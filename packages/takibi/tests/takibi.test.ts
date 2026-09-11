@@ -3,8 +3,8 @@ import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "../src/action";
 import { executeOperation } from "../src/executor";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import {
   createTakibi,
   fullAccess,
@@ -16,7 +16,7 @@ import {
 } from "../src/index";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import { MaintenanceController } from "../src/maintenance";
 import { createDurableObjectStorage } from "../src/storage";
 

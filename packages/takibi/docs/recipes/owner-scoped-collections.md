@@ -8,7 +8,7 @@ The following policy lets an owner create, read, update, and delete notes while
 preventing owner reassignment. Administrators bypass the restriction.
 
 ```ts
-import { createTakibi, fullAccess, grant, none, queryImpliesEquality } from "@takibi/takibi";
+import { createTakibi, fullAccess, grant, none, queryImpliesEquality } from "takibi";
 import { z } from "zod";
 
 type User = {

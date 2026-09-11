@@ -1,0 +1,60 @@
+{
+  "name": "@takibi/query",
+  "version": "0.0.0",
+  "description": "Typed query construction and evaluation for Takibi.",
+  "keywords": [
+    "query",
+    "takibi",
+    "typescript"
+  ],
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/query",
+  "bugs": {
+    "url": "https://github.com/kentrino/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentrino/takibi.git",
+    "directory": "packages/query"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@takibi/protocol": "workspace:^",
+    "@takibi/shared-types": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

@@ -20,11 +20,9 @@ function readManifest(path: string): PackageManifest {
 
 test("OpenTelemetry integration has its own package dependency boundary", () => {
   const core = readManifest(join(import.meta.dirname, "../package.json"));
-  const integration = readManifest(
-    join(import.meta.dirname, "../../takibi-opentelemetry/package.json"),
-  );
+  const integration = readManifest(join(import.meta.dirname, "../../opentelemetry/package.json"));
 
-  expect(core.name).toBe("@takibi/takibi");
+  expect(core.name).toBe("takibi");
   expect(core.exports).not.toHaveProperty("./otel");
   expect(core.exports?.["./instrumentation"]).toBe("./src/instrumentation.ts");
   expect(core.files).toEqual(["dist", "README.md", "LICENSE"]);
@@ -40,7 +38,7 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
   expect(JSON.stringify(core.devDependencies ?? {})).not.toMatch(/opentelemetry/);
   expect(JSON.stringify(core.peerDependencies ?? {})).not.toMatch(/opentelemetry/);
 
-  expect(integration.name).toBe("@takibi/takibi-opentelemetry");
+  expect(integration.name).toBe("@takibi/opentelemetry");
   expect(integration.exports?.["."]).toBe("./src/index.ts");
   expect(integration.exports?.["./logs"]).toBe("./src/logs.ts");
   expect(integration.files).toEqual(["dist", "README.md", "LICENSE"]);
@@ -48,9 +46,9 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
     "./logs": { types: "./dist/logs.d.mts", import: "./dist/logs.mjs" },
   });
-  expect(integration.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(integration.devDependencies?.["@takibi/takibi"]).toBe("workspace:*");
-  expect(integration.peerDependencies?.["@takibi/takibi"]).toBe("workspace:^");
+  expect(integration.dependencies?.["takibi"]).toBeUndefined();
+  expect(integration.devDependencies?.["takibi"]).toBe("workspace:*");
+  expect(integration.peerDependencies?.["takibi"]).toBe("workspace:^");
   expect(integration.peerDependencies?.["@opentelemetry/api"]).toBe("^1.9.0");
   expect(integration.peerDependencies?.["@opentelemetry/api-logs"]).toBe("^0.221.0");
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).not.toBe(true);
@@ -71,117 +69,115 @@ test("core package exposes the Node-only testing subpath in source and published
 
 test("protocol packages keep a one-way dependency graph", () => {
   const core = readManifest(join(import.meta.dirname, "../package.json"));
-  const protocol = readManifest(join(import.meta.dirname, "../../takibi-protocol/package.json"));
-  const api = readManifest(join(import.meta.dirname, "../../takibi-api/package.json"));
-  const client = readManifest(join(import.meta.dirname, "../../takibi-client/package.json"));
-  const policy = readManifest(join(import.meta.dirname, "../../takibi-policy/package.json"));
-  const query = readManifest(join(import.meta.dirname, "../../takibi-query/package.json"));
-  const storage = readManifest(join(import.meta.dirname, "../../takibi-storage/package.json"));
-  const snapshot = readManifest(join(import.meta.dirname, "../../takibi-snapshot/package.json"));
+  const protocol = readManifest(join(import.meta.dirname, "../../protocol/package.json"));
+  const api = readManifest(join(import.meta.dirname, "../../api/package.json"));
+  const client = readManifest(join(import.meta.dirname, "../../client/package.json"));
+  const policy = readManifest(join(import.meta.dirname, "../../policy/package.json"));
+  const query = readManifest(join(import.meta.dirname, "../../query/package.json"));
+  const storage = readManifest(join(import.meta.dirname, "../../storage/package.json"));
+  const snapshot = readManifest(join(import.meta.dirname, "../../snapshot/package.json"));
   const workerRuntime = readManifest(
-    join(import.meta.dirname, "../../takibi-worker-runtime/package.json"),
+    join(import.meta.dirname, "../../worker-runtime/package.json"),
   );
-  const testing = readManifest(join(import.meta.dirname, "../../takibi-testing/package.json"));
-  const sharedTypes = readManifest(
-    join(import.meta.dirname, "../../takibi-shared-types/package.json"),
-  );
+  const testing = readManifest(join(import.meta.dirname, "../../testing/package.json"));
+  const sharedTypes = readManifest(join(import.meta.dirname, "../../shared-types/package.json"));
 
-  expect(core.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-client"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-policy"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-snapshot"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-storage"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-testing"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/takibi-worker-runtime"]).toBe("workspace:^");
-  expect(api.dependencies?.["@takibi/takibi-policy"]).toBe("workspace:^");
-  expect(api.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
-  expect(api.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(api.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(api.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(api.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
-  expect(client.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
-  expect(client.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
-  expect(client.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
-  expect(client.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(client.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(policy.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-protocol"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
-  expect(query.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(query.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(protocol.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
-  expect(storage.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
-  expect(storage.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
-  expect(storage.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(storage.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(snapshot.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
-  expect(snapshot.dependencies?.["@takibi/takibi-storage"]).toBe("workspace:^");
-  expect(snapshot.dependencies?.["@takibi/takibi-shared-types"]).toBe("workspace:^");
-  expect(snapshot.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(snapshot.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
-  expect(snapshot.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(workerRuntime.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
-  expect(workerRuntime.dependencies?.["@takibi/takibi-policy"]).toBe("workspace:^");
-  expect(workerRuntime.dependencies?.["@takibi/takibi-query"]).toBe("workspace:^");
-  expect(workerRuntime.dependencies?.["@takibi/takibi-protocol"]).toBe("workspace:^");
-  expect(workerRuntime.dependencies?.["@takibi/takibi-storage"]).toBe("workspace:^");
-  expect(workerRuntime.dependencies?.["@takibi/takibi-snapshot"]).toBe("workspace:^");
-  expect(workerRuntime.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(workerRuntime.devDependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(workerRuntime.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(testing.dependencies?.["@takibi/takibi-api"]).toBe("workspace:^");
-  expect(testing.dependencies?.["@takibi/takibi-storage"]).toBe("workspace:^");
-  expect(testing.dependencies?.["@takibi/takibi-worker-runtime"]).toBe("workspace:^");
-  expect(testing.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(testing.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(testing.devDependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(api.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
-  expect(client.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
-  expect(snapshot.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
-  expect(workerRuntime.dependencies?.["@takibi/takibi-testing"]).toBeUndefined();
-  expect(api.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(client.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(storage.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(snapshot.dependencies?.["@takibi/takibi-worker-runtime"]).toBeUndefined();
-  expect(api.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(client.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(query.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(protocol.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-snapshot"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-protocol"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-query"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-policy"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-api"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-client"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/takibi-storage"]).toBeUndefined();
+  expect(core.dependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/client"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/policy"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/protocol"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/query"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/snapshot"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/storage"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/testing"]).toBe("workspace:^");
+  expect(core.dependencies?.["@takibi/worker-runtime"]).toBe("workspace:^");
+  expect(api.dependencies?.["@takibi/policy"]).toBe("workspace:^");
+  expect(api.dependencies?.["@takibi/query"]).toBe("workspace:^");
+  expect(api.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(api.dependencies?.["takibi"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/storage"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(client.dependencies?.["@takibi/query"]).toBe("workspace:^");
+  expect(client.dependencies?.["@takibi/protocol"]).toBe("workspace:^");
+  expect(client.dependencies?.["takibi"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/storage"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(policy.dependencies?.["takibi"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/query"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/protocol"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/api"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/storage"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/protocol"]).toBe("workspace:^");
+  expect(query.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(query.dependencies?.["takibi"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/policy"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/api"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/storage"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(protocol.dependencies?.["takibi"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/query"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/policy"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/api"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/storage"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(storage.dependencies?.["@takibi/protocol"]).toBe("workspace:^");
+  expect(storage.dependencies?.["@takibi/query"]).toBe("workspace:^");
+  expect(storage.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(storage.dependencies?.["takibi"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/policy"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(snapshot.dependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(snapshot.dependencies?.["@takibi/storage"]).toBe("workspace:^");
+  expect(snapshot.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(snapshot.dependencies?.["takibi"]).toBeUndefined();
+  expect(snapshot.dependencies?.["@takibi/policy"]).toBeUndefined();
+  expect(snapshot.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(workerRuntime.dependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(workerRuntime.dependencies?.["@takibi/policy"]).toBe("workspace:^");
+  expect(workerRuntime.dependencies?.["@takibi/query"]).toBe("workspace:^");
+  expect(workerRuntime.dependencies?.["@takibi/protocol"]).toBe("workspace:^");
+  expect(workerRuntime.dependencies?.["@takibi/storage"]).toBe("workspace:^");
+  expect(workerRuntime.dependencies?.["@takibi/snapshot"]).toBe("workspace:^");
+  expect(workerRuntime.dependencies?.["takibi"]).toBeUndefined();
+  expect(workerRuntime.devDependencies?.["takibi"]).toBeUndefined();
+  expect(workerRuntime.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(testing.dependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(testing.dependencies?.["@takibi/storage"]).toBe("workspace:^");
+  expect(testing.dependencies?.["@takibi/worker-runtime"]).toBe("workspace:^");
+  expect(testing.dependencies?.["takibi"]).toBeUndefined();
+  expect(testing.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(testing.devDependencies?.["takibi"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/testing"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/testing"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/testing"]).toBeUndefined();
+  expect(snapshot.dependencies?.["@takibi/testing"]).toBeUndefined();
+  expect(workerRuntime.dependencies?.["@takibi/testing"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(storage.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(snapshot.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
+  expect(api.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(client.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(query.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(protocol.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/snapshot"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["takibi"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/protocol"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/query"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/policy"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/api"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/client"]).toBeUndefined();
+  expect(sharedTypes.dependencies?.["@takibi/storage"]).toBeUndefined();
 });
 
 test("instrumentation exports the stable Takibi telemetry vocabulary", () => {
@@ -190,9 +186,7 @@ test("instrumentation exports the stable Takibi telemetry vocabulary", () => {
 });
 
 test("worker-runtime testing-bridge is a dedicated owner subpath", () => {
-  const runtime = readManifest(
-    join(import.meta.dirname, "../../takibi-worker-runtime/package.json"),
-  );
+  const runtime = readManifest(join(import.meta.dirname, "../../worker-runtime/package.json"));
   expect(runtime.exports?.["./testing-bridge"]).toBe("./src/testing-bridge.server.ts");
   const core = readManifest(join(import.meta.dirname, "../package.json"));
   expect(core.exports).not.toHaveProperty("./testing-bridge");

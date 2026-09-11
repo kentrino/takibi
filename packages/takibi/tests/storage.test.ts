@@ -1,7 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";

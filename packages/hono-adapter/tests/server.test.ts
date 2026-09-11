@@ -1,9 +1,9 @@
 import { Hono, type Context } from "hono";
 import { expect, expectTypeOf, test, vi } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi } from "@takibi/takibi-worker-runtime";
-import { fullAccess } from "@takibi/takibi-policy";
-import { withSqliteTestBackend } from "@takibi/takibi-testing";
+import { createTakibi } from "@takibi/worker-runtime";
+import { fullAccess } from "@takibi/policy";
+import { withSqliteTestBackend } from "@takibi/testing";
 import { takibiServer } from "../src";
 
 type AppEnv = {

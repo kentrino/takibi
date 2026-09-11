@@ -1,9 +1,9 @@
 import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient } from "@takibi/takibi/client";
-import { createPolicyHelper } from "@takibi/takibi-policy";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { createPolicyHelper } from "@takibi/policy";
+import { withSqliteTestBackend } from "takibi/testing";
 import { createTakibi, fullAccess, grant, none, UnauthorizedError } from "../src/index";
 
 type User = { id: string; role: "staff" | "member" };

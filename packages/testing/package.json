@@ -1,0 +1,70 @@
+{
+  "name": "@takibi/testing",
+  "version": "0.0.0",
+  "description": "Node-only SQLite test handler adapter for Takibi.",
+  "keywords": [
+    "sqlite",
+    "takibi",
+    "testing"
+  ],
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/testing",
+  "bugs": {
+    "url": "https://github.com/kentrino/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentrino/takibi.git",
+    "directory": "packages/testing"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./sqlite-storage": "./src/sqlite-storage.server.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./sqlite-storage": {
+        "types": "./dist/sqlite-storage.d.mts",
+        "import": "./dist/sqlite-storage.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@takibi/api": "workspace:^",
+    "@takibi/storage": "workspace:^",
+    "@takibi/worker-runtime": "workspace:^"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@takibi/client": "workspace:*",
+    "@takibi/policy": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

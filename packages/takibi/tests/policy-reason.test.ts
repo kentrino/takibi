@@ -1,6 +1,6 @@
 import { requestTakibi } from "./helpers/request";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import {

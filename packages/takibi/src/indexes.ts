@@ -13,7 +13,7 @@ export {
   matchesIndexRange,
   planIndexRange,
   resolveIndexedList,
-} from "@takibi/takibi-storage";
+} from "@takibi/storage";
 export type {
   CompiledIndex,
   IndexRangeBound,
@@ -21,4 +21,4 @@ export type {
   IndexRegistry,
   IndexedCollectionSource,
   ResolvedIndexScan,
-} from "@takibi/takibi-storage";
+} from "@takibi/storage";

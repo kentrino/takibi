@@ -1,7 +1,7 @@
 import { requestTakibi } from "./helpers/request";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { withSqliteTestBackend } from "takibi/testing";
 import {
   createPrettyConsoleLogger,
   createTakibi,
@@ -10,7 +10,7 @@ import {
   type Logger,
 } from "../src/index";
 import type { WireRequest } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 
 const Post = z.object({ title: z.string() });
 

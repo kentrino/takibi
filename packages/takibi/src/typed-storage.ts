@@ -8,4 +8,4 @@ export {
   storageDelete,
   storageSet,
   storageUpdate,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

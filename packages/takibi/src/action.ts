@@ -6,7 +6,7 @@ export {
   createRootActionBuilder,
   defineCollection,
   unsafeClientPropertyNames,
-} from "@takibi/takibi-api";
+} from "@takibi/api";
 export type {
   ActionDefinition,
   ActionDefinitions,
@@ -30,4 +30,4 @@ export type {
   RootActionBuilder,
   RuntimeActionDefinition,
   ScopedActions,
-} from "@takibi/takibi-api";
+} from "@takibi/api";

@@ -1,10 +1,10 @@
 # Takibi Hono adapter
 
-`@takibi/takibi-hono-adapter` mounts a Takibi HTTP handler on Hono.
+`@takibi/hono-adapter` mounts a Takibi HTTP handler on Hono.
 
 ```ts
 import { Hono, type Context } from "hono";
-import { takibiServer } from "@takibi/takibi-hono-adapter";
+import { takibiServer } from "@takibi/hono-adapter";
 import { handler } from "./takibi";
 import type { AppEnv } from "./env";
 

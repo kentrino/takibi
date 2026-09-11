@@ -1,8 +1,8 @@
 import { expectTypeOf, test } from "vite-plus/test";
-import * as Takibi from "@takibi/takibi";
-import * as Client from "@takibi/takibi/client";
-import * as Instrumentation from "@takibi/takibi/instrumentation";
-import * as Testing from "@takibi/takibi/testing";
+import * as Takibi from "takibi";
+import * as Client from "takibi/client";
+import * as Instrumentation from "takibi/instrumentation";
+import * as Testing from "takibi/testing";
 
 test("public entries expose the documented consumer contracts", () => {
   expectTypeOf(Takibi.createTakibi).toBeFunction();

@@ -3,4 +3,4 @@ export {
   createMigratingStorage,
   currentCollectionVersion,
   validateStoredDocumentForRestore,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

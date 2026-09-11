@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import * as Api from "@takibi/takibi-api";
-import * as Policy from "@takibi/takibi-policy";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import * as Api from "@takibi/api";
+import * as Policy from "@takibi/policy";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import {
   AlreadyExistsError,
   ListAllLimitError,
@@ -29,10 +29,10 @@ test("built Takibi facade recognizes errors from the API package specifier", asy
   const takibiDist = join(import.meta.dirname, "../dist/index.mjs");
   if (!existsSync(takibiDist)) return;
   const js = readFileSync(takibiDist, "utf8");
-  if (!js.includes("@takibi/takibi-api")) return;
+  if (!js.includes("@takibi/api")) return;
 
   const TakibiBuilt = await import(pathToFileURL(takibiDist).href);
-  expect(js).toMatch(/@takibi\/takibi-api/);
+  expect(js).toMatch(/@takibi\/api/);
   expect(TakibiBuilt.TakibiError).toBe(Api.TakibiError);
   expect(new TakibiBuilt.AlreadyExistsError()).toBeInstanceOf(Api.AlreadyExistsError);
 });

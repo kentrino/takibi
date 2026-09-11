@@ -1,0 +1,55 @@
+{
+  "name": "@takibi/shared-types",
+  "version": "0.0.0",
+  "description": "Shared transport and query types for Takibi packages.",
+  "keywords": [
+    "takibi",
+    "types",
+    "typescript"
+  ],
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/shared-types",
+  "bugs": {
+    "url": "https://github.com/kentrino/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentrino/takibi.git",
+    "directory": "packages/shared-types"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

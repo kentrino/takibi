@@ -1,8 +1,8 @@
 import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import { ListAllLimitError, createTakibi, fullAccess, grant, none } from "../src/index";
 import { LIST_ALL_PAGE_SIZE_DEFAULT, LIST_PAGE_MAX } from "../src/list-all";
 

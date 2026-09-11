@@ -5,5 +5,5 @@ export {
   createIndexCatalogTableSql,
   indexColumnExpression,
   physicalIndexName,
-} from "@takibi/takibi-storage";
-export type { IndexCatalogRow } from "@takibi/takibi-storage";
+} from "@takibi/storage";
+export type { IndexCatalogRow } from "@takibi/storage";

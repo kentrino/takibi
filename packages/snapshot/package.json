@@ -1,0 +1,63 @@
+{
+  "name": "@takibi/snapshot",
+  "version": "0.0.0",
+  "description": "Logical snapshot streaming and maintenance coordination for Takibi.",
+  "keywords": [
+    "maintenance",
+    "snapshot",
+    "takibi"
+  ],
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/snapshot",
+  "bugs": {
+    "url": "https://github.com/kentrino/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentrino/takibi.git",
+    "directory": "packages/snapshot"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@noble/hashes": "catalog:",
+    "@takibi/api": "workspace:^",
+    "@takibi/shared-types": "workspace:^",
+    "@takibi/storage": "workspace:^"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

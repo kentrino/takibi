@@ -12,5 +12,5 @@ export {
   type TakibiSpan,
   type TakibiTracer,
   type TracingContextBackend,
-} from "@takibi/takibi-worker-runtime/instrumentation";
-export { TAKIBI_ATTR, TAKIBI_SPAN } from "@takibi/takibi-worker-runtime/instrumentation";
+} from "@takibi/worker-runtime/instrumentation";
+export { TAKIBI_ATTR, TAKIBI_SPAN } from "@takibi/worker-runtime/instrumentation";

@@ -4,4 +4,4 @@ export {
   nextDocumentRevision,
   takeRevisionPrecondition,
   withDocumentRevision,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

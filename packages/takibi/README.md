@@ -1,16 +1,16 @@
-# @takibi/takibi
+# takibi
 
 Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
 The official public API is `createTakibi`, policy helpers, and errors on
-`@takibi/takibi` and `createClient` on `@takibi/takibi/client`.
+`takibi` and `createClient` on `takibi/client`.
 OpenTelemetry support is distributed separately as
-`@takibi/takibi-opentelemetry`.
+`@takibi/opentelemetry`.
 
 ## AuthN vs AuthZ
 
 **AuthN** (who is calling, which tenant they may use) is owned by your application.
-**AuthZ** (what that identity may do to a collection) is owned by `@takibi/takibi`
+**AuthZ** (what that identity may do to a collection) is owned by `takibi`
 via `accessPolicy`.
 
 `createTakibi()({ resolve })` is the trust boundary. Inside `resolve` you must:
@@ -50,7 +50,7 @@ that resolved context. `Env` describes the Durable Object bindings used by `serv
 For empty input use `createTakibi()` and pass `context: {}`; with typed bindings use
 `createTakibi<Record<string, never>, Env>()`.
 
-For Hono, install `@takibi/takibi-hono-adapter` and mount `takibiServer` on a static
+For Hono, install `@takibi/hono-adapter` and mount `takibiServer` on a static
 prefix wildcard. The application chooses the prefix and supplies request context;
 Takibi interprets all collection, action and batch paths beneath it. The adapter
 checks the context supplier against the handler's required input type.
@@ -70,9 +70,9 @@ JSON-safe-checked, and is invisible to collection `accessPolicy`, action
 `services.foo` is a compile error.
 
 ```ts
-import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "@takibi/takibi";
+import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "takibi";
 import { Hono, type Context } from "hono";
-import { takibiServer } from "@takibi/takibi-hono-adapter";
+import { takibiServer } from "@takibi/hono-adapter";
 import { z } from "zod";
 
 type User = { id: string; role: "admin" | "member"; clinicIds: string[] };
@@ -140,7 +140,7 @@ Durable Object mode needs `stub` (and usually `handle` so AuthN / env reach
 
 ## Node integration tests
 
-Use the Node-only `@takibi/takibi/testing` entry to exercise a production
+Use the Node-only `takibi/testing` entry to exercise a production
 handler against an isolated `DatabaseSync(":memory:")` database. The helper
 reuses Takibi's production SQLite storage, migrations, index reconciliation,
 seeds, actions, logging, and tracing paths. Each call creates a separate
@@ -150,8 +150,8 @@ The returned handler implements `Symbol.dispose`; use `using` or call the
 method from test teardown when a suite keeps handlers alive for a long time.
 
 ```ts
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 
 const handler = withSqliteTestBackend(takibiHandler, {
   resolve: ({ request }) => {
@@ -198,8 +198,8 @@ const testHandler = baseHandler.with({ memory: true, resolve, services });
 const testHandler = withSqliteTestBackend(baseHandler, { resolve, services });
 ```
 
-Import `withSqliteTestBackend` from `@takibi/takibi/testing`. That entry
-re-exports `@takibi/takibi-testing`. Keep pure
+Import `withSqliteTestBackend` from `takibi/testing`. That entry
+re-exports `@takibi/testing`. Keep pure
 query, policy, and protocol tests storage-free; the helper is for tests that
 need storage-backed behavior.
 
@@ -365,7 +365,7 @@ vs required does not matter). `and` / `or` infer that pick from their arguments.
 rules and document rules compose:
 
 ```ts
-import { and, fullAccess, none, read } from "@takibi/takibi";
+import { and, fullAccess, none, read } from "takibi";
 
 const staffPolicy = context.policy(({ user }) => (user != null ? fullAccess : none));
 const isSeededData = context.policy(itemSchema, ({ doc, nextDoc }) =>
@@ -433,7 +433,7 @@ policy must prove the whole expression, not merely find an owner leaf that
 could be bypassed by `or` or `not`:
 
 ```ts
-import { grant, none, queryImpliesEquality } from "@takibi/takibi";
+import { grant, none, queryImpliesEquality } from "takibi";
 
 accessPolicy({ user, operation, where }) {
   if (
@@ -655,7 +655,7 @@ the public HTTP response contract.
 Carry credentials your server trusts — not self-declared role or membership JSON.
 
 ```ts
-import { createClient } from "@takibi/takibi/client";
+import { createClient } from "takibi/client";
 import type { Handler } from "./server";
 
 const client = createClient<Handler>("https://localhost:3000/foo", {
@@ -921,7 +921,7 @@ reset, normal reads and writes fail with retryable `MAINTENANCE_LOCKED` status 5
 Takibi does not choose the object store, key, encryption, retention policy, or
 maintenance endpoint authorization. A full snapshot can contain password
 hashes and session tokens. See
-[`@takibi/takibi-snapshot` logical snapshot spec](../takibi-snapshot/docs/spec/logical-snapshots.md)
+[`@takibi/snapshot` logical snapshot spec](../snapshot/docs/spec/logical-snapshots.md)
 for the format, lease, compatibility, and atomicity contract.
 
 Server-side policy-bound collections and trusted `$collections` expose
@@ -1004,7 +1004,7 @@ Notes:
 - Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
   The object name is that `tenantId`; prefixed names are not supported.
   `fetch` on the class is stub-only — do not route public HTTP to it.
-- The root `@takibi/takibi` import does not require `nodejs_als`,
+- The root `takibi` import does not require `nodejs_als`,
   `nodejs_compat`, or a minimum compatibility date.
 
 ## Observability
@@ -1014,8 +1014,8 @@ logger on `createTakibi()`, `defineCollections()`, or
 `withSqliteTestBackend()`; the more local setting wins field by field:
 
 ```ts
-import { createPrettyConsoleLogger, createTakibi } from "@takibi/takibi";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createPrettyConsoleLogger, createTakibi } from "takibi";
+import { withSqliteTestBackend } from "takibi/testing";
 
 const takibi = createTakibi()({
   resolve,
@@ -1052,7 +1052,7 @@ credentials, stubs, or bindings.
 A query comparison value can still be a name, phone number, or other personal
 data. Restrict access to debug logs and retain them only briefly.
 
-Install `@takibi/takibi-opentelemetry` to enable OpenTelemetry spans and,
+Install `@takibi/opentelemetry` to enable OpenTelemetry spans and,
 optionally, map permitted `LogEvent` values to OpenTelemetry Logs. The
 integration package owns its OpenTelemetry peer dependencies, adapters, setup
 documentation, and tests; the core package has no OpenTelemetry dependency.

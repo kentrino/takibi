@@ -30,7 +30,7 @@ export {
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
-} from "@takibi/takibi-api";
+} from "@takibi/api";
 
 export { and, fullAccess, grant, none, or, read, write } from "./policy";
 export { queryImpliesEquality } from "./query";

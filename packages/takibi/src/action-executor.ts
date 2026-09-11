@@ -1,2 +1,2 @@
-export { executeAction } from "@takibi/takibi-worker-runtime";
-export type { ActionInvocation } from "@takibi/takibi-worker-runtime";
+export { executeAction } from "@takibi/worker-runtime";
+export type { ActionInvocation } from "@takibi/worker-runtime";

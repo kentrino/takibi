@@ -5,7 +5,7 @@ export {
   requestLogFields,
   resolveLogging,
   withLoggedSpan,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";
 export type {
   InternalLogger,
   Logger,
@@ -13,4 +13,4 @@ export type {
   LogLevel,
   LoggingOptions,
   PrettyConsoleLoggerOptions,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

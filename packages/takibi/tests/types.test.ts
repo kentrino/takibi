@@ -1,8 +1,8 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { createClient } from "@takibi/takibi/client";
-import { type SqliteTestBackendOptions, withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { type SqliteTestBackendOptions, withSqliteTestBackend } from "takibi/testing";
 import { and, createTakibi, fullAccess, none, UnauthorizedError } from "../src/index";
 import type { RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";

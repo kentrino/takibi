@@ -1,2 +1,2 @@
-export { createInProcessExecutor, createStubExecutor } from "@takibi/takibi-worker-runtime";
-export type { Executor, ExecutorInput } from "@takibi/takibi-worker-runtime";
+export { createInProcessExecutor, createStubExecutor } from "@takibi/worker-runtime";
+export type { Executor, ExecutorInput } from "@takibi/worker-runtime";
