@@ -363,6 +363,7 @@ test.each(["single", "batch", "decode", "resolve", "dispatch"] as const)(
   async (scenario) => {
     for (const overrideDispatch of [false, true]) {
       const sequence: string[] = [];
+      const failureMessages: string[] = [];
       const recording = createRecordingTracer((event) => sequence.push(event));
       const record = (event: string) => {
         const active = recording.spans.find((span) => span.spanId === activeSpanContext()?.spanId);
@@ -407,6 +408,7 @@ test.each(["single", "batch", "decode", "resolve", "dispatch"] as const)(
           : dispatch,
         logger: {
           emit(event) {
+            if (event.event === "takibi.error") failureMessages.push(event.message);
             record(
               "log:" + event.event + (event.event === "takibi.request" ? ":" + event.message : ""),
             );
@@ -447,12 +449,13 @@ test.each(["single", "batch", "decode", "resolve", "dispatch"] as const)(
                 error: {
                   kind: "operation",
                   code: "INTERNAL",
-                  message: scenario + " failed",
+                  message: "An unexpected error occurred.",
                   status: 500,
                 },
               }
             : wire,
         );
+        expect(failureMessages).toEqual(failed ? [scenario + " failed"] : []);
         expect(mapping).toHaveBeenCalledTimes(1);
         const request = (event: string) => event + "@" + TAKIBI_SPAN.request;
         const resolve = (event: string) => event + "@" + TAKIBI_SPAN.resolve;

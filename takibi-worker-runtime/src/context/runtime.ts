@@ -17,6 +17,10 @@ import { toTakibiFailure } from "../result";
 import { SchemaValidationError } from "../schema";
 import type { StorageDriver } from "@takibi/takibi-storage";
 
+const PUBLIC_INTERNAL_ERROR_MESSAGE = "An unexpected error occurred.";
+// Keep the source classification without adding a field to the serializable failure contract.
+const unexpectedInvocationFailures = new WeakSet<object>();
+
 /**
  * Fields read by invocation log helpers. Shared by observer-safe values,
  * wire invocations, and public requests; batch exists only on the last.
@@ -85,28 +89,45 @@ export function errorResponse(
   invocation?: PublicRequest,
   request?: Request,
 ): Response {
-  const wire = toWireFailure(error);
-  emitFailure(logger, wire.error, {
+  const failure = normalizeInvocationFailureForServer(error);
+  emitFailure(logger, failure, {
     ...(invocation === undefined ? {} : invocationFields(invocation)),
     ...(request === undefined ? {} : requestLogFields(request)),
   });
+  const wire = wireFailureFromNormalized(failure);
   return Response.json(wire, { status: statusOf(error) });
 }
 
-export function normalizeInvocationFailure(error: unknown): TakibiFailure<string> {
+export function normalizeInvocationFailureForServer(error: unknown): TakibiFailure<string> {
   if (error instanceof SchemaValidationError || error instanceof TakibiError) {
     return toTakibiFailure(error);
   }
-  return {
+  const failure: TakibiFailure<string> = {
     kind: "operation",
     code: "INTERNAL",
     message: error instanceof Error ? error.message : String(error),
     status: 500,
   };
+  unexpectedInvocationFailures.add(failure);
+  return failure;
+}
+
+export function normalizeInvocationFailure(error: unknown): TakibiFailure<string> {
+  return publicFailureFromNormalized(normalizeInvocationFailureForServer(error));
 }
 
 export function toWireFailure(err: unknown): WireFailure {
   return { ok: false, error: normalizeInvocationFailure(err) };
+}
+
+export function wireFailureFromNormalized(failure: TakibiFailure<string>): WireFailure {
+  return { ok: false, error: publicFailureFromNormalized(failure) };
+}
+
+function publicFailureFromNormalized(failure: TakibiFailure<string>): TakibiFailure<string> {
+  return unexpectedInvocationFailures.has(failure)
+    ? { ...failure, message: PUBLIC_INTERNAL_ERROR_MESSAGE }
+    : failure;
 }
 
 function statusOf(err: unknown): number {

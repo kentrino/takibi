@@ -652,8 +652,14 @@ test.each([
   { kind: "action", scope: "$", name: "missing" },
   { kind: "action", scope: "$", name: "fail" },
 ] as const)("failed $kind invocation $name records its executor error", async (invocation) => {
+  const privateMessage = "SQL failed at /internal/private.db";
+  const events: LogEvent[] = [];
   const recording = createRecordingTracer();
-  const app = createTakibi()({ resolve: () => ({}) }).defineCollections(
+  const app = createTakibi()({
+    resolve: () => ({}),
+    logger: capturingLogger(events),
+    logLevel: "error",
+  }).defineCollections(
     { posts: { schema: Post, accessPolicy: fullAccess } },
     { [internalTracerKey]: recording.tracer },
   );
@@ -661,7 +667,7 @@ test.each([
     .defineAction()
     .policy(fullAccess)
     .handler(() => {
-      throw new Error("handler failed");
+      throw new Error(privateMessage);
     });
   const handler = app.actions({ $: { fail } });
   const storage = createSqliteDurableObjectStorage();
@@ -675,6 +681,24 @@ test.each([
   expect(executors).toHaveLength(1);
   expect(executors[0]).toMatchObject({ status: { code: "error" }, endCount: 1 });
   expect(executors[0]!.exceptions).toHaveLength(1);
-  if (!wire.ok) expect(executors[0]!.exceptions[0]!.message).toBe(wire.error.message);
+  if (!wire.ok && invocation.kind === "action" && invocation.name === "fail") {
+    expect(wire.error).toMatchObject({
+      code: "INTERNAL",
+      message: "An unexpected error occurred.",
+      status: 500,
+    });
+    expect(JSON.stringify(wire)).not.toContain(privateMessage);
+    expect(executors[0]!.exceptions[0]!.message).toBe(privateMessage);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: "takibi.error",
+        message: privateMessage,
+        errorCode: "INTERNAL",
+        status: 500,
+      }),
+    );
+  } else if (!wire.ok) {
+    expect(executors[0]!.exceptions[0]!.message).toBe(wire.error.message);
+  }
   storage.close();
 });

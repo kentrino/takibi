@@ -5,7 +5,7 @@ import {
   type InvocationAdapters,
 } from "@takibi/takibi-worker-runtime-contract";
 import { alias, defineContainer, inject, type DependencyGraph } from "tatenuki";
-import { normalizeInvocationFailure } from "./context/runtime";
+import { normalizeInvocationFailureForServer } from "./context/runtime";
 import {
   createTakibiInvocationPlan,
   getTakibiRawInput,
@@ -100,7 +100,7 @@ export function createTakibiInvocationAdapterFactories<
       ) =>
         invocationRuntime.storage.transaction(work),
     transactionClassifyFailure: () => undefined,
-    invocationToFailure: () => normalizeInvocationFailure,
+    invocationToFailure: () => normalizeInvocationFailureForServer,
     invocationSnapshotObserverEvent: () => snapshotTakibiObserverEvent,
     invocationNotify: () => undefined,
   };
