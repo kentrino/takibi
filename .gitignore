@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Accidental tsc emit beside source (declarations belong in dist)
+packages/**/src/**/*.d.ts
+
 # dotenv environment variable files
 .env
 .env.*
