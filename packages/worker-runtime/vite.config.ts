@@ -1,6 +1,15 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
 
+const testingSrc = fileURLToPath(new URL("../testing/src/", import.meta.url));
+
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@takibi/testing/sqlite-storage": `${testingSrc}sqlite-storage.server.ts`,
+      "@takibi/testing": `${testingSrc}index.ts`,
+    },
+  },
   pack: {
     entry: {
       index: "src/index.ts",

@@ -5,6 +5,11 @@
     "moduleDetection": "force",
     "module": "esnext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@takibi/testing": ["../testing/src/index.ts"],
+      "@takibi/testing/sqlite-storage": ["../testing/src/sqlite-storage.server.ts"]
+    },
     "resolveJsonModule": true,
     "types": ["node", "@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
     "strict": true,
