@@ -1,4 +1,4 @@
-import { compileWhere } from "@takibi/takibi-query";
+import { compileWhere } from "@takibi/query";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";

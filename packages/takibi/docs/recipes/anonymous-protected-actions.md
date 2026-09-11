@@ -10,7 +10,7 @@ Allowing an anonymous action does not open CRUD; grant those operations
 explicitly, or keep them staff-only.
 
 ```ts
-import { UnauthorizedError, createTakibi, fullAccess, grant, none } from "@takibi/takibi";
+import { UnauthorizedError, createTakibi, fullAccess, grant, none } from "takibi";
 import { z } from "zod";
 
 type User = { id: string; role: "staff" | "member" };

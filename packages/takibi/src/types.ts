@@ -7,8 +7,8 @@ export type {
   CollectionOperation,
   PolicyReasonCodeCarrier,
   PolicyReasonCodeOf,
-} from "@takibi/takibi-policy";
-export type { ListOptions } from "@takibi/takibi-query";
+} from "@takibi/policy";
+export type { ListOptions } from "@takibi/query";
 export type {
   DocumentId,
   DocumentMetadata,
@@ -36,12 +36,12 @@ export type {
   ValidationIssue,
   WithId,
   WithMetadata,
-} from "@takibi/takibi-shared-types";
+} from "@takibi/shared-types";
 export {
   RESERVED_DOCUMENT_DATA_KEYS,
   TAKIBI_REVISION_KEY,
   TAKIBI_VERSION_KEY,
-} from "@takibi/takibi-shared-types";
+} from "@takibi/shared-types";
 export type {
   ClientCollectionApi,
   ClientCollectionsApi,
@@ -73,11 +73,11 @@ export type {
   TrustedCollectionApi,
   TrustedCollectionsApi,
   UniqueConstraintDeclaration,
-} from "@takibi/takibi-api";
-export { INDEXABLE_METADATA_FIELDS } from "@takibi/takibi-api";
+} from "@takibi/api";
+export { INDEXABLE_METADATA_FIELDS } from "@takibi/api";
 export type {
   StorageDriver,
   StorageListPlan,
   StorageReadTransform,
   StoredDocument,
-} from "@takibi/takibi-storage";
+} from "@takibi/storage";

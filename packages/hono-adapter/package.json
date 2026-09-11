@@ -1,5 +1,5 @@
 {
-  "name": "@takibi/takibi-hono-adapter",
+  "name": "@takibi/hono-adapter",
   "version": "0.0.0",
   "description": "Typed Hono middleware for Takibi HTTP handlers.",
   "keywords": [
@@ -45,12 +45,12 @@
     "check": "vp check"
   },
   "dependencies": {
-    "@takibi/takibi-worker-runtime": "workspace:^"
+    "@takibi/worker-runtime": "workspace:^"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250803.0",
-    "@takibi/takibi-policy": "workspace:*",
-    "@takibi/takibi-testing": "workspace:*",
+    "@takibi/policy": "workspace:*",
+    "@takibi/testing": "workspace:*",
     "@types/node": "catalog:",
     "hono": "catalog:",
     "typescript": "catalog:",

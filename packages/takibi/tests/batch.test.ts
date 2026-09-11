@@ -2,8 +2,8 @@ import { requestTakibi } from "./helpers/request";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import { createTakibi, fullAccess, UnauthorizedError } from "../src/index";
 import {
   internalTracerKey,
@@ -15,7 +15,7 @@ import { TAKIBI_ATTR } from "../src/otel-helper";
 import type { LogEvent, Logger } from "../src/index";
 import type { WireRequest } from "../src/protocol";
 import { createRecordingTracer } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 
 const Post = z.object({ title: z.string(), secret: z.boolean().default(false) });
 

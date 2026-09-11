@@ -1,14 +1,14 @@
 import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import { createTakibi, fullAccess } from "../src/index";
 import { nextDocumentRevision } from "../src/revision";
 import { createDurableObjectStorage } from "../src/storage";
 import { storageSet } from "../src/typed-storage";
 import type { StoredDocument } from "../src/types";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 
 type AppCtx = { tenantId: string };
 

@@ -8,7 +8,7 @@ export {
   StaleWriteError,
   TakibiError,
   UnauthorizedError,
-} from "@takibi/takibi-client";
+} from "@takibi/client";
 export type {
   ClientOf,
   CreateClientOptions,
@@ -16,4 +16,4 @@ export type {
   InferHandlerCollections,
   PolicyReason,
   TakibiResult,
-} from "@takibi/takibi-client";
+} from "@takibi/client";

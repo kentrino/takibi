@@ -4,8 +4,8 @@ import { afterEach, beforeEach, expect, expectTypeOf, test } from "vite-plus/tes
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import { createTakibi, fullAccess, none } from "../src/index";
 import {
   bindTracer,
@@ -18,7 +18,7 @@ import {
 } from "../src/tracing";
 import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
 import { createRecordingTracer, type RecordedSpan } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import type { WireResponse } from "../src/protocol";
 
 /**

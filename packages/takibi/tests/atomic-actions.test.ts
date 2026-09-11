@@ -4,7 +4,7 @@ import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "..
 import { executeAction } from "../src/action-executor";
 import { fullAccess, none } from "../src/policy";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import type { CollectionsDef, StorageDriver, StoredDocument } from "../src/types";
 
 const TS = "2026-08-19T00:00:00.000Z";

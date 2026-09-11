@@ -1,1 +1,1 @@
-export { MemoryMaintenanceBackend } from "@takibi/takibi-snapshot";
+export { MemoryMaintenanceBackend } from "@takibi/snapshot";

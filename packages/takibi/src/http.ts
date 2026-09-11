@@ -7,5 +7,5 @@ export {
   publicPathRemainder,
   rawPathSegments,
   readRequestJson,
-} from "@takibi/takibi-worker-runtime";
-export type { PublicRequest } from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";
+export type { PublicRequest } from "@takibi/worker-runtime";

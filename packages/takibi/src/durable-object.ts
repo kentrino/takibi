@@ -1,1 +1,1 @@
-export { createDurableObjectClass, seedCollections } from "@takibi/takibi-worker-runtime";
+export { createDurableObjectClass, seedCollections } from "@takibi/worker-runtime";

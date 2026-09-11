@@ -1,5 +1,1 @@
-export {
-  asTakibiResult,
-  normalizeValidationIssues,
-  toTakibiFailure,
-} from "@takibi/takibi-worker-runtime";
+export { asTakibiResult, normalizeValidationIssues, toTakibiFailure } from "@takibi/worker-runtime";

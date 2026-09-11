@@ -1,1 +1,1 @@
-export { withSqliteTestBackend, type SqliteTestBackendOptions } from "@takibi/takibi-testing";
+export { withSqliteTestBackend, type SqliteTestBackendOptions } from "@takibi/testing";

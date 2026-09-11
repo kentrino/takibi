@@ -1,1 +1,1 @@
-export { backfillIndexedCollections, reconcileCollectionIndexes } from "@takibi/takibi-storage";
+export { backfillIndexedCollections, reconcileCollectionIndexes } from "@takibi/storage";

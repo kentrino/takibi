@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import * as StoragePkg from "@takibi/takibi-storage";
+import * as StoragePkg from "@takibi/storage";
 import * as IndexFacade from "../src/indexes";
 import * as IndexReconcileFacade from "../src/index-reconcile";
 import * as IndexSqlFacade from "../src/index-sql";

@@ -15,4 +15,4 @@ export type {
   InternalCollectionsOptions,
   TakibiBrand,
   TakibiHandler,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

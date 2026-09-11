@@ -10,7 +10,7 @@ export {
   resolveTracer,
   tracedStorage,
   withSpan,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";
 export type {
   ExtractedTraceContext,
   SpanAttributes,
@@ -23,4 +23,4 @@ export type {
   TakibiSpan,
   TakibiTracer,
   TracingContextBackend,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

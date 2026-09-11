@@ -16,10 +16,10 @@ export {
   permissionsOf,
   read,
   write,
-} from "@takibi/takibi-policy";
+} from "@takibi/policy";
 export type {
   ConstrainedPolicy,
   ContextPolicy,
   InferPolicyDoc,
   PolicyHelper,
-} from "@takibi/takibi-policy";
+} from "@takibi/policy";

@@ -1,0 +1,58 @@
+{
+  "name": "@takibi/utility",
+  "version": "0.0.0",
+  "description": "Shared utilities for Takibi packages.",
+  "keywords": [
+    "takibi",
+    "utility"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/utility",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/utility"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "bench:create-class": "vp test bench benchmarks/create-class.bench.ts --no-file-parallelism --maxWorkers 1",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@takibi/shared-types": "workspace:^"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

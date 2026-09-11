@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createTakibi, fullAccess } from "../src/index";
 import { createMigratingStorage } from "../src/migrations";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import type { AccessContext, CollectionsDef } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 

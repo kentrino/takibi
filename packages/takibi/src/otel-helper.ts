@@ -6,4 +6,4 @@ export {
   collectionSpanAttributes,
   invocationSpanAttributes,
   storageSpanAttributes,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

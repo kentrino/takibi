@@ -10,5 +10,5 @@ export {
   collectListPagesResult,
   listAllLimitFailure,
   resolveListAllBounds,
-} from "@takibi/takibi-api";
-export type { ListAllBounds } from "@takibi/takibi-api";
+} from "@takibi/api";
+export type { ListAllBounds } from "@takibi/api";

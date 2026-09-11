@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
-import * as SnapshotPkg from "@takibi/takibi-snapshot";
-import * as RuntimePkg from "@takibi/takibi-worker-runtime";
+import * as SnapshotPkg from "@takibi/snapshot";
+import * as RuntimePkg from "@takibi/worker-runtime";
 import * as MaintenanceFacade from "../src/maintenance";
 import * as MaintenanceMemoryFacade from "../src/maintenance-memory";
 import * as SnapshotFacade from "../src/snapshot";

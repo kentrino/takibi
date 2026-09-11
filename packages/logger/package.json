@@ -1,0 +1,59 @@
+{
+  "name": "@takibi/logger",
+  "version": "0.0.0",
+  "description": "Shared logger and log-event contracts for Takibi packages.",
+  "keywords": [
+    "logger",
+    "takibi",
+    "types"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/logger",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/logger"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@takibi/shared-types": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

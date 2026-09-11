@@ -7,4 +7,4 @@ export {
   mergeLoggingOptions,
   normalizeInvocationFailure,
   toWireFailure,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

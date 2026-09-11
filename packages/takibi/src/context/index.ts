@@ -1,4 +1,4 @@
-export { createTakibi } from "@takibi/takibi-worker-runtime";
+export { createTakibi } from "@takibi/worker-runtime";
 export type {
   CollectionsOptions,
   ContextConfig,

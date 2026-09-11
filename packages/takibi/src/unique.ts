@@ -1,4 +1,1 @@
-export {
-  assertCollectionUniqueConstraints,
-  assertUniqueDocument,
-} from "@takibi/takibi-worker-runtime";
+export { assertCollectionUniqueConstraints, assertUniqueDocument } from "@takibi/worker-runtime";

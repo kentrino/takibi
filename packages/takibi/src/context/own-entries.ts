@@ -1,1 +1,1 @@
-export { ownStringEntries } from "@takibi/takibi-worker-runtime";
+export { ownStringEntries } from "@takibi/worker-runtime";

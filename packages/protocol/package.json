@@ -1,0 +1,58 @@
+{
+  "name": "@takibi/protocol",
+  "version": "0.0.0",
+  "description": "Transport codecs and AST parsers for Takibi.",
+  "keywords": [
+    "codec",
+    "protocol",
+    "takibi"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/protocol",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/protocol"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@takibi/shared-types": "workspace:^"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

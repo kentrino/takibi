@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
-import * as Runtime from "@takibi/takibi-worker-runtime";
-import * as RuntimeInstrumentation from "@takibi/takibi-worker-runtime/instrumentation";
+import * as Runtime from "@takibi/worker-runtime";
+import * as RuntimeInstrumentation from "@takibi/worker-runtime/instrumentation";
 import * as ContextFacade from "../src/context";
 import * as HttpFacade from "../src/http";
 import * as InstrumentationFacade from "../src/instrumentation";

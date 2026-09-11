@@ -11,4 +11,4 @@ export {
   StaleWriteError,
   TakibiError,
   UnauthorizedError,
-} from "@takibi/takibi-api";
+} from "@takibi/api";

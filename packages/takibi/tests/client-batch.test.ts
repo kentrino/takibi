@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createClient } from "@takibi/takibi/client";
+import { createClient } from "takibi/client";
 import { createTakibi, fullAccess } from "../src/index";
 import { MAX_BATCH_ITEMS } from "../src/protocol";
 import { z } from "zod";

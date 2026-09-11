@@ -21,13 +21,16 @@ function collectSpecifiers(source: string, valuesOnly: boolean): string[] {
   const body = stripComments(source);
   const specifiers: string[] = [];
   for (const match of body.matchAll(
-    /(?:^|\n)\s*(?:import|export)(?:\s+type)?\s+[\s\S]*?["']([^"']+)["']/g,
+    /(?:^|\n)[ \t]*((?:import|export)(?:\s+type)?[\s\S]*?\sfrom\s+)["']([^"']+)["']/g,
   )) {
-    const statement = match[0] ?? "";
-    const specifier = match[1];
+    const statement = match[1] ?? "";
+    const specifier = match[2];
     if (!specifier) continue;
-    if (valuesOnly && /^\s*(?:import|export)\s+type\b/m.test(statement)) continue;
+    if (valuesOnly && /^(?:import|export)\s+type\b/.test(statement.trim())) continue;
     specifiers.push(specifier);
+  }
+  for (const match of body.matchAll(/(?:^|\n)\s*import\s+["']([^"']+)["']/g)) {
+    if (match[1]) specifiers.push(match[1]);
   }
   for (const match of body.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g)) {
     if (match[1]) specifiers.push(match[1]);
@@ -100,7 +103,7 @@ test("the browser entry static import graph stays off Worker modules", () => {
   expect(files.has("hono")).toBe(false);
   expect([...files].filter((file) => file.startsWith("node:"))).toEqual([]);
   expect([...files].filter((file) => file.startsWith("cloudflare:"))).toEqual([]);
-  expect(files.has("@takibi/takibi-client")).toBe(true);
+  expect(files.has("@takibi/client")).toBe(true);
   expect(
     [...files].some((file) =>
       /(?:^|\/)(?:storage|logging|instrumentation|durable-object)/i.test(file),
@@ -115,8 +118,8 @@ test("published client facade declarations stay off Worker and Node types", () =
 
   const dts = readFileSync(dtsPath, "utf8");
   const js = readFileSync(jsPath, "utf8");
-  if (!js.includes("@takibi/takibi-client")) return;
-  expect(js).toMatch(/@takibi\/takibi-client/);
+  if (!js.includes("@takibi/client")) return;
+  expect(js).toMatch(/@takibi\/client/);
   expect(dts).not.toContain("hono");
   expect(js).not.toContain("hono");
   expect(dts).not.toContain("node:");
@@ -144,7 +147,7 @@ test("production entry graphs cannot reach the Node-only testing backend", () =>
   for (const [name, entry] of productionEntries) {
     const files = walkValueImports(join(srcDir, entry));
     expect(files.has(testingEntry), `${name} reaches testing.server.ts`).toBe(false);
-    expect(files.has("@takibi/takibi-testing"), `${name} reaches takibi-testing`).toBe(false);
+    expect(files.has("@takibi/testing"), `${name} reaches takibi-testing`).toBe(false);
     expect(files.has("node:sqlite"), `${name} reaches node:sqlite`).toBe(false);
   }
 });
@@ -153,7 +156,7 @@ test("testing entry reaches Node SQLite only through the testing package", () =>
   const files = walkValueImports(join(srcDir, "testing.server.ts"));
 
   expect(files.has(normalize(join(srcDir, "testing.server.ts")))).toBe(true);
-  expect(files.has("@takibi/takibi-testing")).toBe(true);
+  expect(files.has("@takibi/testing")).toBe(true);
   expect(files.has("node:sqlite")).toBe(true);
   expect(existsSync(join(srcDir, "testing/sqlite-storage.server.ts"))).toBe(false);
 });

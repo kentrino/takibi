@@ -1,0 +1,64 @@
+{
+  "name": "@takibi/worker-runtime-contract",
+  "version": "0.0.0",
+  "description": "Call and invocation contracts for Takibi Worker runtimes.",
+  "keywords": [
+    "contract",
+    "internal",
+    "runtime",
+    "takibi"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/worker-runtime-contract",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/worker-runtime-contract"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "catalog:",
+    "@takibi/api": "workspace:^",
+    "@takibi/logger": "workspace:^",
+    "@takibi/policy": "workspace:^",
+    "@takibi/shared-types": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

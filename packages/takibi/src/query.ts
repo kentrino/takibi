@@ -4,10 +4,10 @@ export {
   compileWhere,
   matchesQuery,
   queryImpliesEquality,
-} from "@takibi/takibi-query";
+} from "@takibi/query";
 export {
   normalizeOrderBy,
   normalizeQueryExpr,
   QUERY_MAX_DEPTH,
   QUERY_MAX_NODES,
-} from "@takibi/takibi-protocol";
+} from "@takibi/protocol";

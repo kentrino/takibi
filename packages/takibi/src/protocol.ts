@@ -10,7 +10,7 @@ export {
   isWireResponse,
   MAX_BATCH_ITEMS,
   parseWireRequest,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";
 export type {
   ActionWireRequest,
   BatchWireRequest,
@@ -24,4 +24,4 @@ export type {
   WireRequest,
   WireResponse,
   WireSuccess,
-} from "@takibi/takibi-worker-runtime";
+} from "@takibi/worker-runtime";

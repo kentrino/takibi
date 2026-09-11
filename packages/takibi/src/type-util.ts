@@ -5,4 +5,4 @@ export type {
   IsAny,
   KeysMatching,
   StringKeysMatching,
-} from "@takibi/takibi-api";
+} from "@takibi/api";

@@ -5,9 +5,9 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import * as Policy from "@takibi/takibi-policy";
-import { createClient } from "@takibi/takibi/client";
-import { withSqliteTestBackend } from "@takibi/takibi/testing";
+import * as Policy from "@takibi/policy";
+import { createClient } from "takibi/client";
+import { withSqliteTestBackend } from "takibi/testing";
 import { and, createTakibi, fullAccess, grant, none, or, read, write } from "../src/index";
 import type { AccessContext } from "../src/index";
 import { allows, isAccessGrant, permissionsOf } from "../src/policy";
@@ -54,10 +54,10 @@ test("built Takibi facade recognizes grants from the policy package specifier", 
   const takibiDist = join(import.meta.dirname, "../dist/index.mjs");
   if (!existsSync(takibiDist)) return;
   const js = readFileSync(takibiDist, "utf8");
-  if (!js.includes("@takibi/takibi-policy")) return;
+  if (!js.includes("@takibi/policy")) return;
 
   const TakibiBuilt = await import(pathToFileURL(takibiDist).href);
-  expect(js).toMatch(/@takibi\/takibi-policy/);
+  expect(js).toMatch(/@takibi\/policy/);
   expect(Policy.isAccessGrant(TakibiBuilt.grant("get"))).toBe(true);
   expect(Policy.allows(TakibiBuilt.fullAccess, "invoke")).toBe(true);
   expect(isAccessGrant(TakibiBuilt.write)).toBe(true);
