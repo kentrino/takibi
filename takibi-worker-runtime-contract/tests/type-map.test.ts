@@ -333,7 +333,11 @@ test("call factories infer adapter types and reject mismatched requests and wiri
         return { kind: "collection", collection: "patients", operation: "get", id: "1" };
       },
       invocationRun: single.invocationRun,
-      callToSingleResponse: () => ({ status: 200 }),
+      callToSingleResponse: ({ decoded, context, invocation }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        expectTypeOf(invocation).toEqualTypeOf<InvocationResult<Invocation>>();
+        return { status: decoded.bodyLength };
+      },
     });
     expectTypeOf(inlineSingle).toEqualTypeOf<typeof executeSingle>();
     const inlineBatch = createBatchTakibiCall({
@@ -348,9 +352,61 @@ test("call factories infer adapter types and reject mismatched requests and wiri
         return [{ kind: "collection", collection: "patients", operation: "get", id: "1" }];
       },
       invocationRun: batch.invocationRun,
-      callToBatchResponse: () => ({ status: 200 }),
+      callToBatchResponse: async ({ decoded, context, invocations }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        expectTypeOf(invocations).toEqualTypeOf<readonly InvocationResult<Invocation>[]>();
+        return { status: decoded.bodyLength };
+      },
     });
     expectTypeOf(inlineBatch).toEqualTypeOf<typeof executeBatch>();
+
+    const singleResponse = runSingleCall(
+      {
+        ...single,
+        callToSingleResponse: ({ request, decoded, context, invocation }) => {
+          expectTypeOf(request).toEqualTypeOf<Types["request"]>();
+          expectTypeOf(decoded).toEqualTypeOf<Types["decoded"]>();
+          expectTypeOf(invocation).toEqualTypeOf<InvocationResult<Invocation>>();
+          return { tenant: context.tenantId };
+        },
+      },
+      { body: "test" },
+    );
+    expectTypeOf(singleResponse).toEqualTypeOf<Promise<{ tenant: string }>>();
+    const batchResponse = runBatchCall(
+      {
+        ...batch,
+        callToBatchResponse: async ({ request, decoded, context, invocations }) => {
+          expectTypeOf(request).toEqualTypeOf<Types["request"]>();
+          expectTypeOf(decoded).toEqualTypeOf<Types["decoded"]>();
+          expectTypeOf(invocations).toEqualTypeOf<readonly InvocationResult<Invocation>[]>();
+          return { tenant: context.tenantId };
+        },
+      },
+      { body: "test" },
+    );
+    expectTypeOf(batchResponse).toEqualTypeOf<Promise<{ tenant: string }>>();
+
+    createSingleTakibiCall({
+      ...single,
+      // @ts-expect-error response adapters must accept the decoder's actual output
+      callToSingleResponse: ({ decoded }: { decoded: string }) => ({ status: decoded.length }),
+    });
+    createBatchTakibiCall({
+      ...batch,
+      // @ts-expect-error batch response adapters must accept the decoder's actual output
+      callToBatchResponse: ({ decoded }: { decoded: string }) => ({ status: decoded.length }),
+    });
+    createSingleTakibiCall<Types["request"], Types["decoded"], Invocation, Types["response"]>({
+      ...single,
+      // @ts-expect-error explicitly declared response types still constrain the converter
+      callToSingleResponse: () => "wrong",
+    });
+    createBatchTakibiCall<Types["request"], Types["decoded"], Invocation, Types["response"]>({
+      ...batch,
+      // @ts-expect-error explicitly declared batch response types still constrain the converter
+      callToBatchResponse: () => "wrong",
+    });
 
     // @ts-expect-error request must match the decoder input
     void executeSingle({ body: 123 });
@@ -371,4 +427,25 @@ test("call factories infer adapter types and reject mismatched requests and wiri
   };
 
   expectTypeOf(check).toBeFunction();
+});
+
+test("call maps need no local execution facade and share runtime adapter contracts", () => {
+  type Types = import("../src").CallTypeMap<
+    { body: string },
+    { wire: InvocationRequestData },
+    WithSlot<"context", { tenantId: string }>,
+    { status: number }
+  >;
+  type RuntimeTypes = Types & { localExecution: { execute(): Promise<void> } };
+  type Runtime = import("../src").RuntimeAdapterMap<RuntimeTypes>;
+  expectTypeOf<Types>().not.toHaveProperty("context");
+  expectTypeOf<Types>().not.toHaveProperty("localExecution");
+  expectTypeOf<RuntimeTypes>().toExtend<import("../src").RuntimeTypeMap>();
+  expectTypeOf<import("../src").SingleCallAdapters<Types>>().toEqualTypeOf<
+    Pick<Runtime, (typeof import("../src").CALL_SINGLE_ADAPTER_KEYS)[number]>
+  >();
+  expectTypeOf<import("../src").BatchCallAdapters<Types>>().toEqualTypeOf<
+    Pick<Runtime, (typeof import("../src").CALL_BATCH_ADAPTER_KEYS)[number]>
+  >();
+  expectTypeOf<Runtime["localExecution"]>().toEqualTypeOf<RuntimeTypes["localExecution"]>();
 });
