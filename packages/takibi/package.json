@@ -62,9 +62,14 @@
     "test:root-compat": "vp test --config vite.root-import.workers.config.ts",
     "check": "vp check"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@noble/hashes": "catalog:",
+    "@standard-schema/spec": "catalog:",
     "@takibi/api": "workspace:^",
     "@takibi/client": "workspace:^",
+    "@takibi/logger": "workspace:^",
     "@takibi/policy": "workspace:^",
     "@takibi/protocol": "workspace:^",
     "@takibi/query": "workspace:^",
@@ -72,15 +77,12 @@
     "@takibi/snapshot": "workspace:^",
     "@takibi/storage": "workspace:^",
     "@takibi/testing": "workspace:^",
-    "@takibi/worker-runtime": "workspace:^"
-  },
-  "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "catalog:",
-    "@cloudflare/workers-types": "^4.20250803.0",
-    "@noble/hashes": "catalog:",
-    "@standard-schema/spec": "catalog:",
+    "@takibi/utility": "workspace:^",
+    "@takibi/worker-runtime": "workspace:^",
+    "@takibi/worker-runtime-contract": "workspace:^",
     "@types/node": "catalog:",
     "hono": "catalog:",
+    "tatenuki": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
@@ -88,5 +90,10 @@
   },
   "engines": {
     "node": ">=22.18.0"
+  },
+  "inlinedDependencies": {
+    "@noble/hashes": "2.4.0",
+    "@standard-schema/spec": "1.1.0",
+    "tatenuki": "0.2.0"
   }
 }

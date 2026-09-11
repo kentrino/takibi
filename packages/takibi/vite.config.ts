@@ -9,7 +9,13 @@ export default defineConfig({
       testing: "src/testing.server.ts",
     },
     dts: {
-      tsgo: true,
+      generator: "tsgo",
+      tsconfig: "../tsconfig.takibi-pack.json",
+    },
+    deps: {
+      alwaysBundle: [/^@takibi\//],
+      onlyBundle: ["@standard-schema/spec", "tatenuki", "@noble/hashes"],
+      onlyImport: [],
     },
     exports: {
       devExports: true,

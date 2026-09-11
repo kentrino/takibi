@@ -1,0 +1,26 @@
+{
+  "extends": "./takibi/tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "noUnusedLocals": false,
+    "types": []
+  },
+  "include": [
+    "takibi/src",
+    "api/src",
+    "client/src",
+    "logger/src",
+    "policy/src",
+    "protocol/src",
+    "query/src",
+    "shared-types/src",
+    "snapshot/src",
+    "storage/src",
+    "testing/src",
+    "utility/src",
+    "worker-runtime/src",
+    "worker-runtime-contract/src"
+  ]
+}
