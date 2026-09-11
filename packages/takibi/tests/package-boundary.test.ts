@@ -13,6 +13,7 @@ type PackageManifest = {
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  inlinedDependencies?: Record<string, string>;
 };
 
 function readManifest(path: string): PackageManifest {
@@ -87,18 +88,27 @@ test("protocol packages keep a one-way dependency graph", () => {
   const testing = readManifest(join(import.meta.dirname, "../../testing/package.json"));
   const sharedTypes = readManifest(join(import.meta.dirname, "../../shared-types/package.json"));
 
-  expect(core.dependencies?.["@takibi/api"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/client"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/policy"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/protocol"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/query"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/snapshot"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/storage"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/testing"]).toBe("workspace:^");
-  expect(core.dependencies?.["@takibi/worker-runtime"]).toBe("workspace:^");
-  expect(core.dependencies?.hono).toBeUndefined();
-  expect(core.dependencies?.["@standard-schema/spec"]).toBeUndefined();
+  expect(core.dependencies).toBeUndefined();
+  expect(core.devDependencies?.["@takibi/api"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/client"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/logger"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/policy"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/protocol"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/query"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/shared-types"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/snapshot"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/storage"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/testing"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/utility"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/worker-runtime"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/worker-runtime-contract"]).toBe("workspace:^");
+  expect(core.devDependencies?.hono).toBe("catalog:");
+  expect(core.devDependencies?.["@standard-schema/spec"]).toBe("catalog:");
+  expect(Object.keys(core.inlinedDependencies ?? {}).sort()).toEqual([
+    "@noble/hashes",
+    "@standard-schema/spec",
+    "tatenuki",
+  ]);
   expect(api.private).toBe(true);
   expect(client.private).toBe(true);
   expect(policy.private).toBe(true);

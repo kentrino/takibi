@@ -118,8 +118,8 @@ test("published client facade declarations stay off Worker and Node types", () =
 
   const dts = readFileSync(dtsPath, "utf8");
   const js = readFileSync(jsPath, "utf8");
-  if (!js.includes("@takibi/client")) return;
-  expect(js).toMatch(/@takibi\/client/);
+  expect(js).not.toMatch(/from\s+["']@takibi\//);
+  expect(dts).not.toMatch(/from\s+["']@takibi\//);
   expect(dts).not.toContain("hono");
   expect(js).not.toContain("hono");
   expect(dts).not.toContain("node:");
@@ -149,6 +149,29 @@ test("production entry graphs cannot reach the Node-only testing backend", () =>
     expect(files.has(testingEntry), `${name} reaches testing.server.ts`).toBe(false);
     expect(files.has("@takibi/testing"), `${name} reaches takibi-testing`).toBe(false);
     expect(files.has("node:sqlite"), `${name} reaches node:sqlite`).toBe(false);
+  }
+});
+
+test("published SDK entries inline private workspace packages", () => {
+  const distDir = join(srcDir, "../dist");
+  const published = [
+    ["index.mjs", "index.d.mts"],
+    ["client.mjs", "client.d.mts"],
+    ["instrumentation.mjs", "instrumentation.d.mts"],
+    ["testing.mjs", "testing.d.mts"],
+  ] as const;
+
+  for (const [jsName, dtsName] of published) {
+    const jsPath = join(distDir, jsName);
+    const dtsPath = join(distDir, dtsName);
+    if (!existsSync(jsPath) || !existsSync(dtsPath)) return;
+    expect(readFileSync(jsPath, "utf8"), jsName).not.toMatch(/from\s+["']@takibi\//);
+    expect(readFileSync(dtsPath, "utf8"), dtsName).not.toMatch(/from\s+["']@takibi\//);
+  }
+
+  const indexJs = join(distDir, "index.mjs");
+  if (existsSync(indexJs)) {
+    expect(readFileSync(indexJs, "utf8")).not.toContain("node:sqlite");
   }
 });
 

@@ -640,13 +640,28 @@ importers:
         version: 4.6.1
 
   packages/takibi:
-    dependencies:
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 'catalog:'
+        version: 0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.10)
+      '@cloudflare/workers-types':
+        specifier: ^4.20250803.0
+        version: 4.20260702.1
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.4.0
+      '@standard-schema/spec':
+        specifier: 'catalog:'
+        version: 1.1.0
       '@takibi/api':
         specifier: workspace:^
         version: link:../api
       '@takibi/client':
         specifier: workspace:^
         version: link:../client
+      '@takibi/logger':
+        specifier: workspace:^
+        version: link:../logger
       '@takibi/policy':
         specifier: workspace:^
         version: link:../policy
@@ -668,28 +683,24 @@ importers:
       '@takibi/testing':
         specifier: workspace:^
         version: link:../testing
+      '@takibi/utility':
+        specifier: workspace:^
+        version: link:../utility
       '@takibi/worker-runtime':
         specifier: workspace:^
         version: link:../worker-runtime
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: 'catalog:'
-        version: 0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.10)
-      '@cloudflare/workers-types':
-        specifier: ^4.20250803.0
-        version: 4.20260702.1
-      '@noble/hashes':
-        specifier: 'catalog:'
-        version: 2.4.0
-      '@standard-schema/spec':
-        specifier: 'catalog:'
-        version: 1.1.0
+      '@takibi/worker-runtime-contract':
+        specifier: workspace:^
+        version: link:../worker-runtime-contract
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.4
       hono:
         specifier: 'catalog:'
         version: 4.13.7
+      tatenuki:
+        specifier: 'catalog:'
+        version: 0.2.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
