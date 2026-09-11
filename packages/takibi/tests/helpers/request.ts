@@ -1,11 +1,13 @@
-import { Hono } from "hono";
-import { takibiServer, type TakibiHttpHandler } from "../../../hono-adapter/src/index";
+import type { HandleResult } from "takibi";
 
-export function requestTakibi(
-  handler: TakibiHttpHandler<Record<string, never>>,
+export async function requestTakibi(
+  handler: {
+    handle(request: Request, options: { context: Record<string, never> }): Promise<HandleResult>;
+  },
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const app = new Hono().use("*", takibiServer({ handler, createContext: () => ({}) }));
-  return Promise.resolve(app.request(input, init));
+  const result = await handler.handle(new Request(input, init), { context: {} });
+  if (!result.matched) throw new Error("Expected a matching Takibi test request");
+  return result.response;
 }
