@@ -1,0 +1,67 @@
+{
+  "name": "@takibi/takibi-hono-adapter",
+  "version": "0.0.0",
+  "description": "Typed Hono middleware for Takibi HTTP handlers.",
+  "keywords": [
+    "hono",
+    "middleware",
+    "takibi"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/hono-adapter",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/hono-adapter"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@takibi/takibi-worker-runtime": "workspace:^"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@types/node": "catalog:",
+    "@takibi/takibi-policy": "workspace:*",
+    "@takibi/takibi-testing": "workspace:*",
+    "hono": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "hono": "^4.13.1"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

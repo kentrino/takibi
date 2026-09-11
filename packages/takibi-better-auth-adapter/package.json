@@ -1,0 +1,72 @@
+{
+  "name": "@takibi/takibi-better-auth-adapter",
+  "version": "0.0.0",
+  "description": "Better Auth database adapter for trusted Takibi collections.",
+  "keywords": [
+    "better-auth",
+    "cloudflare",
+    "durable-objects",
+    "takibi"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi-better-auth-adapter",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/takibi-better-auth-adapter"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.server.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test && vp run test:workers",
+    "test:workers": "vp test --config vite.workers.config.ts",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "catalog:"
+  },
+  "devDependencies": {
+    "@better-auth/test-utils": "catalog:",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@types/node": "catalog:",
+    "@takibi/takibi": "workspace:*",
+    "better-auth": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@takibi/takibi": "workspace:^",
+    "better-auth": "^1.6.26",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

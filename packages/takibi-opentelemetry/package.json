@@ -1,0 +1,81 @@
+{
+  "name": "@takibi/takibi-opentelemetry",
+  "version": "0.0.0",
+  "description": "OpenTelemetry integration for @takibi/takibi.",
+  "keywords": [
+    "cloudflare",
+    "opentelemetry",
+    "takibi",
+    "tracing"
+  ],
+  "homepage": "https://github.com/diaree/takibi/tree/HEAD/packages/takibi-opentelemetry",
+  "bugs": {
+    "url": "https://github.com/diaree/takibi/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diaree/takibi.git",
+    "directory": "packages/takibi-opentelemetry"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./logs": "./src/logs.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./logs": {
+        "types": "./dist/logs.d.mts",
+        "import": "./dist/logs.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test && vp run test:workers",
+    "test:workers": "vp test --config vite.workers.config.ts",
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "catalog:",
+    "@opentelemetry/core": "^2.2.0",
+    "@opentelemetry/sdk-trace-base": "^2.2.0",
+    "@types/node": "catalog:",
+    "@takibi/takibi": "workspace:*",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.221.0",
+    "@takibi/takibi": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api-logs": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
