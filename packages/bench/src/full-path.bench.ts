@@ -1,5 +1,5 @@
 import { bench, describe } from "vite-plus/test";
-import { runFullPathScenario } from "./full-path-scenario";
+import { runFullPathScenario } from "@takibi/issue-tracker";
 
 describe("Takibi full path", () => {
   bench(

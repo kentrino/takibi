@@ -11,15 +11,11 @@
     "test": "vp test"
   },
   "dependencies": {
-    "@takibi/hono-adapter": "workspace:^",
-    "@takibi/protocol": "workspace:^",
-    "takibi": "workspace:^",
-    "zod": "catalog:"
+    "@takibi/issue-tracker": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "citty": "catalog:",
-    "hono": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",

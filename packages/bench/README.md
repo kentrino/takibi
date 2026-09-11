@@ -35,9 +35,12 @@ API builders -> client -> HTTP decode -> query/order compilation
 -> transaction/revision -> SQLite/indexes -> result encoding
 ```
 
-The scenario also covers document, detached, and root actions; atomic
+The scenario lives in `examples/issue-tracker` (`@takibi/issue-tracker`) and is
+exercised only through
+published entry points (`takibi`, `takibi/client`, `takibi/testing`, and
+`@takibi/hono-adapter`). It covers document, detached, and root actions; atomic
 cross-collection writes; optimistic revisions; validation and policy failures;
-fixed-size client read batching; and explicit public protocol round-trips.
+and fixed-size client read batching.
 
 Exclusions:
 
@@ -45,9 +48,6 @@ Exclusions:
   Vitest loads modules before sampling.
 - A real network and the Cloudflare scheduler are not measured.
 - The in-process backend does not traverse the Worker-to-Durable-Object stub.
-  Explicit protocol round-trips cover codec cost, not RPC latency.
-- Response serialization and public response validation are covered, but
-  Takibi has no distinct public response encoder/decoder.
 - Logical snapshot export/restore is outside this request-hot-path benchmark
   and needs a separate benchmark if it becomes a performance target.
 - OpenTelemetry exporters are not enabled.
