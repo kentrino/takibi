@@ -33,7 +33,7 @@ test("new is available only after every method is defined", () => {
   expectTypeOf(incomplete).not.toHaveProperty("newWithInterceptors");
   expectTypeOf(defined.new).toBeCallableWith({ name: "takibi" });
   expectTypeOf(defined.newWithInterceptors).toBeCallableWith({ name: "takibi" }, {});
-  expectTypeOf(defined.new({ name: "takibi" })).toEqualTypeOf<ClassInstance<Foo, ConstructorArg>>();
+  expectTypeOf(defined.new({ name: "takibi" })).toEqualTypeOf<ClassInstance<Foo>>();
   expectTypeOf(defined.new({ name: "takibi" })).not.toHaveProperty("$intercept");
   expectTypeOf(defined.new({ name: "takibi" })).not.toHaveProperty("$replace");
 });
