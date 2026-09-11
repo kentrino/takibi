@@ -13,6 +13,13 @@ These are internal execution contracts, not an application-facing compatibility
 promise. The observer boundary supports a future public `onResponse` option;
 providing that option is a separate runtime concern.
 
+`SingleCallAdapters<T>` and `BatchCallAdapters<T>` accept a `CallTypeMap` with
+request, decoded, invocation, and response types. Context comes from the
+invocation map; only `RuntimeTypeMap` adds `localExecution`. Call factories and
+runners use separate type parameters internally so a response callback can infer
+its return type while reading decoded data, context, and invocation results.
+The same callback contracts define the runtime adapter map.
+
 ## Vocabulary and execution flow
 
 - A **call** is one HTTP or wire envelope containing one invocation or a batch.

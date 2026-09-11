@@ -365,14 +365,23 @@ export type BoundRunInvocation<T extends InternalInvocationTypeMap> = (
   options: InvocationRunOptions<T>,
 ) => Promise<InvocationResult<T>>;
 
-/** Runtime type choices; invocation context has a single source of truth. */
+/** Call type choices; context comes from the invocation map. */
+export type CallTypeMap<
+  TRequest = unknown,
+  TDecoded = unknown,
+  TInvocation extends InternalInvocationTypeMap = InternalInvocationTypeMap,
+  TResponse = unknown,
+> = {
+  request: TRequest;
+  decoded: TDecoded;
+  invocation: TInvocation;
+  response: TResponse;
+};
+
+/** Runtime composition adds its local execution facade to the call types. */
 export type RuntimeTypeMap<
   TInvocation extends InternalInvocationTypeMap = InternalInvocationTypeMap,
-> = {
-  invocation: TInvocation;
-  request: unknown;
-  decoded: unknown;
-  response: unknown;
+> = CallTypeMap<unknown, unknown, TInvocation, unknown> & {
   localExecution: unknown;
 };
 
@@ -424,56 +433,9 @@ export type RuntimeAdapterMap<T extends RuntimeTypeMap = RuntimeTypeMap> = {
   invocationNotify:
     | ((event: InvocationObserverEvent<T["invocation"]>) => MaybePromise<void>)
     | undefined;
-  invocationRun: BoundRunInvocation<T["invocation"]>;
-
-  callDecode: (request: T["request"]) => MaybePromise<T["decoded"]>;
-  callResolveContext: (input: {
-    request: T["request"];
-    decoded: T["decoded"];
-  }) => MaybePromise<T["invocation"]["context"]>;
-  callGetWireInvocation: (input: {
-    request: T["request"];
-    decoded: T["decoded"];
-    context: T["invocation"]["context"];
-  }) => MaybePromise<T["invocation"]["wireInvocation"]>;
-  callGetWireInvocations: (input: {
-    request: T["request"];
-    decoded: T["decoded"];
-    context: T["invocation"]["context"];
-  }) => MaybePromise<readonly T["invocation"]["wireInvocation"][]>;
-  callToSingleResponse: (input: {
-    request: T["request"];
-    decoded: T["decoded"];
-    context: T["invocation"]["context"];
-    invocation: InvocationResult<T["invocation"]>;
-  }) => MaybePromise<T["response"]>;
-  callToBatchResponse: (input: {
-    request: T["request"];
-    decoded: T["decoded"];
-    context: T["invocation"]["context"];
-    invocations: readonly InvocationResult<T["invocation"]>[];
-  }) => MaybePromise<T["response"]>;
-  callRuntimeChecks: boolean | (() => boolean) | undefined;
-  callSingle: TakibiCall<T["request"], T["response"]>;
-  callBatch: TakibiCall<T["request"], T["response"]>;
-
   invocationCoreRun: BoundRunInvocation<T["invocation"]>;
   localExecution: T["localExecution"];
-};
-
-export type CallTypeMap<
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
-> = {
-  request: TRequestLike;
-  decoded: TDecoded;
-  context: TInvocation["context"];
-  invocation: TInvocation;
-  response: TResponseObject;
-  localExecution: unknown;
-};
+} & CallAdapterSlots<T["request"], T["decoded"], T["invocation"], T["response"]>;
 
 type InvocationCompositionKeys =
   | InvocationAdapterKeys
@@ -632,54 +594,116 @@ export type CallAdapters<
   ) => MaybePromise<void>;
 };
 
-export type SingleCallAdapters<T extends RuntimeTypeMap> = Adapters<
-  T,
-  (typeof CALL_SINGLE_ADAPTER_KEYS)[number]
+export type SingleCallAdapters<T extends CallTypeMap> = SingleCallAdapterSlots<
+  T["request"],
+  T["decoded"],
+  T["invocation"],
+  T["response"]
 >;
 
-export type BatchCallAdapters<T extends RuntimeTypeMap> = Adapters<
-  T,
+export type BatchCallAdapters<T extends CallTypeMap> = BatchCallAdapterSlots<
+  T["request"],
+  T["decoded"],
+  T["invocation"],
+  T["response"]
+>;
+
+type ResolvedCallInput<TRequest, TDecoded, TInvocation extends InternalInvocationTypeMap> = {
+  request: TRequest;
+  decoded: TDecoded;
+  context: TInvocation["context"];
+};
+
+/** Direct type parameters keep response inference independent of earlier callbacks. */
+type CallAdapterSlots<
+  TRequest,
+  TDecoded,
+  TInvocation extends InternalInvocationTypeMap,
+  TResponse,
+> = {
+  invocationRun: BoundRunInvocation<TInvocation>;
+  callDecode: (request: TRequest) => MaybePromise<TDecoded>;
+  callResolveContext: (input: {
+    request: TRequest;
+    decoded: TDecoded;
+  }) => MaybePromise<TInvocation["context"]>;
+  callGetWireInvocation: (
+    input: ResolvedCallInput<TRequest, TDecoded, TInvocation>,
+  ) => MaybePromise<TInvocation["wireInvocation"]>;
+  callGetWireInvocations: (
+    input: ResolvedCallInput<TRequest, TDecoded, TInvocation>,
+  ) => MaybePromise<readonly TInvocation["wireInvocation"][]>;
+  callRuntimeChecks: boolean | (() => boolean) | undefined;
+  callToSingleResponse: (
+    input: ResolvedCallInput<TRequest, TDecoded, TInvocation> & {
+      invocation: InvocationResult<TInvocation>;
+    },
+  ) => MaybePromise<TResponse>;
+  callToBatchResponse: (
+    input: ResolvedCallInput<TRequest, TDecoded, TInvocation> & {
+      invocations: readonly InvocationResult<TInvocation>[];
+    },
+  ) => MaybePromise<TResponse>;
+  callSingle: TakibiCall<TRequest, TResponse>;
+  callBatch: TakibiCall<TRequest, TResponse>;
+};
+
+type SingleCallAdapterSlots<
+  TRequest,
+  TDecoded,
+  TInvocation extends InternalInvocationTypeMap,
+  TResponse,
+> = Pick<
+  CallAdapterSlots<TRequest, TDecoded, TInvocation, TResponse>,
+  (typeof CALL_SINGLE_ADAPTER_KEYS)[number]
+>;
+type BatchCallAdapterSlots<
+  TRequest,
+  TDecoded,
+  TInvocation extends InternalInvocationTypeMap,
+  TResponse,
+> = Pick<
+  CallAdapterSlots<TRequest, TDecoded, TInvocation, TResponse>,
   (typeof CALL_BATCH_ADAPTER_KEYS)[number]
 >;
 
-/** Keep separate type parameters at call boundaries so adapters can infer each slot. */
 export type CreateSingleTakibiCall = <
-  TRequestLike,
+  TRequest,
   TDecoded,
   TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
+  TResponse,
 >(
-  options: SingleCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
-) => TakibiCall<TRequestLike, TResponseObject>;
+  options: SingleCallAdapterSlots<TRequest, TDecoded, TInvocation, TResponse>,
+) => TakibiCall<TRequest, TResponse>;
 
 export type CreateBatchTakibiCall = <
-  TRequestLike,
+  TRequest,
   TDecoded,
   TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
+  TResponse,
 >(
-  options: BatchCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
-) => TakibiCall<TRequestLike, TResponseObject>;
+  options: BatchCallAdapterSlots<TRequest, TDecoded, TInvocation, TResponse>,
+) => TakibiCall<TRequest, TResponse>;
 
 export type RunSingleCall = <
-  TRequestLike,
+  TRequest,
   TDecoded,
   TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
+  TResponse,
 >(
-  options: SingleCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
-  request: TRequestLike,
-) => Promise<TResponseObject>;
+  options: SingleCallAdapterSlots<TRequest, TDecoded, TInvocation, TResponse>,
+  request: TRequest,
+) => Promise<TResponse>;
 
 export type RunBatchCall = <
-  TRequestLike,
+  TRequest,
   TDecoded,
   TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
+  TResponse,
 >(
-  options: BatchCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
-  request: TRequestLike,
-) => Promise<TResponseObject>;
+  options: BatchCallAdapterSlots<TRequest, TDecoded, TInvocation, TResponse>,
+  request: TRequest,
+) => Promise<TResponse>;
 
 export type RunCall = <
   TRequestLike,
