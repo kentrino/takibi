@@ -56,9 +56,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250803.0",
-    "@types/node": "catalog:",
     "@takibi/takibi-client": "workspace:*",
     "@takibi/takibi-policy": "workspace:*",
+    "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",

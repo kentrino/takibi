@@ -74,8 +74,8 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "^4.20250803.0",
-    "@types/node": "catalog:",
     "@takibi/takibi-client": "workspace:*",
+    "@types/node": "catalog:",
     "hono": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",

@@ -53,12 +53,13 @@
     "@better-auth/test-utils": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "^4.20250803.0",
-    "@types/node": "catalog:",
     "@takibi/takibi": "workspace:*",
+    "@types/node": "catalog:",
     "better-auth": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
+    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {
