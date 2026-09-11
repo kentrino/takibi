@@ -21,6 +21,7 @@
   "scripts": {
     "check": "vp check",
     "ready": "vp run check && vp run -r test && vp run -r build",
+    "test:e2e": "node e2e/run.ts",
     "prepare": "vp config"
   },
   "devDependencies": {

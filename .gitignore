@@ -48,3 +48,7 @@ packages/**/src/**/*.d.ts
 .legacy
 
 *.tgz
+
+# Isolated packed-package consumer
+e2e/.consumer
+e2e/.tarballs
