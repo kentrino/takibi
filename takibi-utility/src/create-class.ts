@@ -4,8 +4,8 @@ export type AnyMethod = (...args: never[]) => unknown;
 
 export type MethodMap = Record<string, AnyMethod>;
 
-export type ClassConstructorOptions<TRuntimeCheck extends boolean = boolean> = {
-  readonly runtimeCheck: TRuntimeCheck;
+export type ClassConstructorOptions = {
+  readonly runtimeCheck: boolean;
 };
 
 export type InterceptContext<TCtor, K extends PropertyKey, M extends AnyMethod> = {
@@ -20,7 +20,7 @@ export type InterceptMap<T extends MethodMap, TCtor> = {
   [K in keyof T]: (context: InterceptContext<TCtor, K, T[K]>) => ReturnType<T[K]>;
 };
 
-export type ClassInstance<T extends MethodMap, _TCtor = unknown> = T;
+export type ClassInstance<T extends MethodMap> = T;
 
 export type MethodRun<TDeps, M extends AnyMethod> = (
   deps: TDeps,
@@ -28,12 +28,12 @@ export type MethodRun<TDeps, M extends AnyMethod> = (
 ) => ReturnType<M>;
 
 type DefinedClass<T extends MethodMap, TCtor> = {
-  new: (ctor: TCtor) => ClassInstance<T, TCtor>;
+  new: (ctor: TCtor) => ClassInstance<T>;
   newWithInterceptors: (
     ctor: TCtor,
     interceptors: Partial<InterceptMap<T, TCtor>>,
     ...more: Partial<InterceptMap<T, TCtor>>[]
-  ) => ClassInstance<T, TCtor>;
+  ) => ClassInstance<T>;
 };
 
 type UnionToIntersection<U> = (U extends U ? (arg: U) => void : never) extends (
@@ -42,52 +42,31 @@ type UnionToIntersection<U> = (U extends U ? (arg: U) => void : never) extends (
   ? I
   : never;
 
-type DefineForKey<
-  T extends MethodMap,
-  TCtor,
-  TRemaining extends keyof T,
-  TRuntimeCheck extends boolean,
-  K extends TRemaining,
-> = {
-  (
-    name: K,
-    run: MethodRun<TCtor, T[K]>,
-  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
+type DefineForKey<T extends MethodMap, TCtor, TRemaining extends keyof T, K extends TRemaining> = {
+  (name: K, run: MethodRun<TCtor, T[K]>): ClassBuilder<T, TCtor, Exclude<TRemaining, K>>;
   <TDeps>(
     name: K,
     apply: (ctor: TCtor) => TDeps,
     run: MethodRun<TDeps, T[K]>,
-  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>, TRuntimeCheck>;
+  ): ClassBuilder<T, TCtor, Exclude<TRemaining, K>>;
 };
 
-type DefineFns<
-  T extends MethodMap,
-  TCtor,
-  TRemaining extends keyof T,
-  TRuntimeCheck extends boolean,
-> = [TRemaining] extends [never]
+type DefineFns<T extends MethodMap, TCtor, TRemaining extends keyof T> = [TRemaining] extends [
+  never,
+]
   ? never
   : UnionToIntersection<
       {
-        [K in TRemaining]: DefineForKey<T, TCtor, TRemaining, TRuntimeCheck, K>;
+        [K in TRemaining]: DefineForKey<T, TCtor, TRemaining, K>;
       }[TRemaining]
     >;
 
-export type ClassBuilder<
-  T extends MethodMap,
-  TCtor,
-  TRemaining extends keyof T,
-  TRuntimeCheck extends boolean,
-> = {
-  define: DefineFns<T, TCtor, TRemaining, TRuntimeCheck>;
+export type ClassBuilder<T extends MethodMap, TCtor, TRemaining extends keyof T> = {
+  define: DefineFns<T, TCtor, TRemaining>;
 } & ([TRemaining] extends [never] ? DefinedClass<T, TCtor> : {});
 
 export type ClassFactory<T extends MethodMap> = {
-  constructor: {
-    <TCtor>(options: ClassConstructorOptions<true>): ClassBuilder<T, TCtor, keyof T, true>;
-    <TCtor>(options: ClassConstructorOptions<false>): ClassBuilder<T, TCtor, keyof T, false>;
-    <TCtor>(options: ClassConstructorOptions): ClassBuilder<T, TCtor, keyof T, boolean>;
-  };
+  constructor: <TCtor>(options: ClassConstructorOptions) => ClassBuilder<T, TCtor, keyof T>;
 };
 
 export class TakibiClassError extends Error {
