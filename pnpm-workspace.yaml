@@ -1,0 +1,42 @@
+packages:
+  - packages/*
+
+catalogMode: prefer
+
+catalog:
+  "@better-auth/test-utils": 1.6.26
+  "@cloudflare/vitest-pool-workers": ^0.21.3
+  "@noble/hashes": ^2.4.0
+  "@opentelemetry/api-logs": ^0.221.0
+  "@standard-schema/spec": ^1.1.0
+  "@types/node": ^24
+  "@vitest/coverage-v8": 4.1.10
+  better-auth: 1.6.26
+  citty: ^0.2.2
+  hono: ^4.13.1
+  tatenuki: 0.2.0
+  typescript: ^7.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.8
+  vite-plus: 0.2.8
+  vitest: 4.1.10
+  wrangler: ^4.120.0
+  zod: ^4.4.3
+
+overrides:
+  vite: "catalog:"
+  better-auth: 1.6.26
+  "@better-auth/core": 1.6.26
+  vitest: 4.1.10
+  "@vitest/coverage-v8": 4.1.10
+
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"
+
+allowBuilds:
+  esbuild: true
+  workerd: true
