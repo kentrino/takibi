@@ -46,3 +46,5 @@ packages/**/src/**/*.d.ts
 
 # Source-repo snapshot used during extraction
 .legacy
+
+*.tgz
