@@ -1,6 +1,6 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import type { QueryExpr } from "@takibi/shared-types";
-import type { InternalLogger, LogEvent, Logger, LogLevel } from "../src";
+import type { InternalLogger, LogEvent, Logger, LogLevel } from "@takibi/logger";
 
 test("log levels and event names stay the shared contract", () => {
   expectTypeOf<LogLevel>().toEqualTypeOf<"debug" | "info" | "warn" | "error">();

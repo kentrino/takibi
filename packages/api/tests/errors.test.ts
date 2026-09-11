@@ -5,7 +5,7 @@ import {
   ListAllLimitError,
   StaleWriteError,
   TakibiError,
-} from "../src";
+} from "@takibi/api";
 
 test("public error classes keep their codes, status, and names", () => {
   const exists = new AlreadyExistsError();

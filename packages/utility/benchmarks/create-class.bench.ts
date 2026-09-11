@@ -1,5 +1,5 @@
 import { bench, describe } from "vite-plus/test";
-import { createClass } from "../src/index";
+import { createClass } from "@takibi/utility";
 
 type Pair = {
   greet: (name: string) => string;

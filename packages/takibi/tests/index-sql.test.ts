@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { fullAccess } from "../src/index";
+import { fullAccess } from "takibi";
 import { compileIndexedScanSql, physicalIndexName } from "../src/index-sql";
 import { reconcileCollectionIndexes } from "../src/index-reconcile";
 import { compileIndexRegistry, resolveIndexedList } from "../src/indexes";

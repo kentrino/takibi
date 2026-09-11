@@ -4,7 +4,7 @@ import {
   statusOfResult,
   type JsonResponseLike,
   type StatusBearingResult,
-} from "../src";
+} from "@takibi/worker-runtime-contract";
 
 test("statusOfResult maps ok to 200 and failure to error.status", () => {
   expect(statusOfResult({ ok: true })).toBe(200);

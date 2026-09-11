@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import * as ClientPkg from "@takibi/client";
 import * as ClientFacade from "takibi/client";
-import { AlreadyExistsError, TakibiError } from "../src/index";
+import { AlreadyExistsError, TakibiError } from "takibi";
 
 test("direct client package and Takibi client facade share constructors", () => {
   expect(ClientFacade.createClient).toBe(ClientPkg.createClient);

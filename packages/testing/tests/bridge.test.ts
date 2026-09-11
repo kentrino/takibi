@@ -7,7 +7,7 @@ import { createTakibi } from "@takibi/worker-runtime";
 import { createInProcessRuntime, getTestingFork } from "@takibi/worker-runtime/testing-bridge";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "../src";
+import { withSqliteTestBackend } from "@takibi/testing";
 
 test("withSqliteTestBackend looks up the same WeakMap registration", async () => {
   const handler = createTakibi()({
@@ -41,7 +41,7 @@ test("built testing package and runtime testing-bridge share one WeakMap", async
   const bridgeDist = join(import.meta.dirname, "../../worker-runtime/dist/testing-bridge.mjs");
   if (!existsSync(testingDist) || !existsSync(runtimeDist) || !existsSync(bridgeDist)) return;
 
-  const testing = (await import(pathToFileURL(testingDist).href)) as typeof import("../src");
+  const testing = (await import(pathToFileURL(testingDist).href)) as typeof import("@takibi/testing");
   const runtime = (await import(
     pathToFileURL(runtimeDist).href
   )) as typeof import("@takibi/worker-runtime");

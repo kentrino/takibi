@@ -15,7 +15,7 @@ import {
   StaleWriteError,
   TakibiError,
   createTakibi,
-} from "../src/index";
+} from "takibi";
 
 test("direct API package and Takibi facade share error class identity", () => {
   expect(Api.TakibiError).toBe(TakibiError);

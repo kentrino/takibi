@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { assertJsonObject, assertJsonValue, JSON_MAX_DEPTH } from "../src/json";
+import { assertJsonObject, assertJsonValue, JSON_MAX_DEPTH } from "@takibi/utility";
 
 const options = {
   subject: "Value",

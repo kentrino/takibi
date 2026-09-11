@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi, fullAccess } from "../src/index";
+import { createTakibi, fullAccess } from "takibi";
 import { createMigratingStorage } from "../src/migrations";
 import { createDurableObjectStorage } from "../src/storage";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";

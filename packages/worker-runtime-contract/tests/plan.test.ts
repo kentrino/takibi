@@ -6,7 +6,7 @@ import {
   transactionBoundaryOf,
   type ActionPlanCriteria,
   type CollectionPlanCriteria,
-} from "../src";
+} from "@takibi/worker-runtime-contract";
 
 test("action and collection criteria select the Takibi boundary table", () => {
   expect(transactionBoundaryOf({ kind: "action", target: "document", atomic: true })).toBe("full");

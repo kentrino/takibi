@@ -1,7 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "@takibi/policy";
-import { prepareAddDoc } from "../src";
+import { prepareAddDoc } from "@takibi/worker-runtime";
 
 test("schema outputs that are not plain JSON documents fail before storage", async () => {
   const accessor = {};

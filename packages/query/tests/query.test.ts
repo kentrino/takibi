@@ -5,8 +5,8 @@ import {
   compileWhere,
   matchesQuery,
   queryImpliesEquality,
-} from "../src";
-import type { QueryBuilder, QueryExpr } from "../src";
+} from "@takibi/query";
+import type { QueryBuilder, QueryExpr } from "@takibi/query";
 
 type Item = {
   ownerId: string;

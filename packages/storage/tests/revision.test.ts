@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { documentRevision, withDocumentRevision } from "../src";
+import { documentRevision, withDocumentRevision } from "@takibi/storage";
 
 test("documentRevision defaults missing or invalid values to 1", () => {
   expect(documentRevision(undefined)).toBe(1);

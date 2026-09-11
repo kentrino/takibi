@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createClient } from "takibi/client";
 import { type SqliteTestBackendOptions, withSqliteTestBackend } from "takibi/testing";
-import { and, createTakibi, fullAccess, none, UnauthorizedError } from "../src/index";
+import { and, createTakibi, fullAccess, none, UnauthorizedError } from "takibi";
 import type { RegisteredAction, RuntimeActionDefinition } from "../src/action";
 import { parseSchema } from "../src/schema";
 import type {
@@ -23,7 +23,7 @@ import type {
   QueryBuilder,
   TrustedCollectionApi,
   TrustedCollectionsApi,
-} from "../src/index";
+} from "takibi";
 import type { StorageDriver } from "../src/types";
 
 type User = { id: string; role: "admin" | "member" };
@@ -94,7 +94,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
     Parameters<DurableInstance["$collections"]["$transaction"]>[0]
   >[0];
   expectTypeOf<TransactionCollections>().toEqualTypeOf<
-    import("../src/index").TrustedCollectionsApi<typeof collections>
+    import("takibi").TrustedCollectionsApi<typeof collections>
   >();
   expectTypeOf<TransactionCollections>().not.toHaveProperty("$exportSnapshot");
   expectTypeOf<TransactionCollections>().not.toHaveProperty("$restoreSnapshot");
@@ -104,7 +104,7 @@ test("collection schemas type CRUD clients without handler $collections", () => 
   >().toEqualTypeOf<ReadableStream<Uint8Array>>();
   expectTypeOf<
     Awaited<ReturnType<DurableInstance["$collections"]["$restoreSnapshot"]>>
-  >().toEqualTypeOf<import("../src/index").SnapshotRestoreReport>();
+  >().toEqualTypeOf<import("takibi").SnapshotRestoreReport>();
   expectTypeOf<
     Awaited<ReturnType<DurableInstance["$collections"]["$resetAll"]>>
   >().toEqualTypeOf<void>();

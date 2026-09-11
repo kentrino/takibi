@@ -1,7 +1,7 @@
 import type { BetterAuthOptions } from "better-auth";
 import { getAuthTables, type DBFieldAttribute } from "better-auth/db";
 import { z } from "zod";
-import { takibiAdapter, type BetterAuthModelMap } from "../src/adapter.server.ts";
+import { takibiAdapter, type BetterAuthModelMap } from "@takibi/better-auth-adapter";
 import { createTestCollection } from "./test-collection.server";
 
 type Row = Record<string, unknown> & {

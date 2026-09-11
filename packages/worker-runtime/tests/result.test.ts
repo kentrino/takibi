@@ -1,8 +1,8 @@
 import { ForbiddenError, TakibiError } from "@takibi/api";
 import type { TakibiFailure, TakibiResult } from "@takibi/shared-types";
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { normalizeInvocationFailure, toWireFailure } from "../src/context/runtime";
-import { asTakibiResult, toTakibiFailure } from "../src/result";
+import { normalizeInvocationFailure, toWireFailure } from "@takibi/worker-runtime";
+import { asTakibiResult, toTakibiFailure } from "@takibi/worker-runtime";
 import { SchemaValidationError } from "../src/schema";
 
 test("typed forbidden errors preserve their reason code type", () => {

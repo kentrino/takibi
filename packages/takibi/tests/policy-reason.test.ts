@@ -13,7 +13,7 @@ import {
   type AccessContext,
   type ClientOf,
   type PolicyReason,
-} from "../src/index";
+} from "takibi";
 import { denialReasonOf, evaluateAccessPolicy } from "../src/policy";
 
 type TestContext = { user: { id: string } | null };

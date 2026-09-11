@@ -1,5 +1,5 @@
 import { expectTypeOf, test } from "vite-plus/test";
-import type { ListOptions, QueryBuilder, QueryExpr, QueryField } from "../src";
+import type { ListOptions, QueryBuilder, QueryExpr, QueryField } from "@takibi/query";
 
 type Item = {
   ownerId: string;

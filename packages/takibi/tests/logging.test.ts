@@ -8,7 +8,7 @@ import {
   fullAccess,
   type LogEvent,
   type Logger,
-} from "../src/index";
+} from "takibi";
 import type { WireRequest } from "../src/protocol";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 

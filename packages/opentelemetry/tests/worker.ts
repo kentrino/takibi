@@ -19,7 +19,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { createTakibi, fullAccess, none } from "takibi";
 import { z } from "zod";
-import { TakibiInstrumentation } from "../src/index";
+import { TakibiInstrumentation } from "@takibi/opentelemetry";
 
 class AsyncLocalContextManager implements ContextManager {
   readonly #storage = new AsyncLocalStorage<Context>();

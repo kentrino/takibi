@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { admin, bearer } from "better-auth/plugins";
 import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
-import { takibiAdapter, type BetterAuthModelMap } from "../src/adapter.server.ts";
+import { takibiAdapter, type BetterAuthModelMap } from "@takibi/better-auth-adapter";
 import { createTestCollection } from "./test-collection.server";
 
 type Row = Record<string, unknown> & {

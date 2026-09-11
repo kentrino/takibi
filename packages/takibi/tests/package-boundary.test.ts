@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
-import { TAKIBI_ATTR, TAKIBI_SPAN } from "../src/instrumentation";
+import { TAKIBI_ATTR, TAKIBI_SPAN } from "takibi/instrumentation";
 
 type PackageManifest = {
   name: string;

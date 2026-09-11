@@ -7,7 +7,7 @@ import {
   collectListPagesResult,
   listAllLimitFailure,
   resolveListAllBounds,
-} from "../src";
+} from "@takibi/api";
 
 test("listAll bounds reject non-positive page sizes and clamp to the caller cap", () => {
   expect(LIST_ALL_PAGE_SIZE_DEFAULT).toBe(LIST_PAGE_MAX);

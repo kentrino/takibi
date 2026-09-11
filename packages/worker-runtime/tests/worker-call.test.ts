@@ -1,12 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { Call } from "@takibi/worker-runtime-contract";
-import { resolveWorkerEnvelopeMap, serveDecodedCall } from "../src/context/worker-call";
-import type { Executor, ExecutorInput } from "../src/context/executors";
-import type { PublicRequest } from "../src/http";
-import type { InternalLogger, LogEvent } from "../src/logging";
-import { TAKIBI_SPAN } from "../src/otel-helper";
-import type { WireResponse } from "../src/protocol";
+import { resolveWorkerEnvelopeMap } from "@takibi/worker-runtime";
+import { serveDecodedCall } from "../src/context/worker-call";
+import type { Executor, ExecutorInput } from "@takibi/worker-runtime";
+import type { PublicRequest } from "@takibi/worker-runtime";
+import type { InternalLogger, LogEvent } from "@takibi/worker-runtime";
+import { TAKIBI_SPAN } from "@takibi/worker-runtime";
+import type { WireResponse } from "@takibi/worker-runtime";
 import {
   activeSpanContext,
   bindTracer,
@@ -21,7 +22,7 @@ import {
   type SpanAttributes,
   type TakibiTracer,
   type TracingContextBackend,
-} from "../src/tracing";
+} from "@takibi/worker-runtime";
 
 type RecordedSpan = {
   name: string;

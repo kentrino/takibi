@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createClient } from "takibi/client";
 import { createPolicyHelper } from "@takibi/policy";
 import { withSqliteTestBackend } from "takibi/testing";
-import { createTakibi, fullAccess, grant, none, UnauthorizedError } from "../src/index";
+import { createTakibi, fullAccess, grant, none, UnauthorizedError } from "takibi";
 
 type User = { id: string; role: "staff" | "member" };
 type AppCtx = { tenantId: string; user: User | null };

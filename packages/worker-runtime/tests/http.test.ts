@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError, NotFoundError } from "@takibi/api";
-import { decodePublicHttp, matchesPublicPrefix, MethodNotAllowedError } from "../src";
+import { decodePublicHttp, matchesPublicPrefix, MethodNotAllowedError } from "@takibi/worker-runtime";
 
 test("matchesPublicPrefix uses path-segment boundaries", () => {
   expect(matchesPublicPrefix("/api/fire", "/api/fire")).toBe(true);

@@ -6,7 +6,7 @@ import {
   parseWireRequest,
   TakibiProtocolError,
   type WireRequest,
-} from "../src";
+} from "@takibi/protocol";
 
 const request = {
   kind: "collection",

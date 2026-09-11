@@ -6,7 +6,7 @@ import {
   compileIndexRegistry,
   physicalIndexName,
   resolveIndexedList,
-} from "../src";
+} from "@takibi/storage";
 
 test("physical index names are stable hashes of collection, public name, and fields", () => {
   const name = physicalIndexName("posts", "byOwner", ["ownerId", "createdAt"]);

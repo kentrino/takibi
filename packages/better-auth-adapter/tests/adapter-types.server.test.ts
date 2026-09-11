@@ -1,7 +1,7 @@
 import type { ClientCollectionApi, CollectionsApi, TrustedCollectionsApi } from "takibi";
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { takibiAdapter, type TakibiAdapterOptions } from "../src/adapter.server.ts";
+import { takibiAdapter, type TakibiAdapterOptions } from "@takibi/better-auth-adapter";
 
 const defs = {
   authUsers: { schema: z.object({ email: z.string() }) },

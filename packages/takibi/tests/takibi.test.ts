@@ -13,7 +13,7 @@ import {
   queryImpliesEquality,
   read,
   UnauthorizedError,
-} from "../src/index";
+} from "takibi";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";

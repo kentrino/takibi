@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { createClass, withTracing, type TracingRunner, type TracingSpanSpec } from "../src/index";
+import { createClass, withTracing, type TracingRunner, type TracingSpanSpec } from "@takibi/utility";
 
 type Probe = {
   target: (label: string) => Promise<string>;

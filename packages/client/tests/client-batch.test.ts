@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { MAX_BATCH_ITEMS } from "@takibi/protocol";
-import { createClient } from "../src";
+import { createClient } from "@takibi/client";
 
 const Post = z.object({ title: z.string() });
 
