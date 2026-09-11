@@ -234,4 +234,12 @@ test("only the SDK and adapters are publishable", () => {
   expect(betterAuth.private).toBeUndefined();
   expect(betterAuth.publishConfig?.access).toBe("public");
   expect(betterAuth.peerDependencies?.takibi).toBe("workspace:^");
+
+  const issueTracker = readManifest(
+    join(import.meta.dirname, "../../../examples/issue-tracker/package.json"),
+  );
+  expect(issueTracker.private).toBe(true);
+  expect(issueTracker.dependencies?.takibi).toBe("workspace:^");
+  expect(issueTracker.dependencies?.["@takibi/hono-adapter"]).toBe("workspace:^");
+  expect(issueTracker.dependencies?.["@takibi/protocol"]).toBeUndefined();
 });
