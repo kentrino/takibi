@@ -51,7 +51,6 @@ export type {
   AdapterMap,
   Adapters,
   BatchCallAdapters,
-  BatchTakibiCallOptions,
   BoundRunInvocation,
   CallAdapterMap,
   CallAdapters,
@@ -101,7 +100,6 @@ export type {
   RuntimeAdapterMap,
   RuntimeTypeMap,
   SingleCallAdapters,
-  SingleTakibiCallOptions,
   TakibiCall,
   TransactionBoundary,
 } from "./type";

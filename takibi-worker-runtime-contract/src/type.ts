@@ -472,6 +472,7 @@ export type CallTypeMap<
   context: TInvocation["context"];
   invocation: TInvocation;
   response: TResponseObject;
+  localExecution: unknown;
 };
 
 type InvocationCompositionKeys =
@@ -631,69 +632,24 @@ export type CallAdapters<
   ) => MaybePromise<void>;
 };
 
-export type SingleCallAdapters<
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
-> = Adapters<
-  {
-    invocation: TInvocation;
-    request: TRequestLike;
-    decoded: TDecoded;
-    response: TResponseObject;
-    localExecution: unknown;
-  },
-  | "callDecode"
-  | "callResolveContext"
-  | "callGetWireInvocation"
-  | "callToSingleResponse"
-  | "callRuntimeChecks"
-  | "invocationRun"
+export type SingleCallAdapters<T extends RuntimeTypeMap> = Adapters<
+  T,
+  (typeof CALL_SINGLE_ADAPTER_KEYS)[number]
 >;
 
-export type BatchCallAdapters<
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
-> = Adapters<
-  {
-    invocation: TInvocation;
-    request: TRequestLike;
-    decoded: TDecoded;
-    response: TResponseObject;
-    localExecution: unknown;
-  },
-  | "callDecode"
-  | "callResolveContext"
-  | "callGetWireInvocations"
-  | "callToBatchResponse"
-  | "callRuntimeChecks"
-  | "invocationRun"
+export type BatchCallAdapters<T extends RuntimeTypeMap> = Adapters<
+  T,
+  (typeof CALL_BATCH_ADAPTER_KEYS)[number]
 >;
 
-export type SingleTakibiCallOptions<
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
-> = SingleCallAdapters<TRequestLike, TDecoded, TInvocation, TResponseObject>;
-
-export type BatchTakibiCallOptions<
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
-> = BatchCallAdapters<TRequestLike, TDecoded, TInvocation, TResponseObject>;
-
+/** Keep separate type parameters at call boundaries so adapters can infer each slot. */
 export type CreateSingleTakibiCall = <
   TRequestLike,
   TDecoded,
   TInvocation extends InternalInvocationTypeMap,
   TResponseObject,
 >(
-  options: SingleTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
+  options: SingleCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
 ) => TakibiCall<TRequestLike, TResponseObject>;
 
 export type CreateBatchTakibiCall = <
@@ -702,7 +658,7 @@ export type CreateBatchTakibiCall = <
   TInvocation extends InternalInvocationTypeMap,
   TResponseObject,
 >(
-  options: BatchTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
+  options: BatchCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
 ) => TakibiCall<TRequestLike, TResponseObject>;
 
 export type RunSingleCall = <
@@ -711,7 +667,7 @@ export type RunSingleCall = <
   TInvocation extends InternalInvocationTypeMap,
   TResponseObject,
 >(
-  options: SingleTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
+  options: SingleCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
   request: TRequestLike,
 ) => Promise<TResponseObject>;
 
@@ -721,7 +677,7 @@ export type RunBatchCall = <
   TInvocation extends InternalInvocationTypeMap,
   TResponseObject,
 >(
-  options: BatchTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
+  options: BatchCallAdapters<CallTypeMap<TRequestLike, TDecoded, TInvocation, TResponseObject>>,
   request: TRequestLike,
 ) => Promise<TResponseObject>;
 
