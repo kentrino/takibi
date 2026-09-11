@@ -6,6 +6,10 @@ import type {
   TakibiFailure,
 } from "@takibi/takibi-shared-types";
 import {
+  createSingleTakibiCall,
+  createBatchTakibiCall,
+  runSingleCall,
+  runBatchCall,
   toObservedInput,
   type InternalInvocationRuntime,
   type InternalInvocationTypeMap,
@@ -291,4 +295,80 @@ test("action handler arguments require the common execution context", () => {
   expectTypeOf<Omit<CommonArgs, "$collections">>().not.toExtend<Args>();
   expectTypeOf<Omit<CommonArgs, "services">>().not.toExtend<Args>();
   expectTypeOf<Omit<CommonArgs, "input">>().not.toExtend<Args>();
+});
+
+test("call factories infer adapter types and reject mismatched requests and wiring", () => {
+  type Invocation = WithSlot<"context", { tenantId: string }>;
+  type Types = import("../src").CallTypeMap<
+    { body: string },
+    { wire: InvocationRequestData },
+    Invocation,
+    { status: number }
+  >;
+
+  const check = (
+    single: import("../src").SingleCallAdapters<Types>,
+    batch: import("../src").BatchCallAdapters<Types>,
+  ) => {
+    const executeSingle = createSingleTakibiCall(single);
+    const executeBatch = createBatchTakibiCall(batch);
+    expectTypeOf(executeSingle).toEqualTypeOf<
+      (request: Types["request"]) => Promise<Types["response"]>
+    >();
+    expectTypeOf(executeBatch).toEqualTypeOf<typeof executeSingle>();
+    expectTypeOf(runSingleCall(single, { body: "test" })).toEqualTypeOf<
+      Promise<Types["response"]>
+    >();
+    expectTypeOf(runBatchCall(batch, { body: "test" })).toEqualTypeOf<Promise<Types["response"]>>();
+
+    const inlineSingle = createSingleTakibiCall({
+      callRuntimeChecks: undefined,
+      callDecode: (request: Types["request"]) => ({ bodyLength: request.body.length }),
+      callResolveContext: ({ decoded }) => {
+        expectTypeOf(decoded).toEqualTypeOf<{ bodyLength: number }>();
+        return { tenantId: "tenant-1" };
+      },
+      callGetWireInvocation: ({ context }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        return { kind: "collection", collection: "patients", operation: "get", id: "1" };
+      },
+      invocationRun: single.invocationRun,
+      callToSingleResponse: () => ({ status: 200 }),
+    });
+    expectTypeOf(inlineSingle).toEqualTypeOf<typeof executeSingle>();
+    const inlineBatch = createBatchTakibiCall({
+      callRuntimeChecks: undefined,
+      callDecode: (request: Types["request"]) => ({ bodyLength: request.body.length }),
+      callResolveContext: ({ decoded }) => {
+        expectTypeOf(decoded).toEqualTypeOf<{ bodyLength: number }>();
+        return { tenantId: "tenant-1" };
+      },
+      callGetWireInvocations: ({ context }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        return [{ kind: "collection", collection: "patients", operation: "get", id: "1" }];
+      },
+      invocationRun: batch.invocationRun,
+      callToBatchResponse: () => ({ status: 200 }),
+    });
+    expectTypeOf(inlineBatch).toEqualTypeOf<typeof executeBatch>();
+
+    // @ts-expect-error request must match the decoder input
+    void executeSingle({ body: 123 });
+    // @ts-expect-error request must match the decoder input
+    void executeBatch({ body: 123 });
+    // @ts-expect-error runners must also preserve decoder input types
+    void runSingleCall(single, { body: 123 });
+    // @ts-expect-error runners must also preserve decoder input types
+    void runBatchCall(batch, { body: 123 });
+    // @ts-expect-error the invocation runner requires a tenantId context
+    createSingleTakibiCall({ ...single, callResolveContext: () => ({ tenantId: 123 }) });
+    // @ts-expect-error batch invocation wiring must preserve the same context
+    createBatchTakibiCall({ ...batch, callResolveContext: () => ({ tenantId: 123 }) });
+    // @ts-expect-error a batch adapter bag cannot substitute for single adapters
+    createSingleTakibiCall(batch);
+    // @ts-expect-error a single adapter bag cannot substitute for batch adapters
+    createBatchTakibiCall(single);
+  };
+
+  expectTypeOf(check).toBeFunction();
 });

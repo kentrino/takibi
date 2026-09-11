@@ -1,48 +1,22 @@
 import { runCall } from "./request";
 import type {
-  BatchTakibiCallOptions,
   CreateBatchTakibiCall,
   CreateSingleTakibiCall,
-  InternalInvocationTypeMap,
   MaybePromise,
   ResolveRuntimeChecks,
   RunBatchCall,
   RunSingleCall,
-  SingleTakibiCallOptions,
-  TakibiCall,
 } from "./type";
 
-export const createSingleTakibiCall: CreateSingleTakibiCall = function <
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
->(
-  options: SingleTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
-): TakibiCall<TRequestLike, TResponseObject> {
+export const createSingleTakibiCall: CreateSingleTakibiCall = (options) => {
   return (request) => runSingleCall(options, request);
 };
 
-export const createBatchTakibiCall: CreateBatchTakibiCall = function <
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
->(
-  options: BatchTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
-): TakibiCall<TRequestLike, TResponseObject> {
+export const createBatchTakibiCall: CreateBatchTakibiCall = (options) => {
   return (request) => runBatchCall(options, request);
 };
 
-export const runSingleCall: RunSingleCall = async function <
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
->(
-  adapters: SingleTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
-  request: TRequestLike,
-): Promise<TResponseObject> {
+export const runSingleCall: RunSingleCall = async (adapters, request) => {
   const invocationRuntimeChecks = resolveRuntimeChecks(adapters.callRuntimeChecks);
   return runResolvedRequest(adapters, request, async (resolved) => {
     const wireInvocation = await adapters.callGetWireInvocation(resolved);
@@ -54,15 +28,7 @@ export const runSingleCall: RunSingleCall = async function <
   });
 };
 
-export const runBatchCall: RunBatchCall = async function <
-  TRequestLike,
-  TDecoded,
-  TInvocation extends InternalInvocationTypeMap,
-  TResponseObject,
->(
-  adapters: BatchTakibiCallOptions<TRequestLike, TDecoded, TInvocation, TResponseObject>,
-  request: TRequestLike,
-): Promise<TResponseObject> {
+export const runBatchCall: RunBatchCall = async (adapters, request) => {
   const invocationRuntimeChecks = resolveRuntimeChecks(adapters.callRuntimeChecks);
   return runResolvedRequest(adapters, request, async (resolved) => {
     const wireInvocations = await adapters.callGetWireInvocations(resolved);

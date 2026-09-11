@@ -176,15 +176,4 @@ export type EnvelopeAdapterMap<
 /**
  * Thin entry around `Call.run` for callers that still pass a bare adapter map.
  */
-export const runCall: RunCall = function runCall<
-  TRequestLike,
-  TDecoded,
-  TContext,
-  TResponseObject,
-  TDispatched = TResponseObject,
->(
-  request: TRequestLike,
-  adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>,
-): Promise<TResponseObject> {
-  return new Call(adapters).run(request);
-};
+export const runCall: RunCall = (request, adapters) => new Call(adapters).run(request);
