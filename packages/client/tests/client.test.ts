@@ -1,6 +1,6 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { createClient, type ClientOf } from "../src";
+import { createClient, type ClientOf } from "@takibi/client";
 
 const Post = z.object({ title: z.string() });
 const DuplicateInput = z.object({ title: z.string() });

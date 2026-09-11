@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
-import { createTakibi, fullAccess, none } from "../src/index";
+import { createTakibi, fullAccess, none } from "takibi";
 import {
   bindTracer,
   formatTraceparent,
@@ -905,7 +905,7 @@ test("instrumentation contract stays off the public root", () => {
   expect(JSON.stringify(pkg.peerDependencies ?? {})).not.toMatch(/opentelemetry/);
   expect(pkg.exports?.["./instrumentation"]).toBe("./src/instrumentation.ts");
 
-  type PublicModule = typeof import("../src/index");
+  type PublicModule = typeof import("takibi");
   type Hidden =
     | "internalTracerKey"
     | "registerGlobalTracer"

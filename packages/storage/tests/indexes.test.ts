@@ -9,7 +9,7 @@ import {
   planIndexRange,
   resolveIndexedList,
   type IndexRangePlan,
-} from "../src";
+} from "@takibi/storage";
 
 test("assertCollectionIndexes rejects empty, duplicate, and reserved fields", () => {
   expect(() =>

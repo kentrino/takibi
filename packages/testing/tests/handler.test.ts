@@ -5,8 +5,8 @@ import { createDurableObjectStorage } from "@takibi/storage";
 import { createTakibi } from "@takibi/worker-runtime";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "../src";
-import { createSqliteDurableObjectStorage } from "../src/sqlite-storage.server";
+import { withSqliteTestBackend } from "@takibi/testing";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 
 type User = { id: string; role: "admin" | "guest" };
 

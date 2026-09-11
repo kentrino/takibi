@@ -2,7 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { NotFoundError, TakibiError } from "../src/errors";
 import { executeOperation } from "../src/executor";
-import { fullAccess, none, write } from "../src/index";
+import { fullAccess, none, write } from "takibi";
 import { createDurableObjectStorage } from "../src/storage";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import { prepareSetDoc, storageAdd, storageSet, storageUpdate } from "../src/typed-storage";

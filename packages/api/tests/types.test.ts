@@ -14,7 +14,7 @@ import {
   type SnapshotRestoreReport,
   type TrustedCollectionApi,
   type TrustedCollectionsApi,
-} from "../src";
+} from "@takibi/api";
 import { and, createPolicyHelper, fullAccess, grant, type ConstrainedPolicy } from "@takibi/policy";
 
 type AppCtx = { tenantId: string; user: { id: string } | null };

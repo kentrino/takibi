@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { TakibiDefinition } from "@takibi/api";
 import type { PolicyReasonCodeCarrier } from "@takibi/policy";
 import type { TakibiResult } from "@takibi/shared-types";
-import { createClient, type ClientOf, type InferHandlerCollections } from "../src";
+import { createClient, type ClientOf, type InferHandlerCollections } from "@takibi/client";
 
 test("action output and policy reason-code inference reach ClientOf on a structural carrier", () => {
   const inputSchema = z.string().transform((value) => value.length);

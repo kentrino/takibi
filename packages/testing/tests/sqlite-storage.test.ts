@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { createSqliteDurableObjectStorage } from "../src/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 
 test("Node SQLite emulation converts SELECT and write statements", () => {
   const storage = createSqliteDurableObjectStorage();

@@ -3,7 +3,7 @@ import { expect, expectTypeOf, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "takibi";
 import { withSqliteTestBackend } from "takibi/testing";
-import { takibiServer } from "../src";
+import { takibiServer } from "@takibi/hono-adapter";
 
 type AppEnv = {
   Bindings: { tenant: string };

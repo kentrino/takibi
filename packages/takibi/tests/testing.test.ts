@@ -3,7 +3,7 @@ import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi, fullAccess } from "../src/index";
+import { createTakibi, fullAccess } from "takibi";
 
 test("withSqliteTestBackend rejects a non-Takibi handler", () => {
   expect(() => {

@@ -3,12 +3,12 @@ import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
 import type { ActionDefinitions } from "@takibi/api";
 import { createClient } from "@takibi/client";
-import { withSqliteTestBackend } from "../../testing/src/index";
-import { createSqliteDurableObjectStorage } from "../../testing/src/sqlite-storage.server";
+import { withSqliteTestBackend } from "@takibi/testing";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import * as Policy from "@takibi/policy";
 import { fullAccess, grant, none, type AccessContext } from "@takibi/policy";
-import { createTakibi, type TakibiHandler } from "../src";
-import type { WireRequest, WireResponse } from "../src";
+import { createTakibi, type TakibiHandler } from "@takibi/worker-runtime";
+import type { WireRequest, WireResponse } from "@takibi/worker-runtime";
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };

@@ -1,8 +1,8 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import type { ObserverInvocationData } from "@takibi/shared-types";
-import { debugInvocationFields, invocationFields } from "../src/context/runtime";
-import type { PublicRequest } from "../src/http";
-import type { TakibiWireInvocation } from "../src/invocation-type-map";
+import { debugInvocationFields, invocationFields } from "@takibi/worker-runtime";
+import type { PublicRequest } from "@takibi/worker-runtime";
+import type { TakibiWireInvocation } from "@takibi/worker-runtime";
 
 test("log field helpers accept observer, wire, and public request shapes", () => {
   expectTypeOf<ObserverInvocationData>().toExtend<Parameters<typeof invocationFields>[0]>();

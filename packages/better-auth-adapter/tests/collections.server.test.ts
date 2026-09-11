@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
   createZodBetterAuthBaseSchemas,
   defineBetterAuthCollections,
-} from "../src/index.server.ts";
+} from "@takibi/better-auth-adapter";
 
 const base = createZodBetterAuthBaseSchemas(z);
 

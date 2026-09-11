@@ -3,7 +3,7 @@ import { fullAccess } from "@takibi/policy";
 import { createTakibi } from "@takibi/worker-runtime";
 import { expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { type SqliteTestBackendOptions, withSqliteTestBackend } from "../src";
+import { type SqliteTestBackendOptions, withSqliteTestBackend } from "@takibi/testing";
 
 type AppCtx = { tenantId: string; user: { id: string; role: "member" } | null };
 

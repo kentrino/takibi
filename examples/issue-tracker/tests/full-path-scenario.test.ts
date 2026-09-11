@@ -4,7 +4,7 @@ import {
   FULL_PATH_FIXTURE,
   FULL_PATH_OPERATIONS,
   runFullPathScenario,
-} from "../src/index";
+} from "@takibi/issue-tracker";
 
 test("the issue-tracker scenario preserves its workload and result", async () => {
   expect(FULL_PATH_FIXTURE.counts).toEqual({

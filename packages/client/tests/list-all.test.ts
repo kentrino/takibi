@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { LIST_PAGE_MAX } from "@takibi/api";
-import { createClient } from "../src";
+import { createClient } from "@takibi/client";
 
 const Post = z.object({ title: z.string() });
 

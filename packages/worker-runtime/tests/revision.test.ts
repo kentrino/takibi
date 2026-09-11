@@ -2,11 +2,11 @@ import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "@takibi/client";
-import { withSqliteTestBackend } from "../../testing/src/index";
-import { createSqliteDurableObjectStorage } from "../../testing/src/sqlite-storage.server";
+import { withSqliteTestBackend } from "@takibi/testing";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import { createDurableObjectStorage } from "@takibi/storage";
 import { fullAccess } from "@takibi/policy";
-import { createTakibi, nextDocumentRevision, storageSet } from "../src";
+import { createTakibi, nextDocumentRevision, storageSet } from "@takibi/worker-runtime";
 import type { StoredDocument } from "@takibi/storage";
 
 type AppCtx = { tenantId: string };

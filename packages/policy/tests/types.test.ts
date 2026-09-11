@@ -13,7 +13,7 @@ import {
   type InferPolicyDoc,
   type PolicyReason,
   type PolicyReasonCodeOf,
-} from "../src";
+} from "@takibi/policy";
 import type { WithMetadata } from "@takibi/shared-types";
 
 type User = { id: string } | null;

@@ -3,8 +3,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "@takibi/policy";
-import { createTakibi } from "../src";
-import type { WireRequest, WireResponse } from "../src";
+import { createTakibi } from "@takibi/worker-runtime";
+import type { WireRequest, WireResponse } from "@takibi/worker-runtime";
 import type { StorageTestObject } from "./worker";
 
 test("Durable Object wire path runs CRUD, action, and batch through fetch", async () => {

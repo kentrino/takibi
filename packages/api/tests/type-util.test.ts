@@ -6,7 +6,7 @@ import type {
   IsAny,
   KeysMatching,
   StringKeysMatching,
-} from "../src";
+} from "@takibi/api";
 
 declare const token: unique symbol;
 

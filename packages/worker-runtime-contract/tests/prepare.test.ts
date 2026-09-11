@@ -3,8 +3,8 @@ import {
   composeActionPreparation,
   invocationStageResult,
   unwrapInvocationAdapterResult,
-} from "../src";
-import type { InternalInvocationTypeMap, InvocationAdapterResult } from "../src";
+} from "@takibi/worker-runtime-contract";
+import type { InternalInvocationTypeMap, InvocationAdapterResult } from "@takibi/worker-runtime-contract";
 
 type Spec = InternalInvocationTypeMap & {
   context: { tenantId: string };

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { createTakibi, fullAccess, none } from "../src/index";
+import { createTakibi, fullAccess, none } from "takibi";
 import type { WireRequest, WireResponse } from "../src/protocol";
 import type { StorageTestObject } from "./worker";
 

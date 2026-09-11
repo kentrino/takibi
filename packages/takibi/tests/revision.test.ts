@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
-import { createTakibi, fullAccess } from "../src/index";
+import { createTakibi, fullAccess } from "takibi";
 import { nextDocumentRevision } from "../src/revision";
 import { createDurableObjectStorage } from "../src/storage";
 import { storageSet } from "../src/typed-storage";

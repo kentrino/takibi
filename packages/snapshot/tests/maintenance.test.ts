@@ -7,7 +7,7 @@ import {
   MaintenanceController,
   MemoryMaintenanceBackend,
   type SnapshotLifecycle,
-} from "../src";
+} from "@takibi/snapshot";
 
 const lifecycle: SnapshotLifecycle = {
   listCollections() {

@@ -1,7 +1,7 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { createClass, type InterceptMap } from "@takibi/utility";
-import { otel } from "../src/otel";
-import type { InternalLogger, LogEvent } from "../src/logging";
+import { otel } from "@takibi/worker-runtime";
+import type { InternalLogger, LogEvent } from "@takibi/worker-runtime";
 
 type Probe = {
   greet: (name: string) => Promise<string>;

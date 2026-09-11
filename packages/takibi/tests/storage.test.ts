@@ -425,7 +425,7 @@ test("DO SQLite round-trips revisions beyond safe and signed 64-bit integer limi
 test("indexed list pages by createdAt and id in both directions", async () => {
   const { compileIndexRegistry } = await import("../src/indexes");
   const { z } = await import("zod");
-  const { fullAccess } = await import("../src/index");
+  const { fullAccess } = await import("takibi");
 
   const posts = {
     schema: z.object({ ownerId: z.string(), createdAt: z.string(), tag: z.string() }),

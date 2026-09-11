@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { queryImpliesEquality } from "../src/index";
+import { queryImpliesEquality } from "takibi";
 import {
   compileListOptions,
   compileWhere,

@@ -15,7 +15,7 @@ import {
   type InvocationRequest,
   type InvocationResult,
   type TransactionBoundary,
-} from "../src";
+} from "@takibi/worker-runtime-contract";
 
 type Spec = {
   wireInvocation: ActionRequestData;

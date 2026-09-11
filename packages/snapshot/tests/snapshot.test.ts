@@ -9,7 +9,7 @@ import {
   MemoryMaintenanceBackend,
   type SnapshotLifecycle,
   type SnapshotStoredDocument,
-} from "../src";
+} from "@takibi/snapshot";
 
 const encoder = new TextEncoder();
 

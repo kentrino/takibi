@@ -2,8 +2,8 @@ import { requestTakibi } from "./helpers/request";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "../../testing/src/index";
-import { createSqliteDurableObjectStorage } from "../../testing/src/sqlite-storage.server";
+import { withSqliteTestBackend } from "@takibi/testing";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import { fullAccess } from "@takibi/policy";
 import {
   createTakibi,
@@ -23,7 +23,7 @@ import {
   type TracingContextBackend,
   type WireRequest,
   type WireResponse,
-} from "../src";
+} from "@takibi/worker-runtime";
 
 const Post = z.object({ title: z.string() });
 

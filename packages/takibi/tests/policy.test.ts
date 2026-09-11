@@ -8,8 +8,8 @@ import { z } from "zod";
 import * as Policy from "@takibi/policy";
 import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
-import { and, createTakibi, fullAccess, grant, none, or, read, write } from "../src/index";
-import type { AccessContext } from "../src/index";
+import { and, createTakibi, fullAccess, grant, none, or, read, write } from "takibi";
+import type { AccessContext } from "takibi";
 import { allows, isAccessGrant, permissionsOf } from "../src/policy";
 
 type Ctx = { tenantId: string; user: { id: string } };

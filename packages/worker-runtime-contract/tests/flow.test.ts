@@ -1,6 +1,8 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import type { TakibiFailure } from "@takibi/shared-types";
 import {
+  createBatchTakibiCall,
+  createSingleTakibiCall,
   runInvocation,
   type BoundRunInvocation,
   type InternalInvocationTypeMap,
@@ -9,8 +11,7 @@ import {
   type InvocationPlan,
   type InvocationPlanningView,
   type InvocationResult,
-} from "../src/index";
-import { createBatchTakibiCall, createSingleTakibiCall } from "../src/call";
+} from "@takibi/worker-runtime-contract";
 
 type ActionWire = {
   readonly kind: "action";
@@ -101,8 +102,8 @@ function toFailure(error: unknown): Failure {
 }
 
 function snapshotObserverEvent<T extends InternalInvocationTypeMap>(
-  event: import("../src/index").InvocationObserverEvent<T>,
-): import("../src/index").InvocationObserverEvent<T> {
+  event: import("@takibi/worker-runtime-contract").InvocationObserverEvent<T>,
+): import("@takibi/worker-runtime-contract").InvocationObserverEvent<T> {
   return structuredClone(event);
 }
 

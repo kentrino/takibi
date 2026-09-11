@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { compileQueryToSql } from "../src";
+import { compileQueryToSql } from "@takibi/storage";
 
 test("SQL lowering parameterizes values and rejects interpolation", () => {
   const attack = "' OR 1=1 --";

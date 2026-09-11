@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { createClass, TakibiClassError, type ClassInstance } from "../src/index";
+import { createClass, TakibiClassError, type ClassInstance } from "@takibi/utility";
 
 type Foo = {
   bar: () => Promise<void>;

@@ -4,15 +4,15 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "../../testing/src/index";
+import { withSqliteTestBackend } from "@takibi/testing";
 import { fullAccess } from "@takibi/policy";
-import { createTakibi } from "../src";
+import { createTakibi } from "@takibi/worker-runtime";
 import { assignTakibiBrand } from "../src/brand";
 import {
   createInProcessRuntime,
   getTestingFork,
   registerTestingFork,
-} from "../src/testing-bridge.server";
+} from "@takibi/worker-runtime/testing-bridge";
 
 test("createTakibi registers a testing fork on the shared WeakMap", () => {
   const handler = createTakibi()({
@@ -70,10 +70,10 @@ test("built testing-bridge and root share one WeakMap instance", async () => {
   const bridgePath = join(distDir, "testing-bridge.mjs");
   if (!existsSync(rootPath) || !existsSync(bridgePath)) return;
 
-  const root = (await import(pathToFileURL(rootPath).href)) as typeof import("../src");
+  const root = (await import(pathToFileURL(rootPath).href)) as typeof import("@takibi/worker-runtime");
   const bridge = (await import(
     pathToFileURL(bridgePath).href
-  )) as typeof import("../src/testing-bridge.server");
+  )) as typeof import("@takibi/worker-runtime/testing-bridge");
   const handler = root
     .createTakibi()({
       resolve: () => ({ tenantId: "built" }),

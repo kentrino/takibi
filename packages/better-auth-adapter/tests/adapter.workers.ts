@@ -8,8 +8,8 @@ import {
 } from "takibi";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { takibiAdapter } from "../src/adapter.server.ts";
-import { defineBetterAuthCollections } from "../src/collections.server.ts";
+import { takibiAdapter } from "@takibi/better-auth-adapter";
+import { defineBetterAuthCollections } from "@takibi/better-auth-adapter";
 import type { AdapterTestObject } from "./worker";
 
 const tenantId = "better-auth-adapter";

@@ -1,10 +1,10 @@
 import { requestTakibi } from "./helpers/request";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "../../testing/src/index";
+import { withSqliteTestBackend } from "@takibi/testing";
 import { fullAccess } from "@takibi/policy";
-import { createPrettyConsoleLogger, createTakibi } from "../src";
-import type { LogEvent, Logger } from "../src";
+import { createPrettyConsoleLogger, createTakibi } from "@takibi/worker-runtime";
+import type { LogEvent, Logger } from "@takibi/worker-runtime";
 
 const Post = z.object({ title: z.string() });
 

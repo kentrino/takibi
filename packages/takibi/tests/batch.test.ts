@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
-import { createTakibi, fullAccess, UnauthorizedError } from "../src/index";
+import { createTakibi, fullAccess, UnauthorizedError } from "takibi";
 import {
   internalTracerKey,
   registerGlobalTracer,
@@ -12,7 +12,7 @@ import {
   type TracingContextBackend,
 } from "../src/tracing";
 import { TAKIBI_ATTR } from "../src/otel-helper";
-import type { LogEvent, Logger } from "../src/index";
+import type { LogEvent, Logger } from "takibi";
 import type { WireRequest } from "../src/protocol";
 import { createRecordingTracer } from "./helpers/recording-tracer";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";

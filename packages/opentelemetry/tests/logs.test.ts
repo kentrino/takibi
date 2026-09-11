@@ -18,8 +18,8 @@ import { createTakibi, fullAccess } from "takibi";
 import { withSqliteTestBackend } from "takibi/testing";
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
-import { TakibiInstrumentation } from "../src/index";
-import { createOtelLogger } from "../src/logs";
+import { TakibiInstrumentation } from "@takibi/opentelemetry";
+import { createOtelLogger } from "@takibi/opentelemetry/logs";
 
 class AsyncLocalContextManager implements ContextManager {
   readonly #storage = new AsyncLocalStorage<Context>();

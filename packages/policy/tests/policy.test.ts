@@ -16,8 +16,8 @@ import {
   permissionsOf,
   read,
   write,
-} from "../src";
-import type { AccessContext, AccessGrant, AccessPermission } from "../src";
+} from "@takibi/policy";
+import type { AccessContext, AccessGrant, AccessPermission } from "@takibi/policy";
 
 type Ctx = { tenantId: string; user: { id: string } | null };
 

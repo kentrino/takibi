@@ -21,10 +21,10 @@ import type {
   TakibiPrepared,
   TakibiPublicInvocation,
   TakibiWireInvocation,
-} from "../src/invocation-type-map";
-import type { InternalLogger } from "../src/logging";
+} from "@takibi/worker-runtime";
+import type { InternalLogger } from "@takibi/worker-runtime";
 import type { TakibiFailure } from "@takibi/shared-types";
-import type { CollectionReadRequest } from "../src/protocol";
+import type { CollectionReadRequest } from "@takibi/worker-runtime";
 
 type AppContext = { readonly tenantId: string };
 type AppServices = { readonly queue: { readonly name: string } };

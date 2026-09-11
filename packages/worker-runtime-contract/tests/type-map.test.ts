@@ -18,7 +18,7 @@ import {
   type InvocationRuntime,
   type InvocationTransactionBoundaryContracts,
   type ObservedInput,
-} from "../src";
+} from "@takibi/worker-runtime-contract";
 
 type ValidMap = {
   wireInvocation: InvocationRequestData;
@@ -166,8 +166,8 @@ test("one runtime type map preserves request, context, response and facade relat
     response: { status: number };
     localExecution: { execute(): Promise<string> };
   };
-  type Map = import("../src").RuntimeAdapterMap<Types>;
-  type Decode = import("../src").Adapters<Types, "callDecode">;
+  type Map = import("@takibi/worker-runtime-contract").RuntimeAdapterMap<Types>;
+  type Decode = import("@takibi/worker-runtime-contract").Adapters<Types, "callDecode">;
   expectTypeOf<Parameters<Decode["callDecode"]>[0]>().toEqualTypeOf<Types["request"]>();
   expectTypeOf<Awaited<ReturnType<Decode["callDecode"]>>>().toEqualTypeOf<Types["decoded"]>();
   expectTypeOf<Awaited<ReturnType<Map["callResolveContext"]>>>().toEqualTypeOf<
@@ -182,17 +182,17 @@ test("one runtime type map preserves request, context, response and facade relat
 });
 
 test("adapter collaborators and logger are typed on the contract map", () => {
-  type Map = import("../src").RuntimeAdapterMap;
-  type Policy = import("../src").PolicySurface;
-  type Schema = import("../src").SchemaSurface;
-  type HandlerCtor = import("../src").ActionHandlerCtor;
-  type Handler = import("../src").ActionHandlerSurface;
-  type Logger = import("../src").InternalLogger;
-  type PrepareDeps = import("../src").InvocationPrepareApplyDeps;
+  type Map = import("@takibi/worker-runtime-contract").RuntimeAdapterMap;
+  type Policy = import("@takibi/worker-runtime-contract").PolicySurface;
+  type Schema = import("@takibi/worker-runtime-contract").SchemaSurface;
+  type HandlerCtor = import("@takibi/worker-runtime-contract").ActionHandlerCtor;
+  type Handler = import("@takibi/worker-runtime-contract").ActionHandlerSurface;
+  type Logger = import("@takibi/worker-runtime-contract").InternalLogger;
+  type PrepareDeps = import("@takibi/worker-runtime-contract").InvocationPrepareApplyDeps;
 
-  expectTypeOf<import("../src").InvocationRuntime["logger"]>().toEqualTypeOf<Logger | undefined>();
+  expectTypeOf<import("@takibi/worker-runtime-contract").InvocationRuntime["logger"]>().toEqualTypeOf<Logger | undefined>();
   expectTypeOf<Logger>().toEqualTypeOf<import("@takibi/logger").InternalLogger>();
-  expectTypeOf<import("../src").LogEvent>().toEqualTypeOf<import("@takibi/logger").LogEvent>();
+  expectTypeOf<import("@takibi/worker-runtime-contract").LogEvent>().toEqualTypeOf<import("@takibi/logger").LogEvent>();
   expectTypeOf<Map["invocationPolicy"]>().toEqualTypeOf<Policy>();
   expectTypeOf<Map["invocationSchema"]>().toEqualTypeOf<Schema>();
   expectTypeOf<Map["invocationActionHandler"]>().toEqualTypeOf<(ctor: HandlerCtor) => Handler>();
@@ -211,7 +211,7 @@ test("adapter collaborators and logger are typed on the contract map", () => {
   };
   expectTypeOf(rejectedPolicy).toBeFunction();
 
-  const optionalLogger = (runtime: import("../src").InvocationRuntime) => {
+  const optionalLogger = (runtime: import("@takibi/worker-runtime-contract").InvocationRuntime) => {
     runtime.logger?.emit({
       level: "debug",
       event: "takibi.schema",
@@ -222,8 +222,8 @@ test("adapter collaborators and logger are typed on the contract map", () => {
 });
 
 test("execution context updates default to the resolved context type", () => {
-  type Map = import("../src").InternalInvocationTypeMap;
-  type View = import("../src").InvocationExecutionView<Map>;
+  type Map = import("@takibi/worker-runtime-contract").InternalInvocationTypeMap;
+  type View = import("@takibi/worker-runtime-contract").InvocationExecutionView<Map>;
   expectTypeOf<View["baseContext"]>().toEqualTypeOf<Map["context"]>();
   expectTypeOf<View["context"]>().toEqualTypeOf<Map["context"]>();
 });
@@ -238,7 +238,7 @@ test("schema parse keeps Standard Schema output inference", () => {
     void value;
     return undefined as never;
   };
-  const schemaSurface: import("../src").SchemaSurface = { parse };
+  const schemaSurface: import("@takibi/worker-runtime-contract").SchemaSurface = { parse };
   const lengthSchema = {} as LengthSchema;
   expectTypeOf(schemaSurface.parse(lengthSchema, "hello")).toEqualTypeOf<Promise<number>>();
 });
@@ -249,14 +249,14 @@ test("envelope call is derived from the envelope type arguments", () => {
   type Context = { readonly tenantId: string };
   type ResponseObject = { readonly status: number };
   type Dispatched = { readonly ok: true };
-  type Envelope = import("../src").EnvelopeAdapterMap<
+  type Envelope = import("@takibi/worker-runtime-contract").EnvelopeAdapterMap<
     RequestLike,
     Decoded,
     Context,
     ResponseObject,
     Dispatched
   >;
-  type ExpectedCall = import("../src").Call<
+  type ExpectedCall = import("@takibi/worker-runtime-contract").Call<
     RequestLike,
     Decoded,
     Context,
@@ -275,9 +275,9 @@ test("envelope call is derived from the envelope type arguments", () => {
 });
 
 test("action handler arguments require the common execution context", () => {
-  type Args = Parameters<import("../src").ActionHandlerSurface["run"]>[0];
+  type Args = Parameters<import("@takibi/worker-runtime-contract").ActionHandlerSurface["run"]>[0];
   expectTypeOf<Args["ctx"]>().toEqualTypeOf<unknown>();
-  type PolicyArgs = Parameters<import("../src").PolicySurface["evaluateAction"]>;
+  type PolicyArgs = Parameters<import("@takibi/worker-runtime-contract").PolicySurface["evaluateAction"]>;
   expectTypeOf<PolicyArgs[1]>().toEqualTypeOf<unknown>();
   expectTypeOf<PolicyArgs[3]["ctx"]>().toEqualTypeOf<unknown>();
   type CommonArgs = {
@@ -297,7 +297,7 @@ test("action handler arguments require the common execution context", () => {
 
 test("call factories infer adapter types and reject mismatched requests and wiring", () => {
   type Invocation = WithSlot<"context", { tenantId: string }>;
-  type Types = import("../src").CallTypeMap<
+  type Types = import("@takibi/worker-runtime-contract").CallTypeMap<
     { body: string },
     { wire: InvocationRequestData },
     Invocation,
@@ -305,8 +305,8 @@ test("call factories infer adapter types and reject mismatched requests and wiri
   >;
 
   const check = (
-    single: import("../src").SingleCallAdapters<Types>,
-    batch: import("../src").BatchCallAdapters<Types>,
+    single: import("@takibi/worker-runtime-contract").SingleCallAdapters<Types>,
+    batch: import("@takibi/worker-runtime-contract").BatchCallAdapters<Types>,
   ) => {
     const executeSingle = createSingleTakibiCall(single);
     const executeBatch = createBatchTakibiCall(batch);
@@ -428,22 +428,22 @@ test("call factories infer adapter types and reject mismatched requests and wiri
 });
 
 test("call maps need no local execution facade and share runtime adapter contracts", () => {
-  type Types = import("../src").CallTypeMap<
+  type Types = import("@takibi/worker-runtime-contract").CallTypeMap<
     { body: string },
     { wire: InvocationRequestData },
     WithSlot<"context", { tenantId: string }>,
     { status: number }
   >;
   type RuntimeTypes = Types & { localExecution: { execute(): Promise<void> } };
-  type Runtime = import("../src").RuntimeAdapterMap<RuntimeTypes>;
+  type Runtime = import("@takibi/worker-runtime-contract").RuntimeAdapterMap<RuntimeTypes>;
   expectTypeOf<Types>().not.toHaveProperty("context");
   expectTypeOf<Types>().not.toHaveProperty("localExecution");
-  expectTypeOf<RuntimeTypes>().toExtend<import("../src").RuntimeTypeMap>();
-  expectTypeOf<import("../src").SingleCallAdapters<Types>>().toEqualTypeOf<
-    Pick<Runtime, (typeof import("../src").CALL_SINGLE_ADAPTER_KEYS)[number]>
+  expectTypeOf<RuntimeTypes>().toExtend<import("@takibi/worker-runtime-contract").RuntimeTypeMap>();
+  expectTypeOf<import("@takibi/worker-runtime-contract").SingleCallAdapters<Types>>().toEqualTypeOf<
+    Pick<Runtime, (typeof import("@takibi/worker-runtime-contract").CALL_SINGLE_ADAPTER_KEYS)[number]>
   >();
-  expectTypeOf<import("../src").BatchCallAdapters<Types>>().toEqualTypeOf<
-    Pick<Runtime, (typeof import("../src").CALL_BATCH_ADAPTER_KEYS)[number]>
+  expectTypeOf<import("@takibi/worker-runtime-contract").BatchCallAdapters<Types>>().toEqualTypeOf<
+    Pick<Runtime, (typeof import("@takibi/worker-runtime-contract").CALL_BATCH_ADAPTER_KEYS)[number]>
   >();
   expectTypeOf<Runtime["localExecution"]>().toEqualTypeOf<RuntimeTypes["localExecution"]>();
 });

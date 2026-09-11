@@ -4,7 +4,7 @@ import { fullAccess } from "@takibi/policy";
 import { createTakibi } from "@takibi/worker-runtime";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
-import { withSqliteTestBackend } from "../src";
+import { withSqliteTestBackend } from "@takibi/testing";
 
 test("SQLite test handlers inherit definitions without sharing storage", async () => {
   const context = createTakibi()({

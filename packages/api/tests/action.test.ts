@@ -9,7 +9,7 @@ import {
   defineCollection,
   type ActionDefinitions,
   type RuntimeActionDefinition,
-} from "../src";
+} from "@takibi/api";
 import { createPolicyHelper, fullAccess, grant } from "@takibi/policy";
 
 test("registered actions use the unknown-based runtime definition", () => {

@@ -1,4 +1,4 @@
-import type { StorageDriver, StoredDocument } from "../src";
+import type { StorageDriver, StoredDocument } from "@takibi/storage";
 
 const TS = "2026-08-31T00:00:00.000Z";
 

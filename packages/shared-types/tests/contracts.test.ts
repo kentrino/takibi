@@ -16,7 +16,7 @@ import {
   type StorageListOptions,
   type TakibiResult,
   type WithMetadata,
-} from "../src";
+} from "@takibi/shared-types";
 
 test("query and result contracts compose without runtime dependencies", () => {
   type Document = {

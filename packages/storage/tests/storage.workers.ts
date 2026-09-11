@@ -10,7 +10,7 @@ import {
   reconcileCollectionIndexes,
   resolveIndexedList,
   type StoredDocument,
-} from "../src";
+} from "@takibi/storage";
 import type { QueryExpr, WithMetadata } from "@takibi/shared-types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
