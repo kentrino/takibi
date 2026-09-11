@@ -5,9 +5,10 @@ import { TAKIBI_ATTR, TAKIBI_SPAN } from "../src/instrumentation";
 
 type PackageManifest = {
   name: string;
+  private?: boolean;
   files?: string[];
   exports?: Record<string, string>;
-  publishConfig?: { exports?: Record<string, unknown> };
+  publishConfig?: { exports?: Record<string, unknown>; access?: string };
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
@@ -23,6 +24,8 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
   const integration = readManifest(join(import.meta.dirname, "../../opentelemetry/package.json"));
 
   expect(core.name).toBe("takibi");
+  expect(core.private).toBeUndefined();
+  expect(core.publishConfig?.access).toBe("public");
   expect(core.exports).not.toHaveProperty("./otel");
   expect(core.exports?.["./instrumentation"]).toBe("./src/instrumentation.ts");
   expect(core.files).toEqual(["dist", "README.md", "LICENSE"]);
@@ -39,6 +42,8 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
   expect(JSON.stringify(core.peerDependencies ?? {})).not.toMatch(/opentelemetry/);
 
   expect(integration.name).toBe("@takibi/opentelemetry");
+  expect(integration.private).toBeUndefined();
+  expect(integration.publishConfig?.access).toBe("public");
   expect(integration.exports?.["."]).toBe("./src/index.ts");
   expect(integration.exports?.["./logs"]).toBe("./src/logs.ts");
   expect(integration.files).toEqual(["dist", "README.md", "LICENSE"]);
@@ -92,6 +97,18 @@ test("protocol packages keep a one-way dependency graph", () => {
   expect(core.dependencies?.["@takibi/storage"]).toBe("workspace:^");
   expect(core.dependencies?.["@takibi/testing"]).toBe("workspace:^");
   expect(core.dependencies?.["@takibi/worker-runtime"]).toBe("workspace:^");
+  expect(core.dependencies?.hono).toBeUndefined();
+  expect(core.dependencies?.["@standard-schema/spec"]).toBeUndefined();
+  expect(api.private).toBe(true);
+  expect(client.private).toBe(true);
+  expect(policy.private).toBe(true);
+  expect(query.private).toBe(true);
+  expect(protocol.private).toBe(true);
+  expect(storage.private).toBe(true);
+  expect(snapshot.private).toBe(true);
+  expect(workerRuntime.private).toBe(true);
+  expect(testing.private).toBe(true);
+  expect(sharedTypes.private).toBe(true);
   expect(api.dependencies?.["@takibi/policy"]).toBe("workspace:^");
   expect(api.dependencies?.["@takibi/query"]).toBe("workspace:^");
   expect(api.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
@@ -190,4 +207,21 @@ test("worker-runtime testing-bridge is a dedicated owner subpath", () => {
   expect(runtime.exports?.["./testing-bridge"]).toBe("./src/testing-bridge.server.ts");
   const core = readManifest(join(import.meta.dirname, "../package.json"));
   expect(core.exports).not.toHaveProperty("./testing-bridge");
+});
+
+test("only the SDK and adapters are publishable", () => {
+  const honoAdapter = readManifest(join(import.meta.dirname, "../../hono-adapter/package.json"));
+  const betterAuth = readManifest(
+    join(import.meta.dirname, "../../better-auth-adapter/package.json"),
+  );
+
+  expect(honoAdapter.private).toBeUndefined();
+  expect(honoAdapter.publishConfig?.access).toBe("public");
+  expect(honoAdapter.dependencies ?? {}).toEqual({});
+  expect(honoAdapter.peerDependencies?.takibi).toBe("workspace:^");
+  expect(honoAdapter.peerDependencies?.hono).toBe("^4.13.1");
+
+  expect(betterAuth.private).toBeUndefined();
+  expect(betterAuth.publishConfig?.access).toBe("public");
+  expect(betterAuth.peerDependencies?.takibi).toBe("workspace:^");
 });

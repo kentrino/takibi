@@ -1,6 +1,7 @@
 {
   "name": "@takibi/worker-runtime",
   "version": "0.0.0",
+  "private": true,
   "description": "Cloudflare Worker and Durable Object execution runtime for Takibi.",
   "keywords": [
     "cloudflare",
@@ -46,8 +47,7 @@
         "import": "./dist/testing-bridge.mjs"
       },
       "./package.json": "./package.json"
-    },
-    "access": "public"
+    }
   },
   "scripts": {
     "build": "vp pack",

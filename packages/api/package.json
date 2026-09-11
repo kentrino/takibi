@@ -1,6 +1,7 @@
 {
   "name": "@takibi/api",
   "version": "0.0.0",
+  "private": true,
   "description": "Collection and action definition language for Takibi.",
   "keywords": [
     "actions",
@@ -36,8 +37,7 @@
         "import": "./dist/index.mjs"
       },
       "./package.json": "./package.json"
-    },
-    "access": "public"
+    }
   },
   "scripts": {
     "build": "vp pack",

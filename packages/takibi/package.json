@@ -63,7 +63,6 @@
     "check": "vp check"
   },
   "dependencies": {
-    "@standard-schema/spec": "catalog:",
     "@takibi/api": "workspace:^",
     "@takibi/client": "workspace:^",
     "@takibi/policy": "workspace:^",
@@ -73,14 +72,13 @@
     "@takibi/snapshot": "workspace:^",
     "@takibi/storage": "workspace:^",
     "@takibi/testing": "workspace:^",
-    "@takibi/worker-runtime": "workspace:^",
-    "hono": "catalog:"
+    "@takibi/worker-runtime": "workspace:^"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "^4.20250803.0",
     "@noble/hashes": "catalog:",
-    "@takibi/hono-adapter": "workspace:*",
+    "@standard-schema/spec": "catalog:",
     "@types/node": "catalog:",
     "hono": "catalog:",
     "typescript": "catalog:",

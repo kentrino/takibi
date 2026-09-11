@@ -44,22 +44,19 @@
     "test": "vp test",
     "check": "vp check"
   },
-  "dependencies": {
-    "@takibi/worker-runtime": "workspace:^"
-  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250803.0",
-    "@takibi/policy": "workspace:*",
-    "@takibi/testing": "workspace:*",
     "@types/node": "catalog:",
     "hono": "catalog:",
+    "takibi": "workspace:*",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "hono": "^4.13.1"
+    "hono": "^4.13.1",
+    "takibi": "workspace:^"
   },
   "engines": {
     "node": ">=22.18.0"
