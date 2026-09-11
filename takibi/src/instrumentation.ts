@@ -12,5 +12,5 @@ export {
   type TakibiSpan,
   type TakibiTracer,
   type TracingContextBackend,
-} from "./tracing";
-export { TAKIBI_ATTR, TAKIBI_SPAN } from "./otel-helper";
+} from "@takibi/takibi-worker-runtime/instrumentation";
+export { TAKIBI_ATTR, TAKIBI_SPAN } from "@takibi/takibi-worker-runtime/instrumentation";

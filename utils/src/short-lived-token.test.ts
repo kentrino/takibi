@@ -29,55 +29,57 @@ describe("short-lived tokens", () => {
     expect(result).toEqual({ ok: true, expiresAt: now + 30 });
   });
 
-  it("binds a token to its audience and action", async () => {
+  it.each([
+    { name: "another audience", audience: "https://other.example", action, secret },
+    { name: "another action", audience, action: "takibi:reset:another-tenant", secret },
+    { name: "another secret", audience, action, secret: "different-maintenance-secret" },
+  ])("rejects a token verified with $name", async (verification) => {
     const signed = await token();
 
     await expect(
       verifyShortLivedToken({
-        action,
-        audience: "https://other.example",
+        ...verification,
         maxTtlSeconds: 60,
         now,
-        secret,
-        token: signed,
-      }),
-    ).resolves.toEqual({ ok: false, reason: "invalid" });
-    await expect(
-      verifyShortLivedToken({
-        action: "takibi:reset:another-tenant",
-        audience,
-        maxTtlSeconds: 60,
-        now,
-        secret,
         token: signed,
       }),
     ).resolves.toEqual({ ok: false, reason: "invalid" });
   });
 
-  it("rejects expired and excessively long-lived tokens", async () => {
+  it.each([
+    {
+      name: "one second before expiry",
+      now: 1_800_000_029,
+      expected: { ok: true, expiresAt: 1_800_000_030 },
+    },
+    { name: "at expiry", now: 1_800_000_030, expected: { ok: false, reason: "expired" } },
+    { name: "after expiry", now: 1_800_000_031, expected: { ok: false, reason: "expired" } },
+    {
+      name: "exactly the maximum TTL",
+      now: 1_799_999_970,
+      expected: { ok: true, expiresAt: 1_800_000_030 },
+    },
+    {
+      name: "one second beyond the maximum TTL",
+      now: 1_799_999_969,
+      expected: { ok: false, reason: "expiry-too-far" },
+    },
+  ])("verifies a token $name", async ({ now: verificationTime, expected }) => {
+    const signed = await token(1_800_000_030);
+
     await expect(
       verifyShortLivedToken({
         action,
         audience,
         maxTtlSeconds: 60,
-        now,
+        now: verificationTime,
         secret,
-        token: await token(now),
+        token: signed,
       }),
-    ).resolves.toEqual({ ok: false, reason: "expired" });
-    await expect(
-      verifyShortLivedToken({
-        action,
-        audience,
-        maxTtlSeconds: 60,
-        now,
-        secret,
-        token: await token(now + 61),
-      }),
-    ).resolves.toEqual({ ok: false, reason: "expiry-too-far" });
+    ).resolves.toEqual(expected);
   });
 
-  it("rejects malformed and tampered tokens", async () => {
+  it("rejects a malformed token", async () => {
     await expect(
       verifyShortLivedToken({
         action,
@@ -88,18 +90,27 @@ describe("short-lived tokens", () => {
         token: "not-a-token",
       }),
     ).resolves.toEqual({ ok: false, reason: "invalid" });
+  });
 
+  it("rejects a modified signature byte", async () => {
     const signed = await token();
-    const tampered = `${signed.slice(0, -1)}${signed.endsWith("a") ? "b" : "a"}`;
+    const [version, expiresAt, signature] = signed.split(".");
+    const bytes = Buffer.from(signature!, "base64url");
+    bytes[0] = bytes[0]! ^ 1;
+    const tampered = `${version}.${expiresAt}.${bytes.toString("base64url")}`;
+
     await expect(
-      verifyShortLivedToken({
-        action,
-        audience,
-        maxTtlSeconds: 60,
-        now,
-        secret,
-        token: tampered,
-      }),
+      verifyShortLivedToken({ action, audience, maxTtlSeconds: 60, now, secret, token: tampered }),
+    ).resolves.toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("rejects an extended expiry even when it is within the allowed TTL", async () => {
+    const signed = await token(1_800_000_030);
+    const [version, , signature] = signed.split(".");
+    const tampered = `${version}.1800000040.${signature}`;
+
+    await expect(
+      verifyShortLivedToken({ action, audience, maxTtlSeconds: 60, now, secret, token: tampered }),
     ).resolves.toEqual({ ok: false, reason: "invalid" });
   });
 });

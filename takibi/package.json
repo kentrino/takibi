@@ -63,16 +63,26 @@
     "check": "vp check"
   },
   "dependencies": {
-    "@noble/hashes": "catalog:",
     "@standard-schema/spec": "catalog:",
+    "@takibi/takibi-api": "workspace:^",
+    "@takibi/takibi-client": "workspace:^",
+    "@takibi/takibi-policy": "workspace:^",
     "@takibi/takibi-protocol": "workspace:^",
+    "@takibi/takibi-query": "workspace:^",
     "@takibi/takibi-shared-types": "workspace:^",
+    "@takibi/takibi-snapshot": "workspace:^",
+    "@takibi/takibi-storage": "workspace:^",
+    "@takibi/takibi-testing": "workspace:^",
+    "@takibi/takibi-worker-runtime": "workspace:^",
     "hono": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "^4.20250803.0",
+    "@noble/hashes": "catalog:",
     "@types/node": "catalog:",
+    "@takibi/takibi-hono-adapter": "workspace:*",
+    "hono": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",

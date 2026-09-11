@@ -43,14 +43,22 @@ name (`idFromString` and similar) skip that check.
 
 ## Server
 
-Prefer oRPC-style [initial context](https://orpc.dev/docs/context): put framework
-deps (`di`, `env`, …) on `handle(..., { context })`. Bind them with
-`createTakibi<Initial, Env>()`, then call the returned factory with
-`{ resolve, stub?, services? }`. `TCtx` is inferred from `resolve`'s return
-(annotate with `Promise<AppCtx>` when you want a named / wider type). `stub`
-receives the same input plus the complete application-owned context as
-`resolved` and returns a Durable Object stub — no library-side `env` /
-`bindings` option. Empty initial uses `createTakibi()` (no type argument).
+`createTakibi<Input, Env>()({ resolve, stub?, services? })` creates a framework-independent
+handler. Every request supplies its input through `handle(request, { context, prefix? })`.
+`resolve` infers the execution context; `stub` receives both the original input and
+that resolved context. `Env` describes the Durable Object bindings used by `services`.
+For empty input use `createTakibi()` and pass `context: {}`; with typed bindings use
+`createTakibi<Record<string, never>, Env>()`.
+
+For Hono, install `@takibi/takibi-hono-adapter` and mount `takibiServer` on a static
+prefix wildcard. The application chooses the prefix and supplies request context;
+Takibi interprets all collection, action and batch paths beneath it. The adapter
+checks the context supplier against the handler's required input type.
+
+Migration: remove factory entry options. Handlers and SQLite test forks expose
+`handle` and `DurableObject`, without Hono's `request` or `fetch` methods. Use
+`takibiServer({ handler, createContext })` with a Hono application for those methods,
+or call `handle` directly with an explicit context.
 
 `services` is a synchronous factory `({ env }) => TServices` that runs once per
 Durable Object instance in the generated constructor. Action handlers receive
@@ -63,7 +71,8 @@ JSON-safe-checked, and is invisible to collection `accessPolicy`, action
 
 ```ts
 import { UnauthorizedError, createTakibi, fullAccess, grant, read } from "@takibi/takibi";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { takibiServer } from "@takibi/takibi-hono-adapter";
 import { z } from "zod";
 
 type User = { id: string; role: "admin" | "member"; clinicIds: string[] };
@@ -113,18 +122,16 @@ const handler = takibiApp.actions({});
 export type Handler = typeof handler;
 export class TenantStore extends handler.DurableObject {}
 
-const app = new Hono<{ Bindings: { TENANT_STORE: DurableObjectNamespace } }>();
-app.all("/foo/*", async (c) => {
-  const { matched, response } = await handler.handle(c.req.raw, {
-    prefix: "/foo",
-    context: {
-      di: c.get("di"),
-      env: c.env,
-    },
-  });
-  if (matched) return response;
-  return c.notFound();
-});
+type HonoEnv = { Bindings: Initial["env"]; Variables: { di: Initial["di"] } };
+const app = new Hono<HonoEnv>();
+// Register your middleware that sets c.var.di before this route.
+app.use(
+  "/foo/*",
+  takibiServer({
+    handler,
+    createContext: (c: Context<HonoEnv>) => ({ di: c.var.di, env: c.env }),
+  }),
+);
 export default app;
 ```
 
@@ -191,7 +198,8 @@ const testHandler = baseHandler.with({ memory: true, resolve, services });
 const testHandler = withSqliteTestBackend(baseHandler, { resolve, services });
 ```
 
-Import `withSqliteTestBackend` from `@takibi/takibi/testing`. Keep pure
+Import `withSqliteTestBackend` from `@takibi/takibi/testing`. That entry
+re-exports `@takibi/takibi-testing`. Keep pure
 query, policy, and protocol tests storage-free; the helper is for tests that
 need storage-backed behavior.
 
@@ -913,8 +921,8 @@ reset, normal reads and writes fail with retryable `MAINTENANCE_LOCKED` status 5
 Takibi does not choose the object store, key, encryption, retention policy, or
 maintenance endpoint authorization. A full snapshot can contain password
 hashes and session tokens. See
-[`docs/spec/logical-snapshots.md`](./docs/spec/logical-snapshots.md) for the
-format, lease, compatibility, and atomicity contract.
+[`@takibi/takibi-snapshot` logical snapshot spec](../takibi-snapshot/docs/spec/logical-snapshots.md)
+for the format, lease, compatibility, and atomicity contract.
 
 Server-side policy-bound collections and trusted `$collections` expose
 `count`, which pages through the same query, index selection, and migration

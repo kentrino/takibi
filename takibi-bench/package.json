@@ -12,12 +12,14 @@
   },
   "dependencies": {
     "@takibi/takibi": "workspace:^",
+    "@takibi/takibi-hono-adapter": "workspace:^",
     "@takibi/takibi-protocol": "workspace:^",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "citty": "catalog:",
+    "hono": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",

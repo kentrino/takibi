@@ -1,20 +1,19 @@
-export { createClient } from "./client";
+export {
+  AlreadyExistsError,
+  BadRequestError,
+  createClient,
+  ForbiddenError,
+  ListAllLimitError,
+  NotFoundError,
+  StaleWriteError,
+  TakibiError,
+  UnauthorizedError,
+} from "@takibi/takibi-client";
 export type {
   ClientOf,
   CreateClientOptions,
   InferHandlerActions,
   InferHandlerCollections,
-} from "./client";
-
-export {
-  AlreadyExistsError,
-  StaleWriteError,
-  ListAllLimitError,
-  BadRequestError,
-  TakibiError,
-  ForbiddenError,
-  NotFoundError,
-  UnauthorizedError,
-} from "./errors";
-
-export type { PolicyReason, TakibiResult } from "./types";
+  PolicyReason,
+  TakibiResult,
+} from "@takibi/takibi-client";

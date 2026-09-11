@@ -6,7 +6,7 @@ import { reconcileCollectionIndexes } from "../src/index-reconcile";
 import { compileIndexRegistry, resolveIndexedList } from "../src/indexes";
 import { createMigratingStorage } from "../src/migrations";
 import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import type { CollectionsDef, WithMetadata } from "../src/types";
 
 const TS = "2026-08-09T14:12:00.000Z";
@@ -25,6 +25,42 @@ const posts = {
   accessPolicy: fullAccess,
   indexes: { byOwner: ["ownerId", "createdAt"] as const, byScore: ["score"] as const },
 };
+
+test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
+  "index reconcile rejects invalid catalog fields %s before changing indexes",
+  async (fieldsJson) => {
+    const collections = { posts };
+    const backing = createSqliteDurableObjectStorage();
+    const storage = createDurableObjectStorage(backing, compileIndexRegistry(collections));
+    await reconcileCollectionIndexes({ sql: backing.sql, collections, storage });
+    backing.sql.exec("UPDATE takibi_index_catalog SET fields_json = ?", fieldsJson);
+    const before = backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray();
+    await expect(
+      reconcileCollectionIndexes({ sql: backing.sql, collections, storage }),
+    ).rejects.toThrow(/Invalid index catalog fields/);
+    expect(backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray()).toEqual(before);
+  },
+);
+
+test("index reconcile rejects a registry with missing definitions before dropping existing indexes", async () => {
+  const collections = { posts };
+  const backing = createSqliteDurableObjectStorage();
+  const storage = createDurableObjectStorage(backing, compileIndexRegistry(collections));
+  await reconcileCollectionIndexes({ sql: backing.sql, collections, storage });
+  const snapshot = () => ({
+    catalog: backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray(),
+    physical: backing.sql
+      .exec("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'takibi_idx_%'")
+      .toArray(),
+  });
+  const before = snapshot();
+  const registry = compileIndexRegistry({ missing: posts });
+
+  await expect(
+    reconcileCollectionIndexes({ sql: backing.sql, collections, storage, registry }),
+  ).rejects.toThrow("Missing collection definition for missing");
+  expect(snapshot()).toEqual(before);
+});
 
 test("SQLite query plan uses the declared expression index", async () => {
   const collections = { posts };

@@ -1,3 +1,4 @@
+import { requestTakibi } from "./helpers/request";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, expectTypeOf, test } from "vite-plus/test";
 import { z } from "zod";
@@ -17,7 +18,7 @@ import {
 } from "../src/tracing";
 import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
 import { createRecordingTracer, type RecordedSpan } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "../src/testing/sqlite-storage.server";
+import { createSqliteDurableObjectStorage } from "@takibi/takibi-testing/sqlite-storage";
 import type { WireResponse } from "../src/protocol";
 
 /**
@@ -91,7 +92,7 @@ test("A baseline records no internal spans", async () => {
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
   const handler = withSqliteTestBackend(production);
-  const added = await handler.request("http://fire.test/posts", {
+  const added = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "n" }),
@@ -114,7 +115,7 @@ test("public request span encloses the SQLite lifecycle and inherits an active p
 
   const response = await bindTracer(recording.tracer, () =>
     withSpan({ name: "caller", kind: "server" }, async () =>
-      handler.request("http://fire.test/posts", {
+      requestTakibi(handler, "http://fire.test/posts", {
         method: "POST",
         headers: {
           authorization: "Bearer private-token",
@@ -157,7 +158,7 @@ test("decode failure creates and ends one root request span", async () => {
     .actions({});
   const handler = withSqliteTestBackend(production);
 
-  const response = await handler.request("http://fire.test/posts", {
+  const response = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{",
@@ -192,7 +193,7 @@ test("C explicit internal tracer records Worker-DO-executor-storage parentage", 
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
   );
-  const added = await handler.request("http://fire.test/posts", {
+  const added = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "hello" }),
@@ -279,7 +280,7 @@ test("B global registration matches C span names without collections options", a
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
   const handler = withSqliteTestBackend(production);
-  await handler.request("http://fire.test/posts", {
+  await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "hello" }),
@@ -306,7 +307,7 @@ test("B global-only records Worker-DO-executor-storage parentage", async () => {
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
   );
-  const added = await handler.request("http://fire.test/posts", {
+  const added = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "hello" }),
@@ -351,7 +352,7 @@ test("takibi.resolve ends before wire and executor start", async () => {
     {},
   );
 
-  const responsePromise = handler.request("http://fire.test/posts", {
+  const responsePromise = requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "hello" }),
@@ -443,7 +444,7 @@ test("DO path injected failures mark the innermost span and end every span once"
       ),
       {},
     );
-    const response = await handler.request(testCase.path, testCase.init);
+    const response = await requestTakibi(handler, testCase.path, testCase.init);
     const body = (await response.json()) as WireResponse;
     expect(body.ok, testCase.name).toBe(false);
     const failed =
@@ -586,7 +587,7 @@ test("injected failures record error on the failed interval and still end", asyn
           {},
         )
       : undefined;
-    const response = await handler.request(testCase.path, testCase.init);
+    const response = await requestTakibi(handler, testCase.path, testCase.init);
     const body = (await response.json()) as WireResponse;
     expect(body.ok, testCase.name).toBe(false);
     const failed =
@@ -640,7 +641,7 @@ test("wire span covers response consumption and validates the transport envelope
       )
       .actions({});
 
-    const response = await handler.request("http://fire.test/posts", {
+    const response = await requestTakibi(handler, "http://fire.test/posts", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "n" }),
@@ -690,7 +691,7 @@ test("wire span stays open through a delayed body", async () => {
     )
     .actions({});
 
-  const responsePromise = handler.request("http://fire.test/posts", {
+  const responsePromise = requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "n" }),
@@ -733,7 +734,7 @@ test("wire span treats a valid non-2xx failure envelope as a received remote res
     )
     .actions({});
 
-  const response = await handler.request("http://fire.test/posts", {
+  const response = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "n" }),
@@ -759,7 +760,7 @@ test("wire error conversion still identifies the failed interval", async () => {
     )
     .actions({});
   const handler = withSqliteTestBackend(production);
-  const response = await handler.request("http://fire.test/posts", {
+  const response = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "n" }),
@@ -795,7 +796,7 @@ test("W3C traceparent is injected on the internal Request and not via context.tr
     createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
     {},
   );
-  await handler.request("http://fire.test/posts", {
+  await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "hello" }),
@@ -840,7 +841,7 @@ test("withSpan keeps the request path when the tracer adapter throws", async () 
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
   const handler = withSqliteTestBackend(production);
-  const added = await handler.request("http://fire.test/posts", {
+  const added = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "n" }),
@@ -880,13 +881,13 @@ test("withSpan swallows adapter errors on success and failure paths", async () =
     .defineCollections({ posts: { schema: Post, accessPolicy: fullAccess } })
     .actions({});
   const handler = withSqliteTestBackend(production);
-  const added = await handler.request("http://fire.test/posts", {
+  const added = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "n" }),
   });
   expect(added.status).toBe(200);
-  const rejected = await handler.request("http://fire.test/posts", {
+  const rejected = await requestTakibi(handler, "http://fire.test/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "" }),
