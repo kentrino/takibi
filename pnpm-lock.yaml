@@ -253,6 +253,9 @@ importers:
 
   .:
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.4
       '@vitest/coverage-v8':
         specifier: 4.1.10
         version: 4.1.10(@vitest/browser@4.1.10)(vitest@4.1.10)

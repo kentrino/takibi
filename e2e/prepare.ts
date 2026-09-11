@@ -108,5 +108,53 @@ export function prepare(): void {
     recursive: true,
   });
 
+  writeFileSync(
+    join(consumerDir, "tsconfig.json"),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          target: "esnext",
+          lib: ["es2023"],
+          module: "esnext",
+          moduleResolution: "bundler",
+          allowImportingTsExtensions: true,
+          strict: true,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
+          noEmit: true,
+          verbatimModuleSyntax: true,
+          skipLibCheck: false,
+          types: ["@cloudflare/workers-types"],
+        },
+        include: ["app/handler.ts", "tests/app-types.ts", "tests/published-imports.ts"],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(
+    join(consumerDir, "tsconfig.nodenext.json"),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          target: "esnext",
+          lib: ["es2023"],
+          module: "nodenext",
+          moduleResolution: "nodenext",
+          strict: true,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
+          noEmit: true,
+          verbatimModuleSyntax: true,
+          skipLibCheck: false,
+          types: ["@cloudflare/workers-types"],
+        },
+        include: ["tests/published-imports.ts"],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
   run("pnpm", ["install", "--ignore-workspace", "--no-frozen-lockfile"], consumerDir);
 }
