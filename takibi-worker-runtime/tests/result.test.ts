@@ -1,6 +1,7 @@
 import { ForbiddenError, TakibiError } from "@takibi/takibi-api";
 import type { TakibiFailure, TakibiResult } from "@takibi/takibi-shared-types";
 import { expect, expectTypeOf, test } from "vite-plus/test";
+import { normalizeInvocationFailure, toWireFailure } from "../src/context/runtime";
 import { asTakibiResult, toTakibiFailure } from "../src/result";
 import { SchemaValidationError } from "../src/schema";
 
@@ -76,5 +77,33 @@ test("failure conversion preserves validation and operation envelopes", () => {
     code: "CONFLICT",
     message: "Conflict",
     status: 409,
+  });
+});
+
+test("wire failures mask only unexpected error messages", () => {
+  expect(normalizeInvocationFailure(new Error("private storage details"))).toMatchObject({
+    code: "INTERNAL",
+    message: "An unexpected error occurred.",
+    status: 500,
+  });
+
+  expect(toWireFailure(new Error("private storage details"))).toEqual({
+    ok: false,
+    error: {
+      kind: "operation",
+      code: "INTERNAL",
+      message: "An unexpected error occurred.",
+      status: 500,
+    },
+  });
+
+  expect(toWireFailure(new TakibiError("INTERNAL", "Declared public detail", 500))).toEqual({
+    ok: false,
+    error: {
+      kind: "operation",
+      code: "INTERNAL",
+      message: "Declared public detail",
+      status: 500,
+    },
   });
 });

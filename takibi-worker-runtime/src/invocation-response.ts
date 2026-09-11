@@ -5,9 +5,13 @@ import {
 } from "@takibi/takibi-worker-runtime-contract";
 import { emitFailure, requestLogFields, type InternalLogger } from "./logging";
 import type { TakibiFailure } from "@takibi/takibi-shared-types";
-import { invocationFields, toWireFailure } from "./context/runtime";
+import {
+  invocationFields,
+  normalizeInvocationFailureForServer,
+  wireFailureFromNormalized,
+} from "./context/runtime";
 import type { TakibiInvocationTypeMap } from "./invocation-type-map";
-import type { WireFailure, WireResponse } from "./protocol";
+import type { WireResponse } from "./protocol";
 
 type NotifiedInvocation<TContext extends object = object, TServices = unknown> = InvocationResult<
   TakibiInvocationTypeMap<TContext, TServices>
@@ -28,12 +32,12 @@ export function invocationToWireResponse(deps: ResponseConverterDeps) {
     if (settlement.outcome === "succeeded") {
       return { ok: true, data: settlement.result };
     }
-    const wire = wireFailureFromSettlement(settlement.failure);
-    emitFailure(deps.invocationRuntime.logger, wire.error, {
+    const failure = normalizedFailureFromSettlement(settlement.failure);
+    emitFailure(deps.invocationRuntime.logger, failure, {
       ...(invocation.invocation === undefined ? {} : invocationFields(invocation.invocation)),
       ...(deps.localRequest === undefined ? {} : requestLogFields(deps.localRequest)),
     });
-    return wire;
+    return wireFailureFromNormalized(failure);
   };
 }
 
@@ -69,11 +73,11 @@ export function invocationsToBatchHttpResponse(deps: ResponseConverterDeps) {
   }): Response => jsonResponseFromStatus(toWire({ invocations }), Response);
 }
 
-function wireFailureFromSettlement(
+function normalizedFailureFromSettlement(
   failure: InternalInvocationFailure<TakibiFailure<string>>,
-): WireFailure {
+): TakibiFailure<string> {
   if (failure.kind === "mapped") {
-    return { ok: false, error: failure.value };
+    return failure.value;
   }
-  return toWireFailure(failure.error);
+  return normalizeInvocationFailureForServer(failure.error);
 }
