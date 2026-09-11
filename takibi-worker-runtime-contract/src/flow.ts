@@ -25,11 +25,7 @@ const safeToFailure = <TFailure>(
 };
 
 /**
- * 日本語: 1件のCRUD・actionについて、計画作成から実行、成否確定、通知まで進める。
- * English: Runs one CRUD or action invocation from plan creation through settlement and notification.
- *
- * Production Takibi binds its adapters in `takibi-worker-runtime/src/invocation-adapters.ts`
- * and calls this runner from `takibi-worker-runtime/src/invocation-execution.ts`.
+ * Runs one CRUD or action invocation from plan creation through settlement and notification.
  */
 export const runInvocation: RunInvocation = async function <T extends InternalInvocationTypeMap>(
   {
@@ -140,12 +136,8 @@ export async function executePlan<
 }
 
 /**
- * 日本語: 計画のtransactionBoundaryに従い、none / apply / fullへ振り分ける。
- * English: Dispatches a planned invocation to the none, apply, or full contract.
- *
- * Relation to current Takibi / 現行Takibiとの関係:
- * - Transaction-boundary contracts replace action/collection executor switching.
- * - The runner opens the transaction for `apply` and `full`.
+ * Dispatches a planned invocation to the selected transaction-boundary contract.
+ * The runner opens the transaction for `apply` and `full`.
  */
 const executeInvocationPlan = async function <T extends InternalInvocationTypeMap>(
   state: InvocationState<T>,
@@ -204,11 +196,8 @@ const executeInvocationPlan = async function <T extends InternalInvocationTypeMa
 };
 
 /**
- * 日本語: 計画が選んだ境界でtransactionを一度だけ実行し、commit・rollback stateをrunner側で管理する。
- * English: Runs one transaction at the plan-selected boundary while the runner owns commit and rollback state.
- *
- * Production adapters delegate the callback to `StorageDriver.transaction`; this scope records the
- * invocation-level transaction outcome and rejects missing or repeated transaction entry.
+ * Runs one transaction at the plan-selected boundary while tracking commit and rollback state.
+ * Rejects missing or repeated transaction entry.
  */
 const createInvocationTransactionScope = function <T extends InternalInvocationTypeMap>(
   state: InvocationState<T>,
