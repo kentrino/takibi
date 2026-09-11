@@ -1,0 +1,451 @@
+import { expect, expectTypeOf, test } from "vite-plus/test";
+import type {
+  InvocationRequestData,
+  JsonValue,
+  ObserverInvocationData,
+  TakibiFailure,
+} from "@takibi/takibi-shared-types";
+import {
+  createSingleTakibiCall,
+  createBatchTakibiCall,
+  runSingleCall,
+  runBatchCall,
+  toObservedInput,
+  type InternalInvocationRuntime,
+  type InternalInvocationTypeMap,
+  type InvocationObserverEvent,
+  type InvocationResult,
+  type InvocationRuntime,
+  type InvocationTransactionBoundaryContracts,
+  type ObservedInput,
+} from "../src";
+
+type ValidMap = {
+  wireInvocation: InvocationRequestData;
+  invocation: ObserverInvocationData;
+  runtime: InvocationRuntime;
+  context: object;
+  rawInput: unknown;
+  input: unknown;
+  noneWork: unknown;
+  applyWork: unknown;
+  fullWork: unknown;
+  nonePrepared: unknown;
+  applyPrepared: unknown;
+  fullPrepared: unknown;
+  result: JsonValue;
+  failure: TakibiFailure<string>;
+};
+
+type WithSlot<K extends keyof ValidMap, V> = Omit<ValidMap, K> & { [P in K]: V };
+
+test("valid maps extend the shared invocation contract", () => {
+  expectTypeOf<ValidMap>().toExtend<InternalInvocationTypeMap>();
+});
+
+test("execution result types are independent of response serialization", () => {
+  expectTypeOf<WithSlot<"result", Date>>().toExtend<InternalInvocationTypeMap>();
+});
+
+test("failure string is rejected at the map constraint", () => {
+  expectTypeOf<WithSlot<"failure", string>>().not.toExtend<InternalInvocationTypeMap>();
+});
+
+test("context string is rejected at the map constraint", () => {
+  expectTypeOf<WithSlot<"context", string>>().not.toExtend<InternalInvocationTypeMap>();
+});
+
+test("batch wireInvocation is rejected at the map constraint", () => {
+  expectTypeOf<
+    WithSlot<"wireInvocation", { kind: "batch"; items: readonly [] }>
+  >().not.toExtend<InternalInvocationTypeMap>();
+});
+
+test("runtime is independent of the invocation type map", () => {
+  const runtime: InvocationRuntime = {
+    collections: { names: ["patients"] },
+    storage: { scope: "base" },
+    registry: { name: "actions" },
+    logger: undefined,
+    services: { queue: { name: "audit" } },
+  };
+
+  expectTypeOf(runtime).toExtend<InvocationRuntime>();
+  expectTypeOf<InvocationRuntime>().not.toHaveProperty("result");
+  expectTypeOf<InvocationRuntime>().not.toHaveProperty("failure");
+  expectTypeOf<InvocationRuntime>().not.toHaveProperty("input");
+  expectTypeOf<InternalInvocationRuntime<ValidMap>>().toEqualTypeOf<ValidMap["runtime"]>();
+});
+
+test("narrow result, context, and runtime services reach result types", () => {
+  type NarrowMap = Omit<ValidMap, "result" | "context" | "runtime"> & {
+    result: { id: string };
+    context: { tenantId: string };
+    runtime: InvocationRuntime & { services: { queue: { name: string } } };
+  };
+
+  expectTypeOf<NarrowMap>().toExtend<InternalInvocationTypeMap>();
+
+  type SucceededEvent = Extract<InvocationObserverEvent<NarrowMap>, { outcome: "succeeded" }>;
+  expectTypeOf<SucceededEvent["result"]>().toEqualTypeOf<{ id: string }>();
+  expectTypeOf<SucceededEvent["context"]>().toEqualTypeOf<{ tenantId: string }>();
+  expectTypeOf<SucceededEvent>().not.toHaveProperty("services");
+  expectTypeOf<SucceededEvent["invocation"]>().toEqualTypeOf<NarrowMap["invocation"]>();
+
+  type FailedEvent = Extract<InvocationObserverEvent<NarrowMap>, { outcome: "failed" }>;
+  expectTypeOf<FailedEvent["invocation"]>().toEqualTypeOf<NarrowMap["invocation"] | undefined>();
+  expectTypeOf<FailedEvent>().toHaveProperty("stage");
+  expectTypeOf<FailedEvent>().toHaveProperty("failure");
+
+  type SucceededResult = Extract<
+    InvocationResult<NarrowMap>,
+    { settlement: { outcome: "succeeded" } }
+  >;
+  expectTypeOf<SucceededResult["settlement"]["result"]>().toEqualTypeOf<{ id: string }>();
+  expectTypeOf<SucceededResult["context"]>().toEqualTypeOf<{ tenantId: string }>();
+  expectTypeOf<SucceededResult["runtime"]["services"]>().toEqualTypeOf<{
+    queue: { name: string };
+  }>();
+});
+
+test("observed input can be narrowed and keeps validated undefined", () => {
+  type Observed = ObservedInput<{ name: string } | undefined>;
+
+  const unavailable: Observed = { status: "unavailable" };
+  const validatedUndefined: Observed = { status: "validated", value: undefined };
+  const validatedValue: Observed = { status: "validated", value: { name: "Ada" } };
+
+  expectTypeOf(unavailable).not.toHaveProperty("value");
+  if (validatedUndefined.status === "validated") {
+    expectTypeOf(validatedUndefined.value).toEqualTypeOf<{ name: string } | undefined>();
+  }
+  if (validatedValue.status === "validated") {
+    expectTypeOf(validatedValue.value).toEqualTypeOf<{ name: string } | undefined>();
+  }
+
+  expect(toObservedInput({ status: "validated", value: undefined })).toEqual({
+    status: "validated",
+    value: undefined,
+  });
+  expect(toObservedInput({ status: "raw", value: { secret: true } })).toEqual({
+    status: "unavailable",
+  });
+  expect(toObservedInput({ status: "rejected" })).toEqual({ status: "unavailable" });
+  expect(toObservedInput({ status: "not-applicable" })).toEqual({ status: "unavailable" });
+});
+
+test("work and prepared stay paired on the apply contract", () => {
+  type CustomMap = Omit<ValidMap, "noneWork" | "nonePrepared"> & {
+    noneWork: { token: "work" };
+    nonePrepared: { token: "prepared" };
+  };
+  type Contracts = InvocationTransactionBoundaryContracts<CustomMap>;
+
+  expectTypeOf<Contracts["none"]["prepare"]>().parameter(1).toEqualTypeOf<{ token: "work" }>();
+  expectTypeOf<Contracts["none"]["apply"]>().parameter(1).toEqualTypeOf<{ token: "prepared" }>();
+
+  const rejectedPrepared = (
+    apply: Contracts["none"]["apply"],
+    state: Parameters<Contracts["none"]["apply"]>[0],
+    storage: CustomMap["runtime"]["storage"],
+  ) => {
+    void apply(state, { token: "prepared" }, storage);
+    // @ts-expect-error apply must receive the prepared type returned by prepare
+    void apply(state, { token: "other" }, storage);
+  };
+
+  expectTypeOf(rejectedPrepared).toBeFunction();
+});
+
+test("one runtime type map preserves request, context, response and facade relationships", () => {
+  type Invocation = WithSlot<"context", { tenant: string }>;
+  type Types = {
+    invocation: Invocation;
+    request: { url: string };
+    decoded: { operation: string };
+    response: { status: number };
+    localExecution: { execute(): Promise<string> };
+  };
+  type Map = import("../src").RuntimeAdapterMap<Types>;
+  type Decode = import("../src").Adapters<Types, "callDecode">;
+  expectTypeOf<Parameters<Decode["callDecode"]>[0]>().toEqualTypeOf<Types["request"]>();
+  expectTypeOf<Awaited<ReturnType<Decode["callDecode"]>>>().toEqualTypeOf<Types["decoded"]>();
+  expectTypeOf<Awaited<ReturnType<Map["callResolveContext"]>>>().toEqualTypeOf<
+    Invocation["context"]
+  >();
+  expectTypeOf<Parameters<Map["callToSingleResponse"]>[0]["invocation"]>().toEqualTypeOf<
+    InvocationResult<Invocation>
+  >();
+  expectTypeOf<Awaited<ReturnType<Map["callSingle"]>>>().toEqualTypeOf<Types["response"]>();
+  expectTypeOf<Map["localExecution"]>().toEqualTypeOf<Types["localExecution"]>();
+  expectTypeOf<Decode>().not.toHaveProperty("invocationRuntime");
+});
+
+test("adapter collaborators and logger are typed on the contract map", () => {
+  type Map = import("../src").RuntimeAdapterMap;
+  type Policy = import("../src").PolicySurface;
+  type Schema = import("../src").SchemaSurface;
+  type HandlerCtor = import("../src").ActionHandlerCtor;
+  type Handler = import("../src").ActionHandlerSurface;
+  type Logger = import("../src").InternalLogger;
+  type PrepareDeps = import("../src").InvocationPrepareApplyDeps;
+
+  expectTypeOf<import("../src").InvocationRuntime["logger"]>().toEqualTypeOf<Logger | undefined>();
+  expectTypeOf<Logger>().toEqualTypeOf<import("@takibi/takibi-logger").InternalLogger>();
+  expectTypeOf<import("../src").LogEvent>().toEqualTypeOf<
+    import("@takibi/takibi-logger").LogEvent
+  >();
+  expectTypeOf<Map["invocationPolicy"]>().toEqualTypeOf<Policy>();
+  expectTypeOf<Map["invocationSchema"]>().toEqualTypeOf<Schema>();
+  expectTypeOf<Map["invocationActionHandler"]>().toEqualTypeOf<(ctor: HandlerCtor) => Handler>();
+  expectTypeOf<PrepareDeps>().toEqualTypeOf<
+    Pick<Map, "invocationPolicy" | "invocationSchema" | "invocationActionHandler">
+  >();
+
+  const rejectedPolicy = (policy: Policy) => {
+    void policy;
+    const incomplete = {
+      evaluateCollection: policy.evaluateCollection,
+    };
+    // @ts-expect-error policy adapters must implement evaluateAction
+    const assigned: Policy = incomplete;
+    void assigned;
+  };
+  expectTypeOf(rejectedPolicy).toBeFunction();
+
+  const optionalLogger = (runtime: import("../src").InvocationRuntime) => {
+    runtime.logger?.emit({
+      level: "debug",
+      event: "takibi.schema",
+      message: "completed",
+    });
+  };
+  expectTypeOf(optionalLogger).toBeFunction();
+});
+
+test("execution context updates default to the resolved context type", () => {
+  type Map = import("../src").InternalInvocationTypeMap;
+  type View = import("../src").InvocationExecutionView<Map>;
+  expectTypeOf<View["baseContext"]>().toEqualTypeOf<Map["context"]>();
+  expectTypeOf<View["context"]>().toEqualTypeOf<Map["context"]>();
+});
+
+test("schema parse keeps Standard Schema output inference", () => {
+  type LengthSchema = import("@standard-schema/spec").StandardSchemaV1<string, number>;
+  const parse = async <S extends import("@standard-schema/spec").StandardSchemaV1>(
+    schema: S,
+    value: unknown,
+  ): Promise<import("@standard-schema/spec").StandardSchemaV1.InferOutput<S>> => {
+    void schema;
+    void value;
+    return undefined as never;
+  };
+  const schemaSurface: import("../src").SchemaSurface = { parse };
+  const lengthSchema = {} as LengthSchema;
+  expectTypeOf(schemaSurface.parse(lengthSchema, "hello")).toEqualTypeOf<Promise<number>>();
+});
+
+test("envelope call is derived from the envelope type arguments", () => {
+  type RequestLike = { readonly url: string };
+  type Decoded = { readonly name: string };
+  type Context = { readonly tenantId: string };
+  type ResponseObject = { readonly status: number };
+  type Dispatched = { readonly ok: true };
+  type Envelope = import("../src").EnvelopeAdapterMap<
+    RequestLike,
+    Decoded,
+    Context,
+    ResponseObject,
+    Dispatched
+  >;
+  type ExpectedCall = import("../src").Call<
+    RequestLike,
+    Decoded,
+    Context,
+    ResponseObject,
+    Dispatched
+  >;
+
+  expectTypeOf<Envelope["call"]>().toEqualTypeOf<ExpectedCall>();
+  expectTypeOf<Envelope["call"]["run"]>().toEqualTypeOf<
+    (request: RequestLike) => Promise<ResponseObject>
+  >();
+  expectTypeOf<Envelope["call"]["decode"]>().toEqualTypeOf<
+    (request: RequestLike) => Promise<Decoded>
+  >();
+  expectTypeOf<Envelope>().not.toHaveProperty("invocationRuntime");
+});
+
+test("action handler arguments require the common execution context", () => {
+  type Args = Parameters<import("../src").ActionHandlerSurface["run"]>[0];
+  expectTypeOf<Args["ctx"]>().toEqualTypeOf<unknown>();
+  type PolicyArgs = Parameters<import("../src").PolicySurface["evaluateAction"]>;
+  expectTypeOf<PolicyArgs[1]>().toEqualTypeOf<unknown>();
+  expectTypeOf<PolicyArgs[3]["ctx"]>().toEqualTypeOf<unknown>();
+  type CommonArgs = {
+    ctx: { tenantId: string };
+    collections: {};
+    $collections: {};
+    services: { audit: string[] };
+    input: undefined;
+  };
+  expectTypeOf<CommonArgs>().toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "ctx">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "collections">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "$collections">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "services">>().not.toExtend<Args>();
+  expectTypeOf<Omit<CommonArgs, "input">>().not.toExtend<Args>();
+});
+
+test("call factories infer adapter types and reject mismatched requests and wiring", () => {
+  type Invocation = WithSlot<"context", { tenantId: string }>;
+  type Types = import("../src").CallTypeMap<
+    { body: string },
+    { wire: InvocationRequestData },
+    Invocation,
+    { status: number }
+  >;
+
+  const check = (
+    single: import("../src").SingleCallAdapters<Types>,
+    batch: import("../src").BatchCallAdapters<Types>,
+  ) => {
+    const executeSingle = createSingleTakibiCall(single);
+    const executeBatch = createBatchTakibiCall(batch);
+    expectTypeOf(executeSingle).toEqualTypeOf<
+      (request: Types["request"]) => Promise<Types["response"]>
+    >();
+    expectTypeOf(executeBatch).toEqualTypeOf<typeof executeSingle>();
+    expectTypeOf(runSingleCall(single, { body: "test" })).toEqualTypeOf<
+      Promise<Types["response"]>
+    >();
+    expectTypeOf(runBatchCall(batch, { body: "test" })).toEqualTypeOf<Promise<Types["response"]>>();
+
+    const inlineSingle = createSingleTakibiCall({
+      callRuntimeChecks: undefined,
+      callDecode: (request: Types["request"]) => ({ bodyLength: request.body.length }),
+      callResolveContext: ({ decoded }) => {
+        expectTypeOf(decoded).toEqualTypeOf<{ bodyLength: number }>();
+        return { tenantId: "tenant-1" };
+      },
+      callGetWireInvocation: ({ context }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        return { kind: "collection", collection: "patients", operation: "get", id: "1" };
+      },
+      invocationRun: single.invocationRun,
+      callToSingleResponse: ({ decoded, context, invocation }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        expectTypeOf(invocation).toEqualTypeOf<InvocationResult<Invocation>>();
+        return { status: decoded.bodyLength };
+      },
+    });
+    expectTypeOf(inlineSingle).toEqualTypeOf<typeof executeSingle>();
+    const inlineBatch = createBatchTakibiCall({
+      callRuntimeChecks: undefined,
+      callDecode: (request: Types["request"]) => ({ bodyLength: request.body.length }),
+      callResolveContext: ({ decoded }) => {
+        expectTypeOf(decoded).toEqualTypeOf<{ bodyLength: number }>();
+        return { tenantId: "tenant-1" };
+      },
+      callGetWireInvocations: ({ context }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        return [{ kind: "collection", collection: "patients", operation: "get", id: "1" }];
+      },
+      invocationRun: batch.invocationRun,
+      callToBatchResponse: async ({ decoded, context, invocations }) => {
+        expectTypeOf(context).toEqualTypeOf<Invocation["context"]>();
+        expectTypeOf(invocations).toEqualTypeOf<readonly InvocationResult<Invocation>[]>();
+        return { status: decoded.bodyLength };
+      },
+    });
+    expectTypeOf(inlineBatch).toEqualTypeOf<typeof executeBatch>();
+
+    const singleResponse = runSingleCall(
+      {
+        ...single,
+        callToSingleResponse: ({ request, decoded, context, invocation }) => {
+          expectTypeOf(request).toEqualTypeOf<Types["request"]>();
+          expectTypeOf(decoded).toEqualTypeOf<Types["decoded"]>();
+          expectTypeOf(invocation).toEqualTypeOf<InvocationResult<Invocation>>();
+          return { tenant: context.tenantId };
+        },
+      },
+      { body: "test" },
+    );
+    expectTypeOf(singleResponse).toEqualTypeOf<Promise<{ tenant: string }>>();
+    const batchResponse = runBatchCall(
+      {
+        ...batch,
+        callToBatchResponse: async ({ request, decoded, context, invocations }) => {
+          expectTypeOf(request).toEqualTypeOf<Types["request"]>();
+          expectTypeOf(decoded).toEqualTypeOf<Types["decoded"]>();
+          expectTypeOf(invocations).toEqualTypeOf<readonly InvocationResult<Invocation>[]>();
+          return { tenant: context.tenantId };
+        },
+      },
+      { body: "test" },
+    );
+    expectTypeOf(batchResponse).toEqualTypeOf<Promise<{ tenant: string }>>();
+
+    createSingleTakibiCall({
+      ...single,
+      // @ts-expect-error response adapters must accept the decoder's actual output
+      callToSingleResponse: ({ decoded }: { decoded: string }) => ({ status: decoded.length }),
+    });
+    createBatchTakibiCall({
+      ...batch,
+      // @ts-expect-error batch response adapters must accept the decoder's actual output
+      callToBatchResponse: ({ decoded }: { decoded: string }) => ({ status: decoded.length }),
+    });
+    createSingleTakibiCall<Types["request"], Types["decoded"], Invocation, Types["response"]>({
+      ...single,
+      // @ts-expect-error explicitly declared response types still constrain the converter
+      callToSingleResponse: () => "wrong",
+    });
+    createBatchTakibiCall<Types["request"], Types["decoded"], Invocation, Types["response"]>({
+      ...batch,
+      // @ts-expect-error explicitly declared batch response types still constrain the converter
+      callToBatchResponse: () => "wrong",
+    });
+
+    // @ts-expect-error request must match the decoder input
+    void executeSingle({ body: 123 });
+    // @ts-expect-error request must match the decoder input
+    void executeBatch({ body: 123 });
+    // @ts-expect-error runners must also preserve decoder input types
+    void runSingleCall(single, { body: 123 });
+    // @ts-expect-error runners must also preserve decoder input types
+    void runBatchCall(batch, { body: 123 });
+    // @ts-expect-error the invocation runner requires a tenantId context
+    createSingleTakibiCall({ ...single, callResolveContext: () => ({ tenantId: 123 }) });
+    // @ts-expect-error batch invocation wiring must preserve the same context
+    createBatchTakibiCall({ ...batch, callResolveContext: () => ({ tenantId: 123 }) });
+    // @ts-expect-error a batch adapter bag cannot substitute for single adapters
+    createSingleTakibiCall(batch);
+    // @ts-expect-error a single adapter bag cannot substitute for batch adapters
+    createBatchTakibiCall(single);
+  };
+
+  expectTypeOf(check).toBeFunction();
+});
+
+test("call maps need no local execution facade and share runtime adapter contracts", () => {
+  type Types = import("../src").CallTypeMap<
+    { body: string },
+    { wire: InvocationRequestData },
+    WithSlot<"context", { tenantId: string }>,
+    { status: number }
+  >;
+  type RuntimeTypes = Types & { localExecution: { execute(): Promise<void> } };
+  type Runtime = import("../src").RuntimeAdapterMap<RuntimeTypes>;
+  expectTypeOf<Types>().not.toHaveProperty("context");
+  expectTypeOf<Types>().not.toHaveProperty("localExecution");
+  expectTypeOf<RuntimeTypes>().toExtend<import("../src").RuntimeTypeMap>();
+  expectTypeOf<import("../src").SingleCallAdapters<Types>>().toEqualTypeOf<
+    Pick<Runtime, (typeof import("../src").CALL_SINGLE_ADAPTER_KEYS)[number]>
+  >();
+  expectTypeOf<import("../src").BatchCallAdapters<Types>>().toEqualTypeOf<
+    Pick<Runtime, (typeof import("../src").CALL_BATCH_ADAPTER_KEYS)[number]>
+  >();
+  expectTypeOf<Runtime["localExecution"]>().toEqualTypeOf<RuntimeTypes["localExecution"]>();
+});

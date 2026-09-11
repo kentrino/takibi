@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "takibi-better-auth-adapter-tests",
+  "main": "./tests/worker.ts",
+  "compatibility_date": "2026-08-18",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TAKIBI_ADAPTER_TEST",
+        "class_name": "AdapterTestObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AdapterTestObject"],
+    },
+  ],
+}
