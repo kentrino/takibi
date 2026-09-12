@@ -11,7 +11,7 @@ import {
 import type { ActionHandlerArgs } from "@takibi/worker-runtime-contract";
 import type { JsonValue } from "@takibi/shared-types";
 import { allows, denialReasonOf, type AccessGrant } from "@takibi/policy";
-import { createPolicyCollections, createTrustedCollections } from "./executor";
+import { createPolicyCollections, createTrustedCollections } from "./collections";
 import {
   type ActionHandlerSurface,
   type PolicySurface,

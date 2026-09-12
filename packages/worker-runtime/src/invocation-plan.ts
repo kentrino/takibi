@@ -3,7 +3,7 @@ import {
   createCollectionExecutionPlan,
 } from "@takibi/worker-runtime-contract";
 import type { ClassifiedAction } from "./action-resolution";
-import type { ExecuteRequest } from "./executor";
+import type { ExecuteRequest } from "@takibi/operations";
 import type { TakibiActionWork, TakibiCollectionWork } from "./invocation-type-map";
 
 export function createTakibiActionPlan(classified: ClassifiedAction) {

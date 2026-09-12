@@ -39,7 +39,8 @@ export {
   readRequestJson,
 } from "./http";
 export type { PublicRequest } from "./http";
-export { createPolicyCollections, createTrustedCollections, executeOperation } from "./executor";
+export { executeOperation } from "./executor";
+export { createPolicyCollections, createTrustedCollections } from "./collections";
 export type { ExecuteRequest } from "./executor";
 export { executeAction } from "./action-executor";
 export type { ActionInvocation } from "./action-executor";

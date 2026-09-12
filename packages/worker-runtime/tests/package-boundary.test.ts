@@ -17,6 +17,7 @@ const packagesDir = join(packageDir, "..");
 const allowedWorkspace = new Set([
   "@takibi/api",
   "@takibi/logger",
+  "@takibi/operations",
   "@takibi/policy",
   "@takibi/protocol",
   "@takibi/query",
@@ -139,6 +140,7 @@ test("worker-runtime package keeps a one-way dependency graph", () => {
     "@standard-schema/spec": "catalog:",
     "@takibi/api": "workspace:^",
     "@takibi/logger": "workspace:^",
+    "@takibi/operations": "workspace:^",
     "@takibi/policy": "workspace:^",
     "@takibi/protocol": "workspace:^",
     "@takibi/query": "workspace:^",

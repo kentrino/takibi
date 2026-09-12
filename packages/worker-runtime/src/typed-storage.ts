@@ -1,10 +1,11 @@
+import type { DocumentBuilder } from "@takibi/operations";
 import { compileListOptions, type ListOptions } from "@takibi/query";
 import {
-  AlreadyExistsError,
   LIST_ALL_MAX_ITEMS_DEFAULT,
   LIST_ALL_PAGE_SIZE_DEFAULT,
-  NotFoundError,
   TakibiError,
+  AlreadyExistsError,
+  NotFoundError,
   bindResultListAll,
   type ClientCollectionsApi,
   type CollectionDefinition,
@@ -113,28 +114,6 @@ export async function prepareAddDoc(
   return { ...parsed, id, createdAt, updatedAt, rev: 1 };
 }
 
-/** CREATE-only put: rejects when `doc.id` already exists. */
-export async function persistAddDoc(
-  storage: StorageDriver,
-  collection: string,
-  doc: WithMetadata<Record<string, unknown>>,
-): Promise<WithMetadata<Record<string, unknown>>> {
-  const existing = await storage.get(collection, doc.id);
-  if (existing) {
-    throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
-  }
-  await storage.put(collection, doc);
-  return doc;
-}
-
-export async function commitAddDoc(
-  storage: StorageDriver,
-  collection: string,
-  doc: WithMetadata<Record<string, unknown>>,
-): Promise<WithMetadata<Record<string, unknown>>> {
-  return storage.transaction((tx) => persistAddDoc(tx, collection, doc));
-}
-
 /** Build the document that would be stored for `set`, without put. */
 export async function prepareSetDoc(
   def: CollectionDefinition,
@@ -188,23 +167,6 @@ export async function prepareUpdateDoc(
   };
 }
 
-/** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
-export async function storageAdd(
-  def: CollectionDefinition,
-  storage: StorageDriver,
-  collection: string,
-  input: unknown,
-  options?: {
-    id?: DocumentId;
-    createdAt?: string;
-    updatedAt?: string;
-  },
-  logger?: InternalLogger,
-): Promise<WithMetadata<Record<string, unknown>>> {
-  const doc = await prepareAddDoc(def, input, options, logger);
-  return commitAddDoc(storage, collection, doc);
-}
-
 function trustedTimestamp(
   value: string | undefined,
   field: "createdAt" | "updatedAt",
@@ -215,51 +177,6 @@ function trustedTimestamp(
     throw new TypeError(`${field} must be a canonical ISO 8601 timestamp`);
   }
   return value;
-}
-
-export async function storageSet(
-  def: CollectionDefinition,
-  storage: StorageDriver,
-  collection: string,
-  id: string,
-  input: unknown,
-  options?: { existing?: WithMetadata<Record<string, unknown>> | null },
-  logger?: InternalLogger,
-): Promise<WithMetadata<Record<string, unknown>>> {
-  return storage.transaction(async (tx) => {
-    const existing =
-      options && "existing" in options ? options.existing : await tx.get(collection, id);
-    const doc = await prepareSetDoc(def, id, input, existing ?? null, logger);
-    await tx.put(collection, doc);
-    return doc;
-  });
-}
-
-export async function storageUpdate(
-  def: CollectionDefinition,
-  storage: StorageDriver,
-  collection: string,
-  id: string,
-  input: unknown,
-  logger?: InternalLogger,
-): Promise<WithMetadata<Record<string, unknown>>> {
-  return storage.transaction(async (tx) => {
-    const existing = await tx.get(collection, id);
-    if (!existing) throw new NotFoundError(`Document not found: ${id}`);
-    const doc = await prepareUpdateDoc(def, id, input, existing, logger);
-    await tx.put(collection, doc);
-    return doc;
-  });
-}
-
-export async function storageDelete(
-  storage: StorageDriver,
-  collection: string,
-  id: string,
-): Promise<{ id: string }> {
-  const existed = await storage.delete(collection, id);
-  if (!existed) throw new NotFoundError(`Document not found: ${id}`);
-  return { id };
 }
 
 export function createTypedStorage<TCollections extends Record<string, CollectionDefinition>>(
@@ -298,4 +215,97 @@ export function createTypedStorage<TCollections extends Record<string, Collectio
     } as ClientCollectionsApi<TCollections>[typeof name];
   }
   return api;
+}
+
+/** Bind runtime schema instrumentation to the operation document builder. */
+export function createDocumentBuilder(logger?: InternalLogger): DocumentBuilder {
+  return {
+    buildAdd: (def, input, options) => prepareAddDoc(def, input, options, logger),
+    buildSet: (def, id, input, existing) => prepareSetDoc(def, id, input, existing, logger),
+    buildUpdate: (def, id, input, existing) => prepareUpdateDoc(def, id, input, existing, logger),
+  };
+}
+
+/** CREATE-only put: rejects when `doc.id` already exists. */
+export async function persistAddDoc(
+  storage: StorageDriver,
+  collection: string,
+  doc: WithMetadata<Record<string, unknown>>,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  const existing = await storage.get(collection, doc.id);
+  if (existing) {
+    throw new AlreadyExistsError(`Document already exists: ${doc.id}`);
+  }
+  await storage.put(collection, doc);
+  return doc;
+}
+
+export async function storageDelete(
+  storage: StorageDriver,
+  collection: string,
+  id: string,
+): Promise<{ id: string }> {
+  const existed = await storage.delete(collection, id);
+  if (!existed) throw new NotFoundError(`Document not found: ${id}`);
+  return { id };
+}
+
+export async function commitAddDoc(
+  storage: StorageDriver,
+  collection: string,
+  doc: WithMetadata<Record<string, unknown>>,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  return storage.transaction((tx) => persistAddDoc(tx, collection, doc));
+}
+
+/** Trusted data-plane ops (no ACL). Used by Durable Object / admin storage. */
+export async function storageAdd(
+  def: CollectionDefinition,
+  storage: StorageDriver,
+  collection: string,
+  input: unknown,
+  options?: {
+    id?: DocumentId;
+    createdAt?: string;
+    updatedAt?: string;
+  },
+  logger?: InternalLogger,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  const doc = await prepareAddDoc(def, input, options, logger);
+  return commitAddDoc(storage, collection, doc);
+}
+
+export async function storageSet(
+  def: CollectionDefinition,
+  storage: StorageDriver,
+  collection: string,
+  id: string,
+  input: unknown,
+  options?: { existing?: WithMetadata<Record<string, unknown>> | null },
+  logger?: InternalLogger,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  return storage.transaction(async (tx) => {
+    const existing =
+      options && "existing" in options ? options.existing : await tx.get(collection, id);
+    const doc = await prepareSetDoc(def, id, input, existing ?? null, logger);
+    await tx.put(collection, doc);
+    return doc;
+  });
+}
+
+export async function storageUpdate(
+  def: CollectionDefinition,
+  storage: StorageDriver,
+  collection: string,
+  id: string,
+  input: unknown,
+  logger?: InternalLogger,
+): Promise<WithMetadata<Record<string, unknown>>> {
+  return storage.transaction(async (tx) => {
+    const existing = await tx.get(collection, id);
+    if (!existing) throw new NotFoundError(`Document not found: ${id}`);
+    const doc = await prepareUpdateDoc(def, id, input, existing, logger);
+    await tx.put(collection, doc);
+    return doc;
+  });
 }

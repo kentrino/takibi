@@ -61,6 +61,7 @@
     "@standard-schema/spec": "catalog:",
     "@takibi/api": "workspace:^",
     "@takibi/logger": "workspace:^",
+    "@takibi/operations": "workspace:^",
     "@takibi/policy": "workspace:^",
     "@takibi/protocol": "workspace:^",
     "@takibi/query": "workspace:^",

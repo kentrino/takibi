@@ -13,6 +13,7 @@
     "client/src",
     "logger/src",
     "policy/src",
+    "operations/src",
     "protocol/src",
     "query/src",
     "shared-types/src",

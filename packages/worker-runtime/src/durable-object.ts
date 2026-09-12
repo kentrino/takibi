@@ -7,7 +7,7 @@ import {
 } from "@takibi/api";
 import { applyStorageLogging, errorResponse } from "./context/runtime";
 import type { InternalCollectionsOptions } from "./context/types";
-import { createTrustedCollections } from "./executor";
+import { createTrustedCollections } from "./collections";
 import type { PublicRequest } from "./http";
 import { resolveLocalExecution } from "./invocation-execution";
 import type { InternalLogger } from "./logging";

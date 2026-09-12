@@ -10,7 +10,7 @@ import type {
   InvocationRuntime,
 } from "@takibi/worker-runtime-contract";
 import type { ActionInvocation } from "../src/action-executor";
-import type { executeResolvedCollection, ExecuteRequest } from "../src/executor";
+import type { CollectionOperationResult, ExecuteRequest } from "@takibi/operations";
 import type {
   TakibiActionWork,
   TakibiApplyWork,
@@ -66,9 +66,7 @@ test("slots match current runtime types", () => {
   expectTypeOf<TakibiActionWork>().toExtend<AppMap["noneWork"]>();
   expectTypeOf<TakibiCollectionWork>().toExtend<AppMap["noneWork"]>();
   expectTypeOf<AppMap["fullWork"]>().toEqualTypeOf<TakibiActionWork>();
-  expectTypeOf<AppMap["result"]>().toEqualTypeOf<
-    JsonValue | Awaited<ReturnType<typeof executeResolvedCollection>>
-  >();
+  expectTypeOf<AppMap["result"]>().toEqualTypeOf<JsonValue | CollectionOperationResult>();
   expectTypeOf<AppMap["failure"]>().toEqualTypeOf<TakibiFailure<string>>();
 });
 
@@ -139,7 +137,7 @@ test("transaction adapter bindings retain their map relationships", () => {
 
 test("collection execution and authorized documents retain their concrete types", () => {
   type OperationResult = Awaited<ReturnType<typeof import("../src/executor").executeOperation>>;
-  type ResolvedResult = Awaited<ReturnType<typeof executeResolvedCollection>>;
+  type ResolvedResult = CollectionOperationResult;
   expectTypeOf<OperationResult>().not.toBeUnknown();
   expectTypeOf<OperationResult>().toEqualTypeOf<ResolvedResult>();
   expectTypeOf<

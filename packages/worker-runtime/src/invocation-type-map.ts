@@ -2,7 +2,11 @@ import type { ActionRegistry, CollectionsDef, RuntimeActionDefinition } from "@t
 import type { JsonValue, ObserverInvocationData, TakibiFailure } from "@takibi/shared-types";
 import type { StorageDriver } from "@takibi/storage";
 import type { ActionInvocation, ResolvedAction } from "./action-executor";
-import type { executeResolvedCollection, ExecuteRequest, ResolvedCollection } from "./executor";
+import type {
+  CollectionOperationResult,
+  ExecuteRequest,
+  PreparedCollection,
+} from "@takibi/operations";
 import type { InternalLogger } from "./logging";
 import type { CollectionReadRequest } from "./protocol";
 
@@ -35,7 +39,7 @@ export type TakibiFullWork = TakibiActionWork;
 
 export type TakibiPrepared<TContext extends object> =
   | Readonly<{ kind: "action"; resolved: ResolvedAction<TContext> }>
-  | Readonly<{ kind: "collection"; resolved: ResolvedCollection<TContext> }>;
+  | Readonly<{ kind: "collection"; resolved: PreparedCollection<TContext> }>;
 
 /**
  * Concrete collaborator bag for Durable Object and in-process execution.
@@ -72,6 +76,6 @@ export type TakibiInvocationTypeMap<TContext extends object = object, TServices 
   nonePrepared: TakibiPrepared<TContext>;
   applyPrepared: TakibiPrepared<TContext>;
   fullPrepared: TakibiPrepared<TContext>;
-  result: JsonValue | Awaited<ReturnType<typeof executeResolvedCollection>>;
+  result: JsonValue | CollectionOperationResult;
   failure: TakibiFailure<string>;
 };

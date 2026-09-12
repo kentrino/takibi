@@ -1,3 +1,4 @@
+import { createDocumentBuilder } from "./typed-storage";
 import type { JsonValue } from "@takibi/shared-types";
 import {
   composeActionPreparation,
@@ -17,7 +18,7 @@ import {
   type IdentifiedAction,
   type ResolvedAction,
 } from "./action-resolution";
-import { executeResolvedCollection, resolveCollection } from "./executor";
+import { prepareCollection } from "@takibi/operations";
 import {
   createActionHandler,
   createInvocationCollaborators,
@@ -140,14 +141,15 @@ async function prepareCollectionWork<TContext extends object, TServices>(
   policy: PolicySurface,
 ): Promise<InvocationAdapterResult<TakibiMap<TContext, TServices>, TakibiPrepared<TContext>>> {
   return invocationStageResult(async () => {
-    const resolved = await resolveCollection({
-      collections: state.runtime.collections,
-      storage,
-      ctx: state.baseContext,
-      req: work.request,
-      logger: state.runtime.logger,
-      policy,
-    });
+    const resolved = await prepareCollection(
+      {
+        collections: state.runtime.collections,
+        storage,
+        ctx: state.baseContext,
+        req: work.request,
+      },
+      { documents: createDocumentBuilder(state.runtime.logger), policy },
+    );
     return { kind: "collection" as const, resolved };
   });
 }
@@ -212,7 +214,7 @@ async function applyPrepared<TContext extends object, TServices>(
       ),
     );
   }
-  return invocationStageResult(() => executeResolvedCollection({ ...prepared.resolved, storage }));
+  return invocationStageResult(() => prepared.resolved.apply(storage));
 }
 
 function validatedActionInput<TContext extends object, TServices>(resolved: {
