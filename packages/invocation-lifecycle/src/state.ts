@@ -21,6 +21,30 @@ import {
 
 const UNSET = Symbol("takibi.invocation.unset");
 
+function projectRuntime<T extends InternalInvocationTypeMap>(
+  runtime: InternalInvocationRuntime<T>,
+): Omit<InternalInvocationRuntime<T>, "storage"> {
+  const descriptors = Object.getOwnPropertyDescriptors(runtime);
+  Reflect.deleteProperty(descriptors, "storage");
+  const runtimeView = Object.create(Object.getPrototypeOf(runtime), descriptors);
+  const boundCapabilities = new WeakMap<object, object>();
+  return new Proxy(runtimeView, {
+    get(target, property) {
+      if (property === "storage") return undefined;
+      const value = Reflect.get(target, property, runtime);
+      if (typeof value !== "function") return value;
+      const cached = boundCapabilities.get(value);
+      if (cached !== undefined) return cached;
+      const bound = value.bind(runtime);
+      boundCapabilities.set(value, bound);
+      return bound;
+    },
+    has(target, property) {
+      return property !== "storage" && Reflect.has(target, property);
+    },
+  });
+}
+
 /**
  * The single mutable lifecycle object for one invocation. Payload references in
  * views are shared; the carrier fields themselves are hidden by JavaScript
@@ -52,8 +76,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     this.#baseContext = request.context;
     this.#context = request.context;
     this.#runtime = runtime;
-    const { storage: _storage, ...runtimeView } = runtime;
-    this.#runtimeView = runtimeView;
+    this.#runtimeView = projectRuntime<T>(runtime);
     this.#runtimeChecks = runtimeChecks;
   }
 

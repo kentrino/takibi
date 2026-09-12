@@ -172,6 +172,37 @@ test("adapter views are shallow projections without carrier mutation fields", ()
   expectTypeOf(view).not.toHaveProperty("settlement");
 });
 
+test("adapter runtime views preserve prototype capabilities without exposing storage", () => {
+  class RuntimeWithPrototype {
+    readonly storage = { scope: "base" as const };
+    readonly #prefix = "runtime";
+
+    capability(): string {
+      return `${this.#prefix}:available`;
+    }
+  }
+
+  type PrototypeRuntimeSpec = Omit<Spec, "runtime"> & {
+    runtime: RuntimeWithPrototype;
+  };
+  const prototypeRuntime = new RuntimeWithPrototype();
+  const state = new InvocationState<PrototypeRuntimeSpec>(
+    { wireInvocation: request.wireInvocation, context: request.context },
+    prototypeRuntime,
+  );
+  state.start();
+  state.acceptInvocation(publicInvocation);
+  state.acceptPlan({
+    outcome: "succeeded",
+    value: { transactionBoundary: "none", work: { key: "work" } },
+  });
+
+  const view = state.executionView();
+  expect(view.runtime).toBeInstanceOf(RuntimeWithPrototype);
+  expect(view.runtime.capability()).toBe("runtime:available");
+  expect(view.runtime).not.toHaveProperty("storage");
+});
+
 test("replacing fields on an adapter view cannot change carrier fields", () => {
   const state = new InvocationState(request, runtime);
   initialize(state);
