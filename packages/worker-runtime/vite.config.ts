@@ -17,7 +17,11 @@ export default defineConfig({
       "testing-bridge": "src/testing-bridge.server.ts",
     },
     dts: {
-      tsgo: true,
+      generator: "tsgo",
+      // Declarations build from `src` only, without the test-time source
+      // aliases for `@takibi/testing`, so tsgo never emits declarations
+      // beside the testing sources. See tsconfig.pack.json.
+      tsconfig: "tsconfig.pack.json",
     },
     exports: {
       devExports: true,
