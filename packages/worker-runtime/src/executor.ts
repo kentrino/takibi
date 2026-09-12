@@ -19,7 +19,7 @@ import {
   type TrustedCollectionsApi,
 } from "@takibi/api";
 import type { CollectionRequestData, StorageListOptions, WithMetadata } from "@takibi/shared-types";
-import { executePlan } from "@takibi/worker-runtime-contract";
+import { executePlan } from "@takibi/invocation-lifecycle";
 import { createTakibiCollectionPlan } from "./invocation-plan";
 import { createInvocationCollaborators, type PolicySurface } from "./invocation-collaborators";
 import type { InternalLogger } from "./logging";
@@ -104,12 +104,7 @@ async function executeOperationInScope<TCtx extends object>(
   logger: InternalLogger | undefined,
   reuseTransaction: boolean,
 ): ReturnType<typeof executeResolvedCollection<TCtx>> {
-  const { policy } = createInvocationCollaborators({
-    logger,
-    collection: req.collection,
-    operation: req.operation,
-    documentId: req.id,
-  });
+  const { policy } = createInvocationCollaborators({ logger });
   const plan = createTakibiCollectionPlan(req);
   const prepare = (_work: TakibiCollectionWork, scopedStorage: StorageDriver) =>
     resolveCollection({

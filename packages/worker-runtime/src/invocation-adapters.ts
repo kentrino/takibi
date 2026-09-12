@@ -4,7 +4,7 @@ import {
   type InvocationObserverEvent,
   type InvocationPlan,
   type InvocationPlanningView,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
 import { classifyAction } from "./action-resolution";
 import { createTakibiActionPlan, createTakibiCollectionPlan } from "./invocation-plan";
 import type {

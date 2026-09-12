@@ -41,7 +41,9 @@ test("built testing package and runtime testing-bridge share one WeakMap", async
   const bridgeDist = join(import.meta.dirname, "../../worker-runtime/dist/testing-bridge.mjs");
   if (!existsSync(testingDist) || !existsSync(runtimeDist) || !existsSync(bridgeDist)) return;
 
-  const testing = (await import(pathToFileURL(testingDist).href)) as typeof import("@takibi/testing");
+  const testing = (await import(
+    pathToFileURL(testingDist).href
+  )) as typeof import("@takibi/testing");
   const runtime = (await import(
     pathToFileURL(runtimeDist).href
   )) as typeof import("@takibi/worker-runtime");

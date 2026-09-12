@@ -1,5 +1,10 @@
 import { expect, test } from "vite-plus/test";
-import { normalizeQueryExpr, parseOrderBy, parseQueryExpr, TakibiProtocolError } from "@takibi/protocol";
+import {
+  normalizeQueryExpr,
+  parseOrderBy,
+  parseQueryExpr,
+  TakibiProtocolError,
+} from "@takibi/protocol";
 
 test("parses JSON strings into frozen query and order ASTs", () => {
   const query = parseQueryExpr(

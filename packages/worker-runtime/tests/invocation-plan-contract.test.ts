@@ -2,11 +2,10 @@ import { expect, expectTypeOf, test } from "vite-plus/test";
 import {
   createActionExecutionPlan,
   createCollectionExecutionPlan,
-  TakibiContractConfigurationError,
   transactionBoundaryOf,
   type ActionPlanCriteria,
   type CollectionPlanCriteria,
-} from "@takibi/worker-runtime-contract";
+} from "../src/invocation-plan-contract";
 
 test("action and collection criteria select the Takibi boundary table", () => {
   expect(transactionBoundaryOf({ kind: "action", target: "document", atomic: true })).toBe("full");
@@ -40,13 +39,10 @@ test("plan builders pair the selected boundary with the supplied work", () => {
   });
 });
 
-test("collection plans reject a full boundary at construction", () => {
-  expect(() =>
-    createCollectionExecutionPlan(
-      { kind: "collection", operation: "add" },
-      { token: "collection" },
-    ),
-  ).not.toThrow(TakibiContractConfigurationError);
+test("collection criteria never select the full boundary", () => {
+  const boundary = transactionBoundaryOf({ kind: "collection", operation: "add" });
+  expectTypeOf(boundary).toEqualTypeOf<"none" | "apply">();
+  expect(boundary).toBe("apply");
 });
 
 test("specific criteria retain their execution boundary types", () => {

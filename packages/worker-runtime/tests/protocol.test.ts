@@ -1,6 +1,11 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "@takibi/api";
-import { decodeWireRequest, isBatchWireResponse, isWireResponse, MAX_BATCH_ITEMS } from "@takibi/worker-runtime";
+import {
+  decodeWireRequest,
+  isBatchWireResponse,
+  isWireResponse,
+  MAX_BATCH_ITEMS,
+} from "@takibi/worker-runtime";
 
 const context = { clinic: { slug: "clinic-a" }, actor: { id: "u1" } };
 

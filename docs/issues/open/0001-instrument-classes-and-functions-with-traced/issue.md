@@ -15,16 +15,14 @@ const withCollection = withTracing(policy, {
   method: "evaluateCollection",
   span: TAKIBI_SPAN.policy,
   attributes: collectionAttributes,
-  run: (spec, fn, args) =>
-    withLoggedSpan(logger, spec, collectionLogEvent(args), fn),
+  run: (spec, fn, args) => withLoggedSpan(logger, spec, collectionLogEvent(args), fn),
 });
 
 return withTracing(withCollection, {
   method: "evaluateAction",
   span: TAKIBI_SPAN.policy,
   attributes: actionAttributes,
-  run: (spec, fn, args) =>
-    withLoggedSpan(logger, spec, actionLogEvent(args), fn),
+  run: (spec, fn, args) => withLoggedSpan(logger, spec, actionLogEvent(args), fn),
 });
 ```
 
@@ -88,14 +86,14 @@ overload intercepts `[[Call]]`, not `Function#apply`.
 
 Delete the superseded wrappers after migration. Do not keep them as a compatibility layer.
 
-| Existing API | Disposition | Reason |
-| --- | --- | --- |
-| `withTracing` | Delete | One-method proxy plus injected `run` is the problem this issue replaces. Move any needed proxy mechanics into `traced`. |
-| `otel` / `OtelMethodSpec` / `OtelSpec` | Delete | Interceptor-map builder for unused `createClass` production path. Reuse the spec fields (`name`, `kind`, `event`, `attributes`, `logFields`), not the function. |
-| `tracePolicyEvaluator` | Delete | Becomes `traced(new PolicyEvaluator(), logger, { evaluateCollection, evaluateAction })`. |
-| `traceSchemaParser` | Delete | Becomes `traced(new SchemaParser(), logger, { parse })`. |
-| `traceActionHandler` | Delete | Becomes `traced(new ActionHandler(...), logger, { run })` with factory fields closed over. |
-| Resolve adapter object in `createCallResolveContext` | Delete | Wrap the resolve function directly. |
+| Existing API                                         | Disposition | Reason                                                                                                                                                          |
+| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `withTracing`                                        | Delete      | One-method proxy plus injected `run` is the problem this issue replaces. Move any needed proxy mechanics into `traced`.                                         |
+| `otel` / `OtelMethodSpec` / `OtelSpec`               | Delete      | Interceptor-map builder for unused `createClass` production path. Reuse the spec fields (`name`, `kind`, `event`, `attributes`, `logFields`), not the function. |
+| `tracePolicyEvaluator`                               | Delete      | Becomes `traced(new PolicyEvaluator(), logger, { evaluateCollection, evaluateAction })`.                                                                        |
+| `traceSchemaParser`                                  | Delete      | Becomes `traced(new SchemaParser(), logger, { parse })`.                                                                                                        |
+| `traceActionHandler`                                 | Delete      | Becomes `traced(new ActionHandler(...), logger, { run })` with factory fields closed over.                                                                      |
+| Resolve adapter object in `createCallResolveContext` | Delete      | Wrap the resolve function directly.                                                                                                                             |
 
 Update `@takibi/utility` exports and README, worker-runtime public exports, and the contract /
 runtime READMEs that mention `withTracing`. `createClass` itself stays; this issue does not require
@@ -105,12 +103,12 @@ an interceptor adapter for it.
 
 `traced` wraps a class instance or a function. Do not force lexical or recursive sites through it.
 
-| Existing API | Representative code snippet | Expected disposition | Reason |
-| --- | --- | --- | --- |
-| `withSpan` | `withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, run)` | Keep | Request scopes and other lexical blocks are not a stored class or function to wrap. This remains the low-level span lifecycle primitive. |
-| `withLoggedSpan` | `withLoggedSpan(logger, spec, { event: "takibi.wire" }, send)` | Keep, preferably internal | `traced` should call it. Direct calls remain valid for lexical scopes and for the executor, which needs the live span. |
-| `tracedStorage` | `tracedStorage(driver).transaction(work)` | Keep | `transaction` re-wraps the scoped driver. A flat method map cannot express that. |
-| Direct executor span | `withLoggedSpan(logger, executorSpec, fields, async (span) => recordSettlement(span))` | Keep | Settlement failures are returned, not only thrown. Generic method timing is not enough. |
+| Existing API         | Representative code snippet                                                            | Expected disposition      | Reason                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `withSpan`           | `withSpan({ name: TAKIBI_SPAN.request, kind: "server" }, run)`                         | Keep                      | Request scopes and other lexical blocks are not a stored class or function to wrap. This remains the low-level span lifecycle primitive. |
+| `withLoggedSpan`     | `withLoggedSpan(logger, spec, { event: "takibi.wire" }, send)`                         | Keep, preferably internal | `traced` should call it. Direct calls remain valid for lexical scopes and for the executor, which needs the live span.                   |
+| `tracedStorage`      | `tracedStorage(driver).transaction(work)`                                              | Keep                      | `transaction` re-wraps the scoped driver. A flat method map cannot express that.                                                         |
+| Direct executor span | `withLoggedSpan(logger, executorSpec, fields, async (span) => recordSettlement(span))` | Keep                      | Settlement failures are returned, not only thrown. Generic method timing is not enough.                                                  |
 
 # Implementation
 
@@ -186,4 +184,4 @@ Excluded:
 - `packages/worker-runtime/src/invocation-execution.ts`
 - `packages/worker-runtime/src/index.ts`
 - `packages/worker-runtime/README.md`
-- `packages/worker-runtime-contract/README.md`
+- `packages/invocation-lifecycle/README.md`

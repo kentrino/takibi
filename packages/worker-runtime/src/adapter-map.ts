@@ -1,9 +1,4 @@
-import {
-  INVOCATION_PREPARE_ADAPTER_KEYS,
-  type ActionHandlerCtor,
-  type AdapterMap,
-  type InvocationAdapters,
-} from "@takibi/worker-runtime-contract";
+import type { BoundRunInvocation, InvocationAdapters } from "@takibi/invocation-lifecycle";
 import { alias, defineContainer, inject, type DependencyGraph } from "tatenuki";
 import { normalizeInvocationFailureForServer } from "./context/runtime";
 import {
@@ -16,21 +11,46 @@ import {
   createActionHandler,
   PolicyEvaluator,
   tracePolicyEvaluator,
+  type ActionHandlerCtor,
+  type ActionHandlerSurface,
+  type PolicySurface,
 } from "./invocation-collaborators";
 import { InvocationPrepareApply } from "./invocation-prepare-apply";
-import { SchemaParser, traceSchemaParser } from "./schema";
+import { SchemaParser, traceSchemaParser, type SchemaSurface } from "./schema";
 import type { TakibiInvocationRuntime, TakibiInvocationTypeMap } from "./invocation-type-map";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
 
-/**
- * Contract `AdapterMap` pinned to Takibi's invocation type map.
- */
-export type TakibiAdapterMap<TContext extends object, TServices = unknown> = AdapterMap<
+export type TakibiAdapterMap<TContext extends object, TServices = unknown> = InvocationAdapters<
   TakibiMap<TContext, TServices>
 > & {
+  invocationPolicy: PolicySurface;
+  invocationSchema: SchemaSurface;
+  invocationActionHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface;
   invocationPrepareApply: InvocationPrepareApply<TContext, TServices>;
+  invocationRun: BoundRunInvocation<TakibiMap<TContext, TServices>>;
 };
+
+export const INVOCATION_ADAPTER_KEYS = [
+  "invocationRuntime",
+  "invocationToInvocation",
+  "invocationGetRawInput",
+  "invocationCreatePlan",
+  "transactionNone",
+  "transactionApply",
+  "transactionFull",
+  "transactionRun",
+  "transactionClassifyFailure",
+  "invocationToFailure",
+  "invocationSnapshotObserverEvent",
+  "invocationNotify",
+] as const satisfies readonly (keyof InvocationAdapters<TakibiMap<object, unknown>>)[];
+
+const INVOCATION_PREPARE_ADAPTER_KEYS = [
+  "invocationPolicy",
+  "invocationSchema",
+  "invocationActionHandler",
+] as const;
 
 /**
  * Invocation registration without `invocationRun`. Production adds the runner

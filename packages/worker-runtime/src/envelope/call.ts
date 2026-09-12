@@ -1,32 +1,98 @@
-import type {
-  CallAdapters,
-  CallFailureInput,
-  CallTerminalEvent,
-  MaybePromise,
-  RunCall,
-} from "./type";
+import type { MaybePromise } from "@takibi/invocation-lifecycle";
 
-export class TakibiContractStateError extends Error {
-  /**
-   * Creates an internal error that distinguishes invalid invocation state
-   * transitions from business failures.
-   */
-  constructor(message: string) {
-    super(message);
-    this.name = "TakibiContractStateError";
-  }
-}
+export type CallFailureStage = "decode" | "resolve" | "dispatch" | "response";
 
-export class TakibiContractConfigurationError extends Error {
-  /**
-   * Creates an internal error that distinguishes invocation adapter wiring
-   * defects and invalid effect transitions from business failures.
-   */
-  constructor(message: string) {
-    super(message);
-    this.name = "TakibiContractConfigurationError";
-  }
-}
+export type CallFailureInput<TRequestLike, TDecoded, TContext> = Readonly<
+  { error: unknown; request: TRequestLike } & (
+    | { stage: "decode"; decoded?: never; context?: never }
+    | { stage: "resolve"; decoded: TDecoded; context?: never }
+    | { stage: "dispatch" | "response"; decoded: TDecoded; context: TContext }
+  )
+>;
+
+export type CallTerminalEvent<TResponseObject, TRequestLike = unknown, TDecoded = unknown> =
+  | Readonly<{
+      outcome: "responded";
+      request: TRequestLike;
+      decoded?: TDecoded;
+      response: TResponseObject;
+    }>
+  | Readonly<{
+      outcome: "rejected";
+      request: TRequestLike;
+      decoded?: TDecoded;
+      error: unknown;
+    }>;
+
+export type CallAdapters<
+  TRequestLike,
+  TDecoded,
+  TContext,
+  TResponseObject,
+  TDispatched = TResponseObject,
+> = {
+  callDecode: (request: TRequestLike) => MaybePromise<TDecoded>;
+  callResolveContext: (input: {
+    request: TRequestLike;
+    decoded: TDecoded;
+  }) => MaybePromise<TContext>;
+  callDispatch: (input: {
+    request: TRequestLike;
+    decoded: TDecoded;
+    context: TContext;
+  }) => MaybePromise<TDispatched>;
+  callToResponse: (input: {
+    request: TRequestLike;
+    decoded: TDecoded;
+    context: TContext;
+    dispatched: TDispatched;
+  }) => MaybePromise<TResponseObject>;
+  callToFailureResponse?: (
+    failure: CallFailureInput<TRequestLike, TDecoded, TContext>,
+  ) => MaybePromise<TResponseObject>;
+  callOnDecoded?: (input: { request: TRequestLike; decoded: TDecoded }) => MaybePromise<void>;
+  callOnTerminal?: (
+    event: CallTerminalEvent<TResponseObject, TRequestLike, TDecoded>,
+  ) => MaybePromise<void>;
+};
+
+export type EnvelopeAdapterMap<
+  TRequestLike,
+  TDecoded,
+  TContext,
+  TResponseObject,
+  TDispatched = TResponseObject,
+> = CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched> & {
+  call: Call<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>;
+};
+
+export const ENVELOPE_CALL_ADAPTER_KEYS = [
+  "callDecode",
+  "callResolveContext",
+  "callDispatch",
+  "callToResponse",
+  "callToFailureResponse",
+  "callOnDecoded",
+  "callOnTerminal",
+] as const;
+
+export type EnvelopeAdapterGraph = {
+  readonly [K in (typeof ENVELOPE_CALL_ADAPTER_KEYS)[number] | "call"]: readonly (
+    | (typeof ENVELOPE_CALL_ADAPTER_KEYS)[number]
+    | "call"
+  )[];
+};
+
+export const ENVELOPE_ADAPTER_GRAPH = {
+  callDecode: [],
+  callResolveContext: [],
+  callDispatch: [],
+  callToResponse: [],
+  callToFailureResponse: [],
+  callOnDecoded: [],
+  callOnTerminal: [],
+  call: ENVELOPE_CALL_ADAPTER_KEYS,
+} as const satisfies EnvelopeAdapterGraph;
 
 /**
  * Envelope Call runner. Constructor slots are the envelope adapter map.
@@ -159,21 +225,17 @@ export class Call<
 }
 
 /**
- * Worker / testing envelope composition surface. `call` is the constructed
- * `Call` instance derived from the envelope type arguments. This map does
- * not include invocation or storage slots.
+ * Thin entry around `Call.run` for callers that still pass a bare adapter map.
  */
-export type EnvelopeAdapterMap<
+export function runCall<
   TRequestLike,
   TDecoded,
   TContext,
   TResponseObject,
   TDispatched = TResponseObject,
-> = CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched> & {
-  call: Call<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>;
-};
-
-/**
- * Thin entry around `Call.run` for callers that still pass a bare adapter map.
- */
-export const runCall: RunCall = (request, adapters) => new Call(adapters).run(request);
+>(
+  request: TRequestLike,
+  adapters: CallAdapters<TRequestLike, TDecoded, TContext, TResponseObject, TDispatched>,
+): Promise<TResponseObject> {
+  return new Call(adapters).run(request);
+}

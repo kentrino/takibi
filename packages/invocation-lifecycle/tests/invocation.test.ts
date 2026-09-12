@@ -1,13 +1,6 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import type {
-  ActionRequestData,
-  ObserverActionRequestData,
-  TakibiFailure,
-} from "@takibi/shared-types";
 import {
-  InvocationState,
   runInvocation,
-  TakibiContractStateError,
   type InternalInvocationSettledTransaction,
   type InvocationAdapters,
   type InvocationObserverEvent,
@@ -15,7 +8,23 @@ import {
   type InvocationRequest,
   type InvocationResult,
   type TransactionBoundary,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
+import { InvocationLifecycleStateError } from "../src/error";
+import { InvocationState } from "../src/state";
+
+type ActionRequestData = {
+  readonly kind: "action";
+  readonly scope: string;
+  readonly name: string;
+  readonly input?: unknown;
+};
+type ObserverActionRequestData = Omit<ActionRequestData, "input">;
+type TakibiFailure<TCode extends string> = {
+  kind?: string;
+  code: TCode;
+  message?: string;
+  status?: number;
+};
 
 type Spec = {
   wireInvocation: ActionRequestData;
@@ -128,11 +137,11 @@ function runWith(
 
 test("state uses one instance and rejects illegal or duplicate transitions", () => {
   const state = new InvocationState(request, runtime);
-  expect(() => state.planningView()).toThrow(TakibiContractStateError);
+  expect(() => state.planningView()).toThrow(InvocationLifecycleStateError);
   state.start();
-  expect(() => state.start()).toThrow(TakibiContractStateError);
+  expect(() => state.start()).toThrow(InvocationLifecycleStateError);
   state.acceptInvocation(publicInvocation);
-  expect(() => state.acceptInvocation(publicInvocation)).toThrow(TakibiContractStateError);
+  expect(() => state.acceptInvocation(publicInvocation)).toThrow(InvocationLifecycleStateError);
   state.acceptPlan({
     outcome: "succeeded",
     value: { transactionBoundary: "none", work: { key: "work" } },
@@ -142,9 +151,9 @@ test("state uses one instance and rejects illegal or duplicate transitions", () 
       outcome: "succeeded",
       value: { transactionBoundary: "none", work: { key: "work" } },
     }),
-  ).toThrow(TakibiContractStateError);
+  ).toThrow(InvocationLifecycleStateError);
   state.succeed({ id: "patient-1" });
-  expect(() => state.succeed({ id: "patient-2" })).toThrow(TakibiContractStateError);
+  expect(() => state.succeed({ id: "patient-2" })).toThrow(InvocationLifecycleStateError);
 });
 
 test("adapter views are shallow projections without carrier mutation fields", () => {
@@ -431,13 +440,13 @@ test("a throwing failure mapper remains observable", async () => {
 test("runtimeChecks controls phase checks without disabling slot integrity", () => {
   const checked = new InvocationState(request, runtime, true);
   checked.start();
-  expect(() => checked.start()).toThrow(TakibiContractStateError);
+  expect(() => checked.start()).toThrow(InvocationLifecycleStateError);
 
   const unchecked = new InvocationState(request, runtime, false);
   unchecked.start();
   expect(() => unchecked.start()).not.toThrow();
   unchecked.acceptInvocation(publicInvocation);
-  expect(() => unchecked.acceptInvocation(publicInvocation)).toThrow(TakibiContractStateError);
+  expect(() => unchecked.acceptInvocation(publicInvocation)).toThrow(InvocationLifecycleStateError);
 });
 
 test("notification remains single-shot when runtimeChecks is disabled", () => {
@@ -675,7 +684,7 @@ test("missing transaction wiring is a configuration failure", async () => {
 test("notification cannot begin from a running state even without runtime checks", () => {
   const state = new InvocationState(request, runtime, false);
   state.start();
-  expect(() => state.beginNotification()).toThrow(TakibiContractStateError);
+  expect(() => state.beginNotification()).toThrow(InvocationLifecycleStateError);
 });
 
 test("terminal DTO is shallow-frozen without freezing payloads", async () => {

@@ -70,7 +70,9 @@ test("built testing-bridge and root share one WeakMap instance", async () => {
   const bridgePath = join(distDir, "testing-bridge.mjs");
   if (!existsSync(rootPath) || !existsSync(bridgePath)) return;
 
-  const root = (await import(pathToFileURL(rootPath).href)) as typeof import("@takibi/worker-runtime");
+  const root = (await import(
+    pathToFileURL(rootPath).href
+  )) as typeof import("@takibi/worker-runtime");
   const bridge = (await import(
     pathToFileURL(bridgePath).href
   )) as typeof import("@takibi/worker-runtime/testing-bridge");
