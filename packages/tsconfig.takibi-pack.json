@@ -21,6 +21,6 @@
     "testing/src",
     "utility/src",
     "worker-runtime/src",
-    "worker-runtime-contract/src"
+    "invocation-lifecycle/src"
   ]
 }

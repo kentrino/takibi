@@ -3,8 +3,11 @@ import { z } from "zod";
 import { defineCollection, type CollectionDefinition } from "@takibi/api";
 import { fullAccess, none, type AccessContext } from "@takibi/policy";
 import type { WithMetadata } from "@takibi/shared-types";
-import type { PolicySurface } from "@takibi/worker-runtime-contract";
-import { PolicyEvaluator, tracePolicyEvaluator } from "../src/invocation-collaborators";
+import {
+  PolicyEvaluator,
+  tracePolicyEvaluator,
+  type PolicySurface,
+} from "../src/invocation-collaborators";
 
 type Staff = { role: "staff" };
 type Patient = { role: "patient" };

@@ -1,9 +1,5 @@
-import {
-  Call,
-  ENVELOPE_ADAPTER_GRAPH,
-  jsonResponseFromStatus,
-  type EnvelopeAdapterMap,
-} from "@takibi/worker-runtime-contract";
+import { Call, ENVELOPE_ADAPTER_GRAPH, type EnvelopeAdapterMap } from "../envelope/call";
+import { jsonResponseFromStatus } from "../envelope/response";
 import { withTracing } from "@takibi/utility";
 import { defineContainer, inject, type DependencyGraph } from "tatenuki";
 import type { PublicRequest } from "../http";

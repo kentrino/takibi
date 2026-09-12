@@ -50,32 +50,3 @@ export function unwrapInvocationAdapterResult<T extends InternalInvocationTypeMa
   if (result.outcome === "failed") throw result.error;
   return result.value;
 }
-
-/**
- * Identify → authorize → parse. Each stage may record context or input updates
- * that remain visible when a later stage fails. Authorization details stay in
- * the runtime adapters.
- */
-export async function composeActionPreparation<
-  T extends InternalInvocationTypeMap,
-  TIdentified,
-  TAuthorized,
-  TParsed,
->(adapters: {
-  identify: () => MaybePromise<InvocationAdapterResult<T, TIdentified>>;
-  authorize: (identified: TIdentified) => MaybePromise<InvocationAdapterResult<T, TAuthorized>>;
-  parse: (authorized: TAuthorized) => MaybePromise<InvocationAdapterResult<T, TParsed>>;
-}): Promise<InvocationAdapterResult<T, TParsed>> {
-  const identified = await adapters.identify();
-  if (identified.outcome === "failed") return identified;
-  const authorized = await adapters.authorize(identified.value);
-  const afterAuthorize = mergeInvocationUpdates(identified.updates, authorized.updates);
-  if (authorized.outcome === "failed") {
-    return { outcome: "failed", error: authorized.error, updates: afterAuthorize };
-  }
-  const parsed = await adapters.parse(authorized.value);
-  return {
-    ...parsed,
-    updates: mergeInvocationUpdates(afterAuthorize, parsed.updates),
-  };
-}

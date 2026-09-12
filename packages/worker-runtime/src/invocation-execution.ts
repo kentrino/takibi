@@ -1,15 +1,14 @@
 import type { ActionRegistry, CollectionsDef } from "@takibi/api";
 import type { StorageDriver } from "@takibi/storage";
 import {
-  INVOCATION_ADAPTER_KEYS,
-  jsonResponseFromStatus,
   runInvocation,
   type BoundRunInvocation,
   type InvocationResult,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
 import { defineContainer, inject, type DependencyGraph } from "tatenuki";
 import {
   createTakibiInvocationAdapterFactories,
+  INVOCATION_ADAPTER_KEYS,
   TAKIBI_INVOCATION_REGISTRATION_GRAPH,
   type TakibiAdapterMap,
 } from "./adapter-map";
@@ -29,6 +28,8 @@ import {
   type SpanContext,
   type SpanKind,
 } from "./tracing";
+import { jsonResponseFromStatus } from "./envelope/response";
+import { createBatchTakibiCall, createSingleTakibiCall } from "./envelope/invocation";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
 type Notified<TContext extends object, TServices> = InvocationResult<
@@ -117,24 +118,58 @@ function createInstrumentedInvocationRun<TContext extends object, TServices>(dep
     );
 }
 
+type LocalSingleRequest<TContext> = Readonly<{
+  context: TContext;
+  wireInvocation: TakibiWireInvocation;
+}>;
+
+type LocalBatchRequest<TContext> = Readonly<{
+  context: TContext;
+  items: readonly CollectionReadRequest[];
+}>;
+
 function createLocalExecution<TContext extends object, TServices>(deps: {
   invocationRun: BoundRunInvocation<TakibiMap<TContext, TServices>>;
   invocationRuntime: TakibiInvocationRuntime<TContext, TServices>;
   localRequest: Request | undefined;
 }): LocalExecution<TContext, TServices> {
+  type Map = TakibiMap<TContext, TServices>;
   const run = (context: TContext, wireInvocation: TakibiWireInvocation) =>
     deps.invocationRun({ request: { wireInvocation, context } });
   const toSingleResponse = invocationToWireResponse(deps);
   const toBatchResponse = invocationsToBatchWireResponse(deps);
-  const execute = async (context: TContext, wireInvocation: TakibiWireInvocation) =>
-    toSingleResponse({ invocation: await run(context, wireInvocation) });
-  const executeBatch = async (context: TContext, items: readonly CollectionReadRequest[]) => {
-    const invocations: Notified<TContext, TServices>[] = [];
-    for (const wireInvocation of items) {
-      invocations.push(await run(context, wireInvocation));
-    }
-    return toBatchResponse({ invocations });
-  };
+  // Local requests are already decoded wire payloads; the envelope runners own
+  // the single and sequential batch loops.
+  const executeSingle = createSingleTakibiCall<
+    LocalSingleRequest<TContext>,
+    LocalSingleRequest<TContext>,
+    Map,
+    WireResponse
+  >({
+    invocationRun: deps.invocationRun,
+    callRuntimeChecks: undefined,
+    callDecode: (request) => request,
+    callResolveContext: ({ decoded }) => decoded.context,
+    callGetWireInvocation: ({ decoded }) => decoded.wireInvocation,
+    callToSingleResponse: ({ invocation }) => toSingleResponse({ invocation }),
+  });
+  const executeBatchCall = createBatchTakibiCall<
+    LocalBatchRequest<TContext>,
+    LocalBatchRequest<TContext>,
+    Map,
+    WireResponse
+  >({
+    invocationRun: deps.invocationRun,
+    callRuntimeChecks: undefined,
+    callDecode: (request) => request,
+    callResolveContext: ({ decoded }) => decoded.context,
+    callGetWireInvocations: ({ decoded }) => decoded.items,
+    callToBatchResponse: ({ invocations }) => toBatchResponse({ invocations }),
+  });
+  const execute = (context: TContext, wireInvocation: TakibiWireInvocation) =>
+    executeSingle({ context, wireInvocation });
+  const executeBatch = (context: TContext, items: readonly CollectionReadRequest[]) =>
+    executeBatchCall({ context, items });
 
   return {
     run,

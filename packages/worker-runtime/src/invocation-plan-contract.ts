@@ -1,6 +1,5 @@
-import { TakibiContractConfigurationError } from "./request";
+import type { ExecutionPlan, TransactionBoundary } from "@takibi/invocation-lifecycle";
 import type { CollectionOperation } from "@takibi/shared-types";
-import type { ExecutionPlan, TransactionBoundary } from "./type";
 
 export type ActionPlanTarget = "document" | "detached";
 
@@ -17,6 +16,8 @@ export type CollectionPlanCriteria = Readonly<{
 
 export type TransactionPlanCriteria = ActionPlanCriteria | CollectionPlanCriteria;
 
+export function transactionBoundaryOf(criteria: CollectionPlanCriteria): "none" | "apply";
+export function transactionBoundaryOf(criteria: TransactionPlanCriteria): TransactionBoundary;
 export function transactionBoundaryOf(criteria: TransactionPlanCriteria): TransactionBoundary {
   if (criteria.kind === "action") {
     if (criteria.target === "document" && criteria.atomic) return "full";
@@ -58,9 +59,6 @@ export function createCollectionExecutionPlan<TWork>(
   work: TWork,
 ): ExecutionPlan<TWork, TWork, never> {
   const transactionBoundary = transactionBoundaryOf(criteria);
-  if (transactionBoundary === "full") {
-    throw new TakibiContractConfigurationError("Collection plans cannot use the full boundary");
-  }
   if (transactionBoundary === "apply") return { transactionBoundary, work };
   return { transactionBoundary: "none", work };
 }

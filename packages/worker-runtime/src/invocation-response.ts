@@ -1,8 +1,8 @@
 import {
-  jsonResponseFromStatus,
   type InternalInvocationFailure,
   type InvocationResult,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
+import { jsonResponseFromStatus } from "./envelope/response";
 import { emitFailure, requestLogFields, type InternalLogger } from "./logging";
 import type { TakibiFailure } from "@takibi/shared-types";
 import {

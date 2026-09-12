@@ -1,15 +1,16 @@
 {
-  "name": "@takibi/worker-runtime-contract",
+  "name": "@takibi/invocation-lifecycle",
   "version": "0.0.0",
   "private": true,
-  "description": "Call and invocation contracts for Takibi Worker runtimes.",
+  "description": "Platform-independent lifecycle for one Takibi invocation.",
   "keywords": [
-    "contract",
     "internal",
+    "invocation",
+    "lifecycle",
     "runtime",
     "takibi"
   ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/worker-runtime-contract",
+  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/invocation-lifecycle",
   "bugs": {
     "url": "https://github.com/kentrino/takibi/issues"
   },
@@ -17,7 +18,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/worker-runtime-contract"
+    "directory": "packages/invocation-lifecycle"
   },
   "files": [
     "dist",
@@ -45,13 +46,7 @@
     "test": "vp test",
     "check": "vp check"
   },
-  "dependencies": {
-    "@standard-schema/spec": "catalog:",
-    "@takibi/api": "workspace:^",
-    "@takibi/logger": "workspace:^",
-    "@takibi/policy": "workspace:^",
-    "@takibi/shared-types": "workspace:^"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:",

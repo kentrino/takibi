@@ -1,7 +1,7 @@
 import {
   createActionExecutionPlan,
   createCollectionExecutionPlan,
-} from "@takibi/worker-runtime-contract";
+} from "./invocation-plan-contract";
 import type { ClassifiedAction } from "./action-resolution";
 import type { ExecuteRequest } from "./executor";
 import type { TakibiActionWork, TakibiCollectionWork } from "./invocation-type-map";

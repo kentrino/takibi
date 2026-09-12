@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
-import { Call, runCall, type CallFailureInput } from "@takibi/worker-runtime-contract";
+import { Call, runCall, type CallFailureInput } from "../src/envelope/call";
 
 type DecodedRequest = { readonly kind: "action"; readonly name: string };
 type ResolvedContext = { readonly tenantId: string };
