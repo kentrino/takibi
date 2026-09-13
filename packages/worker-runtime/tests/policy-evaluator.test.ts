@@ -4,8 +4,8 @@ import { defineCollection, type CollectionDefinition } from "@takibi/api";
 import { fullAccess, none, type AccessContext } from "@takibi/policy";
 import type { WithMetadata } from "@takibi/shared-types";
 import {
+  createPolicyEvaluator,
   PolicyEvaluator,
-  tracePolicyEvaluator,
   type PolicySurface,
 } from "../src/invocation-collaborators";
 
@@ -46,7 +46,7 @@ test("one evaluator accepts different typed collections and a contract override"
     evaluateCollection: (def, ctx, opts) => evaluator.evaluateCollection(def, ctx, opts),
     evaluateAction: (...args) => evaluator.evaluateAction(...args),
   };
-  for (const policy of [evaluator, override, tracePolicyEvaluator(evaluator, undefined)]) {
+  for (const policy of [evaluator, override, createPolicyEvaluator(undefined)]) {
     expect(await policy.evaluateCollection(visits, visitCtx, options)).toBe(fullAccess);
     expect(await policy.evaluateCollection(invoices, invoiceCtx, options)).toBe(fullAccess);
   }
@@ -78,7 +78,7 @@ void rejectMismatches;
 
 test("typed collection evaluation preserves denial and concealment", async () => {
   const denied = defineCollection({ schema: visits.schema, accessPolicy: none });
-  const evaluator = tracePolicyEvaluator(new PolicyEvaluator(), undefined);
+  const evaluator = createPolicyEvaluator(undefined);
   await expect(evaluator.evaluateCollection(denied, visitCtx, options)).rejects.toMatchObject({
     code: "FORBIDDEN",
   });
