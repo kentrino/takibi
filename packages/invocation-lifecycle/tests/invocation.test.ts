@@ -203,6 +203,33 @@ test("adapter runtime views preserve prototype capabilities without exposing sto
   expect(view.runtime).not.toHaveProperty("storage");
 });
 
+test("adapter runtime views preserve frozen own capabilities without exposing storage", () => {
+  const frozenRuntime = Object.freeze({
+    storage: { scope: "base" as const },
+    prefix: "runtime",
+    capability(): string {
+      return `${this.prefix}:available`;
+    },
+  });
+  type FrozenRuntimeSpec = Omit<Spec, "runtime"> & {
+    runtime: typeof frozenRuntime;
+  };
+  const state = new InvocationState<FrozenRuntimeSpec>(
+    { wireInvocation: request.wireInvocation, context: request.context },
+    frozenRuntime,
+  );
+  state.start();
+  state.acceptInvocation(publicInvocation);
+  state.acceptPlan({
+    outcome: "succeeded",
+    value: { transactionBoundary: "none", work: { key: "work" } },
+  });
+
+  const view = state.executionView();
+  expect(view.runtime.capability()).toBe("runtime:available");
+  expect(view.runtime).not.toHaveProperty("storage");
+});
+
 test("replacing fields on an adapter view cannot change carrier fields", () => {
   const state = new InvocationState(request, runtime);
   initialize(state);
