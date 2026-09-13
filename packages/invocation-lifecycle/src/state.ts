@@ -26,8 +26,17 @@ function projectRuntime<T extends InternalInvocationTypeMap>(
 ): Omit<InternalInvocationRuntime<T>, "storage"> {
   const descriptors = Object.getOwnPropertyDescriptors(runtime);
   Reflect.deleteProperty(descriptors, "storage");
-  const runtimeView = Object.create(Object.getPrototypeOf(runtime), descriptors);
   const boundCapabilities = new WeakMap<object, object>();
+  for (const descriptor of Object.values(descriptors)) {
+    if (typeof descriptor.value !== "function") continue;
+    const capability = descriptor.value;
+    const cached = boundCapabilities.get(capability);
+    const bound = cached ?? capability.bind(runtime);
+    boundCapabilities.set(capability, bound);
+    boundCapabilities.set(bound, bound);
+    descriptor.value = bound;
+  }
+  const runtimeView = Object.create(Object.getPrototypeOf(runtime), descriptors);
   return new Proxy(runtimeView, {
     get(target, property) {
       if (property === "storage") return undefined;
