@@ -58,6 +58,29 @@ test("traced infers async method arguments and instruments one method map", asyn
   ]);
 });
 
+test("method maps may instrument methods named name and event", async () => {
+  const events: LogEvent[] = [];
+  const wrapped = traced(
+    {
+      async name(): Promise<string> {
+        return "name";
+      },
+      async event(): Promise<string> {
+        return "event";
+      },
+    },
+    capture(events),
+    {
+      name: { name: "probe.name", event: "takibi.action" },
+      event: { name: "probe.event", event: "takibi.schema" },
+    },
+  );
+
+  expect(await wrapped.name()).toBe("name");
+  expect(await wrapped.event()).toBe("event");
+  expect(events.map(({ event }) => event)).toEqual(["takibi.action", "takibi.schema"]);
+});
+
 function rejectInvalidMethods(instance: Probe) {
   traced(instance, undefined, {
     // @ts-expect-error unknown methods are not traceable

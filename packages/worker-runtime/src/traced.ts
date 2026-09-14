@@ -59,7 +59,10 @@ export function traced(
 function isFunctionSpec(
   instrumentation: TracedSpec<readonly unknown[]> | TracedMethodMap<object>,
 ): instrumentation is TracedSpec<readonly unknown[]> {
-  return "name" in instrumentation && "event" in instrumentation;
+  return (
+    typeof Reflect.get(instrumentation, "name") === "string" &&
+    typeof Reflect.get(instrumentation, "event") === "string"
+  );
 }
 
 function traceMethods<T extends object>(
