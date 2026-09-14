@@ -914,6 +914,7 @@ test("instrumentation contract stays off the public root", () => {
     | "createRecordingTracer"
     | "TakibiTracer"
     | "TakibiSpan"
-    | "TakibiInstrumentation";
+    | "TakibiInstrumentation"
+    | "CloudflareTakibiInstrumentation";
   expectTypeOf<Extract<Hidden, keyof PublicModule>>().toBeNever();
 });

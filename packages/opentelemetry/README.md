@@ -1,6 +1,11 @@
 # @takibi/opentelemetry
 
-OpenTelemetry integration for `takibi`. The core package has no
+OpenTelemetry integration for `takibi`. This package maps Takibi spans onto the OpenTelemetry API. For Cloudflare
+Workers dashboard traces, use `@takibi/cloudflare-tracing` instead. Do not
+enable both adapters in the same isolate; they share Takibi's process-local
+tracer registry.
+
+The core package has no
 OpenTelemetry runtime or peer dependency; install this package with
 `@opentelemetry/api` only in applications that enable tracing. Treat
 `takibi` as a peer of the same version the application imports.

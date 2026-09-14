@@ -15,10 +15,11 @@ Public packages:
 | `@takibi/hono-adapter`        | `packages/hono-adapter`        | https://www.npmjs.com/package/@takibi/hono-adapter/access        |
 | `@takibi/better-auth-adapter` | `packages/better-auth-adapter` | https://www.npmjs.com/package/@takibi/better-auth-adapter/access |
 | `@takibi/opentelemetry`       | `packages/opentelemetry`       | https://www.npmjs.com/package/@takibi/opentelemetry/access       |
+| `@takibi/cloudflare-tracing`  | `packages/cloudflare-tracing`  | https://www.npmjs.com/package/@takibi/cloudflare-tracing/access  |
 
 A package must already exist on npm before you can add a trusted publisher.
-All four public packages are on npm. If you add a new public package, publish
-it once with `vp pm publish` first, as described in `initial-publish-npm.md`.
+The first four public packages are on npm. `@takibi/cloudflare-tracing` still
+needs a first `vp pm publish` as described in `initial-publish-npm.md`.
 
 Do not use `npm publish`. npm does not apply `publishConfig.exports`, so the
 tarball keeps source `exports` that point at missing `src` files.

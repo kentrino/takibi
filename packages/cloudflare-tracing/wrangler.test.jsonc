@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "takibi-cloudflare-tracing-tests",
+  "main": "./tests/worker.ts",
+  "compatibility_date": "2026-08-18",
+  "observability": {
+    "traces": {
+      "enabled": true,
+    },
+  },
+}

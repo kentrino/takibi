@@ -14,7 +14,8 @@ import { createClient } from "takibi/client";
 The official public API is `createTakibi`, policy helpers, and errors on
 `takibi` and `createClient` on `takibi/client`.
 OpenTelemetry support is distributed separately as
-`@takibi/opentelemetry`.
+`@takibi/opentelemetry`. Cloudflare Workers dashboard traces use
+`@takibi/cloudflare-tracing`.
 
 ## AuthN vs AuthZ
 
@@ -1065,6 +1066,9 @@ Install `@takibi/opentelemetry` to enable OpenTelemetry spans and,
 optionally, map permitted `LogEvent` values to OpenTelemetry Logs. The
 integration package owns its OpenTelemetry peer dependencies, adapters, setup
 documentation, and tests; the core package has no OpenTelemetry dependency.
+Install `@takibi/cloudflare-tracing` to map the same Takibi spans onto
+Workers native `enterSpan` for the Cloudflare dashboard. That adapter does
+not require `nodejs_compat`. Do not enable both adapters in one isolate.
 Export logs and traces to the same observability backend when you need native
 trace-log correlation. `logger: true` writes structured console output only; it
 does not export OpenTelemetry logs. See the integration package README for

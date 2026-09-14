@@ -18,6 +18,7 @@ Do these tasks after this procedure:
 | `@takibi/hono-adapter`        | `packages/hono-adapter`        |
 | `@takibi/better-auth-adapter` | `packages/better-auth-adapter` |
 | `@takibi/opentelemetry`       | `packages/opentelemetry`       |
+| `@takibi/cloudflare-tracing`  | `packages/cloudflare-tracing`  |
 
 Internal workspace packages stay `private` and are not published. The public
 SDK inlines them at pack time.

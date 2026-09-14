@@ -15,13 +15,13 @@ import {
   type AccessContext,
   type AccessGrant,
 } from "@takibi/policy";
-import { assertJsonValue, withTracing } from "@takibi/utility";
+import { assertJsonValue } from "@takibi/utility";
 import type { JsonValue, WithMetadata } from "@takibi/shared-types";
-import { withLoggedSpan } from "./logging";
 import type { InternalLogger } from "./logging";
 import { actionSpanAttributes, collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
-import { SchemaParser, traceSchemaParser } from "./schema";
+import { SchemaParser } from "./schema";
 import { resolveGateGrant, type ActionInvocation } from "./action-gate";
+import { traced } from "./traced";
 
 export type { SchemaSurface } from "./schema";
 
@@ -117,89 +117,63 @@ export class ActionHandler implements ActionHandlerSurface {
   }
 }
 
-export function tracePolicyEvaluator(
-  policy: PolicyEvaluator,
-  logger: InternalLogger | undefined,
-): PolicySurface {
-  const withCollection = withTracing(policy, {
-    method: "evaluateCollection",
-    span: TAKIBI_SPAN.policy,
-    kind: "internal",
-    attributes: (_def, accessCtx, options) =>
-      collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
-    run: (spec, fn, args) => {
-      const accessCtx = args[1];
-      const options = args[2];
-      return withLoggedSpan(
-        logger,
-        spec,
-        {
-          event: "takibi.policy",
-          collection: accessCtx.collection,
-          operation: accessCtx.operation,
-          ...(options.id === undefined ? {} : { documentId: options.id }),
-          ...(accessCtx.where === undefined ? {} : { query: accessCtx.where }),
-        },
-        fn,
-      );
+export function createPolicyEvaluator(logger: InternalLogger | undefined): PolicySurface {
+  return traced(new PolicyEvaluator(), logger, {
+    evaluateCollection: {
+      name: TAKIBI_SPAN.policy,
+      kind: "internal",
+      event: "takibi.policy",
+      attributes: ([_def, accessCtx, options]) =>
+        collectionSpanAttributes(accessCtx.collection, accessCtx.operation, options.id),
+      logFields: ([_def, accessCtx, options]) => ({
+        collection: accessCtx.collection,
+        operation: accessCtx.operation,
+        ...(options.id === undefined ? {} : { documentId: options.id }),
+        ...(accessCtx.where === undefined ? {} : { query: accessCtx.where }),
+      }),
     },
-  });
-  return withTracing(withCollection, {
-    method: "evaluateAction",
-    span: TAKIBI_SPAN.policy,
-    kind: "internal",
-    attributes: (_definition, _actionCtx, invocation) =>
-      actionSpanAttributes(invocation.name, invocation.scope),
-    run: (spec, fn, args) => {
-      const invocation = args[2];
-      return withLoggedSpan(
-        logger,
-        spec,
-        {
-          event: "takibi.policy",
-          ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
-          operation: invocation.name,
-          ...(invocation.id === undefined ? {} : { documentId: invocation.id }),
-        },
-        fn,
-      );
+    evaluateAction: {
+      name: TAKIBI_SPAN.policy,
+      kind: "internal",
+      event: "takibi.policy",
+      attributes: ([_definition, _actionCtx, invocation]) =>
+        actionSpanAttributes(invocation.name, invocation.scope),
+      logFields: ([_definition, _actionCtx, invocation]) => ({
+        ...(invocation.scope === "$" ? {} : { collection: invocation.scope }),
+        operation: invocation.name,
+        ...(invocation.id === undefined ? {} : { documentId: invocation.id }),
+      }),
     },
-  });
-}
-
-export function traceActionHandler(
-  handler: ActionHandler,
-  ctor: ActionHandlerCtor,
-): ActionHandlerSurface {
-  return withTracing(handler, {
-    method: "run",
-    span: TAKIBI_SPAN.action,
-    kind: "internal",
-    attributes: () => actionSpanAttributes(ctor.actionName ?? "", ctor.actionScope ?? "$"),
-    run: (spec, fn) =>
-      withLoggedSpan(
-        ctor.logger,
-        spec,
-        {
-          event: "takibi.action",
-          ...(ctor.actionScope === undefined || ctor.actionScope === "$"
-            ? {}
-            : { collection: ctor.actionScope }),
-          ...(ctor.actionName === undefined ? {} : { operation: ctor.actionName }),
-          ...(ctor.documentId === undefined ? {} : { documentId: ctor.documentId }),
-        },
-        fn,
-      ),
   });
 }
 
 export function createInvocationCollaborators(ctor: InvocationSpanCtor) {
   return {
-    policy: tracePolicyEvaluator(new PolicyEvaluator(), ctor.logger),
-    schema: traceSchemaParser(new SchemaParser(), ctor.logger),
+    policy: createPolicyEvaluator(ctor.logger),
+    schema: traced(new SchemaParser(), ctor.logger, {
+      parse: {
+        name: TAKIBI_SPAN.schema,
+        kind: "internal",
+        event: "takibi.schema",
+      },
+    }),
   };
 }
 
-export function createActionHandler(ctor: ActionHandlerCtor) {
-  return traceActionHandler(new ActionHandler({ definition: ctor.definition }), ctor);
+export function createActionHandler(ctor: ActionHandlerCtor): ActionHandlerSurface {
+  return traced(new ActionHandler({ definition: ctor.definition }), ctor.logger, {
+    run: {
+      name: TAKIBI_SPAN.action,
+      kind: "internal",
+      event: "takibi.action",
+      attributes: () => actionSpanAttributes(ctor.actionName ?? "", ctor.actionScope ?? "$"),
+      logFields: () => ({
+        ...(ctor.actionScope === undefined || ctor.actionScope === "$"
+          ? {}
+          : { collection: ctor.actionScope }),
+        ...(ctor.actionName === undefined ? {} : { operation: ctor.actionName }),
+        ...(ctor.documentId === undefined ? {} : { documentId: ctor.documentId }),
+      }),
+    },
+  });
 }

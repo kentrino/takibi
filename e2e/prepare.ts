@@ -13,6 +13,7 @@ export const PUBLIC_PACKAGES = [
   { dir: "packages/hono-adapter", name: "@takibi/hono-adapter" },
   { dir: "packages/better-auth-adapter", name: "@takibi/better-auth-adapter" },
   { dir: "packages/opentelemetry", name: "@takibi/opentelemetry" },
+  { dir: "packages/cloudflare-tracing", name: "@takibi/cloudflare-tracing" },
 ] as const;
 
 const CONSUMER_RUNTIME_PACKAGES = ["takibi", "@takibi/hono-adapter"] as const;
@@ -61,6 +62,8 @@ export function prepare(): void {
     "@takibi/better-auth-adapter",
     "--filter",
     "@takibi/opentelemetry",
+    "--filter",
+    "@takibi/cloudflare-tracing",
     "run",
     "build",
   ]);

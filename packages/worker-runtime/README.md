@@ -40,3 +40,17 @@ belong to their respective packages.
 The runtime depends inward on the Takibi domain packages and
 `@takibi/invocation-lifecycle`. Node SQLite remains isolated in
 `@takibi/testing`; browser clients do not reach this package.
+
+## Instrumentation wrappers
+
+`traced` instruments async methods on one class instance with a single method
+map, or instruments one async function with a single spec. It binds the
+runtime logger and uses the shared span and log lifecycle while preserving the
+wrapped value's result, exception, receiver, private fields, and property
+behavior. Domain classes do not inherit tracing behavior.
+
+Request scopes and other lexical blocks continue to use `withSpan`.
+`withLoggedSpan` remains the low-level span and log helper for lexical work and
+the executor settlement span, which needs the live span. `tracedStorage`
+continues to re-wrap transaction-scoped storage because a flat method map
+cannot express that relationship.

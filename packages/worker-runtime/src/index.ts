@@ -135,8 +135,7 @@ export {
   type JsonValidationOptions,
 } from "@takibi/utility";
 export { asTakibiResult, normalizeValidationIssues, toTakibiFailure } from "./result";
-export { otel } from "./otel";
-export type { OtelMethodSpec, OtelSpec } from "./otel";
+export { traced, type TracedMethodMap, type TracedSpec } from "./traced";
 export {
   emitFailure,
   loggedStorage,

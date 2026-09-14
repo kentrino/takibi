@@ -23,6 +23,7 @@ pnpm add takibi
 | [`@takibi/hono-adapter`](./packages/hono-adapter)               | Hono middleware for Takibi HTTP handlers                     |
 | [`@takibi/better-auth-adapter`](./packages/better-auth-adapter) | Better Auth adapter                                          |
 | [`@takibi/opentelemetry`](./packages/opentelemetry)             | Optional OpenTelemetry integration                           |
+| [`@takibi/cloudflare-tracing`](./packages/cloudflare-tracing)   | Optional Cloudflare Workers native tracing adapter           |
 
 Internal workspace packages are private and are not published. Import
 `takibi` or an adapter, not `@takibi/policy` and friends.

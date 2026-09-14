@@ -6,6 +6,7 @@ import * as TestingBridge from "@takibi/worker-runtime/testing-bridge";
 test("root entry exposes the Worker runtime contract", () => {
   expectTypeOf(Runtime.createTakibi).toBeFunction();
   expectTypeOf(Runtime.createDurableObjectClass).toBeFunction();
+  expectTypeOf(Runtime.traced).toBeFunction();
   expectTypeOf<Runtime.HandleResult>().not.toBeNever();
   expectTypeOf(Runtime).not.toHaveProperty("assignTakibiBrand");
   expectTypeOf(Runtime).not.toHaveProperty("readTakibiBrand");

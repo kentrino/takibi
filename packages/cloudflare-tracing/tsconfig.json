@@ -5,6 +5,8 @@
     "moduleDetection": "force",
     "module": "esnext",
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "types": ["node", "@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
     "strict": true,
     "noUnusedLocals": true,
     "declaration": true,
