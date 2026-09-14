@@ -40,8 +40,8 @@ pnpm ready
 `pnpm ready` type-checks, tests, and builds every workspace package.
 
 Publishing uses Release Please and npm trusted publishing. See
-`docs/playbook/` for the human steps (GitHub App credentials, the first
-adapter publish, and trusted publishers).
+`docs/playbook/` for GitHub App access, trusted publishers, and first
+publish of a new public package.
 
 ## License
 

@@ -12,12 +12,12 @@ Do these tasks after this procedure:
 
 # Published packages
 
-| npm name | Directory |
-| --- | --- |
-| `takibi` | `packages/takibi` |
-| `@takibi/hono-adapter` | `packages/hono-adapter` |
+| npm name                      | Directory                      |
+| ----------------------------- | ------------------------------ |
+| `takibi`                      | `packages/takibi`              |
+| `@takibi/hono-adapter`        | `packages/hono-adapter`        |
 | `@takibi/better-auth-adapter` | `packages/better-auth-adapter` |
-| `@takibi/opentelemetry` | `packages/opentelemetry` |
+| `@takibi/opentelemetry`       | `packages/opentelemetry`       |
 
 Internal workspace packages stay `private` and are not published. The public
 SDK inlines them at pack time.
@@ -36,10 +36,18 @@ SDK inlines them at pack time.
 
 - `takibi@0.0.1` exists and is owned by `kentrino`. The published
   `repository.url` still points at `diaree/takibi`, and `exports` are broken.
-  Leave that version in place. The next `takibi` version must come from
-  `vp pm publish` (or the Release workflow) so `exports` point at `dist`.
-- `@takibi/hono-adapter`, `@takibi/better-auth-adapter`, and
-  `@takibi/opentelemetry` are not on npm yet.
+  Leave that version in place. Source `packages/takibi` is `0.0.1` so
+  Release Please and packed adapter peers line up with npm. The next core
+  version must come from `vp pm publish` or the Release workflow so `exports`
+  point at `dist`.
+- `@takibi/hono-adapter@0.0.0`, `@takibi/better-auth-adapter@0.0.0`, and
+  `@takibi/opentelemetry@0.0.0` are on npm with `kentrino/takibi` repository
+  metadata. Their published `peerDependencies.takibi` is `^0.0.0`, which does
+  not match `takibi@0.0.1`. The next adapter release must pack after core is
+  `0.0.1` so the peer rewrites to `^0.0.1`.
+
+Do not republish `takibi@0.0.1`. Do not use this procedure for packages that
+are already on npm.
 
 # Step 1. (Human) Log in to npm
 
@@ -51,31 +59,27 @@ If `npm whoami` does not show `kentrino`, run `npm login`. Run `npm view` and
 `npm whoami` outside this repository. The workspace `devEngines` field rejects
 npm as the package manager.
 
-# Step 2. (Human) Publish each missing adapter
+# Step 2. (Human) Publish a package that is not on npm yet
 
-From the repository root:
-
-```sh
-pnpm --filter takibi --filter @takibi/hono-adapter --filter @takibi/better-auth-adapter --filter @takibi/opentelemetry run build
-```
-
-For each unpublished package, inspect the tarball, then publish:
+From the repository root, build the new package, inspect the tarball, then
+publish from that package directory:
 
 ```sh
-cd packages/hono-adapter
+pnpm --filter <npm-name> run build
+cd <package-directory>
 pnpm pack --dry-run
 vp pm publish --access public --no-git-checks
 cd ../..
 ```
-
-Repeat for `packages/better-auth-adapter` and `packages/opentelemetry`.
 
 Look at the `pnpm pack --dry-run` output and the printed `exports` map.
 
 - The tarball must include `dist`, `package.json`, `README.md`, and `LICENSE`.
 - The tarball must not include `src` or tests.
 - `exports` must point at `dist/*.mjs` and `dist/*.d.mts`.
-- `peerDependencies.takibi` must not contain `workspace:`.
+- Dependency specs must not contain `workspace:` or `catalog:`.
+- Adapter `peerDependencies.takibi` must be `^` plus the current
+  `packages/takibi` version, not `workspace:`.
 - `repository.url` must be `git+https://github.com/kentrino/takibi.git`.
 
 If the dry-run still shows source `exports` or `workspace:` / `catalog:`
@@ -84,8 +88,5 @@ dependency specs, do not publish.
 Confirm the published package:
 
 ```sh
-npm view @takibi/hono-adapter name version --prefix /tmp
+npm view <npm-name> name version --prefix /tmp
 ```
-
-Do not republish `takibi@0.0.1`. The next core version is the first Release
-Please version after `0.0.1`.

@@ -64,5 +64,8 @@ The following workflows use these credentials:
 - `.github/workflows/release.yml`
 - `.github/workflows/pinact.yml`
 
-Set both values before merging this work to `main`. A push to `main` starts
-the Release workflow, and that job fails until the app token can be created.
+`RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY` are already set on
+`kentrino/takibi`. Confirm they still exist, and that the GitHub App
+installation includes this repository, before merging to `main`. A push to
+`main` starts the Release workflow, and that job fails until the app token
+can be created.

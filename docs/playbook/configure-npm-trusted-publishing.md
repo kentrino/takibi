@@ -9,17 +9,16 @@ GitHub Actions workflow through OpenID Connect (OIDC).
 
 Public packages:
 
-| npm name | Directory | Access settings |
-| --- | --- | --- |
-| `takibi` | `packages/takibi` | https://www.npmjs.com/package/takibi/access |
-| `@takibi/hono-adapter` | `packages/hono-adapter` | https://www.npmjs.com/package/@takibi/hono-adapter/access |
+| npm name                      | Directory                      | Access settings                                                  |
+| ----------------------------- | ------------------------------ | ---------------------------------------------------------------- |
+| `takibi`                      | `packages/takibi`              | https://www.npmjs.com/package/takibi/access                      |
+| `@takibi/hono-adapter`        | `packages/hono-adapter`        | https://www.npmjs.com/package/@takibi/hono-adapter/access        |
 | `@takibi/better-auth-adapter` | `packages/better-auth-adapter` | https://www.npmjs.com/package/@takibi/better-auth-adapter/access |
-| `@takibi/opentelemetry` | `packages/opentelemetry` | https://www.npmjs.com/package/@takibi/opentelemetry/access |
+| `@takibi/opentelemetry`       | `packages/opentelemetry`       | https://www.npmjs.com/package/@takibi/opentelemetry/access       |
 
 A package must already exist on npm before you can add a trusted publisher.
-`takibi@0.0.1` is published. The adapters are not. Publish each missing
-package once with `vp pm publish` before this procedure, as described in
-`initial-publish-npm.md`.
+All four public packages are on npm. If you add a new public package, publish
+it once with `vp pm publish` first, as described in `initial-publish-npm.md`.
 
 Do not use `npm publish`. npm does not apply `publishConfig.exports`, so the
 tarball keeps source `exports` that point at missing `src` files.
@@ -113,6 +112,8 @@ rejects npm as the package manager.
    to `kentrino/takibi` and `release.yml`.
 5. Confirm that `exports` point at `dist/*.mjs` and `dist/*.d.mts`, not
    `src`.
+6. For adapters, confirm `peerDependencies.takibi` is `^` plus the current
+   `packages/takibi` version.
 
 If publishing fails with `ENEEDAUTH`, first compare the npm trusted publisher
 values with the GitHub owner, repository, and workflow filename. Also confirm
