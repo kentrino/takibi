@@ -1,5 +1,19 @@
 # Package Boundaries
 
+# Semble Code Search
+
+- Use the Semble `search` MCP tool first when locating an implementation or
+  discovering relevant files. Pass the repository root as `repo`.
+- Search once with a focused description of the behavior or symbol, then read
+  the returned file at the reported line. Do not repeat the same discovery with
+  Grep or Glob.
+- Use `content: docs`, `content: config`, or `content: all` when the answer is
+  not limited to source code.
+- Use Semble `find_related` with a returned file and line to discover similar
+  implementations.
+- Use Grep when every literal occurrence is required, such as all callers
+  affected by a rename.
+
 Evaluate a proposed package boundary in this order:
 
 - **Change closure:** Related changes stay inside the package in most cases.
