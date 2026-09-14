@@ -1,0 +1,21 @@
+name: takibi
+version: 1.0.0
+description: APM project for takibi
+author: kentrino
+targets:
+  - claude
+  - codex
+  - cursor
+dependencies:
+  apm: []
+  mcp:
+    - name: semble
+      registry: false
+      transport: stdio
+      command: mise
+      args:
+        - exec
+        - --
+        - semble
+includes: auto
+scripts: {}
