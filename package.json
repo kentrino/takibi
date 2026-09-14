@@ -25,8 +25,10 @@
     "prepare": "vp config"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "publint": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },
