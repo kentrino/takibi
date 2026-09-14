@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "separate-pull-requests": true,
+  "bump-minor-pre-major": true,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "refactor", "section": "Refactoring" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "test", "section": "Tests" },
+    { "type": "ci", "section": "CI/CD" },
+    { "type": "chore", "section": "Miscellaneous" }
+  ],
+  "plugins": ["node-workspace"],
+  "packages": {
+    "packages/takibi": {
+      "release-type": "node",
+      "package-name": "takibi",
+      "component": "takibi"
+    },
+    "packages/hono-adapter": {
+      "release-type": "node",
+      "package-name": "@takibi/hono-adapter",
+      "component": "hono-adapter"
+    },
+    "packages/better-auth-adapter": {
+      "release-type": "node",
+      "package-name": "@takibi/better-auth-adapter",
+      "component": "better-auth-adapter"
+    },
+    "packages/opentelemetry": {
+      "release-type": "node",
+      "package-name": "@takibi/opentelemetry",
+      "component": "opentelemetry"
+    }
+  }
+}
