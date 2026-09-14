@@ -76,6 +76,7 @@ export function createMigratingStorage(
         currentVersion: currentVersion(definition),
         transform: async (stored) => {
           const migrated = await migrateDocument(definition, storage, collection, stored, logger);
+          if (!migrated) return null;
           return plan ? plan.transform(migrated) : migrated;
         },
       });
@@ -94,29 +95,21 @@ async function migrateDocument(
   collection: string,
   stored: StoredDocument,
   logger?: InternalLogger,
-): Promise<WithMetadata<Record<string, unknown>>> {
+): Promise<WithMetadata<Record<string, unknown>> | null> {
   const storedVersion = readStoredVersion(stored);
   const targetVersion = currentVersion(definition);
 
   if (storedVersion === targetVersion) return withoutVersion(stored);
 
   const initiallyMigrated = await migrateStoredDocument(definition, stored, logger);
-  let committed: StoredDocument | undefined;
-  await storage.transaction(async (scoped) => {
+  const committed = await storage.transaction(async (scoped) => {
     const current = await scoped.get(collection, stored.id);
-    if (!current) {
-      throw new TakibiError(
-        "MIGRATION_CONFLICT",
-        `Document disappeared during migration: ${stored.id}`,
-        409,
-      );
-    }
+    if (!current) return null;
     const migrated = sameMigrationSource(current, stored)
       ? initiallyMigrated
       : await migrateStoredDocument(definition, current, logger);
     if (readStoredVersion(migrated) === targetVersion && migrated === current) {
-      committed = current;
-      return;
+      return current;
     }
     assertDocumentIndexFields(definition, collection, migrated);
     await assertUniqueDocument(
@@ -127,9 +120,9 @@ async function migrateDocument(
       currentDocumentReadPlan(definition, logger),
     );
     await scoped.put(collection, migrated);
-    committed = migrated;
+    return migrated;
   });
-  return withoutVersion(committed!);
+  return committed ? withoutVersion(committed) : null;
 }
 
 function sameMigrationSource(left: StoredDocument, right: StoredDocument): boolean {

@@ -513,6 +513,7 @@ async function paginate(
     for (const item of chunk) {
       startAfter = item.id;
       const document = plan ? await plan.transform(item.document) : item.document;
+      if (document === null) continue;
       if (prepared.where && !matchesQuery(document, prepared.where)) continue;
       if (page.length === prepared.limit) {
         const last = page.at(-1)!;
@@ -555,6 +556,11 @@ async function paginateIndex(
 
     for (const item of chunk) {
       const document = plan ? await plan.transform(item.document) : item.document;
+      if (document === null) {
+        const values = extractIndexValues(item.document, resolved.index.fields);
+        if (values !== undefined) startAfter = { values, id: item.id };
+        continue;
+      }
       const values = extractIndexValues(document, resolved.index.fields);
       if (values === undefined) continue;
       startAfter = { values, id: document.id };

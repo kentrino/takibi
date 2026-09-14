@@ -8,7 +8,7 @@ export type StoredDocument = WithMetadata<Record<string, unknown>> & {
 
 export type StorageReadTransform = (
   document: StoredDocument,
-) => Promise<WithMetadata<Record<string, unknown>>>;
+) => Promise<WithMetadata<Record<string, unknown>> | null>;
 
 export type StorageListPlan = {
   currentVersion: number;

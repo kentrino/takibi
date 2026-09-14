@@ -64,6 +64,50 @@ function legacy(id: string, data: Record<string, unknown>): StoredDocument {
   return { ...data, id, createdAt: CREATED_AT, updatedAt: UPDATED_AT };
 }
 
+function migratingPostsDefinition() {
+  return {
+    schema: z.object({ title: z.string(), published: z.boolean() }),
+    migrations: {
+      steps: [
+        (data: unknown) => ({
+          ...(data as { title: string }),
+          published: true,
+        }),
+      ] as const,
+    },
+    accessPolicy: fullAccess,
+  };
+}
+
+function gateBeforeFirstTransaction(raw: StorageDriver): {
+  storage: StorageDriver;
+  entered: Promise<void>;
+  release: () => void;
+} {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let intercept = true;
+  return {
+    storage: {
+      ...raw,
+      transaction(callback) {
+        if (!intercept) return raw.transaction(callback);
+        intercept = false;
+        enter();
+        return released.then(() => raw.transaction(callback));
+      },
+    },
+    entered,
+    release,
+  };
+}
+
 test("missing markers migrate in order once, validate, write back, and stay private", async () => {
   const stepInputs: unknown[] = [];
   const policyDocs: unknown[] = [];
@@ -552,6 +596,42 @@ test("lazy migration rechecks its source before replacing a concurrently updated
     title: "new",
     published: true,
     rev: 2,
+    $schemaVersion: 1,
+  });
+});
+
+test("lazy migration get returns null when the source row disappears", async () => {
+  const raw = createDurableObjectStorage(createInspectableDurableObjectStorage().storage);
+  await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
+  const { storage, entered, release } = gateBeforeFirstTransaction(raw);
+  const migrating = createMigratingStorage({ posts: migratingPostsDefinition() }, storage);
+  const migration = migrating.get("posts", "p1");
+  await entered;
+  await raw.delete("posts", "p1");
+  release();
+
+  await expect(migration).resolves.toBeNull();
+  await expect(raw.get("posts", "p1")).resolves.toBeNull();
+});
+
+test("lazy migration list omits a row that disappeared before persistence", async () => {
+  const raw = createDurableObjectStorage(createInspectableDurableObjectStorage().storage);
+  await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
+  await raw.put("posts", legacy("p2", { title: "keep" }) as import("../src/types").StoredDocument);
+  const { storage, entered, release } = gateBeforeFirstTransaction(raw);
+  const migrating = createMigratingStorage({ posts: migratingPostsDefinition() }, storage);
+  const listing = migrating.list("posts");
+  await entered;
+  await raw.delete("posts", "p1");
+  release();
+
+  await expect(listing).resolves.toMatchObject({
+    items: [{ id: "p2", title: "keep", published: true }],
+  });
+  await expect(raw.get("posts", "p1")).resolves.toBeNull();
+  await expect(raw.get("posts", "p2")).resolves.toMatchObject({
+    title: "keep",
+    published: true,
     $schemaVersion: 1,
   });
 });
