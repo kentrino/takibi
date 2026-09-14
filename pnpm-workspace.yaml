@@ -5,6 +5,7 @@ packages:
 catalogMode: prefer
 
 catalog:
+  "@arethetypeswrong/cli": ^0.18.5
   "@better-auth/test-utils": 1.6.26
   "@cloudflare/vitest-pool-workers": ^0.21.3
   "@noble/hashes": ^2.4.0
@@ -15,6 +16,7 @@ catalog:
   better-auth: 1.6.26
   citty: ^0.2.2
   hono: ^4.13.1
+  publint: ^0.3.12
   tatenuki: 0.2.0
   typescript: ^7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@0.2.8

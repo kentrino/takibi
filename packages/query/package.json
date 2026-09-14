@@ -3,21 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Typed query construction and evaluation for Takibi.",
-  "keywords": [
-    "query",
-    "takibi",
-    "typescript"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/query",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/query"
-  },
   "files": [
     "dist",
     "README.md",

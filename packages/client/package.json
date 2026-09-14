@@ -3,22 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Typed HTTP client for Takibi collections and actions.",
-  "keywords": [
-    "client",
-    "http",
-    "takibi",
-    "typescript"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/client",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/client"
-  },
   "files": [
     "dist",
     "README.md",

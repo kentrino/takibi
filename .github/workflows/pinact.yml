@@ -1,0 +1,24 @@
+name: Pinact
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinact:
+    name: Pin Actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Pin actions
+        uses: suzuki-shunsuke/pinact-action@3132770ecce73073bcd618342c7f4092ed2f994c # v3.0.0
+        with:
+          app_id: ${{ vars.RELEASE_BOT_APP_ID }}
+          app_private_key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}

@@ -3,21 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Logical snapshot streaming and maintenance coordination for Takibi.",
-  "keywords": [
-    "maintenance",
-    "snapshot",
-    "takibi"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/snapshot",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/snapshot"
-  },
   "files": [
     "dist",
     "README.md",

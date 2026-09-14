@@ -2,6 +2,10 @@
 
 `@takibi/hono-adapter` mounts a Takibi HTTP handler on Hono.
 
+```sh
+npm install @takibi/hono-adapter
+```
+
 ```ts
 import { Hono, type Context } from "hono";
 import { takibiServer } from "@takibi/hono-adapter";

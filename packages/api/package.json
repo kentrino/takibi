@@ -3,22 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Collection and action definition language for Takibi.",
-  "keywords": [
-    "actions",
-    "collections",
-    "takibi",
-    "typescript"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/api",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/api"
-  },
   "files": [
     "dist",
     "README.md",

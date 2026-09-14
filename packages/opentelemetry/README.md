@@ -7,6 +7,10 @@ OpenTelemetry runtime or peer dependency; install this package with
 A second copy of the core package isolates the tracer registry, so
 `enable()` succeeds and spans stay silent.
 
+```sh
+npm install takibi @takibi/opentelemetry @opentelemetry/api
+```
+
 Install the binding with its peers:
 
 ```bash

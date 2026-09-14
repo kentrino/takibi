@@ -1,13 +1,21 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findTarball, PUBLIC_PACKAGES, tarballDir, tarballStem } from "./prepare.ts";
+import { findTarball, PUBLIC_PACKAGES, repoRoot, tarballDir, tarballStem } from "./prepare.ts";
+
+// Generic packaging and type-resolution checks are delegated to publint
+// (lint-packed.ts) and attw (run.ts). This file only pins the Takibi-specific
+// contract that those tools cannot know about.
 
 type PackedManifest = {
   name: string;
+  version: string;
   private?: boolean;
   files?: string[];
   exports?: Record<string, unknown>;
+  repository?: { url?: string };
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
@@ -42,56 +50,50 @@ function dependencyValues(manifest: PackedManifest): string[] {
   ];
 }
 
-test("every public package packs the published export map", () => {
+test("public packages ship publishable manifests without workspace internals", () => {
   assert.ok(tarballDir.endsWith("e2e/.tarballs"));
 
   for (const pkg of PUBLIC_PACKAGES) {
     const { files, manifest } = packedManifest(pkg.name);
+    const source = JSON.parse(readFileSync(join(repoRoot, pkg.dir, "package.json"), "utf8")) as {
+      version: string;
+    };
     assert.equal(manifest.name, pkg.name);
+    assert.equal(manifest.version, source.version);
     assert.equal(manifest.private, undefined);
     assert.deepEqual(manifest.files, ["dist", "README.md", "LICENSE"]);
-    assert.ok(files.includes("package/package.json"));
-    assert.ok(files.includes("package/README.md"));
-    assert.ok(files.includes("package/LICENSE"));
-    assert.ok(files.some((file) => file.startsWith("package/dist/") && file.endsWith(".mjs")));
-    assert.ok(files.some((file) => file.startsWith("package/dist/") && file.endsWith(".d.mts")));
+    for (const doc of ["package/README.md", "package/LICENSE"]) {
+      assert.ok(files.includes(doc), `${pkg.name} tarball is missing ${doc}`);
+    }
     assert.equal(
       files.some((file) => file.startsWith("package/src/")),
       false,
       `${pkg.name} tarball leaked src`,
     );
     assert.equal(JSON.stringify(manifest.exports ?? {}).includes("./src/"), false);
+    assert.match(JSON.stringify(manifest.repository ?? {}), /github\.com\/kentrino\/takibi/);
     for (const spec of dependencyValues(manifest)) {
       assert.doesNotMatch(spec, /^(?:workspace|catalog):/);
     }
   }
 });
 
-test("packed takibi inlines workspace packages and keeps entry boundaries", () => {
-  const { files, manifest } = packedManifest("takibi");
-  assert.deepEqual(manifest.exports, {
-    ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
-    "./client": { types: "./dist/client.d.mts", import: "./dist/client.mjs" },
-    "./instrumentation": {
-      types: "./dist/instrumentation.d.mts",
-      import: "./dist/instrumentation.mjs",
-    },
-    "./testing": { types: "./dist/testing.d.mts", import: "./dist/testing.mjs" },
-    "./package.json": "./package.json",
-  });
-  for (const file of [
-    "package/dist/index.mjs",
-    "package/dist/index.d.mts",
-    "package/dist/client.mjs",
-    "package/dist/client.d.mts",
-    "package/dist/instrumentation.mjs",
-    "package/dist/instrumentation.d.mts",
-    "package/dist/testing.mjs",
-    "package/dist/testing.d.mts",
-  ]) {
-    assert.ok(files.includes(file), file);
-  }
+test("public packages expose the documented subpath entries", () => {
+  const subpaths = (name: string): string[] =>
+    Object.keys(packedManifest(name).manifest.exports ?? {});
+  assert.deepEqual(subpaths("takibi"), [
+    ".",
+    "./client",
+    "./instrumentation",
+    "./testing",
+    "./package.json",
+  ]);
+  assert.deepEqual(subpaths("@takibi/hono-adapter"), [".", "./package.json"]);
+  assert.deepEqual(subpaths("@takibi/better-auth-adapter"), [".", "./package.json"]);
+  assert.deepEqual(subpaths("@takibi/opentelemetry"), [".", "./logs", "./package.json"]);
+});
 
+test("packed takibi inlines workspace packages and keeps entry boundaries", () => {
   const indexJs = tarText(findTarball("takibi"), "package/dist/index.mjs");
   const indexDts = tarText(findTarball("takibi"), "package/dist/index.d.mts");
   const clientJs = tarText(findTarball("takibi"), "package/dist/client.mjs");
@@ -113,23 +115,20 @@ test("packed takibi inlines workspace packages and keeps entry boundaries", () =
   assert.match(testingJs, /node:sqlite/);
 });
 
-test("packed adapter manifests rewrite workspace peers", () => {
+test("packed adapters rewrite the workspace takibi peer to the packed version", () => {
+  const takibiVersion = packedManifest("takibi").manifest.version;
+  const expectedTakibiPeer = `^${takibiVersion}`;
+
   const hono = packedManifest("@takibi/hono-adapter");
-  assert.deepEqual(hono.manifest.exports, {
-    ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
-    "./package.json": "./package.json",
-  });
-  assert.match(hono.manifest.peerDependencies?.takibi ?? "", /^\^?0\.0\.0$/);
+  assert.equal(hono.manifest.peerDependencies?.takibi, expectedTakibiPeer);
   assert.equal(hono.manifest.peerDependencies?.hono, "^4.13.1");
 
   const betterAuth = packedManifest("@takibi/better-auth-adapter");
-  assert.match(betterAuth.manifest.peerDependencies?.takibi ?? "", /^\^?0\.0\.0$/);
+  assert.equal(betterAuth.manifest.peerDependencies?.takibi, expectedTakibiPeer);
   assert.doesNotMatch(JSON.stringify(betterAuth.manifest.peerDependencies ?? {}), /workspace:/);
 
   const otel = packedManifest("@takibi/opentelemetry");
-  assert.ok(otel.files.includes("package/dist/logs.mjs"));
-  assert.ok(otel.files.includes("package/dist/logs.d.mts"));
-  assert.match(otel.manifest.peerDependencies?.takibi ?? "", /^\^?0\.0\.0$/);
+  assert.equal(otel.manifest.peerDependencies?.takibi, expectedTakibiPeer);
 });
 
 test("tarball names stay scoped to the published package", () => {

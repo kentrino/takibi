@@ -2,6 +2,15 @@
 
 Typed multi-tenant collection store on Cloudflare Durable Objects — with end-to-end types from `typeof handler` to `createClient`, REST-shaped HTTP, tenant isolation, and access control.
 
+```sh
+npm install takibi
+```
+
+```ts
+import { createTakibi, fullAccess } from "takibi";
+import { createClient } from "takibi/client";
+```
+
 The official public API is `createTakibi`, policy helpers, and errors on
 `takibi` and `createClient` on `takibi/client`.
 OpenTelemetry support is distributed separately as
