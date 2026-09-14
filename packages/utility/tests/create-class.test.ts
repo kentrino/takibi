@@ -206,14 +206,14 @@ test("newWithInterceptors merges layers and wraps the previous hook via next", (
     },
     {
       greet: ({ args, next }) => {
-        order.push("otel");
-        return `otel ${next(...args)}`;
+        order.push("outer");
+        return `outer ${next(...args)}`;
       },
     },
   );
 
-  expect(instance.greet("ada")).toBe("otel class hi ada");
-  expect(order).toEqual(["otel", "class"]);
+  expect(instance.greet("ada")).toBe("outer class hi ada");
+  expect(order).toEqual(["outer", "class"]);
   expect(instance.count()).toBe(99);
 });
 

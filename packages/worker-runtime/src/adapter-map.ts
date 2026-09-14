@@ -9,15 +9,16 @@ import {
 } from "./invocation-adapters";
 import {
   createActionHandler,
-  PolicyEvaluator,
-  tracePolicyEvaluator,
+  createPolicyEvaluator,
   type ActionHandlerCtor,
   type ActionHandlerSurface,
   type PolicySurface,
 } from "./invocation-collaborators";
 import { InvocationPrepareApply } from "./invocation-prepare-apply";
-import { SchemaParser, traceSchemaParser, type SchemaSurface } from "./schema";
+import { SchemaParser, type SchemaSurface } from "./schema";
 import type { TakibiInvocationRuntime, TakibiInvocationTypeMap } from "./invocation-type-map";
+import { TAKIBI_SPAN } from "./otel-helper";
+import { traced } from "./traced";
 
 type TakibiMap<TContext extends object, TServices> = TakibiInvocationTypeMap<TContext, TServices>;
 
@@ -97,11 +98,17 @@ export function createTakibiInvocationAdapterFactories<
     invocationPolicy: ({
       invocationRuntime,
     }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
-      tracePolicyEvaluator(new PolicyEvaluator(), invocationRuntime.logger),
+      createPolicyEvaluator(invocationRuntime.logger),
     invocationSchema: ({
       invocationRuntime,
     }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
-      traceSchemaParser(new SchemaParser(), invocationRuntime.logger),
+      traced(new SchemaParser(), invocationRuntime.logger, {
+        parse: {
+          name: TAKIBI_SPAN.schema,
+          kind: "internal",
+          event: "takibi.schema",
+        },
+      }),
     invocationActionHandler:
       ({ invocationRuntime }: Pick<TakibiAdapterMap<TContext, TServices>, "invocationRuntime">) =>
       (ctor: ActionHandlerCtor) =>

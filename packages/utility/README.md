@@ -40,10 +40,9 @@ const defined = createClass<Pair>()
 
 const instance = defined.newWithInterceptors(
   { prefix: "hi" },
-  // otel() is an app helper that returns Partial<InterceptMap<Pair, Ctor>>
-  otel(ctx, {
-    greet: { name: "pair.greet" },
-  }),
+  {
+    greet: ({ args, next }) => `intercepted ${next(...args)}`,
+  },
 );
 ```
 
@@ -58,33 +57,3 @@ vp run bench:create-class
 
 The apply function (or identity) always runs at construction so `run`
 receives `deps`. `runtimeCheck` wraps a failing apply with the method name.
-
-## `withTracing`
-
-Wrap one async method of an existing instance. The returned object has the
-same call surface; construction leaves the original instance unchanged. Property
-writes through the wrapper update the original instance, including its setters.
-`method` must already
-return a `Promise`. `run` is the injected span runner so this package does
-not depend on a tracing backend.
-
-```ts
-import { withTracing } from "@takibi/utility";
-
-const call = withTracing(instance, {
-  method: "resolveContext",
-  span: "takibi.resolve",
-  kind: "internal",
-  attributes: ({ decoded }) =>
-    decoded.kind === "batch" ? { "takibi.batch.size": decoded.items.length } : undefined,
-  run: (spec, fn) => withSpan(spec, fn),
-});
-```
-
-The wrapper forwards to the original instance, including frozen instances.
-Non-target methods and
-getters keep that instance as `this`, including `#private` fields. `run`
-receives the method arguments so logs and span attributes can be built from
-the same typed input. `fn` is started at most once, including when `run`
-calls it more than once or returns before it settles. Attribute-builder and
-`run` failures must not replace the method result.

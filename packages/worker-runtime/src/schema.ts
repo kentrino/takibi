@@ -1,8 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { withTracing } from "@takibi/utility";
 import type { InternalLogger } from "./logging";
-import { withLoggedSpan } from "./logging";
 import { TAKIBI_SPAN } from "./otel-helper";
+import { traced } from "./traced";
 
 export type SchemaSurface = {
   parse: <S extends StandardSchemaV1>(
@@ -39,23 +38,17 @@ export class SchemaParser implements SchemaSurface {
   }
 }
 
-export function traceSchemaParser(
-  schema: SchemaParser,
-  logger: InternalLogger | undefined,
-): SchemaSurface {
-  return withTracing(schema, {
-    method: "parse",
-    span: TAKIBI_SPAN.schema,
-    kind: "internal",
-    run: (spec, fn) => withLoggedSpan(logger, spec, { event: "takibi.schema" }, fn),
-  });
-}
-
 export async function parseSchema<S extends StandardSchemaV1>(
   schema: S,
   value: unknown,
   logger?: InternalLogger,
 ): Promise<StandardSchemaV1.InferOutput<S>> {
-  const parser = traceSchemaParser(new SchemaParser(), logger);
+  const parser = traced(new SchemaParser(), logger, {
+    parse: {
+      name: TAKIBI_SPAN.schema,
+      kind: "internal",
+      event: "takibi.schema",
+    },
+  });
   return parser.parse(schema, value);
 }

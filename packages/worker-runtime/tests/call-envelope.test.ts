@@ -206,7 +206,7 @@ test("decoded reaches failure and terminal even when onDecoded throws", async ()
   expect(terminalRequest).toBe("request");
 });
 
-test("Call.run uses this.resolveContext so a subclass or withTracing wrapper is observed", async () => {
+test("Call.run uses this.resolveContext so a subclass or traced wrapper is observed", async () => {
   const events: string[] = [];
   class ProbeCall extends Call<string, { name: string }, { tenantId: string }, { status: number }> {
     override async resolveContext(input: {

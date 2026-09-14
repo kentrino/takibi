@@ -18,12 +18,3 @@ export {
   JSON_MAX_DEPTH,
   type JsonValidationOptions,
 } from "./json";
-export {
-  withTracing,
-  type TracingRunner,
-  type TracingSpanAttributeValue,
-  type TracingSpanAttributes,
-  type TracingSpanKind,
-  type TracingSpanSpec,
-  type WithTracingOptions,
-} from "./with-tracing";
