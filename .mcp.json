@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "semble": {
+      "type": "stdio",
+      "command": "mise",
+      "args": ["exec", "--", "semble"]
+    }
+  }
+}

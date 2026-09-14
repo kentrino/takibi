@@ -1,0 +1,50 @@
+lockfile_version: "1"
+apm_version: 0.30.0
+dependencies: []
+deployments:
+  - kind: uri
+    target: mcp
+    value: semble
+    runtime: claude
+    scope: project
+    owners:
+      - .
+    active_owner: .
+    content_hash: null
+  - kind: uri
+    target: mcp
+    value: semble
+    runtime: codex
+    scope: project
+    owners:
+      - .
+    active_owner: .
+    content_hash: null
+  - kind: uri
+    target: mcp
+    value: semble
+    runtime: cursor
+    scope: project
+    owners:
+      - .
+    active_owner: .
+    content_hash: null
+mcp_servers:
+  - semble
+mcp_configs:
+  semble:
+    name: semble
+    transport: stdio
+    args:
+      - exec
+      - --
+      - semble
+    registry: false
+    command: mise
+mcp_target_servers:
+  claude:
+    - semble
+  codex:
+    - semble
+  cursor:
+    - semble

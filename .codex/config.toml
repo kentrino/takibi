@@ -1,0 +1,6 @@
+[mcp_servers.semble]
+command = "mise"
+args = ["exec", "--", "semble"]
+id = ""
+
+[mcp_servers.semble.env]

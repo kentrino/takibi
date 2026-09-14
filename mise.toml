@@ -1,0 +1,2 @@
+[tools]
+"pipx:semble" = { version = "0.6.0", extras = "mcp" }
