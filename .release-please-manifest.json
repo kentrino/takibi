@@ -2,5 +2,5 @@
   "packages/takibi": "0.0.1",
   "packages/hono-adapter": "0.0.0",
   "packages/better-auth-adapter": "0.0.0",
-  "packages/opentelemetry": "0.0.0"
+  "packages/opentelemetry": "1.0.0"
 }
