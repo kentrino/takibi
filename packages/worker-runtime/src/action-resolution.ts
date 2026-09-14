@@ -8,7 +8,7 @@ import {
   type CollectionsDef,
   type RuntimeActionDefinition,
 } from "@takibi/api";
-import type { ActionHandlerArgs } from "@takibi/worker-runtime-contract";
+import type { ActionHandlerArgs } from "./invocation-collaborators";
 import type { JsonValue } from "@takibi/shared-types";
 import { allows, denialReasonOf, type AccessGrant } from "@takibi/policy";
 import { createPolicyCollections, createTrustedCollections } from "./executor";

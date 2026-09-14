@@ -4,7 +4,7 @@ import {
   executePlan,
   unwrapInvocationAdapterResult,
   type InvocationExecutionView,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
 import { classifyAction } from "./action-resolution";
 import { createTakibiActionPlan } from "./invocation-plan";
 import { toTakibiInvocation } from "./invocation-adapters";
@@ -65,7 +65,7 @@ export async function executeAction<TCtx extends object>(
     input: Object.prototype.hasOwnProperty.call(invocation, "input")
       ? { status: "raw", value: invocation.input }
       : { status: "not-applicable" },
-    runtime: { collections, logger, services },
+    runtime: { collections, registry, logger, services },
   };
   const bound = {
     prepare: async (_work: TakibiActionWork, scopedStorage: StorageDriver) =>

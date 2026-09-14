@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import { Call } from "@takibi/worker-runtime-contract";
+import { Call } from "../src/envelope/call";
 import { resolveWorkerEnvelopeMap } from "@takibi/worker-runtime";
 import { serveDecodedCall } from "../src/context/worker-call";
 import type { Executor, ExecutorInput } from "@takibi/worker-runtime";

@@ -13,13 +13,7 @@ type PackageManifest = {
 
 const packageDir = join(import.meta.dirname, "..");
 const packagesDir = join(packageDir, "..");
-const allowedWorkspace = new Set([
-  "@takibi/api",
-  "@takibi/logger",
-  "@takibi/policy",
-  "@takibi/query",
-  "@takibi/shared-types",
-]);
+const allowedWorkspace = new Set<string>();
 const forbiddenSpecifiers = [
   "takibi",
   "@takibi/client",
@@ -93,7 +87,7 @@ function walkGraph(entryFile: string): Set<string> {
         continue;
       }
       visited.add(specifier);
-      if (allowedWorkspace.has(specifier) || specifier === "@takibi/worker-runtime-contract") {
+      if (allowedWorkspace.has(specifier) || specifier === "@takibi/invocation-lifecycle") {
         try {
           queue.push(resolveWorkspaceEntry(specifier));
         } catch {
@@ -105,40 +99,26 @@ function walkGraph(entryFile: string): Set<string> {
   return visited;
 }
 
-test("contract package keeps a one-way dependency graph", () => {
-  const contract = readManifest(join(packageDir, "package.json"));
-  const api = readManifest(join(packagesDir, "api/package.json"));
-  const policy = readManifest(join(packagesDir, "policy/package.json"));
-  const sharedTypes = readManifest(join(packagesDir, "shared-types/package.json"));
+test("lifecycle package is a dependency-free graph floor", () => {
+  const lifecycle = readManifest(join(packageDir, "package.json"));
   const runtime = readManifest(join(packagesDir, "worker-runtime/package.json"));
 
-  expect(contract.name).toBe("@takibi/worker-runtime-contract");
-  expect(contract.exports?.["."]).toBe("./src/index.ts");
-  expect(contract.files).toEqual(["dist", "README.md", "LICENSE"]);
-  expect(contract.publishConfig?.exports).toMatchObject({
+  expect(lifecycle.name).toBe("@takibi/invocation-lifecycle");
+  expect(lifecycle.exports?.["."]).toBe("./src/index.ts");
+  expect(lifecycle.files).toEqual(["dist", "README.md", "LICENSE"]);
+  expect(lifecycle.publishConfig?.exports).toMatchObject({
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
   });
-  expect(contract.dependencies).toEqual({
-    "@standard-schema/spec": "catalog:",
-    "@takibi/api": "workspace:^",
-    "@takibi/logger": "workspace:^",
-    "@takibi/policy": "workspace:^",
-    "@takibi/shared-types": "workspace:^",
-  });
-  expect(api.dependencies?.["@takibi/worker-runtime-contract"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/worker-runtime-contract"]).toBeUndefined();
-  expect(sharedTypes.dependencies?.["@takibi/worker-runtime-contract"]).toBeUndefined();
-  expect(runtime.dependencies?.["@takibi/worker-runtime-contract"]).toBe("workspace:^");
+  expect(lifecycle.dependencies).toEqual({});
+  expect(runtime.dependencies?.["@takibi/invocation-lifecycle"]).toBe("workspace:^");
+  expect(runtime.dependencies?.["@takibi/worker-runtime-contract"]).toBeUndefined();
 });
 
-test("contract source stays off runtime, storage, and container libraries", () => {
+test("lifecycle source stays platform and Takibi independent", () => {
   const reachable = walkGraph(join(packageDir, "src/index.ts"));
 
-  expect(reachable.has(resolveWorkspaceEntry("@takibi/api"))).toBe(true);
-  expect(reachable.has(resolveWorkspaceEntry("@takibi/logger"))).toBe(true);
-  expect(reachable.has(resolveWorkspaceEntry("@takibi/policy"))).toBe(true);
-  expect(reachable.has(resolveWorkspaceEntry("@takibi/shared-types"))).toBe(true);
-  expect(reachable.has("@standard-schema/spec")).toBe(true);
+  expect([...reachable].filter((value) => value.startsWith("@takibi/"))).toEqual([]);
+  expect(reachable.has("@standard-schema/spec")).toBe(false);
   for (const specifier of forbiddenSpecifiers) {
     expect(reachable.has(specifier)).toBe(false);
   }
@@ -146,7 +126,7 @@ test("contract source stays off runtime, storage, and container libraries", () =
   expect([...reachable].filter((value) => value.startsWith("cloudflare:"))).toEqual([]);
 });
 
-test("published contract declarations do not import runtime or higher-layer modules", () => {
+test("published lifecycle declarations do not import higher-layer modules", () => {
   const dtsPath = join(packageDir, "dist/index.d.mts");
   const jsPath = join(packageDir, "dist/index.mjs");
   if (!existsSync(dtsPath) || !existsSync(jsPath)) return;

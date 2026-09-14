@@ -1,4 +1,4 @@
-import { TakibiContractConfigurationError } from "./request";
+import { InvocationLifecycleConfigurationError } from "./error";
 import { InvocationState } from "./state";
 import {
   type ExecutePlanOptions,
@@ -10,8 +10,6 @@ import {
   type MaybePromise,
   type RunInvocation,
 } from "./type";
-
-export { TakibiContractConfigurationError };
 
 const safeToFailure = <TFailure>(
   toFailure: (error: unknown) => TFailure,
@@ -71,7 +69,7 @@ export const runInvocation: RunInvocation = async function <T extends InternalIn
   } catch (error) {
     state.fail(
       failureStage,
-      error instanceof TakibiContractConfigurationError
+      error instanceof InvocationLifecycleConfigurationError
         ? { kind: "configuration", error }
         : safeToFailure(invocationToFailure, error),
     );
@@ -156,12 +154,12 @@ const executeInvocationPlan = async function <T extends InternalInvocationTypeMa
     plan: state.executionView().plan,
     storage: base,
     runInTransaction: (work) =>
-      createInvocationTransactionScope(
+      createInvocationTransactionRun(
         state,
         adapters.transactionRun,
         adapters.transactionClassifyFailure,
         setFailureStage,
-      ).run(({ storage }) => work(storage)),
+      )(({ storage }) => work(storage)),
     none: {
       prepare: async (work, storage) =>
         state.acceptAdapterResult(
@@ -199,7 +197,7 @@ const executeInvocationPlan = async function <T extends InternalInvocationTypeMa
  * Runs one transaction at the plan-selected boundary while tracking commit and rollback state.
  * Rejects missing or repeated transaction entry.
  */
-const createInvocationTransactionScope = function <T extends InternalInvocationTypeMap>(
+const createInvocationTransactionRun = function <T extends InternalInvocationTypeMap>(
   state: InvocationState<T>,
   runInTransaction:
     | (<TResult>(work: (storage: T["runtime"]["storage"]) => Promise<TResult>) => Promise<TResult>)
@@ -211,51 +209,43 @@ const createInvocationTransactionScope = function <T extends InternalInvocationT
       })
     | undefined,
   setFailureStage: (stage: InternalInvocationFailureStage) => void,
-): {
-  transactionBoundary: "none" | "apply" | "full";
-  wasUsed: () => boolean;
-  run<TResult>(
-    work: (scope: { readonly storage: T["runtime"]["storage"] }) => MaybePromise<TResult>,
-  ): Promise<TResult>;
-} {
+): <TResult>(
+  work: (scope: { readonly storage: T["runtime"]["storage"] }) => MaybePromise<TResult>,
+) => Promise<TResult> {
   let used = false;
-  return {
-    transactionBoundary: state.transactionBoundary(),
-    wasUsed: () => used,
-    async run<TResult>(
-      work: (scope: { readonly storage: T["runtime"]["storage"] }) => MaybePromise<TResult>,
-    ): Promise<TResult> {
-      if (used) {
-        throw new TakibiContractConfigurationError(
-          "Invocation transaction scope may only run once",
-        );
-      }
-      used = true;
-      if (runInTransaction === undefined) {
-        throw new TakibiContractConfigurationError(
-          "Transactional invocation requires runInTransaction",
-        );
-      }
+  return async function run<TResult>(
+    work: (scope: { readonly storage: T["runtime"]["storage"] }) => MaybePromise<TResult>,
+  ): Promise<TResult> {
+    if (used) {
+      throw new InvocationLifecycleConfigurationError(
+        "Invocation transaction scope may only run once",
+      );
+    }
+    used = true;
+    if (runInTransaction === undefined) {
+      throw new InvocationLifecycleConfigurationError(
+        "Transactional invocation requires runInTransaction",
+      );
+    }
 
-      state.beginTransaction();
-      let workCompleted = false;
-      try {
-        const result = await runInTransaction(async (storage) => {
-          const value = await work({ storage });
-          workCompleted = true;
-          return value;
-        });
-        state.completeTransaction();
-        return result;
-      } catch (error) {
-        const failure = classifyFailure?.({ error, workCompleted }) ?? {
-          stage: workCompleted ? ("commit" as const) : ("execute" as const),
-          transaction: "unknown" as const,
-        };
-        setFailureStage(failure.stage);
-        state.abortTransaction(failure.transaction);
-        throw error;
-      }
-    },
+    state.beginTransaction();
+    let workCompleted = false;
+    try {
+      const result = await runInTransaction(async (storage) => {
+        const value = await work({ storage });
+        workCompleted = true;
+        return value;
+      });
+      state.completeTransaction();
+      return result;
+    } catch (error) {
+      const failure = classifyFailure?.({ error, workCompleted }) ?? {
+        stage: workCompleted ? ("commit" as const) : ("execute" as const),
+        transaction: "unknown" as const,
+      };
+      setFailureStage(failure.stage);
+      state.abortTransaction(failure.transaction);
+      throw error;
+    }
   };
 };
