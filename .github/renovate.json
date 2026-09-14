@@ -29,10 +29,6 @@
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true,
       "automergeType": "pr"
-    },
-    {
-      "matchFileNames": [".github/workflows/**", ".github/actions/**"],
-      "enabled": false
     }
   ]
 }
