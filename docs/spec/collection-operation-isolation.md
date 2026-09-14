@@ -13,14 +13,14 @@ preserve them. Single-row operation isolation, lazy migration safety, and truste
 transactions have different responsibilities. Some proposed solutions, however, omit conditions
 that must be resolved before adopting them as specifications.
 
-| Topic | Assessment | Disposition |
-| --- | --- | --- |
-| `full` for `set/update/delete/get` | Appropriate for the current architecture and the PR's purpose | Responsibilities recorded here |
-| External I/O and reentry inside policy | Real risks, but not currently rejected automatically | [Contract documentation issue](../issues/open/0005-policy-io-contract/issue.md) |
-| Long transactions for `list/count` | A valid concern; calling them excessive requires examining guarantees and costs | [Investigation and design issue](../issues/open/0006-list-count-isolation/issue.md) |
-| Routing trusted operations through `executePlan` | No current justification for changing the route | Responsibilities recorded here |
-| Returning `MIGRATION_CONFLICT` for a disappeared row | Treating the row as normally absent is appropriate | Fix and verify in the original PR |
-| Pushing changes and updating the PR title/body | PR completion work, not a code specification | No new issue or spec needed |
+| Topic                                                | Assessment                                                                      | Disposition                                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `full` for `set/update/delete/get`                   | Appropriate for the current architecture and the PR's purpose                   | Responsibilities recorded here                                                      |
+| External I/O and reentry inside policy               | Real risks, but not currently rejected automatically                            | [Contract documentation issue](../issues/open/0005-policy-io-contract/issue.md)     |
+| Long transactions for `list/count`                   | A valid concern; calling them excessive requires examining guarantees and costs | [Investigation and design issue](../issues/open/0006-list-count-isolation/issue.md) |
+| Routing trusted operations through `executePlan`     | No current justification for changing the route                                 | Responsibilities recorded here                                                      |
+| Returning `MIGRATION_CONFLICT` for a disappeared row | Treating the row as normally absent is appropriate                              | Fix and verify in the original PR                                                   |
+| Pushing changes and updating the PR title/body       | PR completion work, not a code specification                                    | No new issue or spec needed                                                         |
 
 ## Guarantees to preserve
 
@@ -48,13 +48,13 @@ operations, rather than depending exclusively on a public operation's `full` bou
 
 ## Current boundaries and ownership
 
-| Layer | Responsibility |
-| --- | --- |
-| `executePlan` in `@takibi/invocation-lifecycle` | Execute generic `none/apply/full` plans without knowledge of ACLs or collection semantics |
-| Plan classification and prepare/apply in `@takibi/worker-runtime` | Select each operation's boundary and compose authorization, revision handling, and mutation |
-| Migrating wrapper in `@takibi/worker-runtime` | Transform and safely persist migrations, including index and uniqueness revalidation |
-| `@takibi/storage` | Coordinate SQL operations and transactions; nested transactions on a scoped driver join the existing transaction |
-| `$transaction` on the trusted facade | Commit or roll back caller-selected operations together within one DO |
+| Layer                                                             | Responsibility                                                                                                   |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `executePlan` in `@takibi/invocation-lifecycle`                   | Execute generic `none/apply/full` plans without knowledge of ACLs or collection semantics                        |
+| Plan classification and prepare/apply in `@takibi/worker-runtime` | Select each operation's boundary and compose authorization, revision handling, and mutation                      |
+| Migrating wrapper in `@takibi/worker-runtime`                     | Transform and safely persist migrations, including index and uniqueness revalidation                             |
+| `@takibi/storage`                                                 | Coordinate SQL operations and transactions; nested transactions on a scoped driver join the existing transaction |
+| `$transaction` on the trusted facade                              | Commit or roll back caller-selected operations together within one DO                                            |
 
 Policy-bound collections currently select `apply` for `add` and `full` for every other
 operation. `full` includes both prepare and apply in the transaction; `apply` includes only
