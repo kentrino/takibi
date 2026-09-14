@@ -1,6 +1,6 @@
 {
   "name": "@takibi/better-auth-adapter",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Better Auth database adapter for trusted Takibi collections.",
   "keywords": [
     "better-auth",
