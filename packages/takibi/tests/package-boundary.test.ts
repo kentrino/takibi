@@ -8,6 +8,7 @@ type PackageManifest = {
   private?: boolean;
   files?: string[];
   exports?: Record<string, string>;
+  repository?: { type?: string; url?: string; directory?: string };
   publishConfig?: { exports?: Record<string, unknown>; access?: string };
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -19,6 +20,24 @@ type PackageManifest = {
 function readManifest(path: string): PackageManifest {
   return JSON.parse(readFileSync(path, "utf8")) as PackageManifest;
 }
+
+test("public packages identify the kentrino/takibi repository", () => {
+  const packages = [
+    ["../package.json", "packages/takibi"],
+    ["../../hono-adapter/package.json", "packages/hono-adapter"],
+    ["../../better-auth-adapter/package.json", "packages/better-auth-adapter"],
+    ["../../opentelemetry/package.json", "packages/opentelemetry"],
+  ] as const;
+
+  for (const [relative, directory] of packages) {
+    const manifest = readManifest(join(import.meta.dirname, relative));
+    expect(manifest.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/kentrino/takibi.git",
+      directory,
+    });
+  }
+});
 
 test("OpenTelemetry integration has its own package dependency boundary", () => {
   const core = readManifest(join(import.meta.dirname, "../package.json"));
