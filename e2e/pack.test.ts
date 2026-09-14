@@ -8,6 +8,7 @@ type PackedManifest = {
   private?: boolean;
   files?: string[];
   exports?: Record<string, unknown>;
+  repository?: { url?: string };
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
@@ -61,6 +62,10 @@ test("every public package packs the published export map", () => {
       `${pkg.name} tarball leaked src`,
     );
     assert.equal(JSON.stringify(manifest.exports ?? {}).includes("./src/"), false);
+    assert.match(
+      JSON.stringify(manifest.repository ?? {}),
+      /github\.com\/kentrino\/takibi/,
+    );
     for (const spec of dependencyValues(manifest)) {
       assert.doesNotMatch(spec, /^(?:workspace|catalog):/);
     }
