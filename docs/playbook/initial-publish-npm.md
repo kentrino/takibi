@@ -43,8 +43,10 @@ SDK inlines them at pack time.
 - `@takibi/hono-adapter@0.0.0`, `@takibi/better-auth-adapter@0.0.0`, and
   `@takibi/opentelemetry@0.0.0` are on npm with `kentrino/takibi` repository
   metadata. Their published `peerDependencies.takibi` is `^0.0.0`, which does
-  not match `takibi@0.0.1`. The next adapter release must pack after core is
-  `0.0.1` so the peer rewrites to `^0.0.1`.
+  not match `takibi@0.0.1`. Source adapters stay at `0.0.0` so Release Please
+  treats them as unpublished and uses `initial-version` `0.1.0`. The next
+  adapter release must pack after core is `0.1.0` so the peer rewrites to
+  `^0.1.0`. Do not let adapters jump to `1.0.0`.
 
 Do not republish `takibi@0.0.1`. Do not use this procedure for packages that
 are already on npm.
