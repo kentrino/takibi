@@ -3,6 +3,18 @@
 Better Auth database adapter for trusted Takibi collections inside one
 SQLite-backed Durable Object.
 
+```sh
+npm install @takibi/better-auth-adapter
+```
+
+```ts
+import {
+  createZodBetterAuthBaseSchemas,
+  defineBetterAuthCollections,
+  takibiAdapter,
+} from "@takibi/better-auth-adapter";
+```
+
 ## Setup
 
 Create the Better Auth core storage schemas from the application's Zod module,
