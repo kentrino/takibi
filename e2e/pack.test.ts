@@ -1,10 +1,13 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findTarball, PUBLIC_PACKAGES, tarballDir, tarballStem } from "./prepare.ts";
+import { findTarball, PUBLIC_PACKAGES, repoRoot, tarballDir, tarballStem } from "./prepare.ts";
 
 type PackedManifest = {
   name: string;
+  version?: string;
   private?: boolean;
   files?: string[];
   exports?: Record<string, unknown>;
@@ -14,6 +17,15 @@ type PackedManifest = {
   optionalDependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
 };
+
+function publishedTakibiVersion(): string {
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, "packages/takibi/package.json"), "utf8"),
+  ) as {
+    version: string;
+  };
+  return manifest.version;
+}
 
 function tarList(tarball: string): string[] {
   return execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).trim().split("\n");
@@ -48,7 +60,11 @@ test("every public package packs the published export map", () => {
 
   for (const pkg of PUBLIC_PACKAGES) {
     const { files, manifest } = packedManifest(pkg.name);
+    const source = JSON.parse(readFileSync(join(repoRoot, pkg.dir, "package.json"), "utf8")) as {
+      version: string;
+    };
     assert.equal(manifest.name, pkg.name);
+    assert.equal(manifest.version, source.version);
     assert.equal(manifest.private, undefined);
     assert.deepEqual(manifest.files, ["dist", "README.md", "LICENSE"]);
     assert.ok(files.includes("package/package.json"));
@@ -62,10 +78,7 @@ test("every public package packs the published export map", () => {
       `${pkg.name} tarball leaked src`,
     );
     assert.equal(JSON.stringify(manifest.exports ?? {}).includes("./src/"), false);
-    assert.match(
-      JSON.stringify(manifest.repository ?? {}),
-      /github\.com\/kentrino\/takibi/,
-    );
+    assert.match(JSON.stringify(manifest.repository ?? {}), /github\.com\/kentrino\/takibi/);
     for (const spec of dependencyValues(manifest)) {
       assert.doesNotMatch(spec, /^(?:workspace|catalog):/);
     }
@@ -74,6 +87,7 @@ test("every public package packs the published export map", () => {
 
 test("packed takibi inlines workspace packages and keeps entry boundaries", () => {
   const { files, manifest } = packedManifest("takibi");
+  assert.equal(manifest.version, publishedTakibiVersion());
   assert.deepEqual(manifest.exports, {
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
     "./client": { types: "./dist/client.d.mts", import: "./dist/client.mjs" },
@@ -119,22 +133,23 @@ test("packed takibi inlines workspace packages and keeps entry boundaries", () =
 });
 
 test("packed adapter manifests rewrite workspace peers", () => {
+  const takibiPeer = `^${publishedTakibiVersion()}`;
   const hono = packedManifest("@takibi/hono-adapter");
   assert.deepEqual(hono.manifest.exports, {
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
     "./package.json": "./package.json",
   });
-  assert.match(hono.manifest.peerDependencies?.takibi ?? "", /^\^?0\.0\.0$/);
+  assert.equal(hono.manifest.peerDependencies?.takibi, takibiPeer);
   assert.equal(hono.manifest.peerDependencies?.hono, "^4.13.1");
 
   const betterAuth = packedManifest("@takibi/better-auth-adapter");
-  assert.match(betterAuth.manifest.peerDependencies?.takibi ?? "", /^\^?0\.0\.0$/);
+  assert.equal(betterAuth.manifest.peerDependencies?.takibi, takibiPeer);
   assert.doesNotMatch(JSON.stringify(betterAuth.manifest.peerDependencies ?? {}), /workspace:/);
 
   const otel = packedManifest("@takibi/opentelemetry");
   assert.ok(otel.files.includes("package/dist/logs.mjs"));
   assert.ok(otel.files.includes("package/dist/logs.d.mts"));
-  assert.match(otel.manifest.peerDependencies?.takibi ?? "", /^\^?0\.0\.0$/);
+  assert.equal(otel.manifest.peerDependencies?.takibi, takibiPeer);
 });
 
 test("tarball names stay scoped to the published package", () => {
