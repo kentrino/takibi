@@ -11,6 +11,7 @@ export default defineConfig({
   },
   fmt: {
     ignorePatterns: [
+      "**/CHANGELOG.md",
       "**/worker-configuration.d.ts",
       ".legacy/**",
       "e2e/consumer-template/**",
