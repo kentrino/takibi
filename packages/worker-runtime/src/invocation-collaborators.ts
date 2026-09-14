@@ -17,32 +17,57 @@ import {
 } from "@takibi/policy";
 import { assertJsonValue, withTracing } from "@takibi/utility";
 import type { JsonValue, WithMetadata } from "@takibi/shared-types";
-import type {
-  ActionHandlerArgs,
-  ActionHandlerCtor,
-  ActionHandlerSurface,
-  InternalLogger,
-  PolicySurface,
-} from "@takibi/worker-runtime-contract";
 import { withLoggedSpan } from "./logging";
+import type { InternalLogger } from "./logging";
 import { actionSpanAttributes, collectionSpanAttributes, TAKIBI_SPAN } from "./otel-helper";
 import { SchemaParser, traceSchemaParser } from "./schema";
 import { resolveGateGrant, type ActionInvocation } from "./action-gate";
 
 export type { SchemaSurface } from "./schema";
-export type {
-  ActionHandlerCtor,
-  ActionHandlerSurface,
-  PolicySurface,
-} from "@takibi/worker-runtime-contract";
 
-export type InvocationSpanCtor = {
+export type PolicySurface = {
+  evaluateCollection: <S extends StandardSchemaV1, TCtx extends object>(
+    def: CollectionDefinition<S, TCtx>,
+    accessCtx: AccessContext<NoInfer<TCtx>, WithMetadata<StandardSchemaV1.InferOutput<NoInfer<S>>>>,
+    options: { conceal: boolean; id?: string },
+  ) => Promise<AccessGrant>;
+  evaluateAction: (
+    definition: RuntimeActionDefinition,
+    actionCtx: unknown,
+    invocation: ActionInvocation,
+    gateContext: ActionGateContext<unknown>,
+    doc?: unknown,
+  ) => Promise<AccessGrant>;
+};
+
+export type ActionHandlerArgs = {
+  ctx: unknown;
+  collections: object;
+  $collections: object;
+  services: unknown;
+  input: unknown;
+  collection?: object;
+  $collection?: object;
+  id?: string;
+  doc?: unknown;
+};
+
+export type ActionHandlerSurface = {
+  run: (args: ActionHandlerArgs) => Promise<JsonValue>;
+};
+
+export type ActionHandlerCtor = {
+  readonly definition: RuntimeActionDefinition;
   readonly logger?: InternalLogger;
   readonly collection?: string;
   readonly operation?: string;
   readonly documentId?: string;
   readonly actionName?: string;
   readonly actionScope?: string;
+};
+
+export type InvocationSpanCtor = {
+  readonly logger?: InternalLogger;
 };
 
 export class PolicyEvaluator implements PolicySurface {

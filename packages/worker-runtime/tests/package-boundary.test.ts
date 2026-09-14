@@ -16,6 +16,7 @@ const packageDir = join(import.meta.dirname, "..");
 const packagesDir = join(packageDir, "..");
 const allowedWorkspace = new Set([
   "@takibi/api",
+  "@takibi/invocation-lifecycle",
   "@takibi/logger",
   "@takibi/policy",
   "@takibi/protocol",
@@ -24,13 +25,13 @@ const allowedWorkspace = new Set([
   "@takibi/snapshot",
   "@takibi/storage",
   "@takibi/utility",
-  "@takibi/worker-runtime-contract",
 ]);
 const forbiddenSpecifiers = [
   "takibi",
   "@takibi/client",
   "@takibi/testing",
   "@takibi/execution-model",
+  "@takibi/worker-runtime-contract",
 ];
 
 function readManifest(path: string): PackageManifest {
@@ -138,6 +139,7 @@ test("worker-runtime package keeps a one-way dependency graph", () => {
   expect(runtime.dependencies).toEqual({
     "@standard-schema/spec": "catalog:",
     "@takibi/api": "workspace:^",
+    "@takibi/invocation-lifecycle": "workspace:^",
     "@takibi/logger": "workspace:^",
     "@takibi/policy": "workspace:^",
     "@takibi/protocol": "workspace:^",
@@ -146,7 +148,6 @@ test("worker-runtime package keeps a one-way dependency graph", () => {
     "@takibi/snapshot": "workspace:^",
     "@takibi/storage": "workspace:^",
     "@takibi/utility": "workspace:^",
-    "@takibi/worker-runtime-contract": "workspace:^",
     tatenuki: "catalog:",
   });
   expect(runtime.dependencies?.hono).toBeUndefined();

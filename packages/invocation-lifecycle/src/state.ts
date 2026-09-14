@@ -1,4 +1,4 @@
-import { TakibiContractConfigurationError, TakibiContractStateError } from "./request";
+import { InvocationLifecycleConfigurationError, InvocationLifecycleStateError } from "./error";
 import {
   toObservedInput,
   type InternalInvocationFailure,
@@ -21,6 +21,39 @@ import {
 
 const UNSET = Symbol("takibi.invocation.unset");
 
+function projectRuntime<T extends InternalInvocationTypeMap>(
+  runtime: InternalInvocationRuntime<T>,
+): Omit<InternalInvocationRuntime<T>, "storage"> {
+  const descriptors = Object.getOwnPropertyDescriptors(runtime);
+  Reflect.deleteProperty(descriptors, "storage");
+  const boundCapabilities = new WeakMap<object, object>();
+  for (const descriptor of Object.values(descriptors)) {
+    if (typeof descriptor.value !== "function") continue;
+    const capability = descriptor.value;
+    const cached = boundCapabilities.get(capability);
+    const bound = cached ?? capability.bind(runtime);
+    boundCapabilities.set(capability, bound);
+    boundCapabilities.set(bound, bound);
+    descriptor.value = bound;
+  }
+  const runtimeView = Object.create(Object.getPrototypeOf(runtime), descriptors);
+  return new Proxy(runtimeView, {
+    get(target, property) {
+      if (property === "storage") return undefined;
+      const value = Reflect.get(target, property, runtime);
+      if (typeof value !== "function") return value;
+      const cached = boundCapabilities.get(value);
+      if (cached !== undefined) return cached;
+      const bound = value.bind(runtime);
+      boundCapabilities.set(value, bound);
+      return bound;
+    },
+    has(target, property) {
+      return property !== "storage" && Reflect.has(target, property);
+    },
+  });
+}
+
 /**
  * The single mutable lifecycle object for one invocation. Payload references in
  * views are shared; the carrier fields themselves are hidden by JavaScript
@@ -30,6 +63,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
   #phase: InternalInvocationPhase = "created";
   readonly #wireInvocation: T["wireInvocation"];
   readonly #runtime: InternalInvocationRuntime<T>;
+  readonly #runtimeView: Omit<InternalInvocationRuntime<T>, "storage">;
   #invocation: T["invocation"] | typeof UNSET = UNSET;
   #plan: InvocationPlan<T> | typeof UNSET = UNSET;
   readonly #baseContext: T["context"];
@@ -51,6 +85,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     this.#baseContext = request.context;
     this.#context = request.context;
     this.#runtime = runtime;
+    this.#runtimeView = projectRuntime<T>(runtime);
     this.#runtimeChecks = runtimeChecks;
   }
 
@@ -66,7 +101,8 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
 
   acceptInvocation(invocation: T["invocation"]): void {
     this.#assertPhase("running");
-    if (this.#invocation !== UNSET) throw new TakibiContractStateError("Invocation is initialized");
+    if (this.#invocation !== UNSET)
+      throw new InvocationLifecycleStateError("Invocation is initialized");
     this.#invocation = invocation;
   }
 
@@ -74,7 +110,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     this.#assertPhase("running");
     this.#initializedInvocation();
     if (this.#input.status !== "not-applicable") {
-      throw new TakibiContractStateError("Invocation input is already initialized");
+      throw new InvocationLifecycleStateError("Invocation input is already initialized");
     }
     this.#input = { status: "raw", value: rawInput };
   }
@@ -95,7 +131,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     this.#assertPhase("running");
     this.#initializedInvocation();
     if (this.#plan !== UNSET) {
-      throw new TakibiContractStateError("Invocation already has a plan");
+      throw new InvocationLifecycleStateError("Invocation already has a plan");
     }
     this.#applyUpdates(result.updates);
     if (result.outcome === "failed") throw result.error;
@@ -112,11 +148,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
       invocation,
       plan,
       input: this.#input,
-      runtime: {
-        collections: this.#runtime.collections,
-        logger: this.#runtime.logger,
-        services: this.#runtime.services,
-      },
+      runtime: this.#runtimeView,
     };
   }
 
@@ -134,16 +166,13 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     return this.#runtime.storage;
   }
 
-  transactionBoundary(): InvocationPlan<T>["transactionBoundary"] {
-    this.#assertPhase("running");
-    return this.#acceptedPlan().transactionBoundary;
-  }
-
   beginTransaction(): void {
     this.#assertPhase("running");
     this.#acceptedPlan();
     if (this.#transaction !== "none") {
-      throw new TakibiContractConfigurationError("Invocation transaction is already in progress");
+      throw new InvocationLifecycleConfigurationError(
+        "Invocation transaction is already in progress",
+      );
     }
     this.#transaction = "open";
   }
@@ -151,7 +180,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
   completeTransaction(): void {
     this.#assertPhase("running");
     if (this.#transaction !== "open") {
-      throw new TakibiContractConfigurationError("Invocation transaction is not open");
+      throw new InvocationLifecycleConfigurationError("Invocation transaction is not open");
     }
     this.#transaction = "committed";
   }
@@ -159,7 +188,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
   abortTransaction(outcome: "rolled-back" | "unknown" = "unknown"): void {
     this.#assertPhase("running");
     if (this.#transaction !== "open") {
-      throw new TakibiContractConfigurationError("Invocation transaction is not open");
+      throw new InvocationLifecycleConfigurationError("Invocation transaction is not open");
     }
     this.#transaction = outcome;
   }
@@ -183,7 +212,8 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
 
   observerEvent(): InvocationObserverEvent<T> {
     this.#assertPhase("settled");
-    if (this.#settlement === UNSET) throw new TakibiContractStateError("Invocation is not settled");
+    if (this.#settlement === UNSET)
+      throw new InvocationLifecycleStateError("Invocation is not settled");
     const plan = this.#plan === UNSET ? undefined : this.#plan;
     const common = {
       phase: "settled" as const,
@@ -214,7 +244,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     if (this.#phase === "notified" && !this.#runtimeChecks) return false;
     this.#assertPhaseAlways("settled");
     if (this.#notification !== UNSET) {
-      throw new TakibiContractStateError("Invocation is already notified");
+      throw new InvocationLifecycleStateError("Invocation is already notified");
     }
     this.#phase = "notifying";
     return true;
@@ -223,7 +253,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
   finishNotification(notification: InternalInvocationNotification): void {
     this.#assertPhaseAlways("notifying");
     if (this.#notification !== UNSET) {
-      throw new TakibiContractStateError("Invocation notification is already recorded");
+      throw new InvocationLifecycleStateError("Invocation notification is already recorded");
     }
     this.#notification = notification;
     this.#phase = "notified";
@@ -234,7 +264,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
     const settlement = this.#settlement;
     const notification = this.#notification;
     if (settlement === UNSET || notification === UNSET) {
-      throw new TakibiContractStateError("Invocation terminal state is incomplete");
+      throw new InvocationLifecycleStateError("Invocation terminal state is incomplete");
     }
     const common = {
       phase: "notified",
@@ -249,7 +279,9 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
       const invocation = this.#invocation;
       const plan = this.#plan;
       if (invocation === UNSET || plan === UNSET) {
-        throw new TakibiContractStateError("Successful invocation terminal state is incomplete");
+        throw new InvocationLifecycleStateError(
+          "Successful invocation terminal state is incomplete",
+        );
       }
       return Object.freeze({
         ...common,
@@ -278,7 +310,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
 
   #settledTransaction(): Exclude<InternalInvocationTransaction, "open"> {
     if (this.#transaction === "open") {
-      throw new TakibiContractStateError("Invocation transaction is still open");
+      throw new InvocationLifecycleStateError("Invocation transaction is still open");
     }
     return this.#transaction;
   }
@@ -286,20 +318,20 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
   #assertCanSettle(): void {
     this.#assertPhase("running");
     if (this.#settlement !== UNSET)
-      throw new TakibiContractStateError("Invocation is already settled");
+      throw new InvocationLifecycleStateError("Invocation is already settled");
     if (this.#transaction === "open") this.#transaction = "unknown";
   }
 
   #initializedInvocation(): T["invocation"] {
     if (this.#invocation === UNSET) {
-      throw new TakibiContractStateError("Invocation is not initialized");
+      throw new InvocationLifecycleStateError("Invocation is not initialized");
     }
     return this.#invocation;
   }
 
   #acceptedPlan(): InvocationPlan<T> {
     if (this.#plan === UNSET) {
-      throw new TakibiContractStateError("Invocation has no plan");
+      throw new InvocationLifecycleStateError("Invocation has no plan");
     }
     return this.#plan;
   }
@@ -310,7 +342,7 @@ export class InvocationState<T extends InternalInvocationTypeMap> {
 
   #assertPhaseAlways(expected: InternalInvocationPhase): void {
     if (this.#phase !== expected) {
-      throw new TakibiContractStateError(
+      throw new InvocationLifecycleStateError(
         `Expected invocation phase ${expected}, got ${this.#phase}`,
       );
     }

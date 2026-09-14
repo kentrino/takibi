@@ -1,8 +1,6 @@
 import { expect, expectTypeOf, test } from "vite-plus/test";
 import type { TakibiFailure } from "@takibi/shared-types";
 import {
-  createBatchTakibiCall,
-  createSingleTakibiCall,
   runInvocation,
   type BoundRunInvocation,
   type InternalInvocationTypeMap,
@@ -11,7 +9,8 @@ import {
   type InvocationPlan,
   type InvocationPlanningView,
   type InvocationResult,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
+import { createBatchTakibiCall, createSingleTakibiCall } from "../src/envelope/invocation";
 
 type ActionWire = {
   readonly kind: "action";
@@ -102,12 +101,12 @@ function toFailure(error: unknown): Failure {
 }
 
 function snapshotObserverEvent<T extends InternalInvocationTypeMap>(
-  event: import("@takibi/worker-runtime-contract").InvocationObserverEvent<T>,
-): import("@takibi/worker-runtime-contract").InvocationObserverEvent<T> {
+  event: import("@takibi/invocation-lifecycle").InvocationObserverEvent<T>,
+): import("@takibi/invocation-lifecycle").InvocationObserverEvent<T> {
   return structuredClone(event);
 }
 
-function toWireResult<T extends InternalInvocationTypeMap>(
+function toWireResult<T extends InternalInvocationTypeMap & { failure: Failure }>(
   state: InvocationResult<T>,
 ): WireResult<T["result"]> {
   return state.settlement.outcome === "succeeded"

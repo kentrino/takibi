@@ -101,7 +101,7 @@ test("protocol packages keep a one-way dependency graph", () => {
   expect(core.devDependencies?.["@takibi/testing"]).toBe("workspace:^");
   expect(core.devDependencies?.["@takibi/utility"]).toBe("workspace:^");
   expect(core.devDependencies?.["@takibi/worker-runtime"]).toBe("workspace:^");
-  expect(core.devDependencies?.["@takibi/worker-runtime-contract"]).toBe("workspace:^");
+  expect(core.devDependencies?.["@takibi/invocation-lifecycle"]).toBe("workspace:^");
   expect(core.devDependencies?.hono).toBe("catalog:");
   expect(core.devDependencies?.["@standard-schema/spec"]).toBe("catalog:");
   expect(Object.keys(core.inlinedDependencies ?? {}).sort()).toEqual([

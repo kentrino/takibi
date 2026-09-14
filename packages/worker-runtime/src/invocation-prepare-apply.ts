@@ -1,12 +1,13 @@
 import type { JsonValue } from "@takibi/shared-types";
 import {
-  composeActionPreparation,
   invocationStageResult,
+  mergeInvocationUpdates,
   type InvocationExecutionView,
   type InvocationAdapterResult,
-  type InvocationPrepareApplyDeps,
+  type InternalInvocationTypeMap,
+  type MaybePromise,
   type PrepareApplyInvocationContract,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
 import type { StorageDriver } from "@takibi/storage";
 import {
   authorizeIdentifiedAction,
@@ -44,7 +45,35 @@ type ExecutionView<TContext extends object, TServices> = InvocationExecutionView
   TakibiMap<TContext, TServices>
 >;
 
-export type { InvocationPrepareApplyDeps } from "@takibi/worker-runtime-contract";
+export type InvocationPrepareApplyDeps = {
+  invocationPolicy: PolicySurface;
+  invocationSchema: SchemaSurface;
+  invocationActionHandler: (ctor: ActionHandlerCtor) => ActionHandlerSurface;
+};
+
+export async function composeActionPreparation<
+  T extends InternalInvocationTypeMap,
+  TIdentified,
+  TAuthorized,
+  TParsed,
+>(adapters: {
+  identify: () => MaybePromise<InvocationAdapterResult<T, TIdentified>>;
+  authorize: (identified: TIdentified) => MaybePromise<InvocationAdapterResult<T, TAuthorized>>;
+  parse: (authorized: TAuthorized) => MaybePromise<InvocationAdapterResult<T, TParsed>>;
+}): Promise<InvocationAdapterResult<T, TParsed>> {
+  const identified = await adapters.identify();
+  if (identified.outcome === "failed") return identified;
+  const authorized = await adapters.authorize(identified.value);
+  const afterAuthorize = mergeInvocationUpdates(identified.updates, authorized.updates);
+  if (authorized.outcome === "failed") {
+    return { outcome: "failed", error: authorized.error, updates: afterAuthorize };
+  }
+  const parsed = await adapters.parse(authorized.value);
+  return {
+    ...parsed,
+    updates: mergeInvocationUpdates(afterAuthorize, parsed.updates),
+  };
+}
 
 /**
  * One prepare/apply implementation for none / apply / full. Direct
@@ -219,7 +248,7 @@ function validatedActionInput<TContext extends object, TServices>(resolved: {
   readonly definition: { readonly inputSchema?: unknown };
   readonly invocation: object;
   readonly input: TakibiMap<TContext, TServices>["input"];
-}): import("@takibi/worker-runtime-contract").InvocationUpdates<
+}): import("@takibi/invocation-lifecycle").InvocationUpdates<
   TakibiMap<TContext, TServices>
 >["input"] {
   return resolved.definition.inputSchema !== undefined ||

@@ -18,6 +18,7 @@ const forbiddenSpecifiers = [
   "takibi",
   "@takibi/api",
   "@takibi/client",
+  "@takibi/invocation-lifecycle",
   "@takibi/policy",
   "@takibi/protocol",
   "@takibi/query",
@@ -108,7 +109,6 @@ function walkGraph(entryFile: string): Set<string> {
 test("logger package keeps a one-way dependency graph", () => {
   const logger = readManifest(join(packageDir, "package.json"));
   const sharedTypes = readManifest(join(packagesDir, "shared-types/package.json"));
-  const contract = readManifest(join(packagesDir, "worker-runtime-contract/package.json"));
   const runtime = readManifest(join(packagesDir, "worker-runtime/package.json"));
 
   expect(logger.name).toBe("@takibi/logger");
@@ -121,13 +121,13 @@ test("logger package keeps a one-way dependency graph", () => {
     "@takibi/shared-types": "workspace:^",
   });
   expect(sharedTypes.dependencies?.["@takibi/logger"]).toBeUndefined();
-  expect(contract.dependencies?.["@takibi/logger"]).toBe("workspace:^");
   expect(runtime.dependencies?.["@takibi/logger"]).toBe("workspace:^");
+  expect(logger.dependencies?.["@takibi/invocation-lifecycle"]).toBeUndefined();
   expect(logger.dependencies?.["@takibi/worker-runtime-contract"]).toBeUndefined();
   expect(logger.dependencies?.["@takibi/worker-runtime"]).toBeUndefined();
 });
 
-test("logger source stays off runtime, contract, and container libraries", () => {
+test("logger source stays off runtime, lifecycle, and container libraries", () => {
   const reachable = walkGraph(join(packageDir, "src/index.ts"));
 
   expect(reachable.has(resolveWorkspaceEntry("@takibi/shared-types"))).toBe(true);
@@ -138,7 +138,7 @@ test("logger source stays off runtime, contract, and container libraries", () =>
   expect([...reachable].filter((value) => value.startsWith("cloudflare:"))).toEqual([]);
 });
 
-test("published logger declarations do not import runtime or contract modules", () => {
+test("published logger declarations do not import runtime or lifecycle modules", () => {
   const dtsPath = join(packageDir, "dist/index.d.mts");
   const jsPath = join(packageDir, "dist/index.mjs");
   if (!existsSync(dtsPath) || !existsSync(jsPath)) return;
@@ -147,6 +147,8 @@ test("published logger declarations do not import runtime or contract modules", 
   const js = readFileSync(jsPath, "utf8");
   expect(dts).not.toContain("@takibi/worker-runtime");
   expect(js).not.toContain("@takibi/worker-runtime");
+  expect(dts).not.toContain("@takibi/invocation-lifecycle");
+  expect(js).not.toContain("@takibi/invocation-lifecycle");
   expect(dts).not.toContain("@takibi/worker-runtime-contract");
   expect(js).not.toContain("@takibi/worker-runtime-contract");
   expect(dts).not.toContain("hono");

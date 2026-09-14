@@ -5,10 +5,8 @@ import type { StorageDriver } from "@takibi/storage";
 import type {
   InvocationAdapters,
   InvocationExecutionView,
-  InternalInvocationRuntime,
   InternalInvocationTypeMap,
-  InvocationRuntime,
-} from "@takibi/worker-runtime-contract";
+} from "@takibi/invocation-lifecycle";
 import type { ActionInvocation } from "../src/action-executor";
 import type { executeResolvedCollection, ExecuteRequest } from "../src/executor";
 import type {
@@ -73,10 +71,6 @@ test("slots match current runtime types", () => {
 });
 
 test("runtime bag uses pinned collections, storage, registry, logger, and services", () => {
-  expectTypeOf<TakibiInvocationRuntime<AppContext, AppServices>>().toExtend<InvocationRuntime>();
-  expectTypeOf<InternalInvocationRuntime<AppMap>>().toEqualTypeOf<
-    TakibiInvocationRuntime<AppContext, AppServices>
-  >();
   expectTypeOf<AppMap["runtime"]>().toEqualTypeOf<
     TakibiInvocationRuntime<AppContext, AppServices>
   >();

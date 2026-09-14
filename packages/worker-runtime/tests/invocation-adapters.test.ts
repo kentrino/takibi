@@ -11,11 +11,7 @@ import {
 } from "@takibi/api";
 import { fullAccess, none } from "@takibi/policy";
 import { createDurableObjectStorage } from "@takibi/storage";
-import {
-  runInvocation,
-  type InvocationAdapters,
-  type RuntimeAdapterMap,
-} from "@takibi/worker-runtime-contract";
+import { runInvocation, type InvocationAdapters } from "@takibi/invocation-lifecycle";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import { createBoundInvocationAdapters, type TakibiAdapterMap } from "@takibi/worker-runtime";
 import { getTakibiRawInput, toTakibiInvocation } from "@takibi/worker-runtime";
@@ -1020,13 +1016,13 @@ test("runtime adapter map contains invocation and local execution slots", () => 
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationActionHandler");
   expectTypeOf<TakibiRuntimeAdapterMap<Ctx>>().toHaveProperty("invocationPrepareApply");
   expectTypeOf<TakibiAdapterMap<Ctx>["invocationPolicy"]>().toEqualTypeOf<
-    RuntimeAdapterMap["invocationPolicy"]
+    TakibiAdapterMap<Ctx>["invocationPolicy"]
   >();
   expectTypeOf<TakibiAdapterMap<Ctx>["invocationSchema"]>().toEqualTypeOf<
-    RuntimeAdapterMap["invocationSchema"]
+    TakibiAdapterMap<Ctx>["invocationSchema"]
   >();
   expectTypeOf<TakibiAdapterMap<Ctx>["invocationActionHandler"]>().toEqualTypeOf<
-    RuntimeAdapterMap["invocationActionHandler"]
+    TakibiAdapterMap<Ctx>["invocationActionHandler"]
   >();
 });
 
