@@ -1,9 +1,8 @@
 import { Call, ENVELOPE_ADAPTER_GRAPH, type EnvelopeAdapterMap } from "../envelope/call";
 import { jsonResponseFromStatus } from "../envelope/response";
-import { withTracing } from "@takibi/utility";
 import { defineContainer, inject, type DependencyGraph } from "tatenuki";
 import type { PublicRequest } from "../http";
-import { requestLogFields, withLoggedSpan, type InternalLogger } from "../logging";
+import { requestLogFields, type InternalLogger } from "../logging";
 import { batchSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import type { WireResponse } from "../protocol";
 import {
@@ -14,6 +13,7 @@ import {
   type SpanContext,
   type TakibiTracer,
 } from "../tracing";
+import { traced } from "../traced";
 import type { Executor } from "./executors";
 import { assertSerializableContext, errorResponse, invocationFields } from "./runtime";
 import type { ContextResolver, InternalCollectionsOptions } from "./types";
@@ -93,44 +93,33 @@ function createCallResolveContext<TInitial, TCtx extends object>({
   TInitial,
   TCtx
 >["callResolveContext"] {
-  const adapter = {
-    async resolveContext(input: {
-      request: Request;
-      decoded: PublicRequest;
-    }): Promise<WorkerResolvedCall<TCtx>> {
-      const context = await contextResolver({
-        request: input.request,
-        context: initial,
-      });
-      assertSerializableContext(context);
-      return {
-        context,
-        resolveSpan: activeSpanContext(),
-      };
-    },
+  const resolveContext = async (input: {
+    request: Request;
+    decoded: PublicRequest;
+  }): Promise<WorkerResolvedCall<TCtx>> => {
+    const context = await contextResolver({
+      request: input.request,
+      context: initial,
+    });
+    assertSerializableContext(context);
+    return {
+      context,
+      resolveSpan: activeSpanContext(),
+    };
   };
-  const traced = withTracing(adapter, {
-    method: "resolveContext",
-    span: TAKIBI_SPAN.resolve,
+  return traced(resolveContext, logger, {
+    name: TAKIBI_SPAN.resolve,
     kind: "internal",
-    attributes: ({ decoded }) => {
+    event: "takibi.resolve",
+    attributes: ([{ decoded }]) => {
       const batchSize = batchSizeOf(decoded);
       return batchSize === undefined ? undefined : batchSpanAttributes(batchSize);
     },
-    run: (spec, fn, args) => {
-      const batchSize = batchSizeOf(args[0].decoded);
-      return withLoggedSpan(
-        logger,
-        spec,
-        {
-          event: "takibi.resolve",
-          ...(batchSize === undefined ? {} : { batchSize }),
-        },
-        fn,
-      );
+    logFields: ([{ decoded }]) => {
+      const batchSize = batchSizeOf(decoded);
+      return batchSize === undefined ? {} : { batchSize };
     },
   });
-  return (input) => traced.resolveContext(input);
 }
 
 export type ResolveWorkerEnvelopeArgs<TInitial = unknown, TCtx extends object = object> = {
