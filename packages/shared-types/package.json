@@ -3,21 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Shared transport and query types for Takibi packages.",
-  "keywords": [
-    "takibi",
-    "types",
-    "typescript"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/shared-types",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/shared-types"
-  },
   "files": [
     "dist",
     "README.md",

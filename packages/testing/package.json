@@ -3,21 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Node-only SQLite test handler adapter for Takibi.",
-  "keywords": [
-    "sqlite",
-    "takibi",
-    "testing"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/testing",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/testing"
-  },
   "files": [
     "dist",
     "README.md",

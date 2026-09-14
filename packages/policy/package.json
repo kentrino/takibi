@@ -3,22 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Access-policy kernel for Takibi.",
-  "keywords": [
-    "access-control",
-    "policy",
-    "takibi",
-    "typescript"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/policy",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/policy"
-  },
   "files": [
     "dist",
     "README.md",

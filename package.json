@@ -2,21 +2,7 @@
   "name": "takibi-monorepo",
   "private": true,
   "description": "Typed multi-tenant collection store on Cloudflare Durable Objects.",
-  "keywords": [
-    "cloudflare",
-    "durable-objects",
-    "multi-tenant",
-    "typescript"
-  ],
-  "homepage": "https://github.com/kentrino/takibi#readme",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git"
-  },
   "type": "module",
   "scripts": {
     "check": "vp check",

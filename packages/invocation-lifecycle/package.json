@@ -3,23 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Platform-independent lifecycle for one Takibi invocation.",
-  "keywords": [
-    "internal",
-    "invocation",
-    "lifecycle",
-    "runtime",
-    "takibi"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/invocation-lifecycle",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/invocation-lifecycle"
-  },
   "files": [
     "dist",
     "README.md",

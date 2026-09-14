@@ -3,22 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Durable Object SQLite storage engine for Takibi.",
-  "keywords": [
-    "durable-objects",
-    "sqlite",
-    "storage",
-    "takibi"
-  ],
-  "homepage": "https://github.com/kentrino/takibi/tree/HEAD/packages/storage",
-  "bugs": {
-    "url": "https://github.com/kentrino/takibi/issues"
-  },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kentrino/takibi.git",
-    "directory": "packages/storage"
-  },
   "files": [
     "dist",
     "README.md",
