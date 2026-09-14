@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/kentrino/takibi/compare/opentelemetry-v0.1.0...opentelemetry-v0.2.0) (2026-09-14)
+
+
+### Features
+
+* **cloudflare-tracing:** map Takibi spans onto Workers native enterSpan ([74bb56e](https://github.com/kentrino/takibi/commit/74bb56e6a211cb35fdf0f721e863ccc7048506c2))
+* **cloudflare-tracing:** map Takibi spans onto Workers native enterSpan ([5ebed45](https://github.com/kentrino/takibi/commit/5ebed45ce0d562b587070c327e42c6bfb8a43b81))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * takibi bumped to 0.3.0
+  * peerDependencies
+    * takibi bumped to 0.3.0
+
 ## 0.1.0 (2026-09-14)
 
 
