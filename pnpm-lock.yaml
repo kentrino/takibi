@@ -439,6 +439,33 @@ importers:
         specifier: 'catalog:'
         version: 4.6.1
 
+  packages/cloudflare-tracing:
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 'catalog:'
+        version: 0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.10)
+      '@cloudflare/workers-types':
+        specifier: ^4.20250803.0
+        version: 4.20260702.1
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.4
+      takibi:
+        specifier: workspace:*
+        version: link:../takibi
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@0.2.8
+        version: '@voidzero-dev/vite-plus-core@0.2.8(@arethetypeswrong/core@0.18.5)(@types/node@24.13.4)(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.8(@arethetypeswrong/core@0.18.5)(@opentelemetry/api@1.9.1)(@types/node@24.13.4)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.8(@arethetypeswrong/core@0.18.5)(@types/node@24.13.4)(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2))(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2)
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.1
+
   packages/hono-adapter:
     devDependencies:
       '@cloudflare/workers-types':

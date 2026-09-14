@@ -91,6 +91,7 @@ test("public packages expose the documented subpath entries", () => {
   assert.deepEqual(subpaths("@takibi/hono-adapter"), [".", "./package.json"]);
   assert.deepEqual(subpaths("@takibi/better-auth-adapter"), [".", "./package.json"]);
   assert.deepEqual(subpaths("@takibi/opentelemetry"), [".", "./logs", "./package.json"]);
+  assert.deepEqual(subpaths("@takibi/cloudflare-tracing"), [".", "./package.json"]);
 });
 
 test("packed takibi inlines workspace packages and keeps entry boundaries", () => {
@@ -129,6 +130,10 @@ test("packed adapters rewrite the workspace takibi peer to the packed version", 
 
   const otel = packedManifest("@takibi/opentelemetry");
   assert.equal(otel.manifest.peerDependencies?.takibi, expectedTakibiPeer);
+
+  const cloudflareTracing = packedManifest("@takibi/cloudflare-tracing");
+  assert.equal(cloudflareTracing.manifest.peerDependencies?.takibi, expectedTakibiPeer);
+  assert.equal(Object.keys(cloudflareTracing.manifest.peerDependencies ?? {}).join(), "takibi");
 });
 
 test("tarball names stay scoped to the published package", () => {

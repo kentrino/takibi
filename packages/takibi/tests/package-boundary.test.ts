@@ -27,6 +27,7 @@ test("public packages identify the kentrino/takibi repository", () => {
     ["../../hono-adapter/package.json", "packages/hono-adapter"],
     ["../../better-auth-adapter/package.json", "packages/better-auth-adapter"],
     ["../../opentelemetry/package.json", "packages/opentelemetry"],
+    ["../../cloudflare-tracing/package.json", "packages/cloudflare-tracing"],
   ] as const;
 
   for (const [relative, directory] of packages) {
@@ -78,6 +79,23 @@ test("OpenTelemetry integration has its own package dependency boundary", () => 
   expect(integration.peerDependencies?.["@opentelemetry/api-logs"]).toBe("^0.221.0");
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api"]?.optional).not.toBe(true);
   expect(integration.peerDependenciesMeta?.["@opentelemetry/api-logs"]?.optional).toBe(true);
+});
+
+test("Cloudflare native tracing has its own package dependency boundary", () => {
+  const core = readManifest(join(import.meta.dirname, "../package.json"));
+  const adapter = readManifest(join(import.meta.dirname, "../../cloudflare-tracing/package.json"));
+
+  expect(adapter.name).toBe("@takibi/cloudflare-tracing");
+  expect(adapter.private).toBeUndefined();
+  expect(adapter.publishConfig?.access).toBe("public");
+  expect(adapter.exports?.["."]).toBe("./src/index.ts");
+  expect(adapter.files).toEqual(["dist", "README.md", "LICENSE"]);
+  expect(adapter.dependencies?.takibi).toBeUndefined();
+  expect(adapter.devDependencies?.takibi).toBe("workspace:*");
+  expect(adapter.peerDependencies?.takibi).toBe("workspace:^");
+  expect(JSON.stringify(adapter.peerDependencies ?? {})).not.toMatch(/opentelemetry/);
+  expect(JSON.stringify(core.devDependencies ?? {})).not.toMatch(/cloudflare-tracing/);
+  expect(JSON.stringify(core.peerDependencies ?? {})).not.toMatch(/cloudflare-tracing/);
 });
 
 test("core package exposes the Node-only testing subpath in source and published builds", () => {

@@ -36,6 +36,11 @@
       "release-type": "node",
       "package-name": "@takibi/opentelemetry",
       "component": "opentelemetry"
+    },
+    "packages/cloudflare-tracing": {
+      "release-type": "node",
+      "package-name": "@takibi/cloudflare-tracing",
+      "component": "cloudflare-tracing"
     }
   }
 }
