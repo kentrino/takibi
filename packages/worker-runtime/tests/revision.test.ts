@@ -5,7 +5,7 @@ import { createClient } from "@takibi/client";
 import { withSqliteTestBackend } from "@takibi/testing";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
 import { createDurableObjectStorage } from "@takibi/storage";
-import { fullAccess } from "@takibi/policy";
+import { fullAccess, none } from "@takibi/policy";
 import { createTakibi, nextDocumentRevision, storageSet } from "@takibi/worker-runtime";
 import type { StoredDocument } from "@takibi/storage";
 
@@ -77,6 +77,161 @@ test("omitting rev is last-write-wins and still increments", async () => {
 
   const replaced = await client.posts.set("p1", { title: "two" });
   expect(replaced).toMatchObject({ ok: true, data: { title: "two", rev: 2 } });
+});
+
+test("concurrent revision-checked updates serialize policy and reject the stale writer", async () => {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let updatePolicies = 0;
+  const context = createTakibi()({ resolve: (): AppCtx => ({ tenantId: "tenant-a" }) });
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        async accessPolicy(access) {
+          if (access.operation === "update" && updatePolicies++ === 0) {
+            enter();
+            await released;
+          }
+          return fullAccess;
+        },
+      },
+    })
+    .actions({});
+  const handler = withSqliteTestBackend(production);
+  const client = createClient<typeof production>("http://fire.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
+  await client.posts.add({ title: "one" }, { id: "p1" });
+
+  const first = client.posts.update("p1", { title: "first", rev: 1 });
+  await entered;
+  let secondSettled = false;
+  const second = client.posts.update("p1", { title: "second", rev: 1 }).then((result) => {
+    secondSettled = true;
+    return result;
+  });
+  await Promise.resolve();
+  expect(secondSettled).toBe(false);
+  release();
+
+  await expect(first).resolves.toMatchObject({ ok: true, data: { title: "first", rev: 2 } });
+  await expect(second).resolves.toMatchObject({
+    ok: false,
+    error: { code: "STALE_WRITE" },
+  });
+  await expect(client.posts.get("p1")).resolves.toMatchObject({
+    ok: true,
+    data: { title: "first", rev: 2 },
+  });
+  handler[Symbol.dispose]();
+});
+
+test("concurrent last-write-wins updates derive consecutive revisions", async () => {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let updatePolicies = 0;
+  const context = createTakibi()({ resolve: (): AppCtx => ({ tenantId: "tenant-a" }) });
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        async accessPolicy(access) {
+          if (access.operation === "update" && updatePolicies++ === 0) {
+            enter();
+            await released;
+          }
+          return fullAccess;
+        },
+      },
+    })
+    .actions({});
+  const handler = withSqliteTestBackend(production);
+  const client = createClient<typeof production>("http://fire.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
+  await client.posts.add({ title: "one" }, { id: "p1" });
+
+  const first = client.posts.update("p1", { title: "first" });
+  await entered;
+  const second = client.posts.update("p1", { title: "second" });
+  release();
+
+  await expect(first).resolves.toMatchObject({ ok: true, data: { rev: 2 } });
+  await expect(second).resolves.toMatchObject({ ok: true, data: { title: "second", rev: 3 } });
+  await expect(client.posts.get("p1")).resolves.toMatchObject({
+    ok: true,
+    data: { title: "second", rev: 3 },
+  });
+  handler[Symbol.dispose]();
+});
+
+test("a racing delete evaluates policy against the update it follows", async () => {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let updatePolicies = 0;
+  const context = createTakibi()({ resolve: (): AppCtx => ({ tenantId: "tenant-a" }) });
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        async accessPolicy(access) {
+          if (access.operation === "update" && updatePolicies++ === 0) {
+            enter();
+            await released;
+          }
+          if (access.operation === "delete") {
+            return (access.doc as { title?: unknown } | undefined)?.title === "before"
+              ? fullAccess
+              : none;
+          }
+          return fullAccess;
+        },
+      },
+    })
+    .actions({});
+  const handler = withSqliteTestBackend(production);
+  const client = createClient<typeof production>("http://fire.test", {
+    fetch: (input, init) => requestTakibi(handler, input, init),
+  });
+  await client.posts.add({ title: "before" }, { id: "p1" });
+
+  const update = client.posts.update("p1", { title: "after", rev: 1 });
+  await entered;
+  let deleteSettled = false;
+  const deletion = client.posts.delete("p1").then((result) => {
+    deleteSettled = true;
+    return result;
+  });
+  await Promise.resolve();
+  expect(deleteSettled).toBe(false);
+  release();
+
+  await expect(update).resolves.toMatchObject({ ok: true, data: { title: "after", rev: 2 } });
+  await expect(deletion).resolves.toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+  await expect(client.posts.get("p1")).resolves.toMatchObject({
+    ok: true,
+    data: { title: "after", rev: 2 },
+  });
+  handler[Symbol.dispose]();
 });
 
 test("add rejects rev in input", async () => {

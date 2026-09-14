@@ -336,15 +336,15 @@ test("runtime plans every collection operation", async () => {
         operation: "get",
         id: "missing",
       },
-      transactionBoundary: "none",
+      transactionBoundary: "full",
     },
     {
       invocation: { kind: "collection", collection: "items", operation: "list" },
-      transactionBoundary: "none",
+      transactionBoundary: "full",
     },
     {
       invocation: { kind: "collection", collection: "items", operation: "count" },
-      transactionBoundary: "none",
+      transactionBoundary: "full",
     },
     {
       invocation: {
@@ -364,7 +364,7 @@ test("runtime plans every collection operation", async () => {
         id: "set",
         input: { value: "set" },
       },
-      transactionBoundary: "none",
+      transactionBoundary: "full",
     },
     {
       invocation: {
@@ -374,7 +374,7 @@ test("runtime plans every collection operation", async () => {
         id: "missing",
         input: { value: "updated" },
       },
-      transactionBoundary: "none",
+      transactionBoundary: "full",
     },
     {
       invocation: {
@@ -383,7 +383,7 @@ test("runtime plans every collection operation", async () => {
         operation: "delete",
         id: "missing",
       },
-      transactionBoundary: "none",
+      transactionBoundary: "full",
     },
   ] as const satisfies readonly {
     invocation: TakibiWireInvocation;
@@ -456,7 +456,7 @@ test("runtime plans action transaction boundaries from definitions", async () =>
   }
 });
 
-test("orchestrator add writes through the runner-owned transaction", async () => {
+test("orchestrator routes collection operations through runner-owned boundaries", async () => {
   const { adapters, storage } = await createAdapters();
   let transactions = 0;
   const counted = {
@@ -495,7 +495,7 @@ test("orchestrator add writes through the runner-owned transaction", async () =>
     outcome: "succeeded",
     result: expect.objectContaining({ id: "i1", value: "hello" }),
   });
-  expect(transactions).toBe(1);
+  expect(transactions).toBe(2);
 });
 
 test("direct add uses the same apply-boundary transaction path", async () => {

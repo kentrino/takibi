@@ -14,11 +14,25 @@ let concurrencyGate:
       released: Promise<void>;
     }
   | undefined;
+let collectionPolicyGate:
+  | {
+      entered(): void;
+      released: Promise<void>;
+    }
+  | undefined;
 const context = createTakibi()({ resolve: () => ({ tenantId }) });
 const RecordSchema = z.object({ value: z.string().min(1) });
 const orders = context.defineCollection({
   schema: RecordSchema,
-  accessPolicy: fullAccess,
+  async accessPolicy(access) {
+    if (access.operation === "update" && collectionPolicyGate) {
+      const gate = collectionPolicyGate;
+      collectionPolicyGate = undefined;
+      gate.entered();
+      await gate.released;
+    }
+    return fullAccess;
+  },
 });
 const app = context.defineCollections({
   orders,
@@ -115,6 +129,7 @@ type Backend = {
   invoke(scope: "$" | "orders", name: string, input: unknown, id?: string): Promise<WireResponse>;
   list(collection: "orders" | "inventory" | "events"): Promise<string[]>;
   addOrder(id: string, value: string): Promise<void>;
+  updateOrder(id: string, value: string, rev?: number): Promise<WireResponse>;
   getOrder(id: string): Promise<string>;
 };
 
@@ -195,6 +210,22 @@ test("atomic actions use actual SQLite-backed Durable Object transactions", asyn
       async addOrder(id, value) {
         await object.$collections.orders.add({ value }, { id });
       },
+      async updateOrder(id, value, rev) {
+        const response = await object.fetch(
+          new Request("https://takibi.internal", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "collection",
+              collection: "orders",
+              operation: "update",
+              id,
+              input: { value, ...(rev === undefined ? {} : { rev }) },
+              context: { tenantId },
+            } satisfies WireRequest),
+          }),
+        );
+        return response.json<WireResponse>();
+      },
       async getOrder(id) {
         return (await object.$collections.orders.get(id)).value;
       },
@@ -226,6 +257,39 @@ test("atomic actions use actual SQLite-backed Durable Object transactions", asyn
     });
     await expect(durable.getOrder("concurrent-preserved")).resolves.toBe("preserved");
     concurrencyGate = undefined;
+
+    for (const withRevision of [true, false]) {
+      const id = `concurrent-update-${withRevision ? "checked" : "lww"}`;
+      await durable.addOrder(id, "before");
+      let enterPolicy!: () => void;
+      const policyEntered = new Promise<void>((resolve) => {
+        enterPolicy = resolve;
+      });
+      let releasePolicy!: () => void;
+      const policyReleased = new Promise<void>((resolve) => {
+        releasePolicy = resolve;
+      });
+      collectionPolicyGate = { entered: enterPolicy, released: policyReleased };
+      const first = durable.updateOrder(id, "first", withRevision ? 1 : undefined);
+      await policyEntered;
+      let secondSettled = false;
+      const second = durable
+        .updateOrder(id, "second", withRevision ? 1 : undefined)
+        .then((result) => {
+          secondSettled = true;
+          return result;
+        });
+      await Promise.resolve();
+      expect(secondSettled).toBe(false);
+      releasePolicy();
+
+      await expect(first).resolves.toMatchObject({ ok: true, data: { rev: 2 } });
+      await expect(second).resolves.toMatchObject(
+        withRevision
+          ? { ok: false, error: { code: "STALE_WRITE" } }
+          : { ok: true, data: { value: "second", rev: 3 } },
+      );
+    }
 
     await object.$collections.$transaction(async ($collections) => {
       await $collections.orders.add({ value: "transaction" }, { id: "direct-transaction-order" });

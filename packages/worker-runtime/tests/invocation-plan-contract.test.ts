@@ -12,8 +12,9 @@ test("action and collection criteria select the Takibi boundary table", () => {
   expect(transactionBoundaryOf({ kind: "action", target: "detached", atomic: true })).toBe("apply");
   expect(transactionBoundaryOf({ kind: "action", target: "document", atomic: false })).toBe("none");
   expect(transactionBoundaryOf({ kind: "collection", operation: "add" })).toBe("apply");
-  expect(transactionBoundaryOf({ kind: "collection", operation: "update" })).toBe("none");
-  expect(transactionBoundaryOf({ kind: "collection", operation: "count" })).toBe("none");
+  for (const operation of ["set", "get", "update", "delete", "list", "count"] as const) {
+    expect(transactionBoundaryOf({ kind: "collection", operation })).toBe("full");
+  }
 });
 
 test("plan builders pair the selected boundary with the supplied work", () => {
@@ -34,15 +35,15 @@ test("plan builders pair the selected boundary with the supplied work", () => {
   expect(
     createCollectionExecutionPlan({ kind: "collection", operation: "get" }, collectionWork),
   ).toEqual({
-    transactionBoundary: "none",
+    transactionBoundary: "full",
     work: collectionWork,
   });
 });
 
-test("collection criteria never select the full boundary", () => {
-  const boundary = transactionBoundaryOf({ kind: "collection", operation: "add" });
-  expectTypeOf(boundary).toEqualTypeOf<"none" | "apply">();
-  expect(boundary).toBe("apply");
+test("collection criteria expose the complete collection boundary table", () => {
+  const boundary = transactionBoundaryOf({ kind: "collection", operation: "get" });
+  expectTypeOf(boundary).toEqualTypeOf<"apply" | "full">();
+  expect(boundary).toBe("full");
 });
 
 test("specific criteria retain their execution boundary types", () => {
@@ -71,6 +72,6 @@ test("specific criteria retain their execution boundary types", () => {
   const generalCollection = (criteria: CollectionPlanCriteria) =>
     createCollectionExecutionPlan(criteria, work);
   expectTypeOf<ReturnType<typeof generalCollection>["transactionBoundary"]>().toEqualTypeOf<
-    "none" | "apply"
+    "apply" | "full"
   >();
 });

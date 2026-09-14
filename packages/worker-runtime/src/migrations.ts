@@ -100,9 +100,25 @@ async function migrateDocument(
 
   if (storedVersion === targetVersion) return withoutVersion(stored);
 
-  const migrated = await migrateStoredDocument(definition, stored, logger);
-  assertDocumentIndexFields(definition, collection, migrated);
+  const initiallyMigrated = await migrateStoredDocument(definition, stored, logger);
+  let committed: StoredDocument | undefined;
   await storage.transaction(async (scoped) => {
+    const current = await scoped.get(collection, stored.id);
+    if (!current) {
+      throw new TakibiError(
+        "MIGRATION_CONFLICT",
+        `Document disappeared during migration: ${stored.id}`,
+        409,
+      );
+    }
+    const migrated = sameMigrationSource(current, stored)
+      ? initiallyMigrated
+      : await migrateStoredDocument(definition, current, logger);
+    if (readStoredVersion(migrated) === targetVersion && migrated === current) {
+      committed = current;
+      return;
+    }
+    assertDocumentIndexFields(definition, collection, migrated);
     await assertUniqueDocument(
       definition,
       scoped,
@@ -111,8 +127,16 @@ async function migrateDocument(
       currentDocumentReadPlan(definition, logger),
     );
     await scoped.put(collection, migrated);
+    committed = migrated;
   });
-  return withoutVersion(migrated);
+  return withoutVersion(committed!);
+}
+
+function sameMigrationSource(left: StoredDocument, right: StoredDocument): boolean {
+  return (
+    documentRevision(left) === documentRevision(right) &&
+    readStoredVersion(left) === readStoredVersion(right)
+  );
 }
 
 function currentDocumentReadPlan(

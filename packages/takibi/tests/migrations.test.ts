@@ -4,7 +4,7 @@ import { createTakibi, fullAccess } from "takibi";
 import { createMigratingStorage } from "../src/migrations";
 import { createDurableObjectStorage } from "../src/storage";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
-import type { AccessContext, CollectionsDef } from "../src/types";
+import type { AccessContext, CollectionsDef, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 
 const CREATED_AT = "2026-08-01T00:00:00.000Z";
@@ -496,6 +496,62 @@ test("SQLite storage applies lazy migration semantics", async () => {
   await expect(raw.get("posts", "p1")).resolves.toMatchObject({
     title: "old",
     published: true,
+    $schemaVersion: 1,
+  });
+});
+
+test("lazy migration rechecks its source before replacing a concurrently updated row", async () => {
+  const durableBacking = createInspectableDurableObjectStorage();
+  const raw = createDurableObjectStorage(durableBacking.storage);
+  const definition = {
+    schema: z.object({ title: z.string(), published: z.boolean() }),
+    migrations: {
+      steps: [
+        (data: unknown) => ({
+          ...(data as { title: string }),
+          published: true,
+        }),
+      ] as const,
+    },
+    accessPolicy: fullAccess,
+  };
+  await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
+
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let interceptInitialRead = true;
+  const interleaved: StorageDriver = {
+    ...raw,
+    async get(collection, id) {
+      const document = await raw.get(collection, id);
+      if (interceptInitialRead) {
+        interceptInitialRead = false;
+        enter();
+        await released;
+      }
+      return document;
+    },
+  };
+  const migrating = createMigratingStorage({ posts: definition }, interleaved);
+  const migration = migrating.get("posts", "p1");
+  await entered;
+  await raw.put("posts", {
+    ...legacy("p1", { title: "new" }),
+    rev: 2,
+  } as import("../src/types").StoredDocument);
+  release();
+
+  await expect(migration).resolves.toMatchObject({ title: "new", published: true, rev: 2 });
+  await expect(raw.get("posts", "p1")).resolves.toMatchObject({
+    title: "new",
+    published: true,
+    rev: 2,
     $schemaVersion: 1,
   });
 });

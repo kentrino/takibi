@@ -323,7 +323,9 @@ to the oldest version still accepted; accessing an older document then fails.
 A thrown step or current-schema validation failure leaves the original document
 and marker unchanged, so the next access retries the migration. Steps are
 synchronous and receive only unvalidated domain data—never `id`, timestamps, or
-the version marker.
+the version marker. Before persisting a migrated value, Takibi rechecks the
+stored revision and schema version inside the write transaction; if the source
+changed, it migrates the latest row instead of overwriting it with stale data.
 
 Migration is per-document and lazy. Takibi does not enumerate tenants, eagerly
 migrate a whole deployment, report global progress, provide deployment-level
@@ -745,7 +747,16 @@ without `rev` read as `1`.
 lock tokens. Use `rev` for that. Include the document's current `rev` on `set` /
 `update` to require that generation; a mismatch or a `rev`-qualified write to a missing
 document fails with `STALE_WRITE` (409) and leaves storage unchanged. Omitting `rev`
-keeps last-write-wins. `add` still rejects `rev`. `list.where` cannot query `rev`.
+keeps last-write-wins; concurrent successful writes still derive distinct,
+consecutive revisions from committed storage. `add` still rejects `rev`.
+`list.where` cannot query `rev`.
+
+Each public or policy-bound collection call is isolated as one operation.
+`set`, `update`, and `delete` keep their stored-document read, revision check,
+policy decision, validation, unique checks, and mutation in one transaction.
+`get`, `list`, and `count` use the same boundary because reads may persist lazy
+migrations. Calls made inside an atomic action join its transaction; calls in a
+non-atomic action commit independently.
 
 ### List queries
 

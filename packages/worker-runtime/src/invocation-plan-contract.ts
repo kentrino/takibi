@@ -16,7 +16,7 @@ export type CollectionPlanCriteria = Readonly<{
 
 export type TransactionPlanCriteria = ActionPlanCriteria | CollectionPlanCriteria;
 
-export function transactionBoundaryOf(criteria: CollectionPlanCriteria): "none" | "apply";
+export function transactionBoundaryOf(criteria: CollectionPlanCriteria): "apply" | "full";
 export function transactionBoundaryOf(criteria: TransactionPlanCriteria): TransactionBoundary;
 export function transactionBoundaryOf(criteria: TransactionPlanCriteria): TransactionBoundary {
   if (criteria.kind === "action") {
@@ -24,7 +24,7 @@ export function transactionBoundaryOf(criteria: TransactionPlanCriteria): Transa
     if (criteria.atomic) return "apply";
     return "none";
   }
-  return criteria.operation === "add" ? "apply" : "none";
+  return criteria.operation === "add" ? "apply" : "full";
 }
 
 export function createActionExecutionPlan<TWork>(
@@ -53,12 +53,12 @@ export function createCollectionExecutionPlan<TWork>(
 export function createCollectionExecutionPlan<TWork>(
   criteria: CollectionPlanCriteria,
   work: TWork,
-): Extract<ExecutionPlan<TWork, TWork, never>, { transactionBoundary: "none" | "apply" }>;
+): Extract<ExecutionPlan<never, TWork, TWork>, { transactionBoundary: "apply" | "full" }>;
 export function createCollectionExecutionPlan<TWork>(
   criteria: CollectionPlanCriteria,
   work: TWork,
-): ExecutionPlan<TWork, TWork, never> {
+): ExecutionPlan<never, TWork, TWork> {
   const transactionBoundary = transactionBoundaryOf(criteria);
   if (transactionBoundary === "apply") return { transactionBoundary, work };
-  return { transactionBoundary: "none", work };
+  return { transactionBoundary: "full", work };
 }
