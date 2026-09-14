@@ -4,34 +4,45 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   ready:
+    name: Ready
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm ready
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - run: vp run ready
 
   e2e:
+    name: E2E
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:e2e
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - run: vp run test:e2e
+
+  check:
+    name: Check
+    if: always()
+    needs: [ready, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ needs.ready.result }}" == "success" && "${{ needs.e2e.result }}" == "success" ]]; then
+            echo "All checks passed"
+            exit 0
+          else
+            echo "Some checks failed: ready=${{ needs.ready.result }} e2e=${{ needs.e2e.result }}"
+            exit 1
+          fi
