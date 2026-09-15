@@ -13,8 +13,8 @@ const lifecycle: SnapshotLifecycle = {
   listCollections() {
     return [{ name: "records", currentSchemaVersion: 0, baseSchemaVersion: 0 }];
   },
-  async validateRestoredDocument() {
-    return [];
+  async prepareRestoredDocument(document) {
+    return { document, uniqueConstraints: [] };
   },
   async prepareSeeds() {
     return [];

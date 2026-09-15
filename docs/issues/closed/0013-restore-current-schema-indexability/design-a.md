@@ -1,6 +1,6 @@
 # Design A: Prepare current-schema documents before cutover
 
-Status: proposed.
+Status: implemented.
 
 ## Contract
 
@@ -41,9 +41,7 @@ export type SnapshotSeed = SnapshotPreparedDocument;
 
 export type SnapshotLifecycle = {
   listCollections(): readonly SnapshotCollectionDescriptor[];
-  prepareRestoredDocument(
-    document: SnapshotStoredDocument,
-  ): Promise<SnapshotPreparedDocument>;
+  prepareRestoredDocument(document: SnapshotStoredDocument): Promise<SnapshotPreparedDocument>;
   prepareSeeds(): Promise<readonly SnapshotSeed[]>;
 };
 ```
@@ -79,7 +77,7 @@ Query-time repair must handle filtering, ordering, and cursors over mixed schema
 add complexity to normal reads. Post-cutover backfill would expose an incomplete restore or require
 an additional readiness phase. Preparing during existing staging closes the gap before publication.
 
-[Online index backfill](../0014-online-index-backfill/issue.md) addresses activation scalability and
+[Online index backfill](../../open/0014-online-index-backfill/issue.md) addresses activation scalability and
 can proceed independently. If indexes move to sidecar tables, restore/reset must also prepare or
 invalidate their generations atomically so that a ready index covers the newly published dataset.
 

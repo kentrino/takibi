@@ -12,6 +12,7 @@ export type {
   MaintenancePurpose,
   SnapshotCollectionDescriptor,
   SnapshotLifecycle,
+  SnapshotPreparedDocument,
   SnapshotScanCursor,
   SnapshotSeed,
   SnapshotStoredDocument,

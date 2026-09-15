@@ -52,7 +52,7 @@ export function createTakibiSnapshotLifecycle(
           };
         });
     },
-    async validateRestoredDocument(document) {
+    async prepareRestoredDocument(document) {
       const definition = collections[document.collection]!;
       const stored: StoredDocument = {
         ...document.data,
@@ -79,7 +79,14 @@ export function createTakibiSnapshotLifecycle(
           `Snapshot document failed schema or index validation: ${document.collection}`,
         );
       }
-      return extractUniqueConstraints(definition, document.collection, current);
+      return {
+        document: toSnapshotDocument(
+          document.collection,
+          currentCollectionVersion(definition),
+          current,
+        ),
+        uniqueConstraints: extractUniqueConstraints(definition, document.collection, current),
+      };
     },
     async prepareSeeds() {
       const seeds: Array<{

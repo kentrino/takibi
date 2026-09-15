@@ -6,7 +6,24 @@ priority: P1
 priority_reason: "Restore can report success while indexed queries silently omit valid documents, making the recovery point unreliable."
 category: recovery
 source_issue: 0057-restore-current-schema-indexability
+status: closed
+closed_reason: implemented
 ---
+
+# Resolution
+
+Restore stages the current-schema document returned by the worker-runtime lifecycle,
+with unique keys derived from that same document. IDs, timestamps, and revisions
+are preserved, and input checksums still cover the original stream.
+
+Regression tests cover the first indexed read, changed index values, range ordering
+and cursor pagination, raw metadata, one-time preparation, current-version schema
+transforms, seed reconciliation, logical re-export, and atomic validation failures.
+
+Validation: `pnpm run ready` passed (format/lint/types, recursive tests including
+Workers suites, and recursive builds). Focused checks passed all 17 snapshot
+package tests and all 20 SQLite restore tests. The first indexed-read regression
+was confirmed failing before implementation.
 
 # Problem
 
