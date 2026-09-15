@@ -154,7 +154,8 @@ export function grant(
     else if (typeof input === "string" && ALL_PERMISSIONS.includes(input)) permissions.push(input);
     else throw new ListScopeError();
   }
-  if (permissions.includes("list") || scopes.length === 0) return createGrant(permissions);
+  if (permissions.includes("list") && scopes.length > 0) throw new ListScopeError();
+  if (scopes.length === 0) return createGrant(permissions);
   return createGrant(
     [...permissions, "list"],
     undefined,

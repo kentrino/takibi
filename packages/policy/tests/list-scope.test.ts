@@ -63,7 +63,11 @@ test("grant tokens, catalog overloads and policy folds keep their exact grouping
     where: composeAnd(composeAnd(a.where, b.where), c.where),
   });
   expect(listDecisionOf(grant((g) => [g.get, a]))).toEqual(listDecisionOf(grant("get", a)));
-  expect(listDecisionOf(grant(a, "list", b))).toEqual({ kind: "allowAll" });
+  expect(() => grant(a, "list", b)).toThrow(ListScopeError);
+  expect(() => grant("list", a)).toThrow(ListScopeError);
+  expect(() => grant((g) => [g.list, a])).toThrow(ListScopeError);
+  expect(listDecisionOf(grant("list"))).toEqual({ kind: "allowAll" });
+  expect(listDecisionOf(await and(grant("list"), grant(a))(ctx))).toEqual(listDecisionOf(grant(a)));
   expect(() => grant("list", { ...a })).toThrow(ListScopeError);
   expect(() => listDecisionOf({} as AccessGrant)).toThrow(ListScopeError);
 });

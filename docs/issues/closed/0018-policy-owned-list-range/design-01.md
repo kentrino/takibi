@@ -83,8 +83,10 @@ type ListWhereScope = {
 ```
 
 `grant(listWhere(...))` grants `list` as `allowWhere`. A bare `"list"` in the
-same call is `allowAll`; `allowAll` AND `allowWhere(W)` is `allowWhere(W)`.
-Two `listWhere` tokens in one `grant()` AND together.
+same call as a scope token is invalid, so it cannot silently discard the scope.
+`grant("list")` alone is `allowAll`; `allowAll` AND `allowWhere(W)` across
+separate grants is `allowWhere(W)`. Two `listWhere` tokens in one `grant()` AND
+together.
 
 `read` and `fullAccess` stay `allowAll`. Constant `grant("get")` / `none` stay
 `deny` for list. Unscoped `grant("list")` remains unrestricted.
@@ -352,8 +354,8 @@ No deferred plan or materialization callback is introduced.
 
 ### Composition
 
-Multiple scope tokens in one grant form one n-ary AND in argument order,
-unless a bare list permission makes the decision allowAll. Token provenance
+Multiple scope tokens in one grant form one n-ary AND in argument order.
+A bare list permission together with any scope token is rejected. Token provenance
 is checked even with bare list. Policy combinators use an ordered left fold;
 three scoped AND branches therefore form `and(and(A,B),C)`. Do not flatten,
 sort or reassociate. Decision identities follow the existing truth table.

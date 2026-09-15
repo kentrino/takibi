@@ -69,7 +69,7 @@ type ListWhereScope = {
 };
 ```
 
-`grant(listWhere(...))` は `list` を `allowWhere` として与えます。同じ呼び出しの裸の `"list"` は `allowAll` です。`allowAll` AND `allowWhere(W)` は `allowWhere(W)` です。1つの `grant()` に `listWhere` が2つあれば AND します。
+`grant(listWhere(...))` は `list` を `allowWhere` として与えます。同じ呼び出しに裸の `"list"` とスコープトークンがある場合は拒否し、スコープを黙って捨てません。`grant("list")` 単独は `allowAll` です。別々の grant を合成したときの `allowAll` AND `allowWhere(W)` は `allowWhere(W)` です。1つの `grant()` に `listWhere` が2つあれば AND します。
 
 `read` と `fullAccess` は `allowAll` のままです。定数の `grant("get")` / `none` は list について `deny` のままです。スコープのない `grant("list")` は無制限のままです。
 
@@ -289,7 +289,7 @@ protocol は AST の正規化とクライアント・サーバーの上限を所
 ### 合成 — AST の形とメタデータの引き継ぎ
 
 1 回の grant に渡した複数のスコープトークンは、引数順の 1 個の多項 AND に
-します。ただし裸の list 権限があれば allowAll になります。その場合も
+します。裸の list 権限とスコープトークンが同時にあれば拒否します。その場合も
 トークンの生成元は検証します。ポリシー合成は順序を保った左畳み込みとし、
 3 個のスコープ付き AND 分岐は `and(and(A,B),C)` になります。平坦化、整列、
 結合順序の変更はしません。決定の単位元・吸収則は既存の真理値表に従います。
