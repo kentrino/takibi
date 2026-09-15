@@ -31,7 +31,7 @@ export type TakibiCollectionWork = Readonly<{
 
 export type TakibiNoneWork = TakibiActionWork | TakibiCollectionWork;
 export type TakibiApplyWork = TakibiActionWork | TakibiCollectionWork;
-export type TakibiFullWork = TakibiActionWork;
+export type TakibiFullWork = TakibiActionWork | TakibiCollectionWork;
 
 export type TakibiPrepared<TContext extends object> =
   | Readonly<{ kind: "action"; resolved: ResolvedAction<TContext> }>

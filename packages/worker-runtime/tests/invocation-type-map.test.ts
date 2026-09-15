@@ -13,6 +13,7 @@ import type {
   TakibiActionWork,
   TakibiApplyWork,
   TakibiCollectionWork,
+  TakibiFullWork,
   TakibiInvocationRuntime,
   TakibiInvocationTypeMap,
   TakibiNoneWork,
@@ -63,7 +64,7 @@ test("slots match current runtime types", () => {
   expectTypeOf<AppMap["input"]>().toEqualTypeOf<unknown>();
   expectTypeOf<TakibiActionWork>().toExtend<AppMap["noneWork"]>();
   expectTypeOf<TakibiCollectionWork>().toExtend<AppMap["noneWork"]>();
-  expectTypeOf<AppMap["fullWork"]>().toEqualTypeOf<TakibiActionWork>();
+  expectTypeOf<AppMap["fullWork"]>().toEqualTypeOf<TakibiFullWork>();
   expectTypeOf<AppMap["result"]>().toEqualTypeOf<
     JsonValue | Awaited<ReturnType<typeof executeResolvedCollection>>
   >();
@@ -103,7 +104,7 @@ test("transaction adapter bindings retain their map relationships", () => {
     .toEqualTypeOf<TakibiApplyWork>();
   expectTypeOf<Contracts["transactionFull"]["prepare"]>()
     .parameter(1)
-    .toEqualTypeOf<TakibiActionWork>();
+    .toEqualTypeOf<TakibiFullWork>();
   expectTypeOf<Contracts["transactionFull"]["apply"]>()
     .parameter(1)
     .toEqualTypeOf<TakibiPrepared<AppContext>>();
