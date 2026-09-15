@@ -13,6 +13,10 @@ Policies may return Promises, but awaiting external I/O can hold a transaction b
 
 [Design](./design-a.md)
 
+## Required Verification
+
+Write a meaningful regression test that fails before the change, and run it to confirm that failure before implementing the fix. Then verify that the same test passes after the change. This is required even though the issue is categorized as documentation; do not use an unconditional failure or leave a failing test in the completed implementation.
+
 ## Related Files
 
 - `packages/takibi/README.md`
