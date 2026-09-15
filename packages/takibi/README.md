@@ -346,6 +346,76 @@ migrating. Owner-local logical snapshots are described below.
 
 Missing get / update / delete never call `accessPolicy` (`NOT_FOUND`). Denying get / update / delete / **set** also returns `NOT_FOUND` so IDs are not leaked — `set` uses the same code for a new id and an existing id. Denying create (`add`) / list returns `FORBIDDEN`. Denying a document-action gate returns `FORBIDDEN` when the document exists; a missing id is `NOT_FOUND`.
 
+### Safe local policy evaluation
+
+Compute grants locally from the resolved context, `doc` / `nextDoc`, and query.
+A local policy may return a Promise; Promise support does not make awaited I/O
+safe. Do not perform external HTTP or other awaited I/O in a policy. External
+requests can hold the transaction boundary for their entire duration.
+
+Do not await another operation through a root collections facade or storage
+driver, or fetch/RPC back into the same Durable Object. Root operations queue
+behind the active transaction: if its policy waits for one of them, neither can
+finish. These are caller obligations; Takibi does not detect arbitrary I/O or
+reentry, reject it immediately, or provide a timeout guarantee.
+
+Policy-bound operations other than `add` use a full transaction boundary.
+`add` can also evaluate policy inside an enclosing atomic action transaction.
+Moving I/O into an atomic handler, document guard, or gate is therefore not a
+safe preparation step. Keep authorization with the row read, revision checks,
+uniqueness checks, and mutation; do not release that boundary to perform I/O.
+
+Prepare external identity and membership inputs in `createTakibi()({ resolve,
+stub })`. Takibi awaits `resolve` and checks that its result is JSON-safe before
+dispatching the invocation and entering its transaction. For example, replace a
+policy that awaits `loadMembership` with this local Promise-returning policy:
+
+```ts
+import { createTakibi, none, read, UnauthorizedError } from "takibi";
+import { z } from "zod";
+
+type Initial = {
+  authenticate(request: Request): Promise<{ userId: string; tenantId: string } | null>;
+  loadMembership(userId: string, tenantId: string): Promise<{ canRead: boolean }>;
+  tenantStore(tenantId: string): { fetch(request: Request): Promise<Response> };
+};
+
+export function createPolicyExample() {
+  const context = createTakibi<Initial>()({
+    resolve: async ({ request, context }) => {
+      const identity = await context.authenticate(request);
+      if (!identity) throw new UnauthorizedError("Sign in required");
+      const { userId, tenantId } = identity;
+      const { canRead } = await context.loadMembership(userId, tenantId);
+      return { userId, tenantId, canRead };
+    },
+    stub: ({ context, resolved }) => context.tenantStore(resolved.tenantId),
+  });
+  return context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: async ({ canRead }) => (canRead ? read : none),
+      },
+    })
+    .actions({});
+}
+```
+
+`authenticate`, `loadMembership`, and `tenantStore` are application-owned
+helpers supplied through `handle(request, { context })`. Authentication must
+verify credentials and authorize the selected tenant; return `null` on failure
+so the resolver throws `UnauthorizedError`. `tenantStore` wraps your namespace's
+`get(idFromName(tenantId))`. Preserve your application's routing inputs in the
+resolved context. Only serializable decision data crosses the wire, not the
+helpers, requests, or stubs.
+
+The resolved membership is a point-in-time input. It does not freeze the external
+service's state or guarantee immediate revocation, cross-row authorization, or
+external consistency. Those requirements need a separate consistency design.
+Local evaluation also does not guarantee cheap computation or eliminate waiting
+from asynchronous schema validation.
+
 ### Grants: `fullAccess` / `write` / `read` / `none` / `grant(...)`
 
 `accessPolicy` returns an **`AccessGrant`** — an opaque value for the permissions the subject may perform on this collection / document — not a yes/no for the current request. Build a grant with `grant(...)` or a predefined grant (`fullAccess` / `write` / `read` / `none`) and return it from the policy. The executor allows the call when that grant includes the required `permission` (`create` / `get` / `list` / `update` / `delete` / `invoke`).

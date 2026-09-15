@@ -2,7 +2,7 @@
 
 ## Decision and evidence
 
-Keep 0005 open as documentation work, P1. The problem is a missing caller contract, not evidence that transaction isolation should be removed. No common cause warrants combining it with list/count isolation work in 0006.
+Resolved as documentation work; the following records the accepted design. The problem is a missing caller contract, not evidence that transaction isolation should be removed. No common cause warrants combining it with list/count isolation work in 0006.
 
 `packages/policy/src/types.ts:24-50` exposes arbitrary application context and permits `Promise<AccessGrant>` without I/O or reentry guidance. `transactionBoundaryOf` in `packages/worker-runtime/src/invocation-plan-contract.ts:21` selects `full` for collections other than `add`. The [isolation decision](../../../spec/collection-operation-isolation.md) records the baseline, operation queue mechanism, and why authorization/revision/uniqueness checks share a boundary. These are still applicable; `add` is not evidence that all policy evaluation runs outside transactions because an enclosing atomic action can hold one.
 
