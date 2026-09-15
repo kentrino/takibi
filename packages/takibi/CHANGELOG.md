@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/kentrino/takibi/compare/takibi-v0.3.0...takibi-v0.3.1) (2026-09-15)
+
+
+### Miscellaneous
+
+* create kentrino/2026/09/15-24 ([382aa1b](https://github.com/kentrino/takibi/commit/382aa1b53babcc97e3cd6fd78531899da96d9cb2))
+
 ## [0.3.0](https://github.com/kentrino/takibi/compare/takibi-v0.2.0...takibi-v0.3.0) (2026-09-14)
 
 
