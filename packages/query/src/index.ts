@@ -19,3 +19,6 @@ export type {
   QueryValueOperator,
   StorageListOptions,
 } from "@takibi/shared-types";
+
+export { listWhere, isListWhereScope, composeAnd, composeOr, ListScopeError } from "./list-scope";
+export type { ListWhereScope } from "@takibi/shared-types";

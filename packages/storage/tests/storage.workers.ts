@@ -14,6 +14,7 @@ import {
 import type { QueryExpr, WithMetadata } from "@takibi/shared-types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
+import { composeAnd, listWhere } from "@takibi/query";
 
 const TS = "2026-08-19T00:00:00.000Z";
 
@@ -54,6 +55,93 @@ function tableNames(sql: SqlStorage): string[] {
     .toArray()
     .map(({ name }) => name);
 }
+
+test("cursor v4 binds scoped indexed and unindexed queries without embedding the scope", async () => {
+  const stub = storageStub("scope-cursor-v4");
+  await stub.ping();
+  await runInDurableObject(stub, async (_instance, state) => {
+    const registry = compileIndexRegistry({
+      posts: { indexes: { byOwner: ["ownerId", "createdAt"] as const } },
+    });
+    const storage = createDurableObjectStorage(state.storage, registry);
+    for (const [id, ownerId] of [
+      ["a", "u1"],
+      ["b", "u2"],
+      ["c", "u1"],
+      ["d", "u1"],
+    ]) {
+      await storage.put("posts", meta({ id: id!, ownerId: ownerId!, title: "keep" }));
+    }
+    const scope = listWhere<{ ownerId: string }>((q) => q.ownerId.eq("u1")).where;
+    const otherScope = listWhere<{ ownerId: string }>((q) => q.ownerId.eq("u2")).where;
+    for (const index of [undefined, "byOwner"]) {
+      const options = { where: scope, requestedWhere: null, index, limit: 1 };
+      const first = await storage.list("posts", options);
+      const decoded = decodeCursor(first.nextCursor!);
+      expect(decoded).toMatchObject({ v: 4, requestedWhere: null, id: "a" });
+      expect(decoded).not.toHaveProperty("where");
+      expect(decoded.binding).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const digest = new Uint8Array(
+        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(scope))),
+      );
+      expect(decoded.binding).toBe(
+        btoa(String.fromCharCode(...digest))
+          .replaceAll("+", "-")
+          .replaceAll("/", "_")
+          .replace(/=+$/, ""),
+      );
+      expect(
+        (await storage.list("posts", { ...options, cursor: first.nextCursor })).items.map(
+          (p) => p.id,
+        ),
+      ).toEqual(["c"]);
+      await expect(
+        storage.list("posts", { ...options, where: otherScope, cursor: first.nextCursor }),
+      ).rejects.toBeInstanceOf(BadRequestError);
+      await expect(
+        storage.list("posts", { ...options, requestedWhere: scope, cursor: first.nextCursor }),
+      ).rejects.toBeInstanceOf(BadRequestError);
+      for (const v of [2, 3])
+        await expect(
+          storage.list("posts", { ...options, cursor: encodeCursor({ ...decoded, v }) }),
+        ).rejects.toBeInstanceOf(BadRequestError);
+      await expect(
+        storage.list("posts", {
+          ...options,
+          cursor: encodeCursor({ ...decoded, binding: "x".repeat(43) }),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestError);
+      const forged = encodeCursor({
+        ...decoded,
+        id: "b",
+        ...(index ? { values: ["u1", TS] } : {}),
+      });
+      const forgedPage = await storage.list("posts", { ...options, cursor: forged });
+      expect(forgedPage.items.every((p) => p.ownerId === "u1")).toBe(true);
+      if (index) {
+        expect(decoded.values).toEqual(["u1", TS]); // returned-row tuples remain visible
+        await expect(
+          storage.list("posts", {
+            ...options,
+            orderBy: { field: "createdAt", direction: "desc" },
+            cursor: first.nextCursor,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestError);
+      }
+    }
+    // A valid server expression may exceed the client budget.
+    const large = composeAnd(...Array<QueryExpr>(40).fill(scope));
+    expect(
+      (await storage.list("posts", { where: large, requestedWhere: null })).items,
+    ).toHaveLength(3);
+    await expect(storage.list("posts", { where: large })).rejects.toBeInstanceOf(BadRequestError);
+    await expect(
+      storage.list("posts", { where: { op: "and", operands: [] }, requestedWhere: null }),
+    ).rejects.toMatchObject({ code: "INVALID_LIST_SCOPE", status: 500 });
+    const trusted = await storage.list("posts", { where: scope, limit: 1 });
+    expect(decodeCursor(trusted.nextCursor!).requestedWhere).toEqual(scope);
+  });
+});
 
 test("Workers Durable Object SQLite satisfies the shared storage contract", async () => {
   const stub = storageStub("shared-storage-contract");
@@ -387,7 +475,7 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     const first = await durable.list("posts", desc);
     expect(first.items.map((document) => document.id)).toEqual(["b", "c"]);
     expect(decodeCursor(first.nextCursor!)).toMatchObject({
-      v: 3,
+      v: 4,
       index: "byOwner",
       orderField: "createdAt",
       direction: "desc",

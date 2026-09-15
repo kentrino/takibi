@@ -10,7 +10,7 @@ issue: ./issue.md
 This is the accepted contract for
 [0018-policy-owned-list-range](./issue.md).
 It supersedes the collection-level `listScope` proposal in
-[0015-policy-owned-list-scope](../../closed/0015-policy-owned-list-scope/issue.md).
+[0015-policy-owned-list-scope](../0015-policy-owned-list-scope/issue.md).
 
 # Decision
 
@@ -26,7 +26,7 @@ A grant's list decision is exactly one of:
 Owner, admin, and public-record rules compose through existing `and` / `or`.
 Do not add `listScope` to `CollectionDefinition`.
 
-# Current behavior
+# Behavior before this issue
 
 `packages/worker-runtime/src/executor.ts` evaluates collection policy with
 `AccessContext.where` set to the requested filter, then
@@ -59,18 +59,24 @@ Keep `grant(...permissions)` and the catalog callback. Extend inputs with a
 query-built scope token:
 
 ```ts
-grant("get", listWhere((q) => q.ownerId.eq(user.id)));
+grant(
+  "get",
+  listWhere((q) => q.ownerId.eq(user.id)),
+);
 grant("list"); // allowAll
 ```
 
 `listWhere` lives in `@takibi/query` and is `compileWhere` plus a brand: the
 callback must return a builder-created `QueryExpr`, which is then normalized
 under the existing 32/8 client limits. The token type lives in
-`@takibi/shared-types` so `@takibi/policy` can accept it without depending on
-`@takibi/query`.
+`@takibi/shared-types` as the shared token contract. `@takibi/policy` depends on `@takibi/query`
+for scope recognition and validated composition.
 
 ```ts
+declare const listWhereScopeBrand: unique symbol;
+
 type ListWhereScope = {
+  readonly [listWhereScopeBrand]: true;
   readonly kind: "listWhere";
   readonly where: QueryExpr;
 };
@@ -92,7 +98,7 @@ decision in a WeakMap beside permissions.
 
 # Collection example
 
-This example uses the proposed API; `listWhere` is not implemented yet.
+This example uses the implemented API.
 Assume `z` is imported from `zod`, the policy helpers from `takibi`, and an
 existing `context` resolves `user` as
 `{ id: string; role: "admin" | "member" } | null`.
@@ -105,28 +111,21 @@ const postSchema = z.object({
 
 type Post = z.infer<typeof postSchema>;
 
-const ownerReadPolicy = context.policy(
-  postSchema,
-  ({ user, operation, doc }) => {
-    if (!user) return none;
+const ownerReadPolicy = context.policy(postSchema, ({ user, operation, doc }) => {
+  if (!user) return none;
 
-    switch (operation) {
-      case "list":
-      case "count":
-        return grant(
-          listWhere<Post>((q) => q.ownerId.eq(user.id)),
-        );
-      case "get":
-        return doc?.ownerId === user.id ? grant("get") : none;
-      default:
-        return none;
-    }
-  },
-);
+  switch (operation) {
+    case "list":
+    case "count":
+      return grant(listWhere<Post>((q) => q.ownerId.eq(user.id)));
+    case "get":
+      return doc?.ownerId === user.id ? grant("get") : none;
+    default:
+      return none;
+  }
+});
 
-const adminReadPolicy = context.policy(({ user }) =>
-  user?.role === "admin" ? read : none,
-);
+const adminReadPolicy = context.policy(({ user }) => (user?.role === "admin" ? read : none));
 
 const posts = context.defineCollection({
   schema: postSchema,
@@ -159,15 +158,15 @@ automatically types the nested `listWhere` callback.
 
 # Composition
 
-Permissions stay independent of list range. A branch that grants `update` but
-not `list` does not widen or narrow another branch's list range.
+Permissions stay independent of list range. A branch granting `update` but
+not `list` contributes no range to OR and denies list under AND, as in the table.
 
 Conceptual operators on list decisions:
 
-| left \ right | `deny` | `allowAll` | `allowWhere(W2)` |
-| --- | --- | --- | --- |
-| `deny` | `deny` | `deny` (and) / `allowAll` (or) | `deny` (and) / `allowWhere(W2)` (or) |
-| `allowAll` | `deny` (and) / `allowAll` (or) | `allowAll` | `allowWhere(W2)` (and) / `allowAll` (or) |
+| left \ right     | `deny`                               | `allowAll`                               | `allowWhere(W2)`                                   |
+| ---------------- | ------------------------------------ | ---------------------------------------- | -------------------------------------------------- |
+| `deny`           | `deny`                               | `deny` (and) / `allowAll` (or)           | `deny` (and) / `allowWhere(W2)` (or)               |
+| `allowAll`       | `deny` (and) / `allowAll` (or)       | `allowAll`                               | `allowWhere(W2)` (and) / `allowAll` (or)           |
 | `allowWhere(W1)` | `deny` (and) / `allowWhere(W1)` (or) | `allowWhere(W1)` (and) / `allowAll` (or) | `allowWhere(and(W1,W2))` / `allowWhere(or(W1,W2))` |
 
 `and` starts from all permissions and `allowAll`, then intersects each branch
@@ -202,7 +201,7 @@ Evaluate authorization and scope once per list/count:
 
 Do not overwrite `AccessContext.where` with the effective query. Do not
 implement watch here;
-[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md) must call
+[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md) must call
 this same evaluate-and-compose path later.
 
 # Fail-closed scope results
@@ -280,8 +279,8 @@ normalization does not sort). Use platform Web Crypto (`crypto.subtle`).
 - **Not a secret:** anyone who can construct the same AST can compute the
   digest. Do not document the hash as confidential.
 - **Not authenticated:** a client can forge `binding`, `id`, or `values`.
-  Forging a digest for a *different* scope fails the compatibility check after
-  reauthorization. Forging `id` / `values` under the *current* scope can skip
+  Forging a digest for a _different_ scope fails the compatibility check after
+  reauthorization. Forging `id` / `values` under the _current_ scope can skip
   or reorder pages **inside the authorized set**, the same class as unsigned
   v2/v3 cursors. The cursor is not an authorization credential.
 - **Confidentiality of server predicates:** v4 omits the effective AST so a
@@ -306,17 +305,17 @@ instead of requiring `queryImpliesEquality` on the client filter. Document
 
 # Package boundaries
 
-| Package | Owns |
-| --- | --- |
-| `@takibi/policy` | Grant list-decision semantics, WeakMap storage, `and` / `or` exits, `listDecisionOf` |
-| `@takibi/query` | `listWhere`, `composeAnd` / `composeOr` |
-| `@takibi/protocol` | AST shape, client 32/8 limits, server 64/16 composition limits |
-| `@takibi/shared-types` | `ListWhereScope`; optional `requestedWhere` on `StorageListOptions` |
-| `@takibi/worker-runtime` | One-shot evaluate, requested vs effective, public and action facades |
-| `@takibi/storage` | Effective-query execution, index planning, cursor v4 |
-| `@takibi/api` / `takibi` | Re-exports and collection types; no new `listScope` field |
+| Package                  | Owns                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `@takibi/policy`         | Grant list-decision semantics, WeakMap storage, `and` / `or` exits, `listDecisionOf` |
+| `@takibi/query`          | `listWhere`, `composeAnd` / `composeOr`                                              |
+| `@takibi/protocol`       | AST shape, client 32/8 limits, server 64/16 composition limits                       |
+| `@takibi/shared-types`   | `ListWhereScope`; optional `requestedWhere` on `StorageListOptions`                  |
+| `@takibi/worker-runtime` | One-shot evaluate, requested vs effective, public and action facades                 |
+| `@takibi/storage`        | Effective-query execution, index planning, cursor v4                                 |
+| `@takibi/api` / `takibi` | Re-exports and collection types; no new `listScope` field                            |
 
-No new package. Policy does not depend on query. Cursor encoding stays in
+No new package. Policy depends on query for validated composition and token recognition. Cursor encoding stays in
 storage.
 
 # Out of scope
@@ -329,3 +328,72 @@ storage.
   compiler.
 - Applying scope to trusted `$collections`.
 - Raising client query limits or silently flattening trees.
+
+# Approved implementation details (2026-09-15)
+
+### Accepted API / package boundaries
+
+`@takibi/policy` may depend on `@takibi/query`. Policy owns list-decision
+semantics and grant metadata; query owns scope-token creation/recognition and
+validated `composeAnd` / `composeOr`. Query depends on protocol and shared-types,
+and must not depend on policy, API or runtime. Protocol owns AST normalization
+and client/server budgets, not Boolean composition. No new package is added.
+
+`ListWhereScope` remains a shared-types contract with readonly `kind` and
+`where` plus an opaque type brand. Query registers frozen `listWhere` products
+in a private WeakSet and exports `isListWhereScope` for policy. A structural
+lookalike or cloned token is invalid. Grant's direct inputs and catalog callback
+results accept the tokens. Tokens require the same query package instance.
+
+`listDecisionOf` returns exactly `{ kind: "deny" }`, `{ kind: "allowAll" }`,
+or `{ kind: "allowWhere", where: QueryExpr }`; where is already validated and
+frozen. An unknown grant is a safe policy error, never unrestricted access.
+No deferred plan or materialization callback is introduced.
+
+### Composition
+
+Multiple scope tokens in one grant form one n-ary AND in argument order,
+unless a bare list permission makes the decision allowAll. Token provenance
+is checked even with bare list. Policy combinators use an ordered left fold;
+three scoped AND branches therefore form `and(and(A,B),C)`. Do not flatten,
+sort or reassociate. Decision identities follow the existing truth table.
+
+Every eagerly constructed scoped expression must satisfy the server budget
+before evaluation continues, even if a later branch would absorb its result.
+Existing short circuits still skip unevaluated branches. Scoped grants with
+every permission must not intern to fullAccess. Static-reason wrappers copy
+the list decision as well as permissions and reasons.
+
+### Capacity / failure handling
+
+Keep client normalization and each listWhere leaf at 32 nodes/depth 8. Add a
+separate protocol server-normalization entry point sharing the existing private
+validator at 64 nodes/depth 16. Keep the in-value limit at 32. Query composes
+ASTs through that server entry point, including validation of singleton inputs;
+zero inputs are invalid. Two 32-node operands plus one wrapper exceed 64.
+
+`listWhere` converts all callback and validation errors, including thrown public
+error objects, to a static query-owned ListScopeError without raw values,
+original messages or exposed causes. Token/composition failures use that error
+too. Runtime maps scope failures at evaluation/composition boundaries to
+INVALID_LIST_SCOPE, status 500, message "Invalid list authorization scope".
+Permission denial remains FORBIDDEN. Module-initialization failure stops startup
+with the sanitized local error. Unrelated policy-error handling is unchanged.
+
+### Runtime / cursors
+
+Resolve effective options once after one policy evaluation and before storage;
+preserve request and AccessContext.where. Count reuses those options across its
+internal pages, while every new external continuation reauthorizes.
+
+Define `StorageListOptions.requestedWhere?: QueryExpr | null`: explicit null
+means no client predicate; omission means trusted fallback to where. Runtime
+always supplies the requested value or null for policy-bound list/count.
+Public decoding must reject this server-only option as client input. Storage
+validates effective where at 64/16, requested where at 32/8, before planning.
+Effective validation failures are safe 500s; invalid requests/cursors remain
+safe 400s. Trusted collections bypass policy and use requested = effective.
+
+Cursor v4 and its security guarantees are unchanged. Digest input is the
+ordered normalized AST specified above; semantically equivalent reassociation
+is not cursor-compatible. No plan, scope AST or principal identity enters v4.

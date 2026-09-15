@@ -133,9 +133,9 @@ test("catalog callback grants match string-literal grants", () => {
   expect(actionsOf(grant((_g) => []))).toEqual([]);
 
   // @ts-expect-error unknown permission literal
-  grant("admin");
+  expect(() => grant("admin")).toThrow();
   // @ts-expect-error unknown catalog property
-  grant((g) => [g.admin]);
+  expect(() => grant((g) => [g.admin])).toThrow();
 });
 
 test("isAccessGrant accepts only WeakMap-backed grants", () => {

@@ -1,4 +1,5 @@
 export {
+  listWhere,
   compileListOptions,
   compileOrderBy,
   compileWhere,

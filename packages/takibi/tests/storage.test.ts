@@ -116,9 +116,10 @@ test("SQLite pagination preserves order, boundary, and nextCursor", async () => 
   const page1 = await durable.list("posts", { limit: 2 });
   expect(page1.items.map((d) => d.id)).toEqual(["a", "b"]);
   expect(decodeCursor(page1.nextCursor!)).toEqual({
-    v: 2,
+    v: 4,
     collection: "posts",
-    where: null,
+    requestedWhere: null,
+    binding: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
     id: "b",
   });
 
@@ -158,9 +159,10 @@ test("SQLite filters before limit with query-bound cursors", async () => {
   const first = await durable.list("posts", { limit: 2, where });
   expect(first.items.map((document) => document.id)).toEqual(["b", "d"]);
   expect(decodeCursor(first.nextCursor!)).toEqual({
-    v: 2,
+    v: 4,
     collection: "posts",
-    where,
+    requestedWhere: where,
+    binding: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
     id: "d",
   });
 
@@ -456,7 +458,7 @@ test("indexed list pages by createdAt and id in both directions", async () => {
   const first = await durable.list("posts", desc);
   expect(first.items.map((document) => document.id)).toEqual(["b", "c"]);
   expect(decodeCursor(first.nextCursor!)).toMatchObject({
-    v: 3,
+    v: 4,
     index: "byOwner",
     orderField: "createdAt",
     direction: "desc",

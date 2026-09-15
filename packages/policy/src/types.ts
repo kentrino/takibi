@@ -56,3 +56,8 @@ export type AccessPolicyFn<TCtx extends object, TDoc = WithMetadata<Record<strin
 export type AccessPolicy<TCtx extends object, TDoc = WithMetadata<Record<string, unknown>>> =
   | AccessGrant
   | AccessPolicyFn<TCtx, TDoc>;
+
+export type ListDecision =
+  | { readonly kind: "deny" }
+  | { readonly kind: "allowAll" }
+  | { readonly kind: "allowWhere"; readonly where: QueryExpr };

@@ -10,7 +10,7 @@ issue: ./issue.ja.md
 これは
 [0018-policy-owned-list-range](./issue.ja.md)
 の受諾契約です。
-[0015-policy-owned-list-scope](../../closed/0015-policy-owned-list-scope/issue.ja.md)
+[0015-policy-owned-list-scope](../0015-policy-owned-list-scope/issue.ja.md)
 のコレクション級 `listScope` 提案を置き換えます。
 
 # 決定
@@ -26,7 +26,7 @@ grant の list 決定は次のいずれかちょうど1つです。
 所有者・管理者・公開レコードの規則は、既存の `and` / `or` で合成します。
 `CollectionDefinition` に `listScope` を追加しません。
 
-# 現行の振る舞い
+# この issue の実装前の振る舞い
 
 `packages/worker-runtime/src/executor.ts` は、要求フィルタを `AccessContext.where`
 に載せてコレクションポリシーを評価し、`executeResolvedCollection` はその同じ
@@ -50,14 +50,20 @@ list カーソル（`packages/storage/src/storage.ts`）は認証されない ba
 `grant(...permissions)` とカタログコールバックは残します。入力を、query が構築するスコープトークンで拡張します。
 
 ```ts
-grant("get", listWhere((q) => q.ownerId.eq(user.id)));
+grant(
+  "get",
+  listWhere((q) => q.ownerId.eq(user.id)),
+);
 grant("list"); // allowAll
 ```
 
-`listWhere` は `@takibi/query` に置き、`compileWhere` にブランドを付けたものです。コールバックはビルダーが作った `QueryExpr` を返さなければならず、既存のクライアント上限 32/8 で正規化されます。トークン型は `@takibi/shared-types` に置き、`@takibi/policy` が `@takibi/query` に依存せず受け取れます。
+`listWhere` は `@takibi/query` に置き、`compileWhere` にブランドを付けたものです。コールバックはビルダーが作った `QueryExpr` を返さなければならず、既存のクライアント上限 32/8 で正規化されます。トークン型は `@takibi/shared-types` に置き、共有契約とします。`@takibi/policy` は、検証済みの合成とトークンの識別のために `@takibi/query` に依存します。
 
 ```ts
+declare const listWhereScopeBrand: unique symbol;
+
 type ListWhereScope = {
+  readonly [listWhereScopeBrand]: true;
   readonly kind: "listWhere";
   readonly where: QueryExpr;
 };
@@ -73,7 +79,7 @@ type ListWhereScope = {
 
 # コレクション定義の例
 
-以下は提案 API の例です。`listWhere` はまだ実装されていません。
+以下は実装済み API の例です。
 `z` は `zod` から、ポリシーヘルパーは `takibi` からインポートし、既存の
 `context` が `user` を `{ id: string; role: "admin" | "member" } | null`
 として解決するものとします。
@@ -86,28 +92,21 @@ const postSchema = z.object({
 
 type Post = z.infer<typeof postSchema>;
 
-const ownerReadPolicy = context.policy(
-  postSchema,
-  ({ user, operation, doc }) => {
-    if (!user) return none;
+const ownerReadPolicy = context.policy(postSchema, ({ user, operation, doc }) => {
+  if (!user) return none;
 
-    switch (operation) {
-      case "list":
-      case "count":
-        return grant(
-          listWhere<Post>((q) => q.ownerId.eq(user.id)),
-        );
-      case "get":
-        return doc?.ownerId === user.id ? grant("get") : none;
-      default:
-        return none;
-    }
-  },
-);
+  switch (operation) {
+    case "list":
+    case "count":
+      return grant(listWhere<Post>((q) => q.ownerId.eq(user.id)));
+    case "get":
+      return doc?.ownerId === user.id ? grant("get") : none;
+    default:
+      return none;
+  }
+});
 
-const adminReadPolicy = context.policy(({ user }) =>
-  user?.role === "admin" ? read : none,
-);
+const adminReadPolicy = context.policy(({ user }) => (user?.role === "admin" ? read : none));
 
 const posts = context.defineCollection({
   schema: postSchema,
@@ -139,14 +138,14 @@ await client.posts.list({
 
 # 合成
 
-権限は list 範囲から独立したままです。`update` は与えるが `list` は与えない枝は、他枝の list 範囲を広げも狭めもしません。
+権限は list 範囲から独立したままです。`update` は与えるが `list` は与えない枝は、OR には範囲を寄与せず、AND では表のとおり list を拒否します。
 
 list 決定の概念演算:
 
-| 左 \ 右 | `deny` | `allowAll` | `allowWhere(W2)` |
-| --- | --- | --- | --- |
-| `deny` | `deny` | `deny`（and）/ `allowAll`（or） | `deny`（and）/ `allowWhere(W2)`（or） |
-| `allowAll` | `deny`（and）/ `allowAll`（or） | `allowAll` | `allowWhere(W2)`（and）/ `allowAll`（or） |
+| 左 \ 右          | `deny`                                | `allowAll`                                | `allowWhere(W2)`                                   |
+| ---------------- | ------------------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| `deny`           | `deny`                                | `deny`（and）/ `allowAll`（or）           | `deny`（and）/ `allowWhere(W2)`（or）              |
+| `allowAll`       | `deny`（and）/ `allowAll`（or）       | `allowAll`                                | `allowWhere(W2)`（and）/ `allowAll`（or）          |
 | `allowWhere(W1)` | `deny`（and）/ `allowWhere(W1)`（or） | `allowWhere(W1)`（and）/ `allowAll`（or） | `allowWhere(and(W1,W2))` / `allowWhere(or(W1,W2))` |
 
 `and` は全権限と `allowAll` から始め、各枝（list 決定を含む）を交差させ、権限が残らなければ従来どおり `none` を返します。
@@ -171,7 +170,7 @@ list/count ごとに認可と範囲を一度だけ評価します。
 7. 信頼された `$collections` はポリシーと範囲を迂回する。実効問い合わせは要求問い合わせである。
 
 `AccessContext.where` を実効問い合わせで上書きしない。watch はここでは実装しない。
-[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md)
+[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md)
 は、後でこの同じ評価と合成の経路を呼ばなければなりません。
 
 # 失敗閉鎖の範囲結果
@@ -230,7 +229,7 @@ binding は、正規化済み AST の正規形（凍結木の `JSON.stringify`�
 
 - **互換:** 継続が走るのは、この要求で新たに合成した実効問い合わせがダイジェストと一致するときだけです。
 - **秘密ではない:** 同じ AST を組み立てられる者はダイジェストを計算できます。ハッシュを機密として文書化しないでください。
-- **認証されない:** クライアントは `binding`、`id`、`values` を偽造できます。*別* 範囲向けのダイジェスト偽造は、再認可後の互換検査で失敗します。*現在* の範囲で `id` / `values` を偽造すると、**認可済み集合の内側** でページを飛ばしたり並べ替えたりできます。これは符号なし v2/v3 カーソルと同じ種類です。カーソルは認可資格情報ではありません。
+- **認証されない:** クライアントは `binding`、`id`、`values` を偽造できます。_別_ 範囲向けのダイジェスト偽造は、再認可後の互換検査で失敗します。_現在_ の範囲で `id` / `values` を偽造すると、**認可済み集合の内側** でページを飛ばしたり並べ替えたりできます。これは符号なし v2/v3 カーソルと同じ種類です。カーソルは認可資格情報ではありません。
 - **サーバー述語の機密性:** v4 は実効 AST を省略するので、デコーダはサーバー専用の葉を見ません。それは **暗号化ではなく省略** です。インデックスの `values` は、最後に返した行のインデックスタプルを依然として露出します。そこには、そのページに既にある所有者フィールドが含まれることがあります。インデックスカーソルが認可データを隠すとは主張しないでください。
 
 # インデックス、count、テスト
@@ -243,17 +242,17 @@ list、count、インデックス、カーソル v4、セキュリティテス�
 
 # パッケージ境界
 
-| パッケージ | 所有 |
-| --- | --- |
-| `@takibi/policy` | grant の list 決定意味論、WeakMap 保存、`and` / `or` の終了、`listDecisionOf` |
-| `@takibi/query` | `listWhere`、`composeAnd` / `composeOr` |
-| `@takibi/protocol` | AST 形、クライアント 32/8 上限、サーバー合成 64/16 上限 |
-| `@takibi/shared-types` | `ListWhereScope`。`StorageListOptions` の任意の `requestedWhere` |
-| `@takibi/worker-runtime` | 一度きりの評価、要求対実効、公開およびアクションファサード |
-| `@takibi/storage` | 実効問い合わせ実行、インデックス計画、カーソル v4 |
-| `@takibi/api` / `takibi` | 再エクスポートとコレクション型。新しい `listScope` フィールドは置かない |
+| パッケージ               | 所有                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `@takibi/policy`         | grant の list 決定意味論、WeakMap 保存、`and` / `or` の終了、`listDecisionOf` |
+| `@takibi/query`          | `listWhere`、`composeAnd` / `composeOr`                                       |
+| `@takibi/protocol`       | AST 形、クライアント 32/8 上限、サーバー合成 64/16 上限                       |
+| `@takibi/shared-types`   | `ListWhereScope`。`StorageListOptions` の任意の `requestedWhere`              |
+| `@takibi/worker-runtime` | 一度きりの評価、要求対実効、公開およびアクションファサード                    |
+| `@takibi/storage`        | 実効問い合わせ実行、インデックス計画、カーソル v4                             |
+| `@takibi/api` / `takibi` | 再エクスポートとコレクション型。新しい `listScope` フィールドは置かない       |
 
-新しいパッケージは作りません。policy は query に依存しません。カーソル符号化は storage に残します。
+新しいパッケージは作りません。policy は検証済みの合成とトークンの識別のために query に依存します。カーソル符号化は storage に残します。
 
 # 対象外
 
@@ -263,3 +262,77 @@ list、count、インデックス、カーソル v4、セキュリティテス�
 - watch の実装、予約コンテキスト同一性、JS から SQL への汎用コンパイラ。
 - 信頼された `$collections` への範囲適用。
 - クライアント問い合わせ上限の引き上げ、または木の暗黙の平坦化。
+
+# 承認済みの実装詳細（2026-09-15）
+
+### API / パッケージ境界
+
+`@takibi/policy` から `@takibi/query` への依存を許可します。policy は list
+決定の意味と grant のメタデータを所有し、query はスコープトークンの生成・
+識別と、検証済みの `composeAnd` / `composeOr` を所有します。query の依存先は
+protocol と shared-types とし、policy、API、runtime へは依存しません。
+protocol は AST の正規化とクライアント・サーバーの上限を所有し、Boolean
+合成は所有しません。新しいパッケージは追加しません。
+
+`ListWhereScope` の型は shared-types に置き、readonly の `kind`、`where` と
+不透明な型ブランドを持たせます。query は凍結した `listWhere` の生成物を
+非公開 WeakSet に登録し、policy 用に `isListWhereScope` を公開します。
+同じ形のオブジェクトや複製したトークンは無効です。grant の直接引数と
+カタログコールバックの戻り値の両方でトークンを受け付けます。
+トークンには同一の query パッケージインスタンスが必要です。
+
+`listDecisionOf` の戻り値は `{ kind: "deny" }`、`{ kind: "allowAll" }`、
+`{ kind: "allowWhere", where: QueryExpr }` のいずれかです。where は検証・
+凍結済みです。不明な grant は安全なポリシーエラーとし、無制限の許可には
+しません。遅延プランや実体化コールバックは導入しません。
+
+### 合成 — AST の形とメタデータの引き継ぎ
+
+1 回の grant に渡した複数のスコープトークンは、引数順の 1 個の多項 AND に
+します。ただし裸の list 権限があれば allowAll になります。その場合も
+トークンの生成元は検証します。ポリシー合成は順序を保った左畳み込みとし、
+3 個のスコープ付き AND 分岐は `and(and(A,B),C)` になります。平坦化、整列、
+結合順序の変更はしません。決定の単位元・吸収則は既存の真理値表に従います。
+
+即時に生成したスコープ式は、その後の分岐が結果を吸収する場合でも、評価を
+続ける前にサーバー上限を満たす必要があります。既存の短絡で未評価となる
+分岐は引き続き実行しません。全権限を持つスコープ付き grant を fullAccess
+に置き換えてはいけません。静的な拒否理由のラッパーは、権限と理由に加えて
+list 決定も引き継ぎます。
+
+### 上限 / 失敗処理 — 境界の明確化
+
+クライアントの正規化と各 listWhere の式は 32 ノード・深さ 8 のままです。
+protocol の既存の非公開バリデーターを共有する、64 ノード・深さ 16 の
+サーバー正規化用エントリーポイントを追加します。in の値の上限は 32 の
+ままです。query はこの入口で合成 AST を検証し、単一入力も検証します。
+入力 0 個は無効です。32 ノードの式 2 個に親ノードを加えると 64 を超えます。
+
+`listWhere` は、公開エラーオブジェクトの throw を含む、コールバックと
+検証のすべてのエラーを query 所有の静的な ListScopeError に変換します。
+生の値、元のメッセージ、公開された cause は含めません。トークンと合成の
+失敗も同じエラーにします。runtime は評価・合成の境界で、スコープの失敗を
+INVALID_LIST_SCOPE、HTTP 500、メッセージ "Invalid list authorization scope"
+に変換します。権限拒否は FORBIDDEN のままです。モジュール初期化時の失敗は
+機密情報を除いた同じローカルエラーで起動を停止します。無関係なポリシー
+エラーの処理は変更しません。
+
+### Runtime / カーソル — 要求条件の不在と評価時点
+
+ポリシーを 1 回評価した後、ストレージへ渡す前に有効オプションを 1 回解決
+します。要求と AccessContext.where は保持します。count の内部ページでは
+解決済みオプションを再利用し、新しい外部継続要求では毎回再認可します。
+
+`StorageListOptions.requestedWhere?: QueryExpr | null` と定義します。
+明示的な null はクライアント条件なし、省略は信頼済み経路で where を使う
+ことを意味します。runtime はポリシー付き list/count で必ず要求条件または
+null を渡します。公開デコーダーはこのサーバー専用オプションの入力を拒否
+します。ストレージは計画前に有効 where を 64/16、要求 where を 32/8 で
+検証します。有効条件の検証失敗は安全な 500、要求・カーソルの不正は安全な
+400 とします。信頼済みコレクションはポリシーを迂回し、要求条件と有効条件を
+同一にします。
+
+カーソル v4 とその安全性の保証は変更しません。ダイジェストの入力は上記の
+順序を保った正規化 AST であり、意味が同じでも結合順序の異なる AST は
+カーソル互換ではありません。プラン、スコープ AST、主体の識別子は v4 に
+含めません。

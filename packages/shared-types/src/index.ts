@@ -91,10 +91,22 @@ export type StorageOrderBy = {
   direction: OrderDirection;
 };
 
+declare const listWhereScopeBrand: unique symbol;
+
+/** Opaque server scope, constructed by listWhere in @takibi/query. */
+export type ListWhereScope = {
+  readonly [listWhereScopeBrand]: true;
+  readonly kind: "listWhere";
+  readonly where: QueryExpr;
+};
+
 export type StorageListOptions = {
   limit?: number;
   cursor?: string;
+  /** Effective query executed by storage. */
   where?: QueryExpr;
+  /** Server-only: null means no requested filter; omission uses where. */
+  requestedWhere?: QueryExpr | null;
   index?: string;
   orderBy?: StorageOrderBy;
 };

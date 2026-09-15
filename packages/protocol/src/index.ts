@@ -2,6 +2,9 @@ export { TakibiProtocolError } from "./error";
 export {
   normalizeOrderBy,
   normalizeQueryExpr,
+  normalizeServerQueryExpr,
+  SERVER_QUERY_MAX_NODES,
+  SERVER_QUERY_MAX_DEPTH,
   parseOrderBy,
   parseQueryExpr,
   QUERY_MAX_DEPTH,

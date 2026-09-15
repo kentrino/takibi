@@ -52,7 +52,7 @@ Reserve `watch` as a collection method in `@takibi/api` and action registration.
 new permission: connection and every re-evaluation require the existing `list` permission and apply
 the same policy-owned list range as normal policy-bound list execution. Reuse the evaluate-and-compose
 path from
-[0018-policy-owned-list-range](../0018-policy-owned-list-range/issue.md);
+[0018-policy-owned-list-range](../../closed/0018-policy-owned-list-range/issue.md);
 do not invent a second scope mechanism.
 
 # Transport and authorization
@@ -160,7 +160,7 @@ Out of scope:
 
 # References
 
-- [0018-policy-owned-list-range](../0018-policy-owned-list-range/issue.md)
+- [0018-policy-owned-list-range](../../closed/0018-policy-owned-list-range/issue.md)
 - [Cloudflare Durable Objects WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 - [Cloudflare Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
 - [Convex realtime documentation](https://docs.convex.dev/realtime)

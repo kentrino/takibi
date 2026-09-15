@@ -8,16 +8,16 @@ category: security
 source_issue: 0059-policy-owned-list-scope
 status: closed
 closed_reason: superseded
-replacement: ../../open/0018-policy-owned-list-range/issue.ja.md
+replacement: ../0018-policy-owned-list-range/issue.ja.md
 ---
 
 [English](./issue.md)
 
 # 状態
 
-[0018-policy-owned-list-range](../../open/0018-policy-owned-list-range/issue.ja.md)
+[0018-policy-owned-list-range](../0018-policy-owned-list-range/issue.ja.md)
 に置き換えられ、終了しました。決定した契約は
-[design-01.ja.md](../../open/0018-policy-owned-list-range/design-01.ja.md)
+[design-01.ja.md](../0018-policy-owned-list-range/design-01.ja.md)
 にあります。この issue のコレクション級 `listScope` 提案は実装しないでください。
 
 # 置き換えた理由

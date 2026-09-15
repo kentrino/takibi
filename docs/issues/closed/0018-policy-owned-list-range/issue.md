@@ -7,9 +7,25 @@ priority_reason: "List authorization still makes applications prove client filte
 category: security
 source_issue: 0059-policy-owned-list-scope
 supersedes: 0015-policy-owned-list-scope
+status: closed
+closed_reason: implemented
 ---
 
 [日本語](./issue.ja.md)
+
+# Resolution
+
+Implemented policy-owned list/count ranges, including the human-approved
+policy → query dependency and composition/provenance refinements in
+[design-01.md](./design-01.md). Runtime evaluates once and separates requested
+and effective filters; storage applies the effective set before planning and
+pagination and emits query-bound cursor v4 without the server AST.
+
+Validation: `pnpm run ready` passed (repository format/lint/type checks,
+recursive tests including Workers suites, and recursive builds). Scope tests
+cover grant algebra, eager overflow, query limits/provenance, public HTTP and
+actions, multi-page count, trusted bypass, indexed/unindexed SQLite execution,
+and cursor compatibility/tampering. Old v2/v3 cursors are intentionally rejected.
 
 # Problem
 
@@ -26,9 +42,9 @@ an effective query once per operation; storage executes that query and binds
 cursors without putting server scope in the token.
 
 Supersedes
-[0015-policy-owned-list-scope](../../closed/0015-policy-owned-list-scope/issue.md).
+[0015-policy-owned-list-scope](../0015-policy-owned-list-scope/issue.md).
 Future watch in
-[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md) must reuse
+[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md) must reuse
 this path and is not part of this issue.
 
 # Related Files

@@ -1,4 +1,4 @@
-import { normalizeQueryExpr } from "@takibi/protocol";
+import { normalizeQueryExpr, normalizeServerQueryExpr } from "@takibi/protocol";
 import { matchesQuery } from "@takibi/query";
 import { assertJsonObject } from "@takibi/utility";
 import { BadRequestError, LIST_PAGE_DEFAULT, LIST_PAGE_MAX, TakibiError } from "@takibi/api";
@@ -15,17 +15,20 @@ import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "@takibi/shared-types";
 import { documentRevision, withDocumentRevision } from "./revision";
 import type { StorageDriver, StorageListPlan, StoredDocument } from "./types";
 
-type ListCursorV2 = {
-  v: 2;
+type ListIdCursor = {
+  index?: never;
+  v: 4;
   collection: string;
-  where: QueryExpr | null;
+  requestedWhere: QueryExpr | null;
+  binding: string;
   id: string;
 };
 
-type ListCursorV3 = {
-  v: 3;
+type ListIndexCursor = {
+  v: 4;
   collection: string;
-  where: QueryExpr | null;
+  requestedWhere: QueryExpr | null;
+  binding: string;
   index: string;
   fields: readonly string[];
   orderField: string;
@@ -34,7 +37,7 @@ type ListCursorV3 = {
   id: string;
 };
 
-type ListCursor = ListCursorV2 | ListCursorV3;
+type ListCursor = ListIdCursor | ListIndexCursor;
 
 const LIST_CHUNK_SIZE = 128;
 const STORAGE_LAYOUT_VERSION = 4;
@@ -58,6 +61,8 @@ type ReadChunk = (
 type PreparedList = {
   collection: string;
   where: QueryExpr | undefined;
+  requestedWhere: QueryExpr | null;
+  binding: string;
   limit: number;
   scan:
     | { kind: "id"; startAfter: string | undefined }
@@ -152,7 +157,7 @@ export function createDurableObjectStorage(
         );
       },
       async list(resource, opts, plan) {
-        const prepared = prepareList(resource, opts, registry);
+        const prepared = await prepareList(resource, opts, registry);
         if (prepared.scan.kind === "index") {
           const readChunk = createSqlIndexChunkReader(storage.sql, resource, prepared, plan);
           return paginateIndex(
@@ -439,63 +444,82 @@ function rowToDocument(row: DocumentRow): StoredDocument {
   });
 }
 
-function prepareList(
+async function prepareList(
   resource: string,
   opts: StorageListOptions | undefined,
   registry: IndexRegistry,
-): PreparedList {
+): Promise<PreparedList> {
   let where: QueryExpr | undefined;
   try {
-    where = opts?.where === undefined ? undefined : normalizeQueryExpr(opts.where);
-  } catch (error) {
-    throw new BadRequestError(error instanceof Error ? error.message : "Invalid query");
+    where = opts?.where === undefined ? undefined : normalizeServerQueryExpr(opts.where);
+  } catch {
+    throw new TakibiError("INVALID_LIST_SCOPE", "Invalid list authorization scope", 500);
   }
-
+  let requestedWhere: QueryExpr | null;
+  try {
+    const requested = opts?.requestedWhere === undefined ? opts?.where : opts.requestedWhere;
+    requestedWhere = requested == null ? null : normalizeQueryExpr(requested);
+  } catch {
+    throw new BadRequestError("Invalid requested query");
+  }
+  const binding = await queryBinding(where);
   if (
     opts?.limit !== undefined &&
     (typeof opts.limit !== "number" || !Number.isInteger(opts.limit) || opts.limit < 1)
-  ) {
+  )
     throw new BadRequestError("Invalid list limit");
-  }
 
   const resolved = resolveIndexedList(resource, { ...opts, where }, registry);
   const cursor = opts?.cursor === undefined ? undefined : decodeCursor(opts.cursor);
   const limit = Math.min(opts?.limit ?? LIST_PAGE_DEFAULT, LIST_PAGE_MAX);
+  if (
+    cursor !== undefined &&
+    (cursor.collection !== resource ||
+      !sameQuery(cursor.requestedWhere, requestedWhere) ||
+      cursor.binding !== binding)
+  )
+    throw new BadRequestError("Cursor does not match this collection and query");
 
   if (resolved === undefined) {
-    if (cursor !== undefined && cursor.v !== 2) {
+    if (cursor !== undefined && "index" in cursor)
       throw new BadRequestError("Cursor does not match this collection and query");
-    }
-    if (
-      cursor !== undefined &&
-      (cursor.collection !== resource || !sameQuery(cursor.where, where))
-    ) {
-      throw new BadRequestError("Cursor does not match this collection and query");
-    }
     return {
       collection: resource,
       where,
+      requestedWhere,
+      binding,
       limit,
       scan: { kind: "id", startAfter: cursor?.id },
     };
   }
-
-  if (cursor !== undefined) {
-    if (cursor.v !== 3 || !sameIndexedCursor(cursor, resource, where, resolved)) {
-      throw new BadRequestError("Cursor does not match this collection and query");
-    }
+  if (
+    cursor !== undefined &&
+    (cursor.index === undefined || !sameIndexedCursor(cursor, resolved))
+  ) {
+    throw new BadRequestError("Cursor does not match this collection and query");
   }
-
   return {
     collection: resource,
     where,
+    requestedWhere,
+    binding,
     limit,
     scan: {
       kind: "index",
       resolved,
-      ...(cursor && cursor.v === 3 ? { startAfter: { values: cursor.values, id: cursor.id } } : {}),
+      ...(cursor && cursor.index !== undefined
+        ? { startAfter: { values: cursor.values, id: cursor.id } }
+        : {}),
     },
   };
+}
+
+async function queryBinding(where: QueryExpr | undefined): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(where ?? null)),
+  );
+  return encodeBytes(new Uint8Array(digest));
 }
 
 async function paginate(
@@ -520,9 +544,10 @@ async function paginate(
         return {
           items: page,
           nextCursor: encodeCursor({
-            v: 2,
+            v: 4,
             collection: prepared.collection,
-            where: prepared.where ?? null,
+            requestedWhere: prepared.requestedWhere,
+            binding: prepared.binding,
             id: last.id,
           }),
         };
@@ -578,9 +603,10 @@ async function paginateIndex(
         return {
           items: page,
           nextCursor: encodeCursor({
-            v: 3,
+            v: 4,
             collection: prepared.collection,
-            where: prepared.where ?? null,
+            requestedWhere: prepared.requestedWhere,
+            binding: prepared.binding,
             index: resolved.index.name,
             fields: resolved.index.fields,
             orderField: resolved.orderField,
@@ -599,19 +625,12 @@ async function paginateIndex(
   return { items: page };
 }
 
-function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | undefined): boolean {
+function sameQuery(cursorWhere: QueryExpr | null, where: QueryExpr | null): boolean {
   return JSON.stringify(cursorWhere) === JSON.stringify(where ?? null);
 }
 
-function sameIndexedCursor(
-  cursor: ListCursorV3,
-  collection: string,
-  where: QueryExpr | undefined,
-  resolved: ResolvedIndexScan,
-): boolean {
+function sameIndexedCursor(cursor: ListIndexCursor, resolved: ResolvedIndexScan): boolean {
   return (
-    cursor.collection === collection &&
-    sameQuery(cursor.where, where) &&
     cursor.index === resolved.index.name &&
     cursor.orderField === resolved.orderField &&
     cursor.direction === resolved.direction &&
@@ -622,6 +641,10 @@ function sameIndexedCursor(
 
 function encodeCursor(cursor: ListCursor): string {
   const bytes = new TextEncoder().encode(JSON.stringify(cursor));
+  return encodeBytes(bytes);
+}
+
+function encodeBytes(bytes: Uint8Array): string {
   const chunkSize = 8192;
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
@@ -642,62 +665,58 @@ function decodeCursor(token: string): ListCursor {
     const json = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
     const value = JSON.parse(json) as unknown;
     if (!isRecord(value)) throw new Error("Invalid cursor object");
-    if (value.v === 2) {
-      assertExactKeys(value, ["v", "collection", "where", "id"]);
-      if (
-        typeof value.collection !== "string" ||
-        value.collection.length === 0 ||
-        typeof value.id !== "string" ||
-        value.id.length === 0
-      ) {
-        throw new Error("Invalid cursor fields");
-      }
-      const where = value.where === null ? null : normalizeQueryExpr(value.where);
-      return { v: 2, collection: value.collection, where, id: value.id };
+    if (value.v !== 4) throw new Error("Invalid cursor version");
+    const keys = ["v", "collection", "requestedWhere", "binding", "id"];
+    const indexed = "index" in value;
+    assertExactKeys(
+      value,
+      indexed ? [...keys, "index", "fields", "orderField", "direction", "values"] : keys,
+    );
+    if (
+      typeof value.collection !== "string" ||
+      value.collection.length === 0 ||
+      typeof value.id !== "string" ||
+      value.id.length === 0 ||
+      typeof value.binding !== "string" ||
+      !/^[A-Za-z0-9_-]{43}$/.test(value.binding)
+    ) {
+      throw new Error("Invalid cursor fields");
     }
-    if (value.v === 3) {
-      assertExactKeys(value, [
-        "v",
-        "collection",
-        "where",
-        "index",
-        "fields",
-        "orderField",
-        "direction",
-        "values",
-        "id",
-      ]);
-      if (
-        typeof value.collection !== "string" ||
-        value.collection.length === 0 ||
-        typeof value.index !== "string" ||
-        value.index.length === 0 ||
-        typeof value.orderField !== "string" ||
-        value.orderField.length === 0 ||
-        (value.direction !== "asc" && value.direction !== "desc") ||
-        typeof value.id !== "string" ||
-        value.id.length === 0 ||
-        !Array.isArray(value.fields) ||
-        !value.fields.every((field) => typeof field === "string") ||
-        !Array.isArray(value.values) ||
-        !value.values.every((entry) => typeof entry === "string" || typeof entry === "number")
-      ) {
-        throw new Error("Invalid cursor fields");
-      }
-      const where = value.where === null ? null : normalizeQueryExpr(value.where);
-      return {
-        v: 3,
-        collection: value.collection,
-        where,
-        index: value.index,
-        fields: value.fields,
-        orderField: value.orderField,
-        direction: value.direction,
-        values: value.values,
-        id: value.id,
-      };
-    }
-    throw new Error("Invalid cursor version");
+    const requestedWhere =
+      value.requestedWhere === null ? null : normalizeQueryExpr(value.requestedWhere);
+    const base: ListIdCursor = {
+      v: 4,
+      collection: value.collection,
+      requestedWhere,
+      binding: value.binding,
+      id: value.id,
+    };
+    if (!indexed) return base;
+    if (
+      typeof value.index !== "string" ||
+      value.index.length === 0 ||
+      typeof value.orderField !== "string" ||
+      value.orderField.length === 0 ||
+      (value.direction !== "asc" && value.direction !== "desc") ||
+      !Array.isArray(value.fields) ||
+      value.fields.length === 0 ||
+      !value.fields.every((field) => typeof field === "string" && field.length > 0) ||
+      !Array.isArray(value.values) ||
+      value.values.length !== value.fields.length ||
+      !value.values.every(
+        (entry) =>
+          typeof entry === "string" || (typeof entry === "number" && Number.isFinite(entry)),
+      )
+    )
+      throw new Error("Invalid cursor fields");
+    return {
+      ...base,
+      index: value.index,
+      fields: value.fields,
+      orderField: value.orderField,
+      direction: value.direction,
+      values: value.values,
+    };
   } catch {
     throw new BadRequestError("Invalid list cursor");
   }

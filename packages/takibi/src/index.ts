@@ -33,7 +33,7 @@ export {
 } from "@takibi/api";
 
 export { and, fullAccess, grant, none, or, read, write } from "./policy";
-export { queryImpliesEquality } from "./query";
+export { listWhere, queryImpliesEquality } from "./query";
 
 export type {
   AccessPermission,
@@ -61,3 +61,5 @@ export type {
   QueryOperator,
   QueryScalar,
 } from "./types";
+
+export type { ListWhereScope } from "@takibi/shared-types";

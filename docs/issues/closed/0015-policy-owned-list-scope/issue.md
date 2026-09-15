@@ -8,7 +8,7 @@ category: security
 source_issue: 0059-policy-owned-list-scope
 status: closed
 closed_reason: superseded
-replacement: ../../open/0018-policy-owned-list-range/issue.md
+replacement: ../0018-policy-owned-list-range/issue.md
 ---
 
 [日本語](./issue.ja.md)
@@ -16,9 +16,9 @@ replacement: ../../open/0018-policy-owned-list-range/issue.md
 # Status
 
 Closed as superseded by
-[0018-policy-owned-list-range](../../open/0018-policy-owned-list-range/issue.md).
+[0018-policy-owned-list-range](../0018-policy-owned-list-range/issue.md).
 The decided contract is in
-[design-01.md](../../open/0018-policy-owned-list-range/design-01.md).
+[design-01.md](../0018-policy-owned-list-range/design-01.md).
 Do not implement the collection-level `listScope` proposal from this issue.
 
 # Why this was replaced
