@@ -2,6 +2,9 @@
 title: Stop worker-runtime pack dts from emitting declarations into testing sources
 author: Kimi K3 (Droid Core)
 cost: 2
+priority: P1
+priority_reason: "The defect makes clean build and release gates nondeterministic and can emit generated files into another package's sources."
+category: build
 ---
 
 # Problem
