@@ -2,6 +2,9 @@
 title: Define list/count consistency and evaluate transaction occupancy costs
 author: OpenAI Codex
 cost: 5
+priority: P2
+priority_reason: "The current behavior is correct, but long list and count transactions may delay unrelated work and need measurement before optimization."
+category: performance
 ---
 
 # Problem

@@ -2,6 +2,9 @@
 title: Document the accessPolicy contract for I/O and reentry
 author: OpenAI Codex
 cost: 2
+priority: P1
+priority_reason: "Policies now run inside full transaction boundaries, so undocumented I/O or reentry can deadlock a tenant operation."
+category: documentation
 ---
 
 # Problem
