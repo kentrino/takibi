@@ -13,11 +13,9 @@ type PackageManifest = {
 
 const packageDir = join(import.meta.dirname, "..");
 const packagesDir = join(packageDir, "..");
-const allowedWorkspace = new Set(["@takibi/shared-types"]);
+const allowedWorkspace = new Set(["@takibi/shared-types", "@takibi/query", "@takibi/protocol"]);
 const forbiddenSpecifiers = [
   "takibi",
-  "@takibi/query",
-  "@takibi/protocol",
   "@takibi/api",
   "@takibi/client",
   "@takibi/storage",
@@ -114,6 +112,7 @@ test("policy package keeps a one-way dependency graph", () => {
   expect(policy.dependencies).toEqual({
     "@standard-schema/spec": "catalog:",
     "@takibi/shared-types": "workspace:^",
+    "@takibi/query": "workspace:^",
   });
   expect(sharedTypes.dependencies?.["@takibi/policy"]).toBeUndefined();
   expect(sharedTypes.dependencies?.["takibi"]).toBeUndefined();

@@ -104,3 +104,6 @@ export type {
   KeysMatching,
   StringKeysMatching,
 } from "./type-util";
+
+export { listWhere } from "@takibi/query";
+export type { ListWhereScope } from "@takibi/shared-types";

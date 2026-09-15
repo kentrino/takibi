@@ -9,6 +9,8 @@ import { TakibiProtocolError } from "./error";
 
 export const QUERY_MAX_NODES = 32;
 export const QUERY_MAX_DEPTH = 8;
+export const SERVER_QUERY_MAX_NODES = 64;
+export const SERVER_QUERY_MAX_DEPTH = 16;
 
 const VALUE_OPERATORS = new Set<QueryValueOperator>(["eq", "gt", "gte", "lt", "lte"]);
 const STRING_OPERATORS = new Set<QueryStringOperator>(["contains", "startsWith", "endsWith"]);
@@ -35,12 +37,21 @@ export function normalizeOrderBy(value: unknown): OrderExpr {
 }
 
 export function normalizeQueryExpr(value: unknown): QueryExpr {
+  return normalize(value, QUERY_MAX_NODES, QUERY_MAX_DEPTH);
+}
+
+/** Server-only validation; public ingest must use normalizeQueryExpr. */
+export function normalizeServerQueryExpr(value: unknown): QueryExpr {
+  return normalize(value, SERVER_QUERY_MAX_NODES, SERVER_QUERY_MAX_DEPTH);
+}
+
+function normalize(value: unknown, maxNodes: number, maxDepth: number): QueryExpr {
   const seen = new Set<object>();
   const budget = { nodes: 0 };
 
   const visit = (input: unknown, depth: number): QueryExpr => {
-    if (depth > QUERY_MAX_DEPTH) {
-      throw new TakibiProtocolError(`Query depth must not exceed ${QUERY_MAX_DEPTH}`);
+    if (depth > maxDepth) {
+      throw new TakibiProtocolError(`Query depth must not exceed ${maxDepth}`);
     }
     if (!isRecord(input)) {
       throw new TakibiProtocolError("Query expression must be an object");
@@ -51,8 +62,8 @@ export function normalizeQueryExpr(value: unknown): QueryExpr {
     seen.add(input);
 
     budget.nodes += 1;
-    if (budget.nodes > QUERY_MAX_NODES) {
-      throw new TakibiProtocolError(`Query must not exceed ${QUERY_MAX_NODES} nodes`);
+    if (budget.nodes > maxNodes) {
+      throw new TakibiProtocolError(`Query must not exceed ${maxNodes} nodes`);
     }
 
     const op = input.op;

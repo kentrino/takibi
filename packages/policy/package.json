@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@standard-schema/spec": "catalog:",
+    "@takibi/query": "workspace:^",
     "@takibi/shared-types": "workspace:^"
   },
   "devDependencies": {

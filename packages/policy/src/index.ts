@@ -8,6 +8,7 @@ export {
   evaluateAccessPolicy,
   fullAccess,
   grant,
+  listDecisionOf,
   isAccessGrant,
   isConstrainedPolicy,
   isContextPolicy,
@@ -19,6 +20,7 @@ export {
 } from "./policy";
 export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc, PolicyHelper } from "./policy";
 export type {
+  ListDecision,
   AccessContext,
   AccessGrant,
   AccessPermission,

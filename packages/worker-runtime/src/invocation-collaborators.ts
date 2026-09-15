@@ -15,6 +15,7 @@ import {
   type AccessContext,
   type AccessGrant,
 } from "@takibi/policy";
+import { ListScopeError } from "@takibi/query";
 import { assertJsonValue } from "@takibi/utility";
 import type { JsonValue, WithMetadata } from "@takibi/shared-types";
 import type { InternalLogger } from "./logging";
@@ -76,7 +77,16 @@ export class PolicyEvaluator implements PolicySurface {
     accessCtx: AccessContext<NoInfer<TCtx>, WithMetadata<StandardSchemaV1.InferOutput<NoInfer<S>>>>,
     options: { conceal: boolean; id?: string },
   ): Promise<AccessGrant> {
-    const granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
+    let granted: AccessGrant;
+    try {
+      granted = await evaluateAccessPolicy(def.accessPolicy, accessCtx);
+      if (!isAccessGrant(granted))
+        throw new TakibiError("INVALID_POLICY", "Policy must return an AccessGrant", 500);
+    } catch (error) {
+      if (error instanceof ListScopeError)
+        throw new TakibiError("INVALID_LIST_SCOPE", "Invalid list authorization scope", 500);
+      throw error;
+    }
     if (allows(granted, accessCtx.permission)) return granted;
     if (options.conceal) {
       throw new NotFoundError(options.id ? `Document not found: ${options.id}` : "Not found");

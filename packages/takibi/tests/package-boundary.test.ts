@@ -170,7 +170,7 @@ test("protocol packages keep a one-way dependency graph", () => {
   expect(policy.dependencies?.["@takibi/client"]).toBeUndefined();
   expect(policy.dependencies?.["@takibi/shared-types"]).toBe("workspace:^");
   expect(policy.dependencies?.["takibi"]).toBeUndefined();
-  expect(policy.dependencies?.["@takibi/query"]).toBeUndefined();
+  expect(policy.dependencies?.["@takibi/query"]).toBe("workspace:^");
   expect(policy.dependencies?.["@takibi/protocol"]).toBeUndefined();
   expect(policy.dependencies?.["@takibi/api"]).toBeUndefined();
   expect(policy.dependencies?.["@takibi/storage"]).toBeUndefined();

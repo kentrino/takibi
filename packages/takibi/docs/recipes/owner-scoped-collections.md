@@ -8,7 +8,7 @@ The following policy lets an owner create, read, update, and delete notes while
 preventing owner reassignment. Administrators bypass the restriction.
 
 ```ts
-import { createTakibi, fullAccess, grant, none, queryImpliesEquality } from "takibi";
+import { createTakibi, fullAccess, grant, none, listWhere } from "takibi";
 import { z } from "zod";
 
 type User = {
@@ -32,7 +32,7 @@ const context = createContext({
 const ownerGrant = grant("create", "get", "update", "delete");
 const noteOwnerPolicy = context.policy(
   noteSchema.pick({ ownerId: true }),
-  ({ user, operation, doc, nextDoc, where }) => {
+  ({ user, operation, doc, nextDoc }) => {
     if (user?.role === "admin") return fullAccess;
     if (!user?.id) return none;
 
@@ -56,7 +56,8 @@ const noteOwnerPolicy = context.policy(
             ? ownerGrant
             : none;
       case "list":
-        return queryImpliesEquality(where, "ownerId", user.id) ? grant("list") : none;
+      case "count":
+        return grant(listWhere<z.infer<typeof noteSchema>>((q) => q.ownerId.eq(user.id)));
     }
   },
 );
@@ -74,29 +75,31 @@ const handler = context
   .actions({});
 ```
 
-Clients must send `ownerId`; fire does not insert it. Trusted Durable Object
-`$collections` calls bypass `accessPolicy`, but schema validation still applies.
+Clients supply `ownerId` when creating documents; Takibi does not insert it.
+Trusted Durable Object `$collections` calls bypass `accessPolicy`, but schema
+validation still applies.
 
-The member policy grants `list` only when the complete query implies
-`ownerId.eq(user.id)`. This accepts `and(ownerId.eq(user.id), ...)` and rejects
-an absent query, another owner value, `or(ownerId.eq(user.id), ...)`, and
-`not(ownerId.eq(other))`. Filtering runs in trusted server storage before the
-response is built, so unrelated documents are not returned to the client.
+The member policy supplies the owner range for both list and count. The server
+ANDs that range with the client's view filter before index planning, pagination,
+and count. An absent client filter lists the member's own notes; a conflicting
+owner filter returns no rows. Administrators retain unrestricted access.
+`queryImpliesEquality` remains available for optional application proofs; list
+authorization does not require clients to repeat ownership predicates.
 
-Pair that equality with the `byOwner` index so owner lists scan
-`ownerId, createdAt, id` instead of the collection id order:
+The policy equality supplies the `byOwner` index prefix, so clients can scan
+`ownerId, createdAt, id` while specifying only their view filter:
 
 ```ts
 const page = await client.notes.list({
   index: "byOwner",
-  where: (query) => query.ownerId.eq(user.id),
+  where: (query) => query.title.contains("TypeScript"),
   orderBy: (query) => query.createdAt.desc(),
   limit: 20,
 });
 ```
 
 `orderBy` cannot stand alone, and `createdAt` is valid only because `ownerId`
-is a single-value equality. Writes still update `takibi_documents` only;
+is a single-value equality in the effective query. Writes still update `takibi_documents` only;
 SQLite maintains the expression index and pays write amplification on those
 fields. Adding the index, or advancing the notes schema version, backfills
 existing documents during activation and blocks that tenant until the index is
@@ -106,3 +109,10 @@ automatic fallback from an invalid indexed request to that scan.
 For a different owner field such as `authorId`, pick and compare that field
 instead. If ownership transfer is valid in the domain, model it as a separate
 privileged action rather than weakening the ordinary update rule.
+
+List cursors use v4 and bind the requested filter and freshly authorized effective
+query. Old v2/v3 tokens are rejected: restart the list after upgrading. The token
+omits the server predicate AST; its SHA-256 binding is unkeyed and is neither a
+secret nor authentication. Indexed tuples still expose fields from the last
+returned row. Each continuation reauthorizes, so changed scope invalidates the
+cursor; forged positions can skip rows only inside the authorized set.

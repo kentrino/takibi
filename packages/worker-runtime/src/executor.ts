@@ -1,13 +1,16 @@
 import {
   allows,
+  listDecisionOf,
   type AccessContext,
   type AccessGrant,
   type AccessPermission,
   type CollectionOperation,
 } from "@takibi/policy";
-import { compileListOptions, type ListOptions } from "@takibi/query";
+import { compileListOptions, composeAnd, ListScopeError, type ListOptions } from "@takibi/query";
 import {
   NotFoundError,
+  ForbiddenError,
+  TakibiError,
   bindThrowingListAll,
   LIST_PAGE_MAX,
   type CollectionApi,
@@ -71,6 +74,7 @@ export type ResolvedCollection<TCtx extends object> = {
   readonly storage: StorageDriver;
   readonly logger?: InternalLogger;
   readonly grant: AccessGrant;
+  readonly effectiveList?: StorageListOptions;
   readonly existing?: WithMetadata<Record<string, unknown>> | null;
   readonly nextDoc?: WithMetadata<Record<string, unknown>>;
 };
@@ -248,7 +252,16 @@ export async function resolveCollection<TCtx extends object>(args: {
         ...(req.list?.where ? { where: req.list.where } : {}),
       };
       const grant = await policy.evaluateCollection(def, accessCtx, { conceal: false });
-      return { req, ctx, def, collections, storage, logger, grant };
+      return {
+        req,
+        ctx,
+        def,
+        collections,
+        storage,
+        logger,
+        grant,
+        effectiveList: resolveAuthorizedList(grant, req.list),
+      };
     }
     case "count": {
       const accessCtx: AccessContext<TCtx> = {
@@ -259,7 +272,16 @@ export async function resolveCollection<TCtx extends object>(args: {
         ...(req.list?.where ? { where: req.list.where } : {}),
       };
       const grant = await policy.evaluateCollection(def, accessCtx, { conceal: false });
-      return { req, ctx, def, collections, storage, logger, grant };
+      return {
+        req,
+        ctx,
+        def,
+        collections,
+        storage,
+        logger,
+        grant,
+        effectiveList: resolveAuthorizedList(grant, req.list),
+      };
     }
     default: {
       const _exhaustive: never = req.operation;
@@ -268,10 +290,35 @@ export async function resolveCollection<TCtx extends object>(args: {
   }
 }
 
+/** Reused by public and policy-bound action list/count resolution. */
+function resolveAuthorizedList(
+  grant: AccessGrant,
+  requested: StorageListOptions | undefined,
+): StorageListOptions {
+  try {
+    const decision = listDecisionOf(grant);
+    if (decision.kind === "deny") throw new ForbiddenError("Forbidden");
+    const where =
+      decision.kind === "allowAll"
+        ? requested?.where
+        : requested?.where === undefined
+          ? decision.where
+          : composeAnd(decision.where, requested.where);
+    return { ...requested, where, requestedWhere: requested?.where ?? null };
+  } catch (error) {
+    if (error instanceof ListScopeError)
+      throw new TakibiError("INVALID_LIST_SCOPE", "Invalid list authorization scope", 500);
+    throw error;
+  }
+}
+
 export async function executeResolvedCollection<TCtx extends object>(
   resolved: ResolvedCollection<TCtx>,
 ) {
   const { req, storage, grant, nextDoc } = resolved;
+  if ((req.operation === "list" || req.operation === "count") && !resolved.effectiveList) {
+    throw new TakibiError("INVALID_LIST_SCOPE", "Invalid list authorization scope", 500);
+  }
   switch (req.operation) {
     case "add":
       await persistAddDoc(storage, req.collection, nextDoc!);
@@ -285,9 +332,9 @@ export async function executeResolvedCollection<TCtx extends object>(
     case "delete":
       return storageDelete(storage, req.collection, req.id!);
     case "list":
-      return storage.list(req.collection, req.list);
+      return storage.list(req.collection, resolved.effectiveList);
     case "count":
-      return countDocuments(storage, req.collection, req.list);
+      return countDocuments(storage, req.collection, resolved.effectiveList);
     default: {
       const _exhaustive: never = req.operation;
       return _exhaustive;

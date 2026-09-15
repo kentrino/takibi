@@ -439,25 +439,40 @@ carry one. Policies without a reason keep the existing generic failure.
 
 Ownership is domain-specific policy rather than library metadata. See the
 [owner-scoped collection policy recipe](./docs/recipes/owner-scoped-collections.md)
-for an application-local policy that prevents owner reassignment and only
-grants member lists when the query guarantees the caller's owner value. The
-policy must prove the whole expression, not merely find an owner leaf that
-could be bypassed by `or` or `not`:
+for a policy that prevents owner reassignment and supplies the authorized range
+for member list/count operations. Bind the scope callback to the document schema:
 
 ```ts
-import { grant, none, queryImpliesEquality } from "takibi";
+import { grant, listWhere, none } from "takibi";
+import { z } from "zod";
 
-accessPolicy({ user, operation, where }) {
-  if (
-    operation === "list" &&
-    user &&
-    queryImpliesEquality(where, "ownerId", user.id)
-  ) {
-    return grant("list");
+const postSchema = z.object({ ownerId: z.string(), title: z.string() });
+type Post = z.infer<typeof postSchema>;
+const ownerReadPolicy = context.policy(postSchema, ({ user, operation, doc }) => {
+  if (!user) return none;
+  if (operation === "list" || operation === "count") {
+    return grant(listWhere<Post>((q) => q.ownerId.eq(user.id)));
   }
-  return none;
-}
+  return operation === "get" && doc?.ownerId === user.id ? grant("get") : none;
+});
 ```
+
+Clients supply view filters only; the server ANDs them with the policy range
+before index planning, pagination and count. `or(adminPolicy, ownerReadPolicy)`
+can grant unrestricted admin reads. Bare `grant("list")`, `read` and `fullAccess`
+remain unrestricted. `queryImpliesEquality` is available for optional application
+proofs, rather than being required for owner-scoped list authorization.
+
+Each `listWhere` callback uses the existing 32-node/depth-8 query limits;
+composed server ranges use 64 nodes/depth 16. Invalid scopes and composition
+overflow fail with a safe server error, never unrestricted access.
+
+Cursor v4 binds the requested filter and the reauthorized effective query using
+an unkeyed SHA-256 digest. It omits the server predicate AST, but the digest is
+not secret or authentication and indexed tuples still expose returned-row fields.
+A forged position may skip rows inside the authorized set. Changed effective
+queries invalidate cursors; equivalent principals with the same AST can reuse
+them. Old v2/v3 tokens are rejected; restart pagination after upgrading.
 
 Throw `UnauthorizedError` (or return only after membership checks) from `resolve`
 when AuthN or storage-partition authorization fails for the whole request. When

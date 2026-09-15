@@ -3,7 +3,7 @@ title: Watch typed queries with Durable Object WebSocket Hibernation
 author: OpenAI Codex
 cost: 8
 priority: P3
-priority_reason: "This is a large new capability and should follow transaction isolation, server-owned list scopes, and partition-routing cleanup."
+priority_reason: "This is a large new capability and should follow transaction isolation, policy-owned list ranges, and partition-routing cleanup."
 category: realtime
 source_issue: 0040-realtime-query-watch
 ---
@@ -23,7 +23,7 @@ mutation:
 
 - browser WebSockets cannot reuse arbitrary HTTP headers from `CreateClientOptions.headers`;
 - query and authorization state must survive hibernation without persisting raw credentials;
-- every snapshot must preserve normal list policy, server-owned scope, and partition isolation;
+- every snapshot must preserve normal list policy, the policy-owned list range, and partition isolation;
 - writes from CRUD, actions, and trusted collection facades need one invalidation path.
 
 # Proposal
@@ -50,7 +50,10 @@ result set. It does not include `nextCursor`.
 
 Reserve `watch` as a collection method in `@takibi/api` and action registration. Do not introduce a
 new permission: connection and every re-evaluation require the existing `list` permission and apply
-the same server-owned effective scope as normal policy-bound list execution.
+the same policy-owned list range as normal policy-bound list execution. Reuse the evaluate-and-compose
+path from
+[0018-policy-owned-list-range](../../closed/0018-policy-owned-list-range/issue.md);
+do not invent a second scope mechanism.
 
 # Transport and authorization
 
@@ -65,14 +68,14 @@ The callback is evaluated on every connection attempt so applications can refres
 credentials. Takibi does not interpret the credential format. Values from `headers` are never
 copied into the URL, WebSocket protocols, or connection attachment.
 
-The Durable Object accepts the socket only after list authorization and effective-scope compilation
+The Durable Object accepts the socket only after list authorization and effective-query compilation
 succeed. It stores a versioned `{ collection, list, context }` attachment with
 `serializeAttachment`. Validate attachment size against the current Cloudflare limit before
 acceptance and fail closed when an attachment cannot be serialized. On reactivation, rebuild the
 subscription solely from `state.getWebSockets()` and validated attachments; do not persist a second
 subscription registry in SQLite.
 
-Re-evaluate policy and server-owned list scope for every snapshot. A policy denial, invalid
+Re-evaluate policy and the policy-owned list range for every snapshot. A policy denial, invalid
 attachment, or protocol violation sends a terminal error envelope and closes the socket without
 revealing documents.
 
@@ -120,7 +123,7 @@ In scope:
 - typed collection query watch and unsubscribe;
 - initial and post-mutation full snapshots;
 - Durable Object WebSocket Hibernation and attachment recovery;
-- handshake authentication, per-snapshot list authorization, and mandatory list scope;
+- handshake authentication, per-snapshot list authorization, and the policy-owned list range;
 - reconnect, terminal errors, protocol types, Workers integration tests, and documentation.
 
 Out of scope:
@@ -142,7 +145,7 @@ Out of scope:
 - CRUD, action, policy-bound, trusted, and generated Durable Object writes share the invalidation
   path, while lazy migration alone does not produce a user mutation event.
 - Every handshake runs application `resolve` and `stub`; every snapshot enforces list policy and
-  server-owned scope without relying on a `tenantId` context property.
+  the policy-owned list range without relying on a `tenantId` context property.
 - Hibernation/reactivation restores valid subscriptions from attachments and the next mutation emits
   the correct snapshot.
 - Unsubscribe prevents callbacks and reconnects; abnormal close reconnects with refreshed protocols
@@ -157,6 +160,7 @@ Out of scope:
 
 # References
 
+- [0018-policy-owned-list-range](../../closed/0018-policy-owned-list-range/issue.md)
 - [Cloudflare Durable Objects WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 - [Cloudflare Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
 - [Convex realtime documentation](https://docs.convex.dev/realtime)

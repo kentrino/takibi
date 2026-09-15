@@ -302,7 +302,7 @@ test("action registration validates definitions", () => {
     register({
       badPolicy: { ...valid, policy: grant("admin" as never) } as never,
     }),
-  ).toThrow(/Invalid action policy grant/);
+  ).toThrow(/Invalid list authorization scope/);
   expect(() =>
     register({
       badSchema: { ...valid, inputSchema: {} } as never,
