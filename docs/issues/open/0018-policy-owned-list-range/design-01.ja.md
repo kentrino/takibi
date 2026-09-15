@@ -71,6 +71,72 @@ type ListWhereScope = {
 
 ランタイム向けに `listDecisionOf(grant)` を `@takibi/policy` から公開します。決定は権限の横の WeakMap に保存します。
 
+# コレクション定義の例
+
+以下は提案 API の例です。`listWhere` はまだ実装されていません。
+`z` は `zod` から、ポリシーヘルパーは `takibi` からインポートし、既存の
+`context` が `user` を `{ id: string; role: "admin" | "member" } | null`
+として解決するものとします。
+
+```ts
+const postSchema = z.object({
+  ownerId: z.string(),
+  title: z.string(),
+});
+
+type Post = z.infer<typeof postSchema>;
+
+const ownerReadPolicy = context.policy(
+  postSchema,
+  ({ user, operation, doc }) => {
+    if (!user) return none;
+
+    switch (operation) {
+      case "list":
+      case "count":
+        return grant(
+          listWhere<Post>((q) => q.ownerId.eq(user.id)),
+        );
+      case "get":
+        return doc?.ownerId === user.id ? grant("get") : none;
+      default:
+        return none;
+    }
+  },
+);
+
+const adminReadPolicy = context.policy(({ user }) =>
+  user?.role === "admin" ? read : none,
+);
+
+const posts = context.defineCollection({
+  schema: postSchema,
+  accessPolicy: or(adminReadPolicy, ownerReadPolicy),
+  indexes: {
+    byOwner: ["ownerId", "createdAt"],
+  },
+});
+```
+
+所有者は自分の記事を list/count でき、自分の文書を get できます。管理者は全件を
+読み取れ、未認証の呼び出しは拒否されます。この例が許可するのは読み取り操作だけです。
+
+クライアントは画面に必要な検索条件だけを指定します。
+
+```ts
+await client.posts.list({
+  where: (q) => q.title.contains("TypeScript"),
+});
+```
+
+メンバーの実効クエリは `ownerId = user.id AND title contains "TypeScript"`
+です。管理者にはタイトル条件に一致するすべての記事を返します。
+
+`listWhere<Post>` はスキーマから導いた文書型を明示しています。スキーマから自動で
+型推論するヘルパーの具体形は未確定です。この例は、外側の
+`context.policy(postSchema, ...)` が内側の `listWhere` コールバックを自動で
+型付けすることを前提にしていません。
+
 # 合成
 
 権限は list 範囲から独立したままです。`update` は与えるが `list` は与えない枝は、他枝の list 範囲を広げも狭めもしません。

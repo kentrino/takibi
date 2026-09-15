@@ -90,6 +90,73 @@ from the collection schema (a schema-bound helper alias is allowed).
 Export `listDecisionOf(grant)` from `@takibi/policy` for runtime. Store the
 decision in a WeakMap beside permissions.
 
+# Collection example
+
+This example uses the proposed API; `listWhere` is not implemented yet.
+Assume `z` is imported from `zod`, the policy helpers from `takibi`, and an
+existing `context` resolves `user` as
+`{ id: string; role: "admin" | "member" } | null`.
+
+```ts
+const postSchema = z.object({
+  ownerId: z.string(),
+  title: z.string(),
+});
+
+type Post = z.infer<typeof postSchema>;
+
+const ownerReadPolicy = context.policy(
+  postSchema,
+  ({ user, operation, doc }) => {
+    if (!user) return none;
+
+    switch (operation) {
+      case "list":
+      case "count":
+        return grant(
+          listWhere<Post>((q) => q.ownerId.eq(user.id)),
+        );
+      case "get":
+        return doc?.ownerId === user.id ? grant("get") : none;
+      default:
+        return none;
+    }
+  },
+);
+
+const adminReadPolicy = context.policy(({ user }) =>
+  user?.role === "admin" ? read : none,
+);
+
+const posts = context.defineCollection({
+  schema: postSchema,
+  accessPolicy: or(adminReadPolicy, ownerReadPolicy),
+  indexes: {
+    byOwner: ["ownerId", "createdAt"],
+  },
+});
+```
+
+Owners can list/count their own posts and get their own documents. Admins can
+read all posts; unauthenticated callers are denied. This example grants only
+read operations.
+
+Clients supply only the filter needed by the view:
+
+```ts
+await client.posts.list({
+  where: (q) => q.title.contains("TypeScript"),
+});
+```
+
+For a member, the effective query is `ownerId = user.id AND title contains
+"TypeScript"`. An admin receives all posts matching the title filter.
+
+`listWhere<Post>` explicitly supplies the schema-derived document type. The
+exact helper for automatic schema inference is still to be settled; this
+example does not assume that the surrounding `context.policy(postSchema, ...)`
+automatically types the nested `listWhere` callback.
+
 # Composition
 
 Permissions stay independent of list range. A branch that grants `update` but
