@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/kentrino/takibi/compare/takibi-v0.3.1...takibi-v0.4.0) (2026-09-15)
+
+
+### Features
+
+* **policy:** enforce policy-owned list and count ranges ([98c759d](https://github.com/kentrino/takibi/commit/98c759d1b7a9d391c966658c5768a3c1b257e4df))
+
 ## [0.3.1](https://github.com/kentrino/takibi/compare/takibi-v0.3.0...takibi-v0.3.1) (2026-09-15)
 
 

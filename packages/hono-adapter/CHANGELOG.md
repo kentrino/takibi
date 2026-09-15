@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.4](https://github.com/kentrino/takibi/compare/hono-adapter-v0.1.3...hono-adapter-v0.1.4) (2026-09-15)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * takibi bumped to 0.4.0
+  * peerDependencies
+    * takibi bumped to 0.4.0
+
 ## [0.1.3](https://github.com/kentrino/takibi/compare/hono-adapter-v0.1.2...hono-adapter-v0.1.3) (2026-09-15)
 
 

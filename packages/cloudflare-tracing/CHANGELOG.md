@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.2](https://github.com/kentrino/takibi/compare/cloudflare-tracing-v0.1.1...cloudflare-tracing-v0.1.2) (2026-09-15)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * takibi bumped to 0.4.0
+  * peerDependencies
+    * takibi bumped to 0.4.0
+
 ## [0.1.1](https://github.com/kentrino/takibi/compare/cloudflare-tracing-v0.1.0...cloudflare-tracing-v0.1.1) (2026-09-15)
 
 
