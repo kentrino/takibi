@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/kentrino/takibi/compare/takibi-v0.4.0...takibi-v0.4.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **snapshot:** materialize current-schema documents before restore cu… ([40eb8ea](https://github.com/kentrino/takibi/commit/40eb8eab31e6c74eb383672a3128dea1336f2c1d))
+
 ## [0.4.0](https://github.com/kentrino/takibi/compare/takibi-v0.3.1...takibi-v0.4.0) (2026-09-15)
 
 
