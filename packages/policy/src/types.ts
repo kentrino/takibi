@@ -21,6 +21,19 @@ export type AccessGrant = {
   readonly [accessGrantBrand]: true;
 };
 
+/**
+ * Already-available decision inputs: application context resolved before dispatch,
+ * plus the operation's document candidates and query. Prepare external identity
+ * and membership in `createTakibi()({ resolve, stub })`; return JSON-safe data,
+ * preserving routing inputs. This is point-in-time data, not an external-service
+ * snapshot or a guarantee of immediate revocation or cross-row consistency.
+ *
+ * Evaluate locally without external HTTP or other awaited I/O. Do not await a
+ * root facade/storage operation or fetch/RPC back into the same Durable Object:
+ * policy may hold a transaction that the queued operation needs to finish.
+ * These are caller obligations, not runtime I/O/reentry detection guarantees.
+ * Local computation returning a Promise remains supported.
+ */
 export type AccessContext<
   TCtx extends object,
   TDoc = WithMetadata<Record<string, unknown>>,
@@ -44,6 +57,18 @@ export type AccessContext<
  * Capability producer: return the actions this subject may perform on this
  * collection / document. Prefer not switching on `permission` — the executor
  * collates the grant against the required permission.
+ *
+ * Compute locally from AccessContext, doc/nextDoc, and query. A Promise is legal
+ * for local computation; do not await external HTTP or other I/O, another root
+ * facade/storage operation, or fetch/RPC into the same Durable Object. External
+ * I/O prolongs transaction occupancy; queued root reentry can circularly wait.
+ * Takibi does not promise runtime detection, immediate rejection, or timeouts.
+ *
+ * Prepare serializable external inputs in `resolve` before dispatch, not in an
+ * atomic handler, document guard, or gate. Even `add` policy can run inside an
+ * enclosing transaction. Keep authorization, revision, and uniqueness isolation
+ * intact. Pre-resolved inputs do not guarantee immediate external revocation or
+ * cross-row/external consistency; those require separate design.
  */
 export type AccessPolicyFn<TCtx extends object, TDoc = WithMetadata<Record<string, unknown>>> = (
   ctx: AccessContext<TCtx, TDoc>,
