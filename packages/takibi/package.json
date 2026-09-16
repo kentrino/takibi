@@ -30,6 +30,7 @@
     "./client": "./src/client-entry.ts",
     "./instrumentation": "./src/instrumentation.ts",
     "./testing": "./src/testing.server.ts",
+    "./watch": "./src/watch.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -50,12 +51,16 @@
         "types": "./dist/testing.d.mts",
         "import": "./dist/testing.mjs"
       },
+      "./watch": {
+        "types": "./dist/watch.d.mts",
+        "import": "./dist/watch.mjs"
+      },
       "./package.json": "./package.json"
     },
     "access": "public"
   },
   "scripts": {
-    "build": "vp pack",
+    "build": "vp pack && node scripts/check-client-build.mjs",
     "dev": "vp pack --watch",
     "test": "vp test && vp run test:workers && vp run test:root-compat",
     "test:workers": "vp test --config vite.workers.config.ts",

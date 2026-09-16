@@ -66,6 +66,7 @@ function fakeState(storage: DurableObjectStorage, id: { name?: string } = {}): D
   return {
     storage,
     id,
+    getWebSockets: () => [],
     blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
       return callback();
     },

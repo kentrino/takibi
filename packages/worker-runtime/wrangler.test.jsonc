@@ -5,6 +5,7 @@
   "compatibility_date": "2026-08-18",
   "durable_objects": {
     "bindings": [
+      { "name": "TAKIBI_WATCH_TEST", "class_name": "WatchTestObject" },
       {
         "name": "TAKIBI_STORAGE_TEST",
         "class_name": "StorageTestObject",
@@ -14,7 +15,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["StorageTestObject"],
+      "new_sqlite_classes": ["StorageTestObject", "WatchTestObject"],
     },
   ],
 }

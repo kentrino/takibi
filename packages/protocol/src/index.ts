@@ -37,3 +37,15 @@ export type {
   WireResponse,
   WireSuccess,
 } from "./wire";
+export {
+  WATCH_VERSION,
+  WATCH_PROTOCOL,
+  WATCH_PROTOCOL_CLOSE,
+  WATCH_ERROR_CLOSE,
+  WATCH_MAINTENANCE_CLOSE,
+  WATCH_ATTACHMENT_MAX_BYTES,
+  normalizeWatchList,
+  decodeWatchAttachment,
+  parseWatchEnvelope,
+} from "./watch";
+export type { WatchAttachment, WatchEnvelope } from "./watch";

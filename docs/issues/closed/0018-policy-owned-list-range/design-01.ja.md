@@ -170,7 +170,7 @@ list/count ごとに認可と範囲を一度だけ評価します。
 7. 信頼された `$collections` はポリシーと範囲を迂回する。実効問い合わせは要求問い合わせである。
 
 `AccessContext.where` を実効問い合わせで上書きしない。watch はここでは実装しない。
-[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md)
+[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md)
 は、後でこの同じ評価と合成の経路を呼ばなければなりません。
 
 # 失敗閉鎖の範囲結果

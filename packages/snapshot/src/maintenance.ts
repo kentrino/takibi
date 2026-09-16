@@ -120,8 +120,23 @@ export class MaintenanceController {
   #current: LeaseHandle | undefined;
   #idleResolvers = new Set<() => void>();
 
-  constructor(storage: DurableObjectStorage | MaintenanceBackend) {
+  constructor(
+    storage: DurableObjectStorage | MaintenanceBackend,
+    private readonly onChange?: (purpose: MaintenancePurpose | undefined) => void,
+  ) {
     this.backend = "sql" in storage ? new SqliteMaintenanceBackend(storage) : storage;
+  }
+
+  get blocked(): boolean {
+    return this.#pending || this.#hasLiveLease();
+  }
+
+  #notify(purpose?: MaintenancePurpose): void {
+    try {
+      this.onChange?.(purpose);
+    } catch {
+      /* Observers cannot affect maintenance. */
+    }
   }
 
   async cleanupAbandoned(): Promise<void> {
@@ -147,6 +162,7 @@ export class MaintenanceController {
   async acquire(purpose: MaintenancePurpose): Promise<LeaseHandle> {
     if (this.#pending || this.#hasLiveLease()) throw new MaintenanceLockedError();
     this.#pending = true;
+    this.#notify(purpose);
     try {
       await this.#waitForIdle();
       const token = crypto.randomUUID();
@@ -156,6 +172,7 @@ export class MaintenanceController {
       return this.#current;
     } finally {
       this.#pending = false;
+      if (!this.#current) this.#notify();
     }
   }
 
@@ -174,10 +191,14 @@ export class MaintenanceController {
   async release(lease: LeaseHandle): Promise<void> {
     await this.backend.release(lease.token);
     if (this.#current?.token === lease.token) this.#current = undefined;
+    // A normal operation may already have noticed expiry and cleared #current.
+    if (!this.blocked) this.#notify();
   }
 
   complete(lease: LeaseHandle): void {
     if (this.#current?.token === lease.token) this.#current = undefined;
+    // A normal operation may already have noticed expiry and cleared #current.
+    if (!this.blocked) this.#notify();
   }
 
   #hasLiveLease(): boolean {

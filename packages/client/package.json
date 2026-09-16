@@ -13,7 +13,8 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./watch": "./src/watch.ts"
   },
   "publishConfig": {
     "exports": {
@@ -21,7 +22,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./watch": {
+        "types": "./dist/watch.d.mts",
+        "import": "./dist/watch.mjs"
+      }
     }
   },
   "scripts": {

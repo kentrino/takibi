@@ -5,6 +5,7 @@ export default defineConfig({
     entry: {
       index: "src/index.ts",
       client: "src/client-entry.ts",
+      watch: "src/watch.ts",
       instrumentation: "src/instrumentation.ts",
       testing: "src/testing.server.ts",
     },

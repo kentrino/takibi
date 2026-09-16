@@ -2,11 +2,11 @@
 id: "0001"
 title: Watch subscription lifecycle
 status: accepted
-implementation: pending
+implementation: complete
 decided: 2026-09-17
 created: 2026-09-16
 implementation_issues:
-  - ../issues/open/0007-realtime-query-watch/issue.md
+  - ../issues/closed/0007-realtime-query-watch/issue.md
 ---
 
 # Watch subscription lifecycle
@@ -27,7 +27,15 @@ synchronously. The handle provides idempotent `unsubscribe()` and an always-fulf
 promise. Callbacks begin asynchronously, so callers can always retain the handle before receiving a
 snapshot. Invalid options may throw synchronously before a handle exists.
 
+The user-approved entry-point clarification (2026-09-17) exposes this contract
+through `createWatchClient` from `takibi/watch`. It composes HTTP methods and
+collection `watch` explicitly; the ordinary `takibi/client` import graph excludes
+the WebSocket runtime. Use native browser WebSocket and Durable Object Hibernation
+APIs, with no new package, global registration, or transport library.
+
 ```ts
+import { createWatchClient } from "takibi/watch";
+const client = createWatchClient<typeof handler>(baseUrl);
 const subscription = client.posts.watch(query, {
   next: (page) => setPosts(page.items),
   state: (state) => setConnectionState(state),
@@ -63,9 +71,10 @@ with `list` when a streaming lifecycle is unnecessary.
 
 ## Implementation choices
 
-- Define the exact public state and close-reason type names without adding status properties or
-  callbacks beyond `next`, `state`, `unsubscribe`, and `closed`.
-- Specify the existing host error-reporting hook used for observer exceptions.
+- `WatchState`, `WatchClosed`, `WatchSubscription`, and `WatchObserver` name the public contract.
+- Observer errors use `globalThis.reportError`, with an asynchronous throw when the host lacks it.
+- Existing list policy checks context expiry before each snapshot. An idle socket is not scheduled
+  to close at its expiry deadline; denial terminates before delivery on re-evaluation.
 
 ## Verification
 

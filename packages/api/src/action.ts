@@ -94,7 +94,7 @@ export type ReservedPublicName =
   | "length"
   | "caller"
   | "arguments";
-type CrudName = "add" | "set" | "get" | "list" | "update" | "delete";
+type CrudName = "add" | "set" | "get" | "list" | "update" | "delete" | "watch";
 type LowercaseLetter =
   | "a"
   | "b"
@@ -494,7 +494,7 @@ export type RegisteredAction = {
   definition: RuntimeActionDefinition;
 };
 
-const CRUD_NAMES = new Set(["add", "set", "get", "list", "update", "delete"]);
+const CRUD_NAMES = new Set(["add", "set", "get", "list", "update", "delete", "watch"]);
 const REFLECTION_NAMES = new Set([
   "then",
   "catch",

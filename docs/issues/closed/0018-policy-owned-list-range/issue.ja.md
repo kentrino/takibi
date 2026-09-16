@@ -40,7 +40,7 @@ closed_reason: implemented
 
 [0015-policy-owned-list-scope](../0015-policy-owned-list-scope/issue.ja.md)
 を置き換えます。
-[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md)
+[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md)
 の将来の watch はこの経路を再利用し、本 issue の対象ではありません。
 
 # 関連ファイル

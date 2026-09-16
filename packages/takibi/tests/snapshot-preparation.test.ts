@@ -75,6 +75,7 @@ function createObject(
     {
       storage: backing,
       id: { name: "preparation" },
+      getWebSockets: () => [],
       blockConcurrencyWhile: <T>(callback: () => Promise<T>) => callback(),
     } as unknown as DurableObjectState,
     {},

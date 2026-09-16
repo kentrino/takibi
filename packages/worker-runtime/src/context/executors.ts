@@ -67,21 +67,7 @@ export function createStubExecutor<TInitial, TCtx extends object>(
   logger: InternalLogger | undefined,
 ): Executor<TInitial, TCtx> {
   return async ({ request, initial, ctx, invocation, resolveSpan }) => {
-    if (!resolveStub) {
-      throw new TakibiError(
-        "MISSING_STUB",
-        "Durable Object mode requires stub on createTakibi()({ stub }); Node tests can use withSqliteTestBackend() from takibi/testing",
-        500,
-      );
-    }
-    const doStub = await resolveStub({ request, context: initial, resolved: ctx });
-    if (!doStub || typeof doStub.fetch !== "function") {
-      throw new TakibiError(
-        "MISSING_STUB",
-        "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
-        500,
-      );
-    }
+    const doStub = await resolveExecutionStub(resolveStub, request, initial, ctx);
 
     const wire: WireRequest =
       invocation.kind === "batch"
@@ -134,4 +120,28 @@ export function createStubExecutor<TInitial, TCtx extends object>(
       resolveSpan,
     );
   };
+}
+
+export async function resolveExecutionStub<TInitial, TCtx extends object>(
+  resolveStub: ContextStubResolver<TCtx, TInitial> | undefined,
+  request: Request,
+  initial: TInitial,
+  ctx: TCtx,
+) {
+  if (!resolveStub) {
+    throw new TakibiError(
+      "MISSING_STUB",
+      "Durable Object mode requires stub on createTakibi()({ stub }); Node tests can use withSqliteTestBackend() from takibi/testing",
+      500,
+    );
+  }
+  const doStub = await resolveStub({ request, context: initial, resolved: ctx });
+  if (!doStub || typeof doStub.fetch !== "function") {
+    throw new TakibiError(
+      "MISSING_STUB",
+      "createTakibi()({ stub }) did not return a Durable Object stub (use namespace.get(id))",
+      500,
+    );
+  }
+  return doStub;
 }

@@ -12,7 +12,7 @@ import { createClient } from "takibi/client";
 ```
 
 The official public API is `createTakibi`, policy helpers, and errors on
-`takibi` and `createClient` on `takibi/client`.
+`takibi`, `createClient` on `takibi/client`, and opt-in `createWatchClient` on `takibi/watch`.
 OpenTelemetry support is distributed separately as
 `@takibi/opentelemetry`. Cloudflare Workers dashboard traces use
 `@takibi/cloudflare-tracing`.
@@ -1217,3 +1217,127 @@ operation failure.
 - `where` remains an arbitrary boolean AST. Indexed lists scan the selected
   index in its declared order and apply residual predicates before `limit`.
   Unindexed lists may still scan the collection.
+
+## Watch list snapshots
+
+Opt in through `takibi/watch`. `createWatchClient` composes the ordinary HTTP
+client with collection watches; `takibi/client` remains independent of the
+WebSocket runtime. No registration or external WebSocket library is required.
+
+```ts
+import { createWatchClient } from "takibi/watch";
+import type { handler } from "./server";
+
+const client = createWatchClient<typeof handler>("https://example.com/api/takibi");
+const subscription = client.posts.watch(
+  {
+    index: "byRoomCreatedAt", // declared as ["roomId", "createdAt"]
+    where: (q) => q.roomId.eq(roomId),
+    orderBy: (q) => q.createdAt.desc(),
+    limit: 50,
+  },
+  {
+    next: ({ items }) => renderPosts(items),
+    state: (state) => renderConnectionState(state),
+  },
+);
+// HTTP methods remain available on the same client.
+const page = await client.posts.list({ limit: 50 });
+subscription.unsubscribe();
+const outcome = await subscription.closed; // { reason: "unsubscribed" }
+```
+
+The handle is returned synchronously; callbacks start asynchronously. Options
+have the same schema inference, filter compilation, limits (default 50, maximum
+200), declared indexes, equality-prefix rules, direction, suffix order, and id
+tie-breaking as `list`. Without an index, results are id-ascending. Watch has no
+`cursor` or `nextCursor`. Every delivery is a full `{ items }` snapshot; the
+client suppresses consecutive identical serialized results, including after a
+reconnect. Inserts, deletes, and ordering-field changes re-run the ordered,
+limited query, so items can enter or leave the window.
+
+Initial delivery and every refresh use the existing list policy and its
+policy-owned range. Successful commits invalidate the changed collections in
+that Durable Object. Atomic actions and trusted `$collections.$transaction`
+publish after the outer commit; rollback and unknown commit outcomes do not
+publish. Public CRUD, policy-bound actions, trusted writes, and generated
+Durable Object facades share this path. Lazy migration alone is not an
+invalidation; direct `state.storage.sql` writes are outside this contract.
+Multiple writes outside a transaction may expose intermediate snapshots.
+
+### Authentication and connection lifetime
+
+The browser uses native WebSocket GET upgrades on the collection route. Normal
+GET remains list. Every handshake runs your existing `resolve` and `stub`,
+including reconnections; partition routing makes no assumptions about context
+field names. Only JSON-safe resolved context and normalized query options go
+to the chosen Durable Object. Its internal upgrade endpoint must remain private.
+
+Use same-origin cookies, or supply `webSocketProtocols: async () => [token]` to
+`createWatchClient`. The callback runs on every attempt, allowing credential
+refresh. Tokens must obey browser WebSocket subprotocol syntax: nonempty,
+unique HTTP tokens, with no spaces, commas, or padding characters such as `=`.
+The application verifies its credential format in `resolve` by reading the
+original `Sec-WebSocket-Protocol` header. Takibi offers and selects the reserved
+`takibi.watch.v1` protocol; do not return that token from the callback. Cookie
+handshakes require an `Origin` exactly matching the public request origin.
+Cross-origin cookie watches are not supported; HTTP CORS middleware does not
+authorize WebSocket origins.
+
+`headers` configures HTTP methods only. Its values are never copied into watch
+URLs, protocols, or attachments. Never put authentication values in query
+filters or the base URL. Resolved context is a persisted JSON snapshot from the
+handshake, not live identity-provider state. Resolve identity and expiry into
+credential-free fields, and have list policy check expiry using those trusted
+local inputs. **Expiry is checked before the next snapshot, not by an idle
+socket deadline timer.** Denial closes terminally without delivering that
+snapshot. Policy performs no external I/O; external revocation or role changes
+require fresh resolution on a new handshake. Takibi cannot identify raw
+credentials hidden in arbitrary application context, so the application must
+exclude them. HTTP headers themselves are never persisted by the watch transport.
+
+`state` reports `connecting`, `open`, and `reconnecting`. Abnormal network closes,
+opaque browser handshake failures, and maintenance closures retry with jittered
+exponential backoff (250 ms cap initially, growing to 30 seconds). An opaque
+handshake failure cannot reliably be classified as a typed policy error.
+`closed` always fulfills exactly once with `unsubscribed`, `server-error`,
+`protocol-error`, or `server-closed`; retryable failures leave it pending.
+`server-error` retains the server's failure and typed policy reason. Normal
+server closes and terminal errors never reconnect. Repeated unsubscribe is safe
+and synchronously suppresses subsequent callbacks, pending credential results,
+and retries. Observer exceptions go to the host's `reportError` hook (or an
+asynchronously thrown error on hosts without it), without ending subscriptions.
+
+Hibernation uses `acceptWebSocket`, `getWebSockets`, and versioned attachments;
+there is no SQLite subscription registry. Reactivation validates attachments
+and refreshes recovered queries. Invalid or obsolete versions close terminally.
+Restore/reset disconnect existing watches and reject handshakes during
+maintenance; reconnect obtains a new full snapshot after cutover. Export
+suspends queries and flushes pending invalidation after lease release.
+
+As checked on 2026-09-17, Cloudflare documents a
+[16,384-byte serialized attachment limit](https://developers.cloudflare.com/durable-objects/best-practices/websockets/#websocketserializeattachment),
+a [32,768-connection ceiling per object](https://developers.cloudflare.com/durable-objects/api/state/#acceptwebsocket),
+and a [32 MiB received WebSocket message limit](https://developers.cloudflare.com/durable-objects/platform/limits/).
+Takibi bounds the serialized query/context before acceptance, and the native
+attachment serializer also enforces the runtime's structured-clone limit.
+Application messages, including binary frames, are not supported. Snapshot
+serialization/send failures affect only that subscription.
+
+Fan-out costs `active watches for the changed collection × query cost`, plus
+snapshot serialization and delivery. There is no delta delivery, shared result
+cache, or dependency graph. Measure your application's concurrent watches,
+query selectivity, document sizes, and update rate; platform connection ceilings
+are not a capacity guarantee. Deployments can disconnect sockets; compatible
+clients reconnect, while obsolete attachment/protocol data is terminal.
+
+### Migrating an action named watch
+
+`watch` is now reserved as a collection action name, even for HTTP-only clients.
+Rename an existing action and its callers before upgrading:
+
+```ts
+// Before: app.posts.actions((define) => ({ watch: ... }))
+// After:  app.posts.actions((define) => ({ observePost: ... }))
+await client.posts.observePost(postId);
+```
