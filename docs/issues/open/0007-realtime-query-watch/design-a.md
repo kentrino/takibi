@@ -2,7 +2,7 @@
 
 ## Decision and evidence
 
-Reassessed on 2026-09-16: keep open. `packages/client/src/client.ts` provides request/response CRUD, the reserved names in `packages/api/src/action.ts` do not include watch, and subscriptions are unavailable. Policy-owned ranges were implemented in `98c759d` and `64af4cd`; that dependency needs no reimplementation. A design from first principles would handle an authorized query, commit notification, and connection lifetime together. A mutation-success callback alone cannot handle transaction rollback and trusted writes. Issue 0017 observes public invocations; do not repurpose or merge it into an invalidation bus.
+Keep open. `packages/client/src/client.ts` provides request/response CRUD, the reserved names in `packages/api/src/action.ts` do not include watch, and subscriptions are unavailable. Policy-owned ranges were implemented in `98c759d` and `64af4cd`; that dependency needs no reimplementation. A design from first principles would handle an authorized query, commit notification, and connection lifetime together. A mutation-success callback alone cannot handle transaction rollback and trusted writes. Issue 0017 observes public invocations; do not repurpose or merge it into an invalidation bus.
 
 History confirms coordination within each DO and the existing policy implementation, but acceptable application update latency and concurrent subscription counts remain unverified. Treat the use cases in the existing issue as requirement hypotheses, not measured load. Retain P3 and measure concurrent watches multiplied by query cost for the target application when implementation begins.
 
@@ -26,19 +26,31 @@ History confirms coordination within each DO and the existing policy implementat
 // Before: The application owns repeated fetching and shutdown
 const page = await client.posts.list({ where: (q) => q.roomId.eq(roomId), limit: 50 });
 // After: New API; callbacks receive full snapshots without cursors
-const stop = client.posts.watch(
+const subscription = client.posts.watch(
   { where: (q) => q.roomId.eq(roomId), limit: 50 },
-  (page) => setPosts(page.items),
-  (error) => reportError(error),
+  {
+    next: (page) => setPosts(page.items),
+    state: (state) => setConnectionState(state),
+  },
 );
-stop();
+subscription.unsubscribe();
+const closed = await subscription.closed; // { reason: "unsubscribed" }
 ```
 
-Initial and post-commit snapshots contain items within the same authorized range as list. Rollback emits no notification, and stop prevents callbacks and reconnects. Existing list behavior remains unchanged. However, reserving the action name `watch` changes compatibility; include a README migration example that renames any existing action with that name. External usage is unknown, so do not assume nobody uses it.
+Initial and post-commit snapshots contain items within the same authorized range as list. Rollback emits no notification, and unsubscribe prevents callbacks and reconnects. Existing list behavior remains unchanged. However, reserving the action name `watch` changes compatibility; include a README migration example that renames any existing action with that name. External usage is unknown, so do not assume nobody uses it.
+
+## Subscription lifetime and alternatives
+
+The proposed [watch subscription lifecycle RFC](../../../rfcs/0001-watch-subscription-lifecycle.md)
+extracts the client-side contract from this whole-watch design. It recommends an observer with
+`next` and optional `state`, plus synchronous, idempotent unsubscribe and an always-fulfilling
+`closed` promise. It keeps retryable reconnect state distinct from terminal server, protocol, and
+normal-close outcomes, defines opaque browser handshake and cleanup behavior, and leaves the host
+callback-reporting hook open. The released client still has no watch API.
 
 ## Verification status and remaining checks
 
-This reassessment read client/API/storage transaction types and policy history and checked official documentation. No watch implementation or Workers transport tests were performed. In addition to the original acceptance criteria below, verify rollback, trusted transactions, restore/reset, expired context, and migration of an action with the same name. If snapshot fan-out limits do not fit the target workload, choose B or revisit the requirements; lack of verification is not evidence that no action is needed.
+The review read client/API/storage transaction types and policy history and checked official documentation. No watch implementation or Workers transport tests were performed. In addition to the acceptance criteria below, verify rollback, trusted transactions, restore/reset, expired context, and migration of an action with the same name. If snapshot fan-out limits do not fit the target workload, choose B or revisit the requirements; lack of verification is not evidence that no action is needed.
 
 ## Retained detailed specification and acceptance criteria
 
@@ -65,14 +77,15 @@ mutation:
 Add `watch` to the public collection client. It subscribes to the full result of a typed list query:
 
 ```ts
-const unsubscribe = client.posts.watch(
+const subscription = client.posts.watch(
   { where: (q) => q.roomId.eq(roomId), limit: 50 },
-  (page) => setPosts(page.items),
-  (error) => reportError(error),
+  { next: (page) => setPosts(page.items) },
 );
+const closed = await subscription.closed;
+if (closed.reason === "server-error") reportError(closed.error);
 ```
 
-`watch` returns an unsubscribe function synchronously. After connecting, it emits the current
+`watch` returns a subscription handle synchronously. After connecting, it emits the current
 `{ items }` snapshot once. Each successful mutation of the watched collection re-runs the effective
 query and emits a new full snapshot. The client suppresses a callback when the serialized snapshot
 is unchanged.
@@ -118,8 +131,8 @@ revealing documents.
 - reconnect abnormal closures using jittered exponential backoff from 250 ms up to 30 seconds;
 - call `webSocketProtocols` and application `resolve` again on each reconnect;
 - do not reconnect after unsubscribe, a normal close, or a terminal protocol/policy error;
-- report connection and server failures to the optional error callback without creating an
-  unhandled rejection when it is omitted;
+- expose retryable failures through the optional state observer and terminal outcomes through
+  the always-fulfilling `closed` promise defined above;
 - isolate serialization and `send` failures to the affected socket so they cannot fail the mutation
   response or other subscriptions.
 
@@ -170,7 +183,7 @@ Out of scope:
 
 ## Acceptance criteria
 
-- `client.posts.watch({ where }, onPage)` infers fields and values from schema output and rejects an
+- `client.posts.watch({ where }, { next })` infers fields and values from schema output and rejects an
   unknown field, invalid operator, or cursor at compile time.
 - A collection action named `watch` is rejected in types and runtime registration.
 - Connection emits one snapshot equal to normal list semantics for the same effective query.
@@ -184,6 +197,12 @@ Out of scope:
   the correct snapshot.
 - Unsubscribe prevents callbacks and reconnects; abnormal close reconnects with refreshed protocols
   and resolved context.
+- Retryable failures leave `closed` pending; terminal server/protocol errors and normal server
+  closure fulfill the matching reason exactly once and never reconnect. Typed policy reasons
+  remain available in the terminal server envelope.
+- Repeated unsubscribe is harmless and synchronously suppresses callbacks/retries. Ignoring
+  `closed` never creates an unhandled rejection; callback exceptions do not become transport
+  failures or disrupt other subscriptions.
 - Credentials from HTTP headers are never copied to the URL, protocol list, or attachment.
 - Attachment overflow, malformed frames, and snapshot send failures are isolated and fail closed.
 - Workers tests cover Upgrade, Hibernation, partition isolation, authorization, and CRUD/action
