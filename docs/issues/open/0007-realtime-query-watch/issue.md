@@ -14,6 +14,8 @@ Chat and dashboard applications currently implement typed-list refresh and subsc
 
 [Design](./design-a.md)
 
+[Subscription lifecycle RFC](../../../rfcs/0001-watch-subscription-lifecycle.md)
+
 ## Related Files
 
 - `packages/client/src/client.ts`

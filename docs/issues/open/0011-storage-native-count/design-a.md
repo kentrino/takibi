@@ -31,11 +31,26 @@ Preferred first step: an aggregate with a version guard over the same candidate 
 
 Use the existing SQL compiler for null/missing/scalars/string/in/ranges, index equality prefix, range, and residual predicates. No parallel dialect. Forward count through logged/traced, initialization, maintenance, migrating and transaction-scoped drivers; audit every StorageDriver implementation/test double. One count operation/span should enclose fallback without leaking a sequence of public storage list spans. Internal SQL diagnostics can still record scan work.
 
+[String candidate safety](../0019-string-range-candidate-safety/issue.md) tracks
+false-negative SQL candidates. Native COUNT requires an exact predicate; otherwise
+retain residual evaluation through the scan fallback. Migration eligibility does not
+establish query exactness.
+
 ## Alternatives and tradeoffs
 
 Moving the existing scan unchanged into storage is a safe staging point but does not fulfill this issue's performance outcome. Adding a runtime SQL escape hatch is rejected because it leaks SQL/schema ownership into orchestration. [Alternative B](./design-b.md) proves eligibility with a persisted invariant: simpler hot queries but more write/restore/layout obligations. The guarded aggregate keeps change closure around count, at the cost of SQL guard complexity. The exact efficient guard query remains a design validation item, not an implemented fact.
 
 ## Verification and migration
+
+### Non-count aggregates
+
+Keep sum, grouping, and new client or wire operations outside this count issue.
+Maximum values are already expressible with an indexed descending query and `limit: 1`.
+Consider a separate sum proposal only after measuring a real workload; it must define
+numeric eligibility, empty results, overflow, floating-point accumulation, and
+native/fallback equivalence.
+
+### Count verification
 
 No public type or wire addition. Internal required method changes all decorators/test drivers together. Native trusted count observes one SQL snapshot instead of a series of independently queued pages; this strengthens observation but do not promise whole-count snapshots for the transformed trusted scan fallback. Nested `$transaction`/atomic action always joins the enclosing boundary.
 

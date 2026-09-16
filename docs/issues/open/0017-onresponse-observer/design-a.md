@@ -4,7 +4,7 @@
 
 Reassessed on 2026-09-16: keep open. `ContextConfig` contains only resolve/stub/services/logging, and invocationNotify in `adapter-map.ts` is undefined. `invocation-lifecycle/src/flow.ts` already performs settlement → snapshot → awaited notify and stores exceptions in notification.failed. `invocation-adapters.ts` applies structuredClone and then freezes the outer object. No new lifecycle is needed.
 
-Commit `1b1de81` extracts the generic invocation lifecycle and supports keeping Takibi-specific policy/projection in the runtime. The original ADR for the no-lifecycle-hooks decision mentioned by the issue has not been located. Do not invent its existence or rationale; state in the new ADR that the source is unverified and document the currently established distinction between read-only observation and transaction hooks.
+Commit `1b1de81` extracts the generic invocation lifecycle and supports keeping Takibi-specific policy/projection in the runtime. The original source for the no-lifecycle-hooks decision mentioned by the issue has not been located. Do not invent its existence or rationale; document the currently established distinction between read-only observation and transaction hooks in the new RFC.
 
 ## First principles, alternatives, and boundaries
 
@@ -40,7 +40,7 @@ The application provides services.events through its existing services factory. 
 
 ## Completed verification and implementation checks
 
-The existing `pnpm --filter @takibi/invocation-lifecycle exec vp test tests/invocation.test.ts` completed with **34 tests passed**. This verifies the existing lifecycle; the new onResponse is neither implemented nor tested. In addition to the original acceptance criteria, verify that nested result/ctx mutations cannot reach the response or later batch items, notification.failed produces one single/batch log, behavior is compatible without an observer, and there is no delivery guarantee across client retries. If the original ADR is found, check its constraints; if its prohibition also covers observation, reassess the rationale for adopting the public API in the ADR.
+The existing `pnpm --filter @takibi/invocation-lifecycle exec vp test tests/invocation.test.ts` completed with **34 tests passed**. This verifies the existing lifecycle; the new onResponse is neither implemented nor tested. In addition to the original acceptance criteria, verify that nested result/ctx mutations cannot reach the response or later batch items, notification.failed produces one single/batch log, behavior is compatible without an observer, and there is no delivery guarantee across client retries. [RFC 0005](../../../rfcs/0005-no-lifecycle-hooks.md) rejects collection write hooks but does not decide response observation. Adoption therefore requires a separate observer-boundary RFC that preserves that distinction.
 
 ## Retained detailed specification and acceptance criteria
 
@@ -112,9 +112,9 @@ settled, such as HTTP decode or application context resolution failure, do not c
 - Keep response construction after the notified invocation result. The existing single and batch
   envelope runners should provide call counts and ordering.
 - Wire the same config through the generated Durable Object and `withSqliteTestBackend` path.
-- Add an ADR documenting this read-only completion boundary: it cannot join a transaction, alter
-  handler output, or change the response. The original no-lifecycle-hooks ADR has not been located;
-  record that uncertainty rather than asserting its rationale.
+- Add an RFC documenting this read-only completion boundary: it cannot join a transaction, alter
+  handler output, or change the response. It must preserve RFC 0005's prohibition on collection
+  write hooks rather than treating response observation as a lifecycle mutation hook.
 
 ## Scope
 
@@ -123,7 +123,7 @@ In scope:
 - public types and inference for optional `onResponse`;
 - generated Durable Object and SQLite testing-backend wiring;
 - single/batch, success/failure behavior and callback-failure logging;
-- README and an ADR defining the observer boundary.
+- README and an RFC defining the observer boundary.
 
 Out of scope:
 
@@ -145,6 +145,6 @@ Out of scope:
 - HTTP decode and context-resolution failures do not invoke the observer.
 - Durable Object and SQLite testing paths have matching call count, order, and failure isolation.
 - Existing `resolve`, `services`, action builder, and client inference remain unchanged.
-- The ADR explicitly distinguishes observation from lifecycle mutation and fail-closed auditing.
+- The observer RFC explicitly distinguishes observation from lifecycle mutation and fail-closed auditing.
 - `vp check`, worker-runtime Node/Workers tests, testing package tests, and the repository-wide gate
   pass.
