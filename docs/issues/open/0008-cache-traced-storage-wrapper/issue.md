@@ -1,5 +1,5 @@
 ---
-title: Reuse traced storage wrappers by driver identity
+title: Reuse traced storage wrappers without capturing request tracing state
 author: OpenAI Codex
 cost: 2
 priority: P3
@@ -8,56 +8,15 @@ category: performance
 source_issue: 0044-cache-traced-storage-wrapper
 ---
 
-# Problem
+# Reuse traced storage wrappers without capturing request tracing state
 
-The in-process executor calls `tracedStorage(driver)` for each request when tracing is enabled, and
-the generated Durable Object does the same for each `fetch`. `tracedStorage` currently creates a new
-`StorageDriver` object with method closures on every call even though the underlying root driver is
-stable for the executor or Durable Object lifetime.
+Tracing creates a new storage wrapper on every request and on each transaction callback, even when the underlying driver identity is unchanged. Reuse wrappers by driver identity while retaining request-local tracer selection, raw drivers for untraced requests, and existing storage span semantics. Completion requires root/scoped identity tests, tracer replacement and removal coverage, and weak cache ownership; the allocation reduction is known, but an end-to-end performance gain is not established.
 
-The wrapper does not capture a tracer. Each operation resolves the active tracing context through
-`withSpan`, so a wrapper for one driver can be reused across tracer registration, removal, and
-replacement without retaining a stale provider.
+[Design](./design-a.md)
 
-# Proposal
+## Related Files
 
-Add a module-scoped `WeakMap<StorageDriver, StorageDriver>` in
-`packages/worker-runtime/src/tracing.ts`. `tracedStorage(driver)` returns the cached wrapper for the
-same driver identity and creates one only on a cache miss.
-
-Apply the same rule to transaction-scoped drivers. The `transaction` method must call
-`tracedStorage(scoped)` instead of a local uncached wrapping function. If the storage backend creates
-a new scoped driver for each transaction, one allocation per distinct identity remains expected.
-
-Keep per-request `resolveTracer` and the raw-versus-traced driver choice in
-`context/executors.ts` and `durable-object.ts`. Requests without a tracer continue using the raw
-driver. A `WeakMap` ensures the cache alone does not retain drivers after their owning executor or
-Durable Object becomes unreachable.
-
-# Scope
-
-In scope:
-
-- identity caching for root and transaction-scoped `StorageDriver` wrappers;
-- regression coverage across tracer registration changes;
-- unchanged in-process and Durable Object storage-span semantics.
-
-Out of scope:
-
-- span names, kinds, attributes, parentage, or error behavior;
-- eliminating allocations when a backend always creates a new scoped driver;
-- removing per-request tracer resolution;
-- general storage optimization or allocation benchmarks.
-
-# Acceptance criteria
-
-- Repeated `tracedStorage` calls for one driver return the same object by strict equality.
-- Different driver identities return different wrappers.
-- Reusing one scoped driver identity across transaction callbacks returns one traced wrapper.
-- Registering, unregistering, and replacing a tracer after wrapper creation uses the currently active
-  tracer and records spans in the replacement tracer.
-- Requests without tracing use the raw driver and create no storage spans.
-- Existing storage span counts, attributes, and parent relationships remain unchanged in the
-  in-process and Workers test paths.
-- The cache does not strongly retain an otherwise unreachable driver.
-- `vp check`, worker-runtime tests, and the repository-wide test gate pass.
+- `packages/worker-runtime/src/tracing.ts`
+- `packages/worker-runtime/src/context/executors.ts`
+- `packages/worker-runtime/src/durable-object.ts`
+- `packages/takibi/tests/tracing.test.ts`
