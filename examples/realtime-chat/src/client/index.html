@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A public realtime chat powered by Takibi watch snapshots." />
+    <title>Takibi Fireside</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div class="brand-mark" aria-hidden="true">火</div>
+        <div>
+          <p class="eyebrow">TAKIBI REALTIME</p>
+          <h1>Fireside</h1>
+        </div>
+        <div class="connection" aria-live="polite">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status">Connecting</span>
+          <button id="retry" class="retry" type="button" hidden>Retry</button>
+        </div>
+      </header>
+
+      <section class="controls" aria-label="Chat settings">
+        <label>
+          <span>Room</span>
+          <select id="room">
+            <option value="lobby">Lobby</option>
+            <option value="help">Help desk</option>
+            <option value="random">Random</option>
+          </select>
+        </label>
+        <p>
+          Two visitors, one public room. Send from either side to see Takibi snapshots update both.
+        </p>
+      </section>
+
+      <div id="chat-grid" class="chat-grid"></div>
+      <p class="demo-note">Public demo · Messages are visible to everyone in this room.</p>
+    </main>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

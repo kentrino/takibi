@@ -34,6 +34,11 @@ actions, HTTP, and [opt-in list watches](./packages/takibi/README.md#watch-list-
 See [RFCs](./docs/rfcs/README.md) for design proposals, decisions, and their
 implementation status.
 
+## Examples
+
+- [Realtime chat](./examples/realtime-chat): a public, no-login chat using
+  `takibi/watch`, with one Durable Object per room and a browser UI.
+
 ## Development
 
 ```sh
