@@ -128,8 +128,8 @@ Reconsider an official backend only if all of the following hold:
 - an officially supported hosted engine/runtime combination, not only a local or preview feature.
 
 If any gate fails, discard promotion. A read-only projection or analytics path is a separate
-capability and not success for this issue. Even after all gates pass, return backend API and ADR
-changes to the normal RFC process instead of adding a public entry point here.
+capability and not success for this issue. Even after all gates pass, submit any backend API and
+architectural decision through the normal RFC process instead of adding a public entry point here.
 
 ## Acceptance criteria
 

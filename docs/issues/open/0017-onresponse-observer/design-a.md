@@ -40,7 +40,7 @@ The application provides services.events through its existing services factory. 
 
 ## Completed verification and implementation checks
 
-The existing `pnpm --filter @takibi/invocation-lifecycle exec vp test tests/invocation.test.ts` completed with **34 tests passed**. This verifies the existing lifecycle; the new onResponse is neither implemented nor tested. In addition to the original acceptance criteria, verify that nested result/ctx mutations cannot reach the response or later batch items, notification.failed produces one single/batch log, behavior is compatible without an observer, and there is no delivery guarantee across client retries. If the original ADR is found, check its constraints; if its prohibition also covers observation, reassess the rationale for adopting the public API in the ADR.
+The existing `pnpm --filter @takibi/invocation-lifecycle exec vp test tests/invocation.test.ts` completed with **34 tests passed**. This verifies the existing lifecycle; the new onResponse is neither implemented nor tested. In addition to the original acceptance criteria, verify that nested result/ctx mutations cannot reach the response or later batch items, notification.failed produces one single/batch log, behavior is compatible without an observer, and there is no delivery guarantee across client retries. [RFC 0005](../../../rfcs/0005-no-lifecycle-hooks.md) rejects collection write hooks but does not decide response observation. Adoption therefore requires a separate observer-boundary RFC that preserves that distinction.
 
 ## Retained detailed specification and acceptance criteria
 
@@ -113,8 +113,8 @@ settled, such as HTTP decode or application context resolution failure, do not c
   envelope runners should provide call counts and ordering.
 - Wire the same config through the generated Durable Object and `withSqliteTestBackend` path.
 - Add an RFC documenting this read-only completion boundary: it cannot join a transaction, alter
-  handler output, or change the response. The original no-lifecycle-hooks ADR has not been located;
-  record that uncertainty rather than asserting its rationale.
+  handler output, or change the response. It must preserve RFC 0005's prohibition on collection
+  write hooks rather than treating response observation as a lifecycle mutation hook.
 
 ## Scope
 
@@ -145,6 +145,6 @@ Out of scope:
 - HTTP decode and context-resolution failures do not invoke the observer.
 - Durable Object and SQLite testing paths have matching call count, order, and failure isolation.
 - Existing `resolve`, `services`, action builder, and client inference remain unchanged.
-- The ADR explicitly distinguishes observation from lifecycle mutation and fail-closed auditing.
+- The observer RFC explicitly distinguishes observation from lifecycle mutation and fail-closed auditing.
 - `vp check`, worker-runtime Node/Workers tests, testing package tests, and the repository-wide gate
   pass.
