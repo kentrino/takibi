@@ -129,7 +129,7 @@ Reconsider an official backend only if all of the following hold:
 
 If any gate fails, discard promotion. A read-only projection or analytics path is a separate
 capability and not success for this issue. Even after all gates pass, return backend API and ADR
-changes to the normal design process instead of adding a public entry point here.
+changes to the normal RFC process instead of adding a public entry point here.
 
 ## Acceptance criteria
 

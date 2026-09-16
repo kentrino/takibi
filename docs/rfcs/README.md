@@ -2,8 +2,9 @@
 
 RFCs record a proposed or accepted design, its contract, and why it was chosen.
 Keep each RFC focused and concise. Short contracts and examples belong in the
-same document; a separate specification is not required. Existing ADRs remain
-valid historical records and need not be renamed.
+same document; a separate specification is not required. RFCs are the
+repository's decision log. Accepted RFCs preserve adopted decisions and are
+superseded by later RFCs when decisions change.
 
 ## Lifecycle
 
@@ -63,6 +64,15 @@ an accepted RFC is not evidence that an API is already available.
 - [Watch subscription lifecycle](./0001-watch-subscription-lifecycle.md)
 - [String-query candidate safety](./0002-string-query-candidate-safety.md)
 - [Transaction callback no-replay contract](./0003-transaction-callback-no-replay.md)
+- [Partial updates revalidate the complete merged document](./0004-partial-update-full-revalidation.md)
+- [Do not expose collection write lifecycle hooks](./0005-no-lifecycle-hooks.md)
+- [Cloudflare Durable Objects only](./0006-cloudflare-durable-objects-only.md)
+- [Separate action admission from document authorization](./0007-action-two-layer-authorization.md)
+- [Throw inside the server and return results across the client boundary](./0008-server-throws-client-results.md)
+- [Keep log events independent of OpenTelemetry](./0009-logging-sink-independent-from-opentelemetry.md)
+- [Preserve trace context across the Durable Object wire](./0010-preserve-trace-context-across-durable-object-wire.md)
+- [Store document revisions in a SQLite column](./0011-revision-metadata-in-sqlite-column.md)
+- [Typed collection indexes define list scan order](./0012-typed-index-ordering.md)
 
 These proposals are linked to their existing implementation issues, which
 continue to track delivery. Resolved concerns and application-specific

@@ -31,9 +31,6 @@ Internal workspace packages are private and are not published. Import
 See the [SDK guide](./packages/takibi/README.md) for AuthN/AuthZ, collections,
 actions, and HTTP.
 
-See the [architecture decision records](./docs/adr/) for the rationale
-behind the current security, storage, and integration boundaries.
-
 See [RFCs](./docs/rfcs/README.md) for design proposals, decisions, and their
 implementation status.
 

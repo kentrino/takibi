@@ -4,7 +4,7 @@
 
 Reassessed on 2026-09-16: keep open. `ContextConfig` contains only resolve/stub/services/logging, and invocationNotify in `adapter-map.ts` is undefined. `invocation-lifecycle/src/flow.ts` already performs settlement → snapshot → awaited notify and stores exceptions in notification.failed. `invocation-adapters.ts` applies structuredClone and then freezes the outer object. No new lifecycle is needed.
 
-Commit `1b1de81` extracts the generic invocation lifecycle and supports keeping Takibi-specific policy/projection in the runtime. The original ADR for the no-lifecycle-hooks decision mentioned by the issue has not been located. Do not invent its existence or rationale; state in the new ADR that the source is unverified and document the currently established distinction between read-only observation and transaction hooks.
+Commit `1b1de81` extracts the generic invocation lifecycle and supports keeping Takibi-specific policy/projection in the runtime. The original source for the no-lifecycle-hooks decision mentioned by the issue has not been located. Do not invent its existence or rationale; document the currently established distinction between read-only observation and transaction hooks in the new RFC.
 
 ## First principles, alternatives, and boundaries
 
@@ -112,7 +112,7 @@ settled, such as HTTP decode or application context resolution failure, do not c
 - Keep response construction after the notified invocation result. The existing single and batch
   envelope runners should provide call counts and ordering.
 - Wire the same config through the generated Durable Object and `withSqliteTestBackend` path.
-- Add an ADR documenting this read-only completion boundary: it cannot join a transaction, alter
+- Add an RFC documenting this read-only completion boundary: it cannot join a transaction, alter
   handler output, or change the response. The original no-lifecycle-hooks ADR has not been located;
   record that uncertainty rather than asserting its rationale.
 
@@ -123,7 +123,7 @@ In scope:
 - public types and inference for optional `onResponse`;
 - generated Durable Object and SQLite testing-backend wiring;
 - single/batch, success/failure behavior and callback-failure logging;
-- README and an ADR defining the observer boundary.
+- README and an RFC defining the observer boundary.
 
 Out of scope:
 

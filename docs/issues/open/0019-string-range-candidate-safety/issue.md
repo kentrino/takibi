@@ -22,4 +22,4 @@ String predicates use JavaScript UTF-16 comparison while SQLite indexes use BINA
 - `packages/storage/tests/storage.workers.ts`
 - `packages/storage/tests/indexes.test.ts`
 - `packages/takibi/README.md`
-- `docs/adr/0028-typed-index-ordering.md`
+- `docs/rfcs/0012-typed-index-ordering.md`

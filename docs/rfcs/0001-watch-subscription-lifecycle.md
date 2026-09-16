@@ -15,7 +15,7 @@ A query watch produces snapshots over time, may reconnect after a temporary fail
 terminates. A positional `onPage` / `onError` API with a bare unsubscribe function cannot clearly
 separate a retryable disconnect from a terminal server or protocol failure, or expose normal
 completion. This contract is independent of the WebSocket wire format, full-snapshot behavior, and
-authorization design in the implementation issue. It preserves [ADR 0018's](../adr/0018-throwing-server-result-client.md)
+authorization design in the implementation issue. It preserves [RFC 0008's](./0008-server-throws-client-results.md)
 distinction between server-decided failures and transport or protocol failures.
 
 ## Proposal

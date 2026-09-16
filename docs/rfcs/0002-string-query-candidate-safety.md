@@ -41,7 +41,7 @@ a safe widening is proved. They may retain equality prefixes, numeric ranges, SQ
 and keyset cursors. Pagination must continue across rejected candidates until the requested page
 is full or the scan ends. Planner simplifications of combined string bounds must likewise use
 JavaScript membership semantics, not assume that index collation supplies them. The README and
-ADR 0028 should clarify the distinction between query membership and index result/cursor order.
+RFC 0012 should clarify the distinction between query membership and index result/cursor order.
 
 Changing query membership to SQLite order would break existing JavaScript behavior. Persisting a
 UTF-16-order projection would align membership and range scans, but adds storage, backfill, cursor,
