@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import type { TrustedCollectionsApi } from "@takibi/api";
 import type { SnapshotRestoreReport } from "@takibi/shared-types";
 import {
@@ -19,8 +19,8 @@ const passThroughLifecycle: SnapshotLifecycle = {
   listCollections() {
     return [{ name: "records", currentSchemaVersion: 0, baseSchemaVersion: 0 }];
   },
-  async validateRestoredDocument() {
-    return [];
+  async prepareRestoredDocument(document) {
+    return { document, uniqueConstraints: [] };
   },
   async prepareSeeds() {
     return [];
@@ -121,6 +121,76 @@ test("memory maintenance backend round-trips logical snapshot metadata", async (
   expect(targetBackend.readLive("records", "r1")).toEqual(liveDocument());
   expect(targetBackend.readLive("records", "obsolete")).toBeUndefined();
 });
+
+test("restore stages and publishes the lifecycle-prepared document", async () => {
+  const source = new MemoryMaintenanceBackend();
+  source.writeLive(liveDocument());
+  const encoded = await new Response(await createSnapshotApi(source).$exportSnapshot()).text();
+  const backend = new MemoryMaintenanceBackend();
+  const stageDocument = vi.spyOn(backend, "stageDocument");
+  const prepared = liveDocument({ schemaVersion: 1, data: { slug: "prepared" } });
+  const api = createSnapshotApi(backend, {
+    ...passThroughLifecycle,
+    listCollections() {
+      return [{ name: "records", currentSchemaVersion: 1, baseSchemaVersion: 0 }];
+    },
+    async prepareRestoredDocument(document) {
+      return {
+        document: { ...document, schemaVersion: 1, data: { slug: "prepared" } },
+        uniqueConstraints: [],
+      };
+    },
+  });
+
+  await restore(api, encoded);
+
+  expect(stageDocument).toHaveBeenCalledExactlyOnceWith(expect.any(String), prepared);
+  expect(backend.readLive("records", "r1")).toEqual(prepared);
+});
+
+test.each([
+  { field: "collection", mutate: false },
+  { field: "id", mutate: false },
+  { field: "collection", mutate: true },
+  { field: "id", mutate: true },
+] as const)(
+  "restore rejects changed $field (in-place mutation: $mutate) before staging",
+  async ({ field, mutate }) => {
+    const source = new MemoryMaintenanceBackend();
+    source.writeLive(liveDocument());
+    const encoded = await new Response(await createSnapshotApi(source).$exportSnapshot()).text();
+    const backend = new MemoryMaintenanceBackend();
+    const live = liveDocument({ id: "live", data: { value: "unchanged" } });
+    backend.writeLive(live);
+    const stageUnique = vi.spyOn(backend, "stageUnique");
+    const stageDocument = vi.spyOn(backend, "stageDocument");
+    const api = createSnapshotApi(backend, {
+      ...passThroughLifecycle,
+      async prepareRestoredDocument(input) {
+        const document = mutate ? input : { ...input };
+        document[field] = "changed";
+        return {
+          document,
+          uniqueConstraints: [
+            {
+              collection: document.collection,
+              name: "byValue",
+              valueKey: '["memory"]',
+              documentId: document.id,
+            },
+          ],
+        };
+      },
+    });
+
+    await expect(restore(api, encoded)).rejects.toMatchObject({
+      code: "SNAPSHOT_INVALID_DOCUMENT",
+    });
+    expect(stageUnique).not.toHaveBeenCalled();
+    expect(stageDocument).not.toHaveBeenCalled();
+    expect(await backend.scanDocuments(undefined, 10)).toEqual([live]);
+  },
+);
 
 test("memory maintenance backend scans ordered bounded pages", async () => {
   const backend = new MemoryMaintenanceBackend();

@@ -223,7 +223,7 @@ test("restore rejects invalid UTF-8 without changing live data", async () => {
   await expect(object.$collections.records.get("live")).resolves.toBeDefined();
 });
 
-test("restore validates old versions without write-back and initializes newer collections", async () => {
+test("restore materializes old versions before indexed reads and initializes newer collections", async () => {
   const oldContext = createTakibi()({
     resolve: () => ({ tenantId: "snapshot-validation" }),
   });
@@ -279,6 +279,12 @@ test("restore validates old versions without write-back and initializes newer co
       addedLater: { documentsRestored: 0, seedsInserted: 1 },
     },
   });
+  await expect(
+    newObject.$collections.records.list({
+      index: "bySlug",
+      where: (query) => query.slug.eq("migrated"),
+    }),
+  ).resolves.toMatchObject({ items: [{ id: "legacy" }] });
   expect(
     backing.sql
       .exec<{ schema_version: number; revision: number }>(
@@ -289,7 +295,7 @@ test("restore validates old versions without write-back and initializes newer co
         "legacy",
       )
       .one(),
-  ).toEqual({ schema_version: 0, revision: 2 });
+  ).toEqual({ schema_version: 1, revision: 2 });
   await expect(newObject.$collections.records.get("legacy")).resolves.toMatchObject({
     slug: "migrated",
     rev: 2,

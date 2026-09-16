@@ -15,9 +15,8 @@ the Durable Object RPC method surface. A subclass that exposes them through
 HTTP or RPC must provide its own authorization.
 
 `@takibi/snapshot` owns the logical format, checksum, maintenance
-schema, and lease algorithms. `takibi` keeps the typed document
-lifecycle adapter that validates restored documents and prepares current seeds
-until worker-runtime extraction.
+schema, and lease algorithms. `@takibi/worker-runtime` owns the collection-aware lifecycle adapter that
+prepares restored documents and current seeds.
 
 ## Format and transport
 
@@ -78,7 +77,19 @@ outside this exclusion boundary.
 
 ## Restore and reset
 
-Restore writes incoming documents to
+Restore migrates and validates each incoming document once, including schema
+transforms for documents already at the current version. It stages the resulting
+current-schema data and version while preserving collection, ID, timestamps,
+and revision. Unique keys are derived from that same prepared document. Every
+read path, including indexed queries, can observe the restored data immediately
+after cutover without a prior read to trigger migration.
+
+Checksums and counts still cover the original input stream. Re-export can have
+different bytes and schema versions; with deterministic transforms, logical
+documents and metadata survive another export/restore cycle. The wire format
+and checksum version are unchanged.
+
+Restore writes prepared documents to
 `takibi_restore_staging_documents`. Unique-validation keys use the separate
 snapshot-owned `takibi_restore_staging_unique` table. Staging rows are scoped
 by owner token and never appear through collection APIs.
