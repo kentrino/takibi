@@ -9,7 +9,7 @@ import type { StorageTestObject } from "./worker";
 
 test("Durable Object wire path runs CRUD, action, and batch through fetch", async () => {
   const context = createTakibi()({
-    resolve: () => ({ tenantId: "tenant-a" }),
+    resolve: () => ({ accountId: "account-a" }),
   });
   const app = context.defineCollections({
     posts: {
@@ -20,11 +20,11 @@ test("Durable Object wire path runs CRUD, action, and batch through fetch", asyn
   const ping = app
     .defineAction()
     .policy(fullAccess)
-    .handler(() => ({ pong: true }));
+    .handler(({ ctx }) => ({ accountId: ctx.accountId }));
   const handler = app.actions({ $: { ping } });
 
   const stub = env.TAKIBI_STORAGE_TEST.getByName(
-    "tenant-runtime",
+    "account:account-a",
   ) as DurableObjectStub<StorageTestObject>;
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
@@ -35,7 +35,7 @@ test("Durable Object wire path runs CRUD, action, and batch through fetch", asyn
       operation: "add",
       id: "p1",
       input: { title: "from-do" },
-      context: { tenantId: "tenant-runtime" },
+      context: { accountId: "account-a" },
     };
     const addResponse = await object.fetch(
       new Request("https://takibi.internal", {
@@ -54,7 +54,7 @@ test("Durable Object wire path runs CRUD, action, and batch through fetch", asyn
       collection: "posts",
       operation: "get",
       id: "p1",
-      context: { tenantId: "tenant-runtime" },
+      context: { accountId: "account-a" },
     };
     const getResponse = await object.fetch(
       new Request("https://takibi.internal", {
@@ -75,14 +75,14 @@ test("Durable Object wire path runs CRUD, action, and batch through fetch", asyn
           kind: "action",
           scope: "$",
           name: "ping",
-          context: { tenantId: "tenant-runtime" },
+          context: { accountId: "account-a" },
         } satisfies WireRequest),
       }),
     );
     expect(actionResponse.status).toBe(200);
     await expect(actionResponse.json<WireResponse>()).resolves.toEqual({
       ok: true,
-      data: { pong: true },
+      data: { accountId: "account-a" },
     });
 
     const batchResponse = await object.fetch(
@@ -94,7 +94,7 @@ test("Durable Object wire path runs CRUD, action, and batch through fetch", asyn
             { kind: "collection", collection: "posts", operation: "get", id: "missing" },
             { kind: "collection", collection: "posts", operation: "get", id: "p1" },
           ],
-          context: { tenantId: "tenant-runtime" },
+          context: { accountId: "account-a" },
         } satisfies WireRequest),
       }),
     );

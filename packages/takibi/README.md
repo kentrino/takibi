@@ -46,10 +46,17 @@ Identity is whatever `resolve` returns. The Durable Object does not re-resolve
 or re-verify the caller. Its `fetch` is only for the same Worker's `stub`
 call; do not expose that class on a public route.
 
-Named objects must use `idFromName(resolved.tenantId)` with that exact string
-(no prefix). `fetch` compares `state.id.name` to `context.tenantId` and
-rejects a mismatch with `ForbiddenError` (403). Objects created without a
-name (`idFromString` and similar) skip that check.
+Partition routing is owned by your application in `stub`. Named and unnamed
+objects both accept any serializable context; Takibi does not compare an object
+name with `tenantId` or any other context property. Verify that `resolve`
+authorizes the selected partition and test that `stub` maps the authorized
+context to the intended object. This replaces the old name/context mismatch
+guard, which caught some wiring mistakes but was not an authentication boundary.
+
+Existing `getByName(resolved.tenantId)` routing remains valid. Prefixes and
+other application-owned naming schemes are also supported, but changing an
+existing object's name selects different Durable Object storage and therefore
+requires an application data migration.
 
 ## Server
 
@@ -406,9 +413,10 @@ export function createPolicyExample() {
 helpers supplied through `handle(request, { context })`. Authentication must
 verify credentials and authorize the selected tenant; return `null` on failure
 so the resolver throws `UnauthorizedError`. `tenantStore` wraps your namespace's
-`get(idFromName(tenantId))`. Preserve your application's routing inputs in the
-resolved context. Only serializable decision data crosses the wire, not the
-helpers, requests, or stubs.
+`get(idFromName(tenantId))`; that exact-name choice belongs to this application,
+not Takibi. Preserve your application's routing inputs in the resolved context.
+Only serializable decision data crosses the wire, not the helpers, requests, or
+stubs.
 
 The resolved membership is a point-in-time input. It does not freeze the external
 service's state or guarantee immediate revocation, cross-row authorization, or
@@ -1107,9 +1115,10 @@ Register a Durable Object class with SQLite storage:
 
 Notes:
 
-- Bind one DO per tenant with `idFromName(resolved.tenantId)` inside `stub`.
-  The object name is that `tenantId`; prefixed names are not supported.
-  `fetch` on the class is stub-only — do not route public HTTP to it.
+- Select named or unnamed Durable Objects inside `stub` after `resolve` has
+  authenticated the caller and authorized the partition. Takibi treats object
+  names and resolved context as application-owned values and does not compare
+  them. `fetch` on the class is stub-only — do not route public HTTP to it.
 - The root `takibi` import does not require `nodejs_als`,
   `nodejs_compat`, or a minimum compatibility date.
 

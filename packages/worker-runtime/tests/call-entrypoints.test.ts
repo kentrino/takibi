@@ -173,6 +173,25 @@ function createApp(
   return app.actions({ $: { echo } });
 }
 
+function createAccountApp(events: LogEvent[] = []) {
+  const context = createTakibi()({
+    resolve: () => ({ accountId: "account-a" }),
+    logger: capturingLogger(events),
+    logLevel: "debug",
+  });
+  const app = context.defineCollections({
+    posts: {
+      schema: Post,
+      accessPolicy: fullAccess,
+    },
+  });
+  const identify = app
+    .defineAction()
+    .policy(fullAccess)
+    .handler(({ ctx }) => ({ accountId: ctx.accountId }));
+  return app.actions({ $: { identify } });
+}
+
 async function doFetch(object: DurableObject, body: WireRequest, headers?: HeadersInit) {
   return object.fetch(
     new Request("https://takibi.internal/", {
@@ -365,7 +384,56 @@ test("Worker production dispatch resolves once and sends one stub fetch per Call
   });
 });
 
-test("DO tenant mismatch and invalid wire fail before invocation", async () => {
+test.each([
+  ["named", "collection"],
+  ["named", "action"],
+  ["named", "batch"],
+  ["unnamed", "collection"],
+  ["unnamed", "action"],
+  ["unnamed", "batch"],
+] as const)("DO %s object executes %s calls without context.tenantId", async (objectKind, kind) => {
+  const events: LogEvent[] = [];
+  const handler = createAccountApp(events);
+  const id = objectKind === "named" ? { name: "account:account-a" } : {};
+  const object = new handler.DurableObject(fakeState(createSqliteDurableObjectStorage(), id), {});
+  const invocation: WireRequest =
+    kind === "collection"
+      ? {
+          kind,
+          collection: "posts",
+          operation: "add",
+          id: "p1",
+          input: { title: "opaque-context" },
+          context: { accountId: "account-a" },
+        }
+      : kind === "action"
+        ? {
+            kind,
+            scope: "$",
+            name: "identify",
+            context: { accountId: "account-a" },
+          }
+        : {
+            kind,
+            items: [
+              {
+                kind: "collection",
+                collection: "posts",
+                operation: "get",
+                id: "missing",
+              },
+            ],
+            context: { accountId: "account-a" },
+          };
+
+  const response = await doFetch(object, invocation);
+
+  expect(response.status).toBe(200);
+  await expect(response.json<WireResponse>()).resolves.toMatchObject({ ok: true });
+  expect(events.filter(({ event }) => event === "takibi.executor")).toHaveLength(1);
+});
+
+test("DO name does not interpret context identity and invalid wire still fails", async () => {
   const events: LogEvent[] = [];
   const handler = createApp({ events });
   const object = new handler.DurableObject(
@@ -381,10 +449,10 @@ test("DO tenant mismatch and invalid wire fail before invocation", async () => {
     input: { title: "no" },
     context: { tenantId: "tenant-b" },
   });
-  expect(mismatch.status).toBe(403);
+  expect(mismatch.status).toBe(200);
   await expect(mismatch.json()).resolves.toMatchObject({
-    ok: false,
-    error: { code: "FORBIDDEN", status: 403, message: "Tenant mismatch" },
+    ok: true,
+    data: { id: "cross", title: "no" },
   });
 
   const invalid = await object.fetch(
@@ -402,8 +470,8 @@ test("DO tenant mismatch and invalid wire fail before invocation", async () => {
     id: "cross",
     context: { tenantId: "tenant-a" },
   });
-  expect(later.status).toBe(404);
-  expect(events.filter(({ event }) => event === "takibi.executor")).toHaveLength(1);
+  expect(later.status).toBe(200);
+  expect(events.filter(({ event }) => event === "takibi.executor")).toHaveLength(2);
 });
 
 test("DO fetch waits for ready and does not run inside a maintenance lease", async () => {

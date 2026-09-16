@@ -1611,54 +1611,7 @@ test("named Durable Object fetch accepts a matching tenantId", async () => {
   });
 });
 
-test("named Durable Object fetch rejects a tenant mismatch before storage", async () => {
-  let reads = 0;
-  const storage = createSqliteDurableObjectStorage();
-  const watched = {
-    ...storage,
-    async get(key: string) {
-      reads += 1;
-      return storage.get(key);
-    },
-    async list(options?: { prefix?: string; limit?: number; startAfter?: string }) {
-      reads += 1;
-      return storage.list(options);
-    },
-  } as unknown as DurableObjectStorage;
-  const handler = createTakibi()({
-    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
-  })
-    .defineCollections({
-      posts: { schema: Post, accessPolicy: fullAccess },
-    })
-    .actions({});
-  const object = new handler.DurableObject(
-    createFakeDurableObjectState(watched, { name: "tenant-a" }),
-    { context: {} },
-  );
-
-  const response = await object.fetch(
-    new Request("https://takibi.internal", {
-      method: "POST",
-      body: JSON.stringify({
-        kind: "collection",
-        collection: "posts",
-        operation: "add",
-        id: "p1",
-        input: { title: "cross-tenant" },
-        context: { tenantId: "tenant-b", user: { id: "u1", role: "member" } },
-      } satisfies WireRequest),
-    }),
-  );
-  expect(response.status).toBe(403);
-  await expect(response.json()).resolves.toMatchObject({
-    ok: false,
-    error: { code: "FORBIDDEN", status: 403, message: "Tenant mismatch" },
-  });
-  expect(reads).toBe(0);
-});
-
-test("named Durable Object fetch rejects an empty tenantId", async () => {
+test("named Durable Object fetch treats tenantId as application context", async () => {
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
   })
@@ -1677,20 +1630,54 @@ test("named Durable Object fetch rejects an empty tenantId", async () => {
       body: JSON.stringify({
         kind: "collection",
         collection: "posts",
-        operation: "get",
+        operation: "add",
         id: "p1",
+        input: { title: "cross-tenant" },
+        context: { tenantId: "tenant-b", user: { id: "u1", role: "member" } },
+      } satisfies WireRequest),
+    }),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({
+    ok: true,
+    data: { id: "p1", title: "cross-tenant" },
+  });
+});
+
+test("named Durable Object fetch accepts an empty application tenantId", async () => {
+  const handler = createTakibi()({
+    resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
+  })
+    .defineCollections({
+      posts: { schema: Post, accessPolicy: fullAccess },
+    })
+    .actions({});
+  const object = new handler.DurableObject(
+    createFakeDurableObjectState(createSqliteDurableObjectStorage(), { name: "tenant-a" }),
+    { context: {} },
+  );
+
+  const response = await object.fetch(
+    new Request("https://takibi.internal", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "collection",
+        collection: "posts",
+        operation: "add",
+        id: "p1",
+        input: { title: "empty-tenant" },
         context: { tenantId: "", user: { id: "u1", role: "member" } },
       } satisfies WireRequest),
     }),
   );
-  expect(response.status).toBe(403);
+  expect(response.status).toBe(200);
   await expect(response.json()).resolves.toMatchObject({
-    ok: false,
-    error: { code: "FORBIDDEN", status: 403 },
+    ok: true,
+    data: { id: "p1", title: "empty-tenant" },
   });
 });
 
-test("unnamed Durable Object fetch skips the tenant name check", async () => {
+test("unnamed Durable Object fetch accepts arbitrary application tenantId", async () => {
   const handler = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a", user: { id: "u1", role: "member" as const } }),
   })

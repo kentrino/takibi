@@ -1,5 +1,4 @@
 import {
-  ForbiddenError,
   type ActionRegistry,
   type CollectionDefinition,
   type CollectionsDef,
@@ -47,7 +46,6 @@ export function createDurableObjectClass<
   createServices?: (input: { env: TEnv }) => TServices,
 ): DurableObjectClass<TCollections, TEnv> {
   return class TakibiTenantObject implements DurableObject {
-    readonly #state: DurableObjectState;
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
     readonly #services: TServices | Record<never, never>;
@@ -56,7 +54,6 @@ export function createDurableObjectClass<
 
     constructor(state: DurableObjectState, env: TEnv) {
       this.#services = createServices ? createServices({ env }) : {};
-      this.#state = state;
       const registry = compileIndexRegistry(collections);
       const rawStorage = createDurableObjectStorage(state.storage, registry);
       initializeMaintenanceLayout(state.storage.sql);
@@ -101,7 +98,6 @@ export function createDurableObjectClass<
             const body = parseWireRequest(await request.text());
             const { context, ...decoded } = body;
             invocation = decoded;
-            assertTenantMatchesDurableObjectName(this.#state.id.name, context);
             await this.#ready;
             return await this.#maintenance.runNormal(async () => {
               const local = await resolveLocalExecution({
@@ -170,13 +166,4 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       return driver.transaction(callback);
     },
   };
-}
-
-function assertTenantMatchesDurableObjectName(
-  name: string | undefined,
-  context: Record<string, unknown>,
-): void {
-  if (typeof name === "string" && name.length > 0 && name !== context.tenantId) {
-    throw new ForbiddenError("Tenant mismatch");
-  }
 }
