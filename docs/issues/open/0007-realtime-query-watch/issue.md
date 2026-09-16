@@ -16,6 +16,19 @@ Chat and dashboard applications currently implement typed-list refresh and subsc
 
 [Subscription lifecycle RFC](../../../rfcs/0001-watch-subscription-lifecycle.md)
 
+## Accepted API (2026-09-17)
+
+Implement `client.posts.watch(options, { next, state? })` with a synchronously returned
+`{ unsubscribe, closed }` handle, as accepted in RFC 0001. Options support `where`,
+`limit`, `index`, and index-bound `orderBy` with the same typing, validation, and
+ordering semantics as `list`; exclude `cursor` and `nextCursor`. Deliver full
+`{ items }` snapshots after commit, suppress unchanged snapshots, and preserve the
+RFC's reconnect, terminal-outcome, and unsubscribe contract. Verify indexed ascending
+and descending limited results against `list`, including changes to ordering fields.
+
+Coordinate partition-routing behavior with issue 0016, which was dispatched separately;
+reuse its changes when available rather than introducing another routing contract.
+
 ## Related Files
 
 - `packages/client/src/client.ts`

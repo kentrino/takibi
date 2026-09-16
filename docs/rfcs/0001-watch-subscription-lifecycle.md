@@ -1,7 +1,9 @@
 ---
 id: "0001"
 title: Watch subscription lifecycle
-status: proposed
+status: accepted
+implementation: pending
+decided: 2026-09-17
 created: 2026-09-16
 implementation_issues:
   - ../issues/open/0007-realtime-query-watch/issue.md
@@ -18,7 +20,7 @@ completion. This contract is independent of the WebSocket wire format, full-snap
 authorization design in the implementation issue. It preserves [RFC 0008's](./0008-server-throws-client-results.md)
 distinction between server-decided failures and transport or protocol failures.
 
-## Proposal
+## Decision
 
 Use an observer with required `next` and optional `state`, and return a subscription handle
 synchronously. The handle provides idempotent `unsubscribe()` and an always-fulfilling `closed`
@@ -59,7 +61,7 @@ adds queueing, backpressure, cancellation, and connection-start semantics withou
 An options object alone does not resolve failure classification. Applications can continue polling
 with `list` when a streaming lifecycle is unnecessary.
 
-## Open choices
+## Implementation choices
 
 - Define the exact public state and close-reason type names without adding status properties or
   callbacks beyond `next`, `state`, `unsubscribe`, and `closed`.
