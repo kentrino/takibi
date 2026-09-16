@@ -34,15 +34,15 @@ export type SnapshotUniqueConstraint = {
   documentId: string;
 };
 
-export type SnapshotSeed = {
+export type SnapshotPreparedDocument = {
   document: SnapshotStoredDocument;
   uniqueConstraints: readonly SnapshotUniqueConstraint[];
 };
 
+export type SnapshotSeed = SnapshotPreparedDocument;
+
 export type SnapshotLifecycle = {
   listCollections(): readonly SnapshotCollectionDescriptor[];
-  validateRestoredDocument(
-    document: SnapshotStoredDocument,
-  ): Promise<readonly SnapshotUniqueConstraint[]>;
+  prepareRestoredDocument(document: SnapshotStoredDocument): Promise<SnapshotPreparedDocument>;
   prepareSeeds(): Promise<readonly SnapshotSeed[]>;
 };

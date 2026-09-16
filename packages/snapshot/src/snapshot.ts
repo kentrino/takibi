@@ -284,10 +284,14 @@ async function validateAndStageDocument(
   lease: LeaseHandle,
   document: SnapshotStoredDocument,
 ): Promise<void> {
-  const uniqueConstraints = await lifecycle.validateRestoredDocument(document);
-  await stageUniqueConstraints(maintenance, lease, uniqueConstraints);
+  const { collection, id } = document;
+  const prepared = await lifecycle.prepareRestoredDocument(document);
+  if (prepared.document.collection !== collection || prepared.document.id !== id) {
+    throw new SnapshotInvalidDocumentError("Snapshot preparation changed document identity");
+  }
+  await stageUniqueConstraints(maintenance, lease, prepared.uniqueConstraints);
   try {
-    await maintenance.backend.stageDocument(lease.token, document);
+    await maintenance.backend.stageDocument(lease.token, prepared.document);
   } catch (error) {
     if (error instanceof SnapshotInvalidDocumentError) throw error;
     throw new SnapshotInvalidDocumentError("Snapshot contains duplicate document metadata");
