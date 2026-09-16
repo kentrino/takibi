@@ -22,7 +22,6 @@ created: 2026-09-16
 | `proposed`   | The design or choice among alternatives is still under discussion.     |
 | `accepted`   | The stated decision has been adopted, independently of implementation. |
 | `rejected`   | The proposed decision was considered and not adopted.                  |
-| `withdrawn`  | The proposal was withdrawn without an adoption decision.               |
 | `superseded` | A later RFC replaces this decision.                                    |
 
 Use draft PRs for drafting; do not add a separate draft status. A problem without
@@ -58,22 +57,3 @@ new RFC: add `supersedes: ["0001"]` to the successor and
 the replaced RFC `superseded`. Keep rationale in the body,
 not frontmatter. Keep current API reference documentation in sync with code;
 an accepted RFC is not evidence that an API is already available.
-
-## Proposals
-
-- [Watch subscription lifecycle](./0001-watch-subscription-lifecycle.md)
-- [String-query candidate safety](./0002-string-query-candidate-safety.md)
-- [Transaction callback no-replay contract](./0003-transaction-callback-no-replay.md)
-- [Partial updates revalidate the complete merged document](./0004-partial-update-full-revalidation.md)
-- [Do not expose collection write lifecycle hooks](./0005-no-lifecycle-hooks.md)
-- [Cloudflare Durable Objects only](./0006-cloudflare-durable-objects-only.md)
-- [Separate action admission from document authorization](./0007-action-two-layer-authorization.md)
-- [Throw inside the server and return results across the client boundary](./0008-server-throws-client-results.md)
-- [Keep log events independent of OpenTelemetry](./0009-logging-sink-independent-from-opentelemetry.md)
-- [Preserve trace context across the Durable Object wire](./0010-preserve-trace-context-across-durable-object-wire.md)
-- [Store document revisions in a SQLite column](./0011-revision-metadata-in-sqlite-column.md)
-- [Typed collection indexes define list scan order](./0012-typed-index-ordering.md)
-
-These proposals are linked to their existing implementation issues, which
-continue to track delivery. Resolved concerns and application-specific
-requests are not copied merely to fill the RFC catalog.
