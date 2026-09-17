@@ -15,7 +15,7 @@ Cloudflare Worker application around it.
 - `messages.byCreatedAt` supports the descending, limited watch query. Each
   snapshot contains the newest 50 messages and the browser reverses it for
   chronological display.
-- Two panes simulate `Aさん` and `Bさん` without identity or authentication.
+- Two panes simulate `Alice` and `Bob` without identity or authentication.
   Each pane owns a `createWatchClient`, watch subscription, connection state,
   retry control, composer, and draft. A shared room selector makes realtime
   delivery visible side by side.

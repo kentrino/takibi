@@ -81,13 +81,13 @@ test("validates messages and lists the latest messages by createdAt", async () =
   const client = clientFor(handler, "lobby");
 
   const blankName = await client.messages.add({ displayName: "   ", body: "hello" });
-  const blankBody = await client.messages.add({ displayName: "Aさん", body: "   " });
+  const blankBody = await client.messages.add({ displayName: "Alice", body: "   " });
   const longName = await client.messages.add({
     displayName: "n".repeat(DISPLAY_NAME_MAX_LENGTH + 1),
     body: "hello",
   });
   const longBody = await client.messages.add({
-    displayName: "Aさん",
+    displayName: "Alice",
     body: "x".repeat(MESSAGE_BODY_MAX_LENGTH + 1),
   });
   expect(blankName.ok).toBe(false);
@@ -96,11 +96,11 @@ test("validates messages and lists the latest messages by createdAt", async () =
   expect(longBody.ok).toBe(false);
 
   const markup = await client.messages.add({
-    displayName: "Aさん",
+    displayName: "Alice",
     body: "<em>hello</em>",
   });
-  const first = await client.messages.add({ displayName: "Aさん", body: "first" });
-  const second = await client.messages.add({ displayName: "Bさん", body: "second" });
+  const first = await client.messages.add({ displayName: "Alice", body: "first" });
+  const second = await client.messages.add({ displayName: "Bob", body: "second" });
   expect(markup.ok).toBe(true);
   expect(first.ok).toBe(true);
   expect(second.ok).toBe(true);
@@ -136,7 +136,7 @@ test("keeps two independently created SQLite stores isolated", async () => {
   const lobbyClient = clientFor(lobby, "lobby");
   const helpClient = clientFor(help, "help");
 
-  const added = await lobbyClient.messages.add({ displayName: "Aさん", body: "lobby only" });
+  const added = await lobbyClient.messages.add({ displayName: "Alice", body: "lobby only" });
   expect(added.ok).toBe(true);
 
   const helpList = await helpClient.messages.list({
@@ -201,7 +201,7 @@ test("hono serves the page, assets, unknown rooms, and known room prefixes", asy
     new Request("https://chat.test/api/lobby/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Aさん", body: "from worker" }),
+      body: JSON.stringify({ displayName: "Alice", body: "from worker" }),
     }),
     env,
   );

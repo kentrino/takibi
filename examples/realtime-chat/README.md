@@ -1,7 +1,7 @@
 # Takibi realtime chat
 
 A runnable public chat showing Takibi's `createWatchClient` snapshots across two
-independent browser clients. The two panes simulate **Aさん** and **Bさん**;
+independent browser clients. The two panes simulate **Alice** and **Bob**;
 there is intentionally no authentication or authorization.
 
 ## Try the two panes
@@ -17,9 +17,9 @@ pnpm --filter @takibi/realtime-chat dev
 Open the URL printed by Wrangler (normally <http://localhost:8787>).
 
 1. Leave the shared room on **Lobby**.
-2. Send a message from the left pane (Aさん). It should appear on the right as
-   well, right-aligned for A and left-aligned for B.
-3. Reply from the right pane (Bさん). Aさんの pane should receive it without a
+2. Send a message from the left pane (Alice). It should appear on the right as
+   well, right-aligned for Alice and left-aligned for Bob.
+3. Reply from the right pane (Bob). Alice's pane should receive it without a
    refresh.
 4. Switch the shared room to **Help desk** or **Random**. Both panes clear, then
    only messages for that room appear. Switching back to Lobby restores its
