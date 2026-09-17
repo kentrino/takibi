@@ -1,0 +1,27 @@
+{
+  "name": "@takibi/realtime-chat",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Public realtime chat example for Takibi watch snapshots.",
+  "type": "module",
+  "scripts": {
+    "build": "vp build",
+    "check": "vp check",
+    "dev": "pnpm run build && wrangler dev",
+    "test": "vp test --root ."
+  },
+  "dependencies": {
+    "takibi": "workspace:^",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
