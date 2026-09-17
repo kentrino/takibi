@@ -34,11 +34,12 @@ pnpm --filter @takibi/realtime-chat test
 
 ## How it is put together
 
-Hono serves the page with `jsxRenderer` and mounts each preset room at
-`/api/:room` (`lobby`, `help`, `random`) through `takibiServer`. Tailwind styles
-the server-rendered shell and the `hono/jsx/dom` panes. The Worker validates
-that room segment, routes it to one named Durable Object, and lets Takibi handle
-collection paths below that prefix. HTTP `messages.send` writes (with a
+Hono serves the page with `jsxRenderer` and mounts `/api/:room` through
+`takibiServer`. Tailwind styles the server-rendered shell and the `hono/jsx/dom`
+panes. The Worker uses that room segment as the Durable Object name and lets
+Takibi handle collection paths below the prefix. The demo selector offers
+`lobby`, `help`, and `random`; any other room name is a separate object. HTTP
+`messages.send` writes (with a
 server-assigned id) and WebSocket `messages.watch` share the same-origin
 endpoint. The declared `byCreatedAt`
 index returns the newest 50 messages; the UI reverses each full snapshot for
@@ -60,8 +61,8 @@ typing, routing, and testing contracts.
 
 ## Public demo limits
 
-This is a public local demo. Anyone who can reach it can read and write every
-preset room. It has no identity, moderation, rate limiting, deletion UI, or
+This is a public local demo. Anyone who can reach it can read and write any
+room. It has no identity, moderation, rate limiting, deletion UI, or
 production retention policy. Each pane shows at most the latest 50 messages. A
 room keeps its Durable Object data between local server restarts until
 Wrangler's local state is removed.

@@ -1,13 +1,13 @@
 import { createTakibi, fullAccess, read } from "takibi";
 import { z } from "zod";
-import { DISPLAY_NAME_MAX_LENGTH, MESSAGE_BODY_MAX_LENGTH, type Room } from "./shared.ts";
+import { DISPLAY_NAME_MAX_LENGTH, MESSAGE_BODY_MAX_LENGTH } from "./shared.ts";
 
 export type ChatEnv = {
   CHAT_ROOMS: DurableObjectNamespace;
   ASSETS: Fetcher;
 };
 
-export type RequestContext = { env: ChatEnv; room: Room };
+export type RequestContext = { env: ChatEnv; room: string };
 
 const messageFields = z.object({
   displayName: z.string().trim().min(1).max(DISPLAY_NAME_MAX_LENGTH),

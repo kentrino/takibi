@@ -159,7 +159,7 @@ test("keeps two independently created SQLite stores isolated", async () => {
     expect(lobbyList.data.items.map((message) => message.body)).toEqual(["lobby only"]);
 });
 
-test("hono serves the page, assets, unknown rooms, and known room prefixes", async () => {
+test("hono serves the page, assets, and any room prefix", async () => {
   using lobby = handlerFor();
   const app = createChatApp(lobby);
   const assets: string[] = [];
@@ -190,16 +190,16 @@ test("hono serves the page, assets, unknown rooms, and known room prefixes", asy
   expect(css.status).toBe(200);
   expect(assets).toEqual(["/main.css"]);
 
-  const unknown = await app.fetch(new Request("https://chat.test/api/secret/messages"), env);
-  expect(unknown.status).toBe(404);
-  await expect(unknown.json()).resolves.toEqual({ error: "Unknown chat room" });
+  const unknownRoute = await app.fetch(new Request("https://chat.test/api/"), env);
+  expect(unknownRoute.status).toBe(404);
+  await expect(unknownRoute.json()).resolves.toEqual({ error: "Unknown API route" });
 
   const missing = await app.fetch(new Request("https://chat.test/api/lobby/anything"), env);
   expect(missing.status).toBe(404);
   await expect(missing.json()).resolves.toMatchObject({ ok: false });
 
   const created = await app.fetch(
-    new Request("https://chat.test/api/lobby/messages:send", {
+    new Request("https://chat.test/api/secret/messages:send", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Alice", body: "from worker" }),
@@ -226,13 +226,13 @@ test("the example only depends on published Takibi entry points", () => {
 test("production handler selects the named Durable Object for each room", async () => {
   const names: string[] = [];
   const selected: DurableObjectId[] = [];
-  const forwarded: { room: Room; context: unknown }[] = [];
-  const ids = new Map<DurableObjectId, Room>();
+  const forwarded: { room: string; context: unknown }[] = [];
+  const ids = new Map<DurableObjectId, string>();
   const namespace = {
     idFromName(name: string) {
       names.push(name);
       const id = { toString: () => name } as DurableObjectId;
-      ids.set(id, name as Room);
+      ids.set(id, name);
       return id;
     },
     get(id: DurableObjectId) {
@@ -255,14 +255,14 @@ test("production handler selects the named Durable Object for each room", async 
       throw new Error("API requests must not fetch assets");
     },
   };
-  for (const room of ["lobby", "help", "lobby"] as const) {
+  for (const room of ["lobby", "help", "secret"] as const) {
     const response = await createChatApp().fetch(
       new Request(`https://chat.test/api/${room}/messages`),
       env,
     );
     expect(response.status).toBe(200);
   }
-  expect(names).toEqual(["lobby", "help", "lobby"]);
+  expect(names).toEqual(["lobby", "help", "secret"]);
   expect(selected.map((id) => id.toString())).toEqual(names);
   expect(forwarded).toEqual(names.map((room) => ({ room, context: { room } })));
 });
