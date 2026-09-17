@@ -1,0 +1,15 @@
+.git
+**/node_modules
+**/dist
+**/dist-ssr
+.pnpm-store
+**/*.tgz
+e2e/.consumer
+e2e/.tarballs
+.bench
+.legacy
+.vite-hooks
+**/*.log
+.env
+.env.*
+!.env.example
