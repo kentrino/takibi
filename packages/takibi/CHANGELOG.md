@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/kentrino/takibi/compare/takibi-v0.4.1...takibi-v0.5.0) (2026-09-17)
+
+
+### Features
+
+* watch policy-bound lists after committed changes ([550b683](https://github.com/kentrino/takibi/commit/550b68332be89b2ad781330b8e5549754fa04bcb))
+
+
+### Bug Fixes
+
+* keep durable object context opaque ([32bd678](https://github.com/kentrino/takibi/commit/32bd6788fd44d4be865bbfae3dbf7a3d0bac536d))
+
 ## [0.4.1](https://github.com/kentrino/takibi/compare/takibi-v0.4.0...takibi-v0.4.1) (2026-09-16)
 
 
