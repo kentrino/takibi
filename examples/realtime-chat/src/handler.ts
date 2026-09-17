@@ -1,10 +1,6 @@
 import { createTakibi, fullAccess } from "takibi";
 import { z } from "zod";
-import {
-  DISPLAY_NAME_MAX_LENGTH,
-  MESSAGE_BODY_MAX_LENGTH,
-  type Room,
-} from "./shared.ts";
+import { DISPLAY_NAME_MAX_LENGTH, MESSAGE_BODY_MAX_LENGTH, type Room } from "./shared.ts";
 
 export type ChatEnv = {
   CHAT_ROOMS: DurableObjectNamespace;

@@ -54,8 +54,6 @@ class ChatPane {
     const name = document.createElement("h2");
     const connection = document.createElement("div");
     const composeFooter = document.createElement("div");
-    const sendLabel = document.createElement("span");
-    const sendArrow = document.createElement("span");
 
     panel.className = "chat-panel";
     panel.dataset.pane = this.person;
@@ -91,10 +89,7 @@ class ChatPane {
     this.characterCount.textContent = `0 / ${MESSAGE_BODY_MAX_LENGTH}`;
     this.characterCount.className = "character-count";
     this.send.type = "submit";
-    sendLabel.textContent = "Send";
-    sendArrow.setAttribute("aria-hidden", "true");
-    sendArrow.textContent = " ↗";
-    this.send.append(sendLabel, sendArrow);
+    this.send.textContent = "Send ↗";
 
     identityText.appendChild(label);
     identityText.appendChild(name);

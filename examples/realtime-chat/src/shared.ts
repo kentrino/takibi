@@ -40,9 +40,10 @@ export function shouldClearComposer(currentValue: string, submittedValue: string
   return currentValue === submittedValue;
 }
 
-export function connectionPresentation(
-  state: WatchConnectionState | "disconnected",
-): { label: string; kind: ConnectionKind } {
+export function connectionPresentation(state: WatchConnectionState | "disconnected"): {
+  label: string;
+  kind: ConnectionKind;
+} {
   if (state === "open") return { label: "Live", kind: "open" };
   if (state === "disconnected") return { label: "Disconnected", kind: "terminal" };
   if (state === "reconnecting") return { label: "Reconnecting", kind: "pending" };
