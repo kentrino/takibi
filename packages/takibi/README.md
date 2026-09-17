@@ -70,7 +70,7 @@ to type the Durable Object constructor environment, `createTakibi<Input>()` is s
 For empty input use `createTakibi()` and pass `context: {}`; with typed bindings use
 `createTakibi<Record<string, never>, Env>()`.
 
-For Hono, install `@takibi/hono-adapter` and mount `takibiServer` on a static
+For Hono, install `@takibi/hono-adapter` and mount `takibiServer` on a
 prefix wildcard. The application chooses the prefix and supplies request context;
 Takibi interprets all collection, action and batch paths beneath it. `matched: true`
 means the path matches the prefix, even when an unknown collection or invalid route

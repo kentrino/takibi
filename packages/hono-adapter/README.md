@@ -30,10 +30,10 @@ app.use(
 handler's `createTakibi<Input, Env>()` declaration. Synchronous and asynchronous
 suppliers are supported. Empty input is supplied explicitly with `() => ({})`.
 
-Mount on a **static prefix followed by `/*`**, or `*` / `/*` for the root.
+Mount on a prefix followed by `/*`, or `*` / `/*` for the root.
 The adapter reads the complete mounted route from Hono's `routePath`, including
-static prefixes added with `app.route(...)`. Parameterized or embedded-wildcard
-prefixes are not supported.
+static prefixes added with `app.route(...)`, and substitutes `:param` segments
+from the request. Embedded wildcards in the prefix are not supported.
 
 Takibi receives the original request URL and interprets collection, action and
 `_batch` paths. It also handles the prefix root, trailing slashes and invalid deep

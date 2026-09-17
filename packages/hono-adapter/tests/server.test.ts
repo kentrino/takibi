@@ -106,6 +106,21 @@ test("group mounts delegate root, collection, batch, actions and invalid paths t
   expect(resolved).toContainEqual({ env: { tenant: "tenant-a" }, session: "signed-in" });
 });
 
+test("parameterized prefixes substitute the matched route params", async () => {
+  using handler = withSqliteTestBackend(
+    createTakibi()({ resolve: () => ({ tenantId: "room" }) })
+      .defineCollections({
+        posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+      })
+      .actions({}),
+  );
+  const app = new Hono().use("/api/:room/*", takibiServer({ handler, createContext: () => ({}) }));
+  app.all("*", (c) => c.text("outside", 418));
+  expect((await app.request("/api/alpha/posts")).status).toBe(200);
+  expect((await app.request("/api/beta/posts")).status).toBe(200);
+  expect((await app.request("/api/alpha/missing")).status).toBe(404);
+});
+
 test("root wildcard supplies empty input explicitly", async () => {
   using handler = withSqliteTestBackend(
     createTakibi()({ resolve: () => ({ tenantId: "root" }) })

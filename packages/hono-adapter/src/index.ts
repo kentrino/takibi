@@ -9,13 +9,20 @@ export type TakibiHttpHandler<TInput> = {
   ) => Promise<HandleResult>;
 };
 
-/** Mount on a static prefix followed by /*, or on * at the root. */
+/** Resolve the Takibi URL prefix from the mounted Hono route, including :params. */
+function handlerPrefix(c: Context): string {
+  return routePath(c)
+    .replace(/\/?\*$/, "")
+    .replace(/:([A-Za-z0-9_]+)(?:\{[^}]*\})?/g, (_match, name: string) => c.req.param(name) ?? "");
+}
+
+/** Mount on a prefix followed by /*, or on * at the root. */
 export function takibiServer<TInput, TEnv extends Env>(options: {
   handler: TakibiHttpHandler<TInput>;
   createContext: (c: Context<TEnv>) => NoInfer<TInput> | Promise<NoInfer<TInput>>;
 }): MiddlewareHandler<TEnv> {
   return async (c, next) => {
-    const prefix = routePath(c).replace(/\/?\*$/, "");
+    const prefix = handlerPrefix(c);
     const context = await options.createContext(c);
     const result = await options.handler.handle(c.req.raw, { prefix, context });
     if (result.matched) {
