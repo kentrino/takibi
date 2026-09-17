@@ -38,8 +38,9 @@ Hono serves the page with `jsxRenderer` and mounts each preset room at
 `/api/:room` (`lobby`, `help`, `random`) through `takibiServer`. Tailwind styles
 the server-rendered shell and the `hono/jsx/dom` panes. The Worker validates
 that room segment, routes it to one named Durable Object, and lets Takibi handle
-collection paths below that prefix. HTTP `messages.add` writes and WebSocket
-`messages.watch` share the same-origin endpoint. The declared `byCreatedAt`
+collection paths below that prefix. HTTP `messages.send` writes (with a
+server-assigned id) and WebSocket `messages.watch` share the same-origin
+endpoint. The declared `byCreatedAt`
 index returns the newest 50 messages; the UI reverses each full snapshot for
 chronological display. Wrangler runs the Worker first, then serves the Vite
 build for `/main.js` and `/main.css`.

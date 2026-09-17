@@ -9,7 +9,7 @@ import type { ChatClient, ConnectionState, Message, MessageSubscription, Person 
  * Watch is the whole room, not this person. Person is only the displayName on post.
  *
  * `generation` is a stale-result token. Changing rooms (or Retry) increments it so
- * the previous watch callbacks and in-flight `messages.add` cannot update this pane.
+ * the previous watch callbacks and in-flight `messages.send` cannot update this pane.
  */
 export function useChat(person: Person, room: Room) {
   const generation = useRef(0);
@@ -75,7 +75,7 @@ export function useChat(person: Person, room: Room) {
     setSending(true);
     setSendError("");
     try {
-      const result = await active.messages.add({ displayName: person, body });
+      const result = await active.messages.send({ displayName: person, body });
       if (generation.current !== token) return "stale";
       if (!result.ok) {
         setSendError(result.error.message);

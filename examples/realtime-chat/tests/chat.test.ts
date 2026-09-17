@@ -80,13 +80,13 @@ test("validates messages and lists the latest messages by createdAt", async () =
   using handler = handlerFor();
   const client = clientFor(handler, "lobby");
 
-  const blankName = await client.messages.add({ displayName: "   ", body: "hello" });
-  const blankBody = await client.messages.add({ displayName: "Alice", body: "   " });
-  const longName = await client.messages.add({
+  const blankName = await client.messages.send({ displayName: "   ", body: "hello" });
+  const blankBody = await client.messages.send({ displayName: "Alice", body: "   " });
+  const longName = await client.messages.send({
     displayName: "n".repeat(DISPLAY_NAME_MAX_LENGTH + 1),
     body: "hello",
   });
-  const longBody = await client.messages.add({
+  const longBody = await client.messages.send({
     displayName: "Alice",
     body: "x".repeat(MESSAGE_BODY_MAX_LENGTH + 1),
   });
@@ -95,16 +95,17 @@ test("validates messages and lists the latest messages by createdAt", async () =
   expect(longName.ok).toBe(false);
   expect(longBody.ok).toBe(false);
 
-  const markup = await client.messages.add({
+  const markup = await client.messages.send({
     displayName: "Alice",
     body: "<em>hello</em>",
   });
-  const first = await client.messages.add({ displayName: "Alice", body: "first" });
-  const second = await client.messages.add({ displayName: "Bob", body: "second" });
+  const first = await client.messages.send({ displayName: "Alice", body: "first" });
+  const second = await client.messages.send({ displayName: "Bob", body: "second" });
   expect(markup.ok).toBe(true);
   expect(first.ok).toBe(true);
   expect(second.ok).toBe(true);
-  if (markup.ok) expect(markup.data.body).toBe("<em>hello</em>");
+  if (markup.ok) expect(markup.data.id.length).toBeGreaterThan(0);
+  if (first.ok && second.ok) expect(first.data.id).not.toBe(second.data.id);
 
   const listed = await client.messages.list({
     index: "byCreatedAt",
@@ -136,8 +137,9 @@ test("keeps two independently created SQLite stores isolated", async () => {
   const lobbyClient = clientFor(lobby, "lobby");
   const helpClient = clientFor(help, "help");
 
-  const added = await lobbyClient.messages.add({ displayName: "Alice", body: "lobby only" });
+  const added = await lobbyClient.messages.send({ displayName: "Alice", body: "lobby only" });
   expect(added.ok).toBe(true);
+  if (added.ok) expect(added.data.id.length).toBeGreaterThan(0);
 
   const helpList = await helpClient.messages.list({
     index: "byCreatedAt",
@@ -197,7 +199,7 @@ test("hono serves the page, assets, unknown rooms, and known room prefixes", asy
   await expect(missing.json()).resolves.toMatchObject({ ok: false });
 
   const created = await app.fetch(
-    new Request("https://chat.test/api/lobby/messages", {
+    new Request("https://chat.test/api/lobby/messages:send", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Alice", body: "from worker" }),
@@ -205,8 +207,9 @@ test("hono serves the page, assets, unknown rooms, and known room prefixes", asy
     env,
   );
   expect(created.status).toBe(200);
-  const payload = (await created.json()) as { ok: boolean; data?: { body: string } };
-  expect(payload).toMatchObject({ ok: true, data: { body: "from worker" } });
+  const payload = (await created.json()) as { ok: boolean; data?: { id: string } };
+  expect(payload.ok).toBe(true);
+  expect(payload.data?.id.length).toBeGreaterThan(0);
 });
 
 test("the example only depends on published Takibi entry points", () => {
