@@ -4,6 +4,13 @@ import type { ChatHandler } from "../handler.ts";
 import { MESSAGE_WATCH_LIMIT, type Room } from "../shared.ts";
 import type { ChatClient, ConnectionState, Message, MessageSubscription, Person } from "./types.ts";
 
+/**
+ * One pane's watch + send for a room.
+ * Watch is the whole room, not this person. Person is only the displayName on post.
+ *
+ * `generation` is a stale-result token. Changing rooms (or Retry) increments it so
+ * the previous watch callbacks and in-flight `messages.add` cannot update this pane.
+ */
 export function useChat(person: Person, room: Room) {
   const generation = useRef(0);
   const subscription = useRef<MessageSubscription>(undefined);

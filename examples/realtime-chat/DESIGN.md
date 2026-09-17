@@ -19,8 +19,9 @@ Cloudflare Worker application around it.
   Each pane owns a `createWatchClient`, watch subscription, connection state,
   retry control, composer, and draft. A shared room selector makes realtime
   delivery visible side by side.
-- Changing rooms unsubscribes both old watches before creating the next clients;
-  every async callback and send is guarded by the pane's generation number.
+- Changing rooms unsubscribes both old watches before creating the next clients.
+  `generation` is a stale-result token: each connect increments it so the previous
+  watch callbacks and in-flight `messages.add` cannot update the current pane.
   A successful send clears the composer only when the draft is unchanged, so a
   newer draft survives an in-flight request. Room changes re-enable Send even
   if the previous room still has a request in flight.
