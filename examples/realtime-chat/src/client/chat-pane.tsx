@@ -1,115 +1,14 @@
-import { useEffect, useRef, useState } from "hono/jsx";
-import { createWatchClient } from "takibi/watch";
-import type { ChatHandler } from "../handler.ts";
-import {
-  MESSAGE_BODY_MAX_LENGTH,
-  MESSAGE_WATCH_LIMIT,
-  connectionPresentation,
-  normalizeMessageBody,
-  shouldClearComposer,
-  type Room,
-} from "../shared.ts";
+import { connectionPresentation, type Room } from "../shared.ts";
 import { Composer } from "./composer.tsx";
 import { MessageList } from "./message-list.tsx";
-import type { ChatClient, ConnectionState, Message, MessageSubscription, Person } from "./types.ts";
+import type { Person } from "./types.ts";
+import { useChat } from "./use-chat.ts";
 
 export function ChatPane(props: { person: Person; room: Room }) {
   const { person, room } = props;
-  const generation = useRef(0);
-  const subscription = useRef<MessageSubscription>(undefined);
-  const client = useRef<ChatClient>(undefined);
-  const draftRef = useRef("");
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const connectRef = useRef(() => {});
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [busy, setBusy] = useState(true);
-  const [connection, setConnection] = useState<ConnectionState>("connecting");
-  const [draft, setDraft] = useState("");
-  const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
-  const presentation = connectionPresentation(connection);
+  const chat = useChat(person, room);
+  const presentation = connectionPresentation(chat.connection);
   const tone = person === "Alice" ? "a" : "b";
-
-  draftRef.current = draft;
-
-  useEffect(() => {
-    function connect(): void {
-      const token = ++generation.current;
-      subscription.current?.unsubscribe();
-      const next = createWatchClient<ChatHandler>(`${location.origin}/api/${room}`);
-      client.current = next;
-      setSending(false);
-      setMessages([]);
-      setBusy(true);
-      setConnection("connecting");
-      setError("");
-      const nextSubscription = next.messages.watch(
-        {
-          index: "byCreatedAt",
-          orderBy: (query) => query.createdAt.desc(),
-          limit: MESSAGE_WATCH_LIMIT,
-        },
-        {
-          next: ({ items }) => {
-            if (generation.current === token) {
-              setMessages(items);
-              setBusy(false);
-            }
-          },
-          state: (state) => {
-            if (generation.current === token) setConnection(state);
-          },
-        },
-      );
-      subscription.current = nextSubscription;
-      void nextSubscription.closed.then((outcome) => {
-        if (generation.current === token && outcome.reason !== "unsubscribed") {
-          setConnection("disconnected");
-        }
-      });
-    }
-
-    connectRef.current = connect;
-    connect();
-    return () => {
-      generation.current += 1;
-      subscription.current?.unsubscribe();
-      subscription.current = undefined;
-    };
-  }, [person, room]);
-
-  function submit(event: Event): void {
-    event.preventDefault();
-    if (sending) return;
-    const submittedDraft = draftRef.current;
-    const body = normalizeMessageBody(submittedDraft);
-    if (!body) {
-      setError(`Enter a message (1–${MESSAGE_BODY_MAX_LENGTH} characters).`);
-      bodyRef.current?.focus();
-      return;
-    }
-    const token = generation.current;
-    const active = client.current;
-    if (!active) return;
-    setSending(true);
-    setError("");
-    void active.messages
-      .add({ displayName: person, body })
-      .then((result) => {
-        if (generation.current !== token) return;
-        if (!result.ok) setError(result.error.message);
-        else if (shouldClearComposer(draftRef.current, submittedDraft)) {
-          setDraft("");
-          bodyRef.current?.focus();
-        }
-      })
-      .catch(() => {
-        if (generation.current === token) setError("Message failed to send. Try again.");
-      })
-      .finally(() => {
-        if (generation.current === token) setSending(false);
-      });
-  }
 
   return (
     <section
@@ -145,25 +44,20 @@ export function ChatPane(props: { person: Person; room: Room }) {
             <button
               class="cursor-pointer border-0 bg-transparent p-[3px_7px] text-retry underline"
               type="button"
-              onClick={() => connectRef.current()}
+              onClick={chat.reconnect}
             >
               Retry
             </button>
           ) : null}
         </div>
       </div>
-      <MessageList person={person} messages={messages} busy={busy} />
+      <MessageList person={person} messages={chat.messages} busy={chat.busy} />
       <Composer
         person={person}
-        draft={draft}
-        error={error}
-        sending={sending}
-        bodyRef={bodyRef}
-        onDraftChange={(value) => {
-          setDraft(value);
-          setError("");
-        }}
-        onSubmit={submit}
+        sending={chat.sending}
+        sendError={chat.sendError}
+        onSend={chat.post}
+        onDraftChange={chat.clearSendError}
       />
     </section>
   );
