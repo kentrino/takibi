@@ -46,7 +46,12 @@ pnpm install
 pnpm ready
 ```
 
-`pnpm ready` type-checks, tests, and builds every workspace package.
+`pnpm ready` type-checks, tests, and builds every workspace package. Node
+`>=22.18.0` is required (see the note in the environment guide below).
+
+Cursor Cloud Agents use a committed environment; see
+[Cursor Cloud Agent environment](./docs/playbook/cursor-cloud-agent.md) for how
+it is set up and why Node 22.18+ is enforced.
 
 Publishing uses Release Please and npm trusted publishing. See
 `docs/playbook/` for GitHub App access, trusted publishers, and first
