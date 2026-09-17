@@ -103,6 +103,7 @@ test("SQLite-backed handler Durable Object applies migrations on read", async ()
     {
       storage,
       id: { name: "tenant-a" },
+      getWebSockets: () => [],
       blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
         return callback();
       },
@@ -133,6 +134,7 @@ test("SQLite-backed handler Durable Object exports and restores a snapshot", asy
     {
       storage: createSqliteDurableObjectStorage(),
       id: { name: "snapshot" },
+      getWebSockets: () => [],
       blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
         return callback();
       },

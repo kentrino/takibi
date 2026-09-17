@@ -107,3 +107,11 @@ export type {
 
 export { listWhere } from "@takibi/query";
 export type { ListWhereScope } from "@takibi/shared-types";
+export type {
+  WatchOptions,
+  WatchState,
+  WatchClosed,
+  WatchSubscription,
+  WatchObserver,
+  WatchCollectionApi,
+} from "./watch";

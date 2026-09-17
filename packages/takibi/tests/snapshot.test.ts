@@ -15,6 +15,7 @@ function createFakeDurableObjectState(storage: DurableObjectStorage): DurableObj
   return {
     storage,
     id: { name: "snapshot-validation" },
+    getWebSockets: () => [],
     blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
       return callback();
     },

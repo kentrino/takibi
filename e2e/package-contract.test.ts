@@ -86,6 +86,7 @@ test("public packages expose the documented subpath entries", () => {
     "./client",
     "./instrumentation",
     "./testing",
+    "./watch",
     "./package.json",
   ]);
   assert.deepEqual(subpaths("@takibi/hono-adapter"), [".", "./package.json"]);

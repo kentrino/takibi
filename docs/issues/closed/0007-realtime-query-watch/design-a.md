@@ -1,10 +1,10 @@
-# Design A: Subscribe to list snapshots after commit (recommended)
+# Design A: Subscribe to list snapshots after commit (selected)
 
 ## Decision and evidence
 
-Keep open. `packages/client/src/client.ts` provides request/response CRUD, the reserved names in `packages/api/src/action.ts` do not include watch, and subscriptions are unavailable. Policy-owned ranges were implemented in `98c759d` and `64af4cd`; that dependency needs no reimplementation. A design from first principles would handle an authorized query, commit notification, and connection lifetime together. A mutation-success callback alone cannot handle transaction rollback and trusted writes. Issue 0017 observes public invocations; do not repurpose or merge it into an invalidation bus.
+Selected for implementation on 2026-09-17 with the accepted RFC 0001 lifecycle and list-compatible `index` / `orderBy` support. At selection, `packages/client/src/client.ts` provided request/response CRUD, `watch` was not reserved, and subscriptions were unavailable. The implemented opt-in entry and reserved name now satisfy that gap. Policy-owned ranges were implemented in `98c759d` and `64af4cd`; that dependency needs no reimplementation. A design from first principles would handle an authorized query, commit notification, and connection lifetime together. A mutation-success callback alone cannot handle transaction rollback and trusted writes. Issue 0017 observes public invocations; do not repurpose or merge it into an invalidation bus.
 
-History confirms coordination within each DO and the existing policy implementation, but acceptable application update latency and concurrent subscription counts remain unverified. Treat the use cases in the existing issue as requirement hypotheses, not measured load. Retain P3 and measure concurrent watches multiplied by query cost for the target application when implementation begins.
+History confirms coordination within each DO and the existing policy implementation, but acceptable application update latency and concurrent subscription counts remain unverified. Treat the use cases in the existing issue as requirement hypotheses, not measured load. Synthetic Workers verification covers 16 concurrent watches; target-application latency and load remain unmeasured. Fan-out remains concurrent watches multiplied by query cost.
 
 ## Boundaries and comparison
 
@@ -14,15 +14,25 @@ History confirms coordination within each DO and the existing policy implementat
 
 - **Use commit as the boundary.** The observing decorator must also wrap scoped storage passed to transaction callbacks and retain the set of changed collections per outermost transaction. Publish only after successful commit and discard on rollback. Include trusted `$collections` transactions under the same rule. Do not classify an unknown commit outcome as success. Observe outside migration storage to exclude internal lazy-migration writes. Reject publishing on put completion or public invocation completion alone.
 - Do not emit snapshots while the maintenance lease blocks normal reads/writes. At the start of restore/reset, disconnect watches for that DO with a retryable maintenance close and reject reconnection handshakes until maintenance ends. Obtain a new full snapshot after cutover. Export also suspends queries during maintenance and re-evaluates pending invalidations when the lease is released. Do not extend this into a general guarantee of tracking direct SQL writes.
-- The Hibernation attachment `context` is a JSON snapshot from the handshake. Re-evaluating policy does not automatically refresh identity-provider revocation or role changes. Applications resolve identity/expiry without credentials and enforce required authorization freshness through trusted local decision inputs passed to policy and expiry checks. As required by 0005, policy performs no external I/O; reflecting changes in external authentication requires resolving again through a new handshake. Expiry causes a terminal close, and a new watch starts with fresh authentication. Takibi cannot identify raw credentials in arbitrary context, so it cannot guarantee that credentials are automatically excluded from storage. Copying HTTP headers themselves is prohibited.
-- The GET upgrade query reuses the existing list wire representation and validates version and where/limit. Do not put authentication values in URLs. Workers integration tests must verify browser subprotocol constraints, server protocol-selection responses, and cookie origin checks. When finalizing the wire format during implementation, use the same fixture to round-trip through the existing list parser.
+- The Hibernation attachment `context` is a JSON snapshot from the handshake. Re-evaluating policy does not automatically refresh identity-provider revocation or role changes. Applications resolve identity/expiry without credentials and enforce required authorization freshness through trusted local decision inputs passed to policy and expiry checks. As required by 0005, policy performs no external I/O; reflecting changes in external authentication requires resolving again through a new handshake. Expiry is checked by existing list policy before the next snapshot and causes a terminal close then; idle sockets have no deadline timer. A new watch starts with fresh authentication. Takibi cannot identify raw credentials in arbitrary context, so it cannot guarantee that credentials are automatically excluded from storage. Copying HTTP headers themselves is prohibited.
+- The GET upgrade query reuses the existing list wire representation and validates version and where/limit/index/orderBy. Do not put authentication values in URLs. Workers integration tests must verify browser subprotocol constraints, server protocol-selection responses, and cookie origin checks. When finalizing the wire format during implementation, use the same fixture to round-trip through the existing list parser.
 - Validate versions of the socket registry and attachments; close obsolete versions terminally instead of creating an automatic reconnection loop. Test upgrades/deployments with active connections separately from restore/reset.
 
 [Cloudflare WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) (checked on 2026-09-16) documents constructor re-execution after Hibernation, loss of in-memory state, and attachment recovery. Recheck current platform limits in the official limits documentation during implementation.
 
+## Approved entry point (2026-09-17)
+
+`createWatchClient` from `takibi/watch` composes HTTP methods with collection
+watch methods. Native WebSocket runtime stays outside the ordinary `takibi/client`
+import graph. The existing private client package owns the implementation; no
+new package, external WebSocket library, global registration, or monkey-patching
+is introduced. The observer/handle and indexed list semantics remain unchanged.
+
 ## Example
 
 ```ts
+import { createWatchClient } from "takibi/watch";
+const client = createWatchClient<typeof handler>(baseUrl);
 // Before: The application owns repeated fetching and shutdown
 const page = await client.posts.list({ where: (q) => q.roomId.eq(roomId), limit: 50 });
 // After: New API; callbacks receive full snapshots without cursors
@@ -41,16 +51,24 @@ Initial and post-commit snapshots contain items within the same authorized range
 
 ## Subscription lifetime and alternatives
 
-The proposed [watch subscription lifecycle RFC](../../../rfcs/0001-watch-subscription-lifecycle.md)
-extracts the client-side contract from this whole-watch design. It recommends an observer with
+The accepted [watch subscription lifecycle RFC](../../../rfcs/0001-watch-subscription-lifecycle.md)
+extracts the client-side contract from this whole-watch design. It specifies an observer with
 `next` and optional `state`, plus synchronous, idempotent unsubscribe and an always-fulfilling
 `closed` promise. It keeps retryable reconnect state distinct from terminal server, protocol, and
-normal-close outcomes, defines opaque browser handshake and cleanup behavior, and leaves the host
-callback-reporting hook open. The released client still has no watch API.
+normal-close outcomes, defines opaque browser handshake and cleanup behavior, and uses the host
+`reportError` hook with an asynchronous throw fallback for callback exceptions. The opt-in `takibi/watch` entry provides the implemented watch API.
 
 ## Verification status and remaining checks
 
-The review read client/API/storage transaction types and policy history and checked official documentation. No watch implementation or Workers transport tests were performed. In addition to the acceptance criteria below, verify rollback, trusted transactions, restore/reset, expired context, and migration of an action with the same name. If snapshot fan-out limits do not fit the target workload, choose B or revisit the requirements; lack of verification is not evidence that no action is needed.
+Implementation and verification are recorded in [the closed issue](./issue.md).
+The recursive tests, Workers gate, build, and format/lint/type checks pass.
+Coverage includes rollback, trusted transactions, restore/reset/export, expired
+context before delivery, native subprotocols, indexed list parity, reactivation,
+and the reserved action name. The build checks HTTP-only import independence.
+Current Cloudflare documentation was rechecked: attachments support 16,384 bytes
+and Hibernation supports up to 32,768 connections per object, subject to workload.
+Tests exercise 16 watches; this is not an application capacity guarantee or a
+production deployment test.
 
 ## Retained detailed specification and acceptance criteria
 
@@ -74,7 +92,7 @@ mutation:
 
 ## Proposal
 
-Add `watch` to the public collection client. It subscribes to the full result of a typed list query:
+Add `watch` to the opt-in collection client created by `createWatchClient` from `takibi/watch`. It subscribes to the full result of a typed list query:
 
 ```ts
 const subscription = client.posts.watch(
@@ -90,10 +108,32 @@ if (closed.reason === "server-error") reportError(closed.error);
 query and emits a new full snapshot. The client suppresses a callback when the serialized snapshot
 is unchanged.
 
-The initial surface accepts only `where` and `limit`. It uses the same field types, query operators,
-normalization, default limit, maximum limit, and deterministic order as `list`. It rejects `cursor`
+The initial surface accepts `where`, `limit`, `index`, and `orderBy`. It uses the same field types,
+query operators, normalization, default limit, maximum limit, and index-dependent option typing as
+`list`. `orderBy` requires a declared index and selects a field of that index; preceding index
+fields require single-value equality constraints, exactly as in list execution. Without an index,
+results are id-ascending. Selected-index order, direction, suffix ordering, and id tie-breaking
+follow [RFC 0012](../../../rfcs/0012-typed-index-ordering.md); do not add an in-memory sort fallback. It rejects `cursor`
 in both types and runtime validation because a fixed cursor has ambiguous meaning over a changing
 result set. It does not include `nextCursor`.
+
+For a collection declaring `byRoomCreatedAt: ["roomId", "createdAt"]`, watch the latest 50 posts:
+
+```ts
+const subscription = client.posts.watch(
+  {
+    index: "byRoomCreatedAt",
+    where: (q) => q.roomId.eq(roomId),
+    orderBy: (q) => q.createdAt.desc(),
+    limit: 50,
+  },
+  { next: ({ items }) => setPosts(items) },
+);
+```
+
+Re-run the complete ordered, limited query after commit so inserts, deletes, and ordering-field
+updates correctly replace or reorder items in the watched window. Preserve normalized index and
+order options through the upgrade request, Hibernation attachment, and reconnect.
 
 Reserve `watch` as a collection method in `@takibi/api` and action registration. Do not introduce a
 new permission: connection and every re-evaluation require the existing `list` permission and apply
@@ -110,7 +150,7 @@ handshake, then sends only JSON-safe resolved context, collection name, and norm
 to the selected Durable Object. Takibi must not infer a partition from `context.tenantId` or compare
 application context fields with the Durable Object name.
 
-Browser authentication uses cookies or a new `CreateClientOptions.webSocketProtocols` callback.
+Browser authentication uses cookies or a new `CreateWatchClientOptions.webSocketProtocols` callback.
 The callback is evaluated on every connection attempt so applications can refresh short-lived
 credentials. Takibi does not interpret the credential format. Values from `headers` are never
 copied into the URL, WebSocket protocols, or connection attachment.
@@ -149,8 +189,8 @@ revealing documents.
 
 ## Implementation notes
 
-- Compile the typed `where` callback once on the client and reject unknown fields, operators, and
-  cursor options at the existing API boundaries.
+- Compile the typed `where` and `orderBy` callbacks once on the client using existing list
+  compilation. Reuse index and ordering validation, and reject cursor options at the API boundaries.
 - Add `webSocketMessage`, `webSocketClose`, and `webSocketError` to the generated Durable Object and
   use only the Hibernation API for accepted sockets.
 - Treat binary messages, client application messages, malformed envelopes, and unknown protocol
@@ -167,7 +207,7 @@ revealing documents.
 
 In scope:
 
-- typed collection query watch and unsubscribe;
+- typed collection query watch, existing index/orderBy support, and unsubscribe;
 - initial and post-mutation full snapshots;
 - Durable Object WebSocket Hibernation and attachment recovery;
 - handshake authentication, per-snapshot list authorization, and the policy-owned list range;
@@ -185,6 +225,13 @@ Out of scope:
 
 - `client.posts.watch({ where }, { next })` infers fields and values from schema output and rejects an
   unknown field, invalid operator, or cursor at compile time.
+- Indexed options infer declared index names and their orderable fields; reject unknown indexes,
+  fields outside the selected index, and orderBy without index in types and runtime validation.
+  Runtime validation preserves list's equality-prefix requirements.
+- Initial and post-commit snapshots match list for indexed ascending and descending queries,
+  equality prefixes, tied values, and limits. Inserts, deletes, and ordering-field updates refresh
+  the correct limited window; unchanged snapshots do not notify. Hibernation and reconnect retain
+  these options and ordering semantics.
 - A collection action named `watch` is rejected in types and runtime registration.
 - Connection emits one snapshot equal to normal list semantics for the same effective query.
 - Add, set, update, and delete correctly handle a document entering, remaining in, or leaving the
@@ -207,7 +254,7 @@ Out of scope:
 - Attachment overflow, malformed frames, and snapshot send failures are isolated and fail closed.
 - Workers tests cover Upgrade, Hibernation, partition isolation, authorization, and CRUD/action
   fan-out using a SQLite-backed Durable Object.
-- README documentation matches full-snapshot semantics, unsupported cursors, authentication,
+- README documentation matches full-snapshot semantics, index/orderBy parity with list, unsupported cursors, authentication,
   context lifetime, reconnect, current platform limits, and fan-out cost.
 - `vp check`, `vp run -r test:workers`, and the repository-wide test gate pass.
 

@@ -1,3 +1,4 @@
+import { WatchRuntime } from "./watch-runtime";
 import {
   type ActionRegistry,
   type CollectionDefinition,
@@ -16,6 +17,7 @@ import {
   MaintenanceController,
 } from "@takibi/snapshot";
 import {
+  observeCommits,
   compileIndexRegistry,
   createDurableObjectStorage,
   reconcileCollectionIndexes,
@@ -46,6 +48,7 @@ export function createDurableObjectClass<
   createServices?: (input: { env: TEnv }) => TServices,
 ): DurableObjectClass<TCollections, TEnv> {
   return class TakibiTenantObject implements DurableObject {
+    readonly #watch: WatchRuntime;
     readonly #driver: StorageDriver;
     readonly #ready: Promise<void>;
     readonly #services: TServices | Record<never, never>;
@@ -57,11 +60,16 @@ export function createDurableObjectClass<
       const registry = compileIndexRegistry(collections);
       const rawStorage = createDurableObjectStorage(state.storage, registry);
       initializeMaintenanceLayout(state.storage.sql);
-      this.#maintenance = new MaintenanceController(state.storage);
+      this.#maintenance = new MaintenanceController(state.storage, (purpose) =>
+        this.#watch?.maintenanceChanged(purpose),
+      );
       this.#driver = applyStorageLogging(
-        createMigratingStorage(collections, rawStorage, logger),
+        observeCommits(createMigratingStorage(collections, rawStorage, logger), (changed) =>
+          this.#watch?.invalidate(changed),
+        ),
         logger,
       );
+      this.#watch = new WatchRuntime(state, collections, this.#driver, this.#maintenance, logger);
       this.#ready = state.blockConcurrencyWhile(async () => {
         await this.#maintenance.cleanupAbandoned();
         await reconcileCollectionIndexes({
@@ -71,6 +79,7 @@ export function createDurableObjectClass<
           registry,
         });
         await seedCollections(collections, this.#driver, logger);
+        this.#watch.recover();
       });
       this.$collections = createDurableObjectCollectionsApi(
         createMaintenanceGatedCollections(
@@ -88,7 +97,25 @@ export function createDurableObjectClass<
       );
     }
 
+    webSocketMessage(socket: WebSocket, _message: string | ArrayBuffer): void {
+      this.#watch.protocolError(socket);
+    }
+    webSocketClose(socket: WebSocket): void {
+      this.#watch.close(socket);
+    }
+    webSocketError(socket: WebSocket): void {
+      this.#watch.close(socket, 1011);
+    }
+
     async fetch(request: Request): Promise<Response> {
+      if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        try {
+          await this.#ready;
+          return await this.#watch.upgrade(request);
+        } catch (error) {
+          return errorResponse(error, logger);
+        }
+      }
       const tracer = resolveTracer(options);
       const execute = async (): Promise<Response> => {
         const extracted = extractTraceContext(request.headers);

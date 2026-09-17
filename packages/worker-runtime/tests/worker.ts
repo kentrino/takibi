@@ -19,3 +19,4 @@ export default {
     return new Response("Takibi worker-runtime test worker");
   },
 };
+export { WatchTestObject } from "./watch-fixture";

@@ -44,7 +44,7 @@ cursors without putting server scope in the token.
 Supersedes
 [0015-policy-owned-list-scope](../0015-policy-owned-list-scope/issue.md).
 Future watch in
-[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md) must reuse
+[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md) must reuse
 this path and is not part of this issue.
 
 # Related Files

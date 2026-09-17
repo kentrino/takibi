@@ -142,6 +142,7 @@ function createFakeDurableObjectState(
   return {
     storage,
     id,
+    getWebSockets: () => [],
     blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
       return callback();
     },

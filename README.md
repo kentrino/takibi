@@ -29,7 +29,7 @@ Internal workspace packages are private and are not published. Import
 `takibi` or an adapter, not `@takibi/policy` and friends.
 
 See the [SDK guide](./packages/takibi/README.md) for AuthN/AuthZ, collections,
-actions, and HTTP.
+actions, HTTP, and [opt-in list watches](./packages/takibi/README.md#watch-list-snapshots) via `takibi/watch`.
 
 See [RFCs](./docs/rfcs/README.md) for design proposals, decisions, and their
 implementation status.

@@ -1,3 +1,4 @@
+import { serveWatchUpgrade } from "../watch-upgrade";
 import { TakibiError, type ActionRegistry, type CollectionsDef } from "@takibi/api";
 import { assignTakibiBrand } from "../brand";
 import { createDurableObjectClass } from "../durable-object";
@@ -58,15 +59,24 @@ export class Application<
     const backend = createBackend({ collections, registry, logger });
     const http = Object.assign(
       createHttpHandler<TInitial>((request, initial, decode) =>
-        serveDecodedCall({
-          request,
-          initial,
-          decode,
-          resolve,
-          execute: backend.execute,
-          logger,
-          options,
-        }),
+        request.headers.get("upgrade")?.toLowerCase() === "websocket"
+          ? serveWatchUpgrade({
+              request,
+              initial,
+              decode,
+              resolve,
+              upgrade: backend.upgrade,
+              logger,
+            })
+          : serveDecodedCall({
+              request,
+              initial,
+              decode,
+              resolve,
+              execute: backend.execute,
+              logger,
+              options,
+            }),
       ),
       { DurableObject },
     );

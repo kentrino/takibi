@@ -203,7 +203,7 @@ Evaluate authorization and scope once per list/count:
 
 Do not overwrite `AccessContext.where` with the effective query. Do not
 implement watch here;
-[0007-realtime-query-watch](../../open/0007-realtime-query-watch/issue.md) must call
+[0007-realtime-query-watch](../0007-realtime-query-watch/issue.md) must call
 this same evaluate-and-compose path later.
 
 # Fail-closed scope results
