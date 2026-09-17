@@ -121,6 +121,21 @@ test("root wildcard supplies empty input explicitly", async () => {
   }
 });
 
+test("passes websocket upgrade responses through without reconstruction", async () => {
+  const upgrade = new Response(null, { headers: { Upgrade: "websocket" } });
+  Object.defineProperty(upgrade, "status", { value: 101 });
+  const app = new Hono().use(
+    "*",
+    takibiServer({
+      handler: { handle: async () => ({ matched: true, response: upgrade }) },
+      createContext: () => ({}),
+    }),
+  );
+  const response = await app.request("/");
+  expect(response).toBe(upgrade);
+  expect(response.status).toBe(101);
+});
+
 test("unmatched handlers yield to later middleware", async () => {
   const app = new Hono().use(
     "/rpc/*",

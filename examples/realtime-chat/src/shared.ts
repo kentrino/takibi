@@ -9,26 +9,14 @@ export const MESSAGE_WATCH_LIMIT = 50;
 
 export type ConnectionKind = "pending" | "open" | "terminal";
 
+export const ROOM_LABELS = {
+  lobby: "Lobby",
+  help: "Help desk",
+  random: "Random",
+} as const satisfies Record<Room, string>;
+
 export function isRoom(value: string): value is Room {
   return (ROOMS as readonly string[]).includes(value);
-}
-
-export function roomFromApiPath(pathname: string): Room | undefined {
-  const match = /^\/api\/([^/]+)(?:\/|$)/.exec(pathname);
-  if (!match) return undefined;
-  let room: string;
-  try {
-    room = decodeURIComponent(match[1] ?? "");
-  } catch {
-    return undefined;
-  }
-  return isRoom(room) ? room : undefined;
-}
-
-export function routeWorkerPath(pathname: string): "assets" | "unknown-room" | { room: Room } {
-  if (!pathname.startsWith("/api/")) return "assets";
-  const room = roomFromApiPath(pathname);
-  return room ? { room } : "unknown-room";
 }
 
 export function normalizeMessageBody(value: string): string | undefined {

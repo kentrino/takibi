@@ -7,7 +7,7 @@ export type ChatEnv = {
   ASSETS: Fetcher;
 };
 
-type RequestContext = { env: ChatEnv; room: Room };
+export type RequestContext = { env: ChatEnv; room: Room };
 
 const app = createTakibi<RequestContext>()({
   resolve: ({ context }) => ({ room: context.room }),

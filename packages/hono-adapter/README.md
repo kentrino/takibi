@@ -43,5 +43,6 @@ result continues to the next Hono middleware.
 
 Authentication and request-header changes belong to preceding application
 middleware. The adapter forwards `c.req.raw` and preserves response headers from
-outer Hono middleware. The core handler itself has no Hono dependency and can
+outer Hono middleware. WebSocket upgrades (status 101) are returned as
+the original Response because Hono cannot reconstruct them. The core handler itself has no Hono dependency and can
 also be called directly with `handler.handle(request, { prefix, context })`.

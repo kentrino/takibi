@@ -34,13 +34,15 @@ pnpm --filter @takibi/realtime-chat test
 
 ## How it is put together
 
-The Worker validates a preset room in `/api/:room` (`lobby`, `help`, `random`),
-routes it to one named Durable Object, and mounts the Takibi handler below that
-prefix. HTTP `messages.add` writes and WebSocket `messages.watch` share the
-same-origin endpoint. The declared `byCreatedAt` index returns the newest 50
-messages; the UI reverses each full snapshot for chronological display.
-Wrangler serves the Vite build as static assets and runs the Worker first for
-`/api/*`.
+Hono serves the page with `jsxRenderer` and mounts each preset room at
+`/api/:room` (`lobby`, `help`, `random`) through `takibiServer`. Tailwind styles
+the server-rendered shell and the `hono/jsx/dom` panes. The Worker validates
+that room segment, routes it to one named Durable Object, and lets Takibi handle
+collection paths below that prefix. HTTP `messages.add` writes and WebSocket
+`messages.watch` share the same-origin endpoint. The declared `byCreatedAt`
+index returns the newest 50 messages; the UI reverses each full snapshot for
+chronological display. Wrangler runs the Worker first, then serves the Vite
+build for `/main.js` and `/main.css`.
 
 The browser derives message and subscription types from `ChatHandler`. Connection
 callbacks use the SDK's `WatchState`; terminal `closed` outcomes become the UI's
@@ -48,7 +50,7 @@ callbacks use the SDK's `WatchState`; terminal `closed` outcomes become the UI's
 from updating the current pane.
 
 Tests cover validation and list ordering with the SQLite backend, and call the
-production handler with a namespace test double to verify named-object selection.
+Hono app with a namespace test double to verify named-object selection.
 The two-store test checks independent SQLite stores; it does not prove Cloudflare
 object isolation. Actual WebSocket delivery and room isolation can be checked with
 the two-pane walkthrough above. See the SDK's

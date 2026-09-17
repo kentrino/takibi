@@ -37,7 +37,7 @@ implementation status.
 ## Examples
 
 - [Realtime chat](./examples/realtime-chat): a public, no-login chat using
-  `takibi/watch`, with one Durable Object per room and a browser UI.
+  `takibi/watch`, Hono, and Tailwind, with one Durable Object per room.
 
 ## Development
 

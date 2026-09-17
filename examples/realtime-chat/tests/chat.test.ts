@@ -1,7 +1,7 @@
 import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
 import { expect, test } from "vite-plus/test";
-import { handleRequest } from "../src/fetch.ts";
+import { createChatApp } from "../src/app.tsx";
 import { chatHandler } from "../src/handler.ts";
 import type { ChatEnv, ChatHandler } from "../src/handler.ts";
 import {
@@ -10,9 +10,8 @@ import {
   MESSAGE_WATCH_LIMIT,
   chronologicalSnapshot,
   connectionPresentation,
+  isRoom,
   normalizeMessageBody,
-  roomFromApiPath,
-  routeWorkerPath,
   shouldClearComposer,
   type Room,
 } from "../src/shared.ts";
@@ -46,16 +45,12 @@ function clientFor(handler: ReturnType<typeof handlerFor>, room: Room) {
   });
 }
 
-test("routes only a complete, preset room segment", () => {
-  expect(roomFromApiPath("/api/lobby/messages")).toBe("lobby");
-  expect(roomFromApiPath("/api/help")).toBe("help");
-  expect(roomFromApiPath("/api/unknown/messages")).toBeUndefined();
-  expect(roomFromApiPath("/api/lobbyish/messages")).toBeUndefined();
-  expect(roomFromApiPath("/api/%E0%A4%A/messages")).toBeUndefined();
-  expect(routeWorkerPath("/")).toBe("assets");
-  expect(routeWorkerPath("/style.css")).toBe("assets");
-  expect(routeWorkerPath("/api/random/messages")).toEqual({ room: "random" });
-  expect(routeWorkerPath("/api/secret")).toBe("unknown-room");
+test("accepts only the preset rooms", () => {
+  expect(isRoom("lobby")).toBe(true);
+  expect(isRoom("help")).toBe(true);
+  expect(isRoom("random")).toBe(true);
+  expect(isRoom("unknown")).toBe(false);
+  expect(isRoom("lobbyish")).toBe(false);
 });
 
 test("rejects blank drafts and keeps a newer composer value", () => {
@@ -162,8 +157,9 @@ test("keeps two independently created SQLite stores isolated", async () => {
     expect(lobbyList.data.items.map((message) => message.body)).toEqual(["lobby only"]);
 });
 
-test("worker serves assets, rejects unknown rooms, and prefixes known rooms", async () => {
+test("hono serves the page, assets, unknown rooms, and known room prefixes", async () => {
   using lobby = handlerFor();
+  const app = createChatApp(lobby);
   const assets: string[] = [];
   const env = {
     ASSETS: {
@@ -180,34 +176,34 @@ test("worker serves assets, rejects unknown rooms, and prefixes known rooms", as
     },
   } satisfies ChatEnv;
 
-  const home = await handleRequest(new Request("https://chat.test/"), env, lobby);
+  const home = await app.fetch(new Request("https://chat.test/"), env);
   expect(home.status).toBe(200);
-  expect(assets).toEqual(["/"]);
+  expect(home.headers.get("content-type")).toMatch(/text\/html/);
+  const html = await home.text();
+  expect(html).toContain("Takibi Fireside");
+  expect(html).toContain('id="chat-grid"');
+  expect(html).toContain('id="room"');
+  expect(assets).toEqual([]);
 
-  const unknown = await handleRequest(
-    new Request("https://chat.test/api/secret/messages"),
-    env,
-    lobby,
-  );
+  const css = await app.fetch(new Request("https://chat.test/main.css"), env);
+  expect(css.status).toBe(200);
+  expect(assets).toEqual(["/main.css"]);
+
+  const unknown = await app.fetch(new Request("https://chat.test/api/secret/messages"), env);
   expect(unknown.status).toBe(404);
   await expect(unknown.json()).resolves.toEqual({ error: "Unknown chat room" });
 
-  const missing = await handleRequest(
-    new Request("https://chat.test/api/lobby/anything"),
-    env,
-    lobby,
-  );
+  const missing = await app.fetch(new Request("https://chat.test/api/lobby/anything"), env);
   expect(missing.status).toBe(404);
   await expect(missing.json()).resolves.toMatchObject({ ok: false });
 
-  const created = await handleRequest(
+  const created = await app.fetch(
     new Request("https://chat.test/api/lobby/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Aさん", body: "from worker" }),
     }),
     env,
-    lobby,
   );
   expect(created.status).toBe(200);
   const payload = (await created.json()) as { ok: boolean; data?: { body: string } };
@@ -215,7 +211,12 @@ test("worker serves assets, rejects unknown rooms, and prefixes known rooms", as
 });
 
 test("the example only depends on published Takibi entry points", () => {
-  expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual(["takibi", "zod"]);
+  expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual([
+    "@takibi/hono-adapter",
+    "hono",
+    "takibi",
+    "zod",
+  ]);
   expect(JSON.stringify(packageJson.devDependencies ?? {})).not.toMatch(/@takibi\//);
 });
 
@@ -253,7 +254,7 @@ test("production handler selects the named Durable Object for each room", async 
     },
   };
   for (const room of ["lobby", "help", "lobby"] as const) {
-    const response = await handleRequest(
+    const response = await createChatApp().fetch(
       new Request(`https://chat.test/api/${room}/messages`),
       env,
     );

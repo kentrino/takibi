@@ -1,11 +1,4 @@
-import { ChatRoom } from "./handler.ts";
-import type { ChatEnv } from "./handler.ts";
-import { handleRequest } from "./fetch.ts";
+import { app } from "./app.tsx";
+export { ChatRoom } from "./handler.ts";
 
-export { ChatRoom };
-
-export default {
-  fetch(request, env) {
-    return handleRequest(request, env);
-  },
-} satisfies ExportedHandler<ChatEnv>;
+export default app;
