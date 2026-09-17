@@ -1,3 +1,5 @@
+import type { WatchState } from "takibi/watch";
+
 export const ROOMS = ["lobby", "help", "random"] as const;
 export type Room = (typeof ROOMS)[number];
 
@@ -5,7 +7,6 @@ export const DISPLAY_NAME_MAX_LENGTH = 40;
 export const MESSAGE_BODY_MAX_LENGTH = 500;
 export const MESSAGE_WATCH_LIMIT = 50;
 
-export type WatchConnectionState = "connecting" | "open" | "reconnecting";
 export type ConnectionKind = "pending" | "open" | "terminal";
 
 export function isRoom(value: string): value is Room {
@@ -40,7 +41,7 @@ export function shouldClearComposer(currentValue: string, submittedValue: string
   return currentValue === submittedValue;
 }
 
-export function connectionPresentation(state: WatchConnectionState | "disconnected"): {
+export function connectionPresentation(state: WatchState | "disconnected"): {
   label: string;
   kind: ConnectionKind;
 } {

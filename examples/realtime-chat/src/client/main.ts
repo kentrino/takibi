@@ -1,4 +1,5 @@
-import { createWatchClient, type WatchSubscription } from "takibi/watch";
+import type { InferCollectionDoc, InferHandlerCollections } from "takibi";
+import { createWatchClient, type WatchClientOf } from "takibi/watch";
 import type { ChatHandler } from "../handler.ts";
 import {
   MESSAGE_BODY_MAX_LENGTH,
@@ -11,7 +12,9 @@ import {
   type Room,
 } from "../shared.ts";
 
-type Message = { id: string; displayName: string; body: string; createdAt: string };
+type Message = InferCollectionDoc<InferHandlerCollections<ChatHandler>["messages"]>;
+type ChatClient = WatchClientOf<ChatHandler>;
+type MessageSubscription = ReturnType<ChatClient["messages"]["watch"]>;
 type Person = "Aさん" | "Bさん";
 
 const roomSelect = requireElement<HTMLSelectElement>("room");
@@ -30,8 +33,8 @@ function selectedRoom(): Room {
 
 class ChatPane {
   private generation = 0;
-  private subscription: WatchSubscription<string> | undefined;
-  private client: ReturnType<typeof createWatchClient<ChatHandler>> | undefined;
+  private subscription: MessageSubscription | undefined;
+  private client: ChatClient | undefined;
   private readonly list = document.createElement("ol");
   private readonly status = document.createElement("span");
   private readonly statusDot = document.createElement("span");

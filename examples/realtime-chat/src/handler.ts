@@ -9,7 +9,7 @@ export type ChatEnv = {
 
 type RequestContext = { env: ChatEnv; room: Room };
 
-const app = createTakibi<RequestContext, ChatEnv>()({
+const app = createTakibi<RequestContext>()({
   resolve: ({ context }) => ({ room: context.room }),
   stub: ({ context, resolved }) =>
     context.env.CHAT_ROOMS.get(context.env.CHAT_ROOMS.idFromName(resolved.room)),

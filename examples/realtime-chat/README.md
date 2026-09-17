@@ -42,6 +42,19 @@ messages; the UI reverses each full snapshot for chronological display.
 Wrangler serves the Vite build as static assets and runs the Worker first for
 `/api/*`.
 
+The browser derives message and subscription types from `ChatHandler`. Connection
+callbacks use the SDK's `WatchState`; terminal `closed` outcomes become the UI's
+`disconnected` state. A generation guard prevents the previous room's completion
+from updating the current pane.
+
+Tests cover validation and list ordering with the SQLite backend, and call the
+production handler with a namespace test double to verify named-object selection.
+The two-store test checks independent SQLite stores; it does not prove Cloudflare
+object isolation. Actual WebSocket delivery and room isolation can be checked with
+the two-pane walkthrough above. See the SDK's
+[watch guide](../../packages/takibi/README.md#watch-list-snapshots) for lifecycle,
+typing, routing, and testing contracts.
+
 ## Public demo limits
 
 This is a public local demo. Anyone who can reach it can read and write every

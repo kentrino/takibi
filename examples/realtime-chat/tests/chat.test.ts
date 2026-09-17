@@ -18,10 +18,19 @@ import {
 } from "../src/shared.ts";
 import packageJson from "../package.json" with { type: "json" };
 
-function handlerFor(room: Room) {
-  return withSqliteTestBackend(chatHandler, {
-    resolve: () => ({ room }),
-  });
+// SQLite bypasses stub, but handle still requires the production input type.
+// Fail loudly if a test accidentally starts using either runtime binding.
+const sqliteEnv: ChatEnv = {
+  get CHAT_ROOMS(): DurableObjectNamespace {
+    throw new Error("SQLite tests must not resolve a Durable Object");
+  },
+  get ASSETS(): Fetcher {
+    throw new Error("SQLite tests must not fetch assets");
+  },
+};
+
+function handlerFor() {
+  return withSqliteTestBackend(chatHandler);
 }
 
 function clientFor(handler: ReturnType<typeof handlerFor>, room: Room) {
@@ -29,7 +38,7 @@ function clientFor(handler: ReturnType<typeof handlerFor>, room: Room) {
     fetch: async (input, init) => {
       const result = await handler.handle(new Request(input, init), {
         prefix: `/api/${room}`,
-        context: { room, env: {} as never },
+        context: { room, env: sqliteEnv },
       });
       if (!result.matched) throw new Error("Test request was not matched");
       return result.response;
@@ -73,7 +82,7 @@ test("reverses the newest-first snapshot and labels connection states", () => {
 });
 
 test("validates messages and lists the latest messages by createdAt", async () => {
-  using handler = handlerFor("lobby");
+  using handler = handlerFor();
   const client = clientFor(handler, "lobby");
 
   const blankName = await client.messages.add({ displayName: "   ", body: "hello" });
@@ -126,9 +135,9 @@ test("validates messages and lists the latest messages by createdAt", async () =
   }
 });
 
-test("keeps rooms on isolated stores", async () => {
-  using lobby = handlerFor("lobby");
-  using help = handlerFor("help");
+test("keeps two independently created SQLite stores isolated", async () => {
+  using lobby = handlerFor();
+  using help = handlerFor();
   const lobbyClient = clientFor(lobby, "lobby");
   const helpClient = clientFor(help, "help");
 
@@ -154,17 +163,22 @@ test("keeps rooms on isolated stores", async () => {
 });
 
 test("worker serves assets, rejects unknown rooms, and prefixes known rooms", async () => {
-  using lobby = handlerFor("lobby");
+  using lobby = handlerFor();
   const assets: string[] = [];
   const env = {
     ASSETS: {
+      connect() {
+        throw new Error("Asset tests must not open TCP sockets");
+      },
       fetch: async (request: Request) => {
         assets.push(new URL(request.url).pathname);
         return new Response("ok");
       },
     },
-    CHAT_ROOMS: {} as DurableObjectNamespace,
-  } as ChatEnv;
+    get CHAT_ROOMS(): DurableObjectNamespace {
+      return sqliteEnv.CHAT_ROOMS;
+    },
+  } satisfies ChatEnv;
 
   const home = await handleRequest(new Request("https://chat.test/"), env, lobby);
   expect(home.status).toBe(200);
@@ -178,11 +192,13 @@ test("worker serves assets, rejects unknown rooms, and prefixes known rooms", as
   expect(unknown.status).toBe(404);
   await expect(unknown.json()).resolves.toEqual({ error: "Unknown chat room" });
 
-  const missing = await handleRequest(new Request("https://chat.test/api/lobby/anything"), env, {
-    handle: async () => ({ matched: false as const }),
-  });
+  const missing = await handleRequest(
+    new Request("https://chat.test/api/lobby/anything"),
+    env,
+    lobby,
+  );
   expect(missing.status).toBe(404);
-  await expect(missing.json()).resolves.toEqual({ error: "Unknown API route" });
+  await expect(missing.json()).resolves.toMatchObject({ ok: false });
 
   const created = await handleRequest(
     new Request("https://chat.test/api/lobby/messages", {
@@ -201,4 +217,49 @@ test("worker serves assets, rejects unknown rooms, and prefixes known rooms", as
 test("the example only depends on published Takibi entry points", () => {
   expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual(["takibi", "zod"]);
   expect(JSON.stringify(packageJson.devDependencies ?? {})).not.toMatch(/@takibi\//);
+});
+
+// This exercises the production stub resolver, independently of SQLite storage.
+test("production handler selects the named Durable Object for each room", async () => {
+  const names: string[] = [];
+  const selected: DurableObjectId[] = [];
+  const forwarded: { room: Room; context: unknown }[] = [];
+  const ids = new Map<DurableObjectId, Room>();
+  const namespace = {
+    idFromName(name: string) {
+      names.push(name);
+      const id = { toString: () => name } as DurableObjectId;
+      ids.set(id, name as Room);
+      return id;
+    },
+    get(id: DurableObjectId) {
+      selected.push(id);
+      const room = ids.get(id);
+      if (!room) throw new Error("Expected the id returned by idFromName");
+      return {
+        async fetch(request: Request) {
+          const wire = (await request.json()) as { context: unknown };
+          forwarded.push({ room, context: wire.context });
+          return Response.json({ ok: true, data: { items: [], nextCursor: null } });
+        },
+      };
+    },
+  };
+  const env: ChatEnv = {
+    // Only the namespace methods used by this example are implemented.
+    CHAT_ROOMS: namespace as unknown as DurableObjectNamespace,
+    get ASSETS(): Fetcher {
+      throw new Error("API requests must not fetch assets");
+    },
+  };
+  for (const room of ["lobby", "help", "lobby"] as const) {
+    const response = await handleRequest(
+      new Request(`https://chat.test/api/${room}/messages`),
+      env,
+    );
+    expect(response.status).toBe(200);
+  }
+  expect(names).toEqual(["lobby", "help", "lobby"]);
+  expect(selected.map((id) => id.toString())).toEqual(names);
+  expect(forwarded).toEqual(names.map((room) => ({ room, context: { room } })));
 });
