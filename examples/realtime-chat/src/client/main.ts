@@ -1,6 +1,15 @@
 import { createWatchClient, type WatchSubscription } from "takibi/watch";
 import type { ChatHandler } from "../handler.ts";
-import { ROOMS, type Room } from "../shared.ts";
+import {
+  MESSAGE_BODY_MAX_LENGTH,
+  MESSAGE_WATCH_LIMIT,
+  ROOMS,
+  chronologicalSnapshot,
+  connectionPresentation,
+  normalizeMessageBody,
+  shouldClearComposer,
+  type Room,
+} from "../shared.ts";
 
 type Message = { id: string; displayName: string; body: string; createdAt: string };
 type Person = "Aさん" | "Bさん";
@@ -45,8 +54,11 @@ class ChatPane {
     const name = document.createElement("h2");
     const connection = document.createElement("div");
     const composeFooter = document.createElement("div");
+    const sendLabel = document.createElement("span");
+    const sendArrow = document.createElement("span");
 
     panel.className = "chat-panel";
+    panel.dataset.pane = this.person;
     heading.className = "room-heading";
     identity.className = "pane-identity";
     avatar.className = `person-avatar person-${this.person === "Aさん" ? "a" : "b"}`;
@@ -55,6 +67,7 @@ class ChatPane {
     label.textContent = "CHATTING AS";
     name.textContent = this.person;
     connection.className = "connection";
+    connection.setAttribute("aria-live", "polite");
     this.statusDot.className = "status-dot";
     this.retry.className = "retry";
     this.retry.type = "button";
@@ -62,22 +75,26 @@ class ChatPane {
     this.retry.hidden = true;
     this.count.className = "message-count";
     this.list.className = "messages";
+    this.list.dataset.messages = this.person;
     this.list.ariaLive = "polite";
     this.list.ariaBusy = "true";
     this.empty.className = "empty";
     this.empty.textContent = "No messages yet. Start the fire.";
     this.empty.hidden = true;
     this.body.rows = 2;
-    this.body.maxLength = 500;
+    this.body.maxLength = MESSAGE_BODY_MAX_LENGTH;
     this.body.placeholder = `Message as ${this.person}…`;
     this.body.setAttribute("aria-label", `Message as ${this.person}`);
     composeFooter.className = "compose-footer";
     this.error.setAttribute("role", "alert");
     this.error.className = "form-error";
-    this.characterCount.textContent = "0 / 500";
+    this.characterCount.textContent = `0 / ${MESSAGE_BODY_MAX_LENGTH}`;
     this.characterCount.className = "character-count";
     this.send.type = "submit";
-    this.send.innerHTML = 'Send <span aria-hidden="true">↗</span>';
+    sendLabel.textContent = "Send";
+    sendArrow.setAttribute("aria-hidden", "true");
+    sendArrow.textContent = " ↗";
+    this.send.append(sendLabel, sendArrow);
 
     identityText.appendChild(label);
     identityText.appendChild(name);
@@ -102,7 +119,7 @@ class ChatPane {
 
     this.retry.addEventListener("click", () => this.connect());
     this.body.addEventListener("input", () => {
-      this.characterCount.textContent = `${this.body.value.length} / 500`;
+      this.characterCount.textContent = `${this.body.value.length} / ${MESSAGE_BODY_MAX_LENGTH}`;
       this.error.textContent = "";
     });
     this.form.addEventListener("submit", (event) => this.submit(event));
@@ -118,27 +135,27 @@ class ChatPane {
     this.list.ariaBusy = "true";
     this.count.textContent = "Waiting for messages…";
     this.empty.hidden = true;
-    this.setConnection("Connecting", "pending");
+    this.setConnection("connecting");
     this.error.textContent = "";
     const subscription = client.messages.watch(
-      { index: "byCreatedAt", orderBy: (query) => query.createdAt.desc(), limit: 50 },
+      {
+        index: "byCreatedAt",
+        orderBy: (query) => query.createdAt.desc(),
+        limit: MESSAGE_WATCH_LIMIT,
+      },
       {
         next: ({ items }) => {
           if (this.generation === token) this.render(items);
         },
         state: (state) => {
-          if (this.generation !== token) return;
-          this.setConnection(
-            state === "open" ? "Live" : state === "reconnecting" ? "Reconnecting" : "Connecting",
-            state === "open" ? "open" : "pending",
-          );
+          if (this.generation === token) this.setConnection(state);
         },
       },
     );
     this.subscription = subscription;
     void subscription.closed.then((outcome) => {
       if (this.generation === token && outcome.reason !== "unsubscribed") {
-        this.setConnection("Disconnected", "terminal");
+        this.setConnection("disconnected");
       }
     });
   }
@@ -149,15 +166,16 @@ class ChatPane {
     this.subscription = undefined;
   }
 
-  private setConnection(label: string, kind: "pending" | "open" | "terminal"): void {
-    this.status.textContent = label;
-    this.statusDot.dataset.state = kind;
-    this.retry.hidden = kind !== "terminal";
+  private setConnection(state: Parameters<typeof connectionPresentation>[0]): void {
+    const presentation = connectionPresentation(state);
+    this.status.textContent = presentation.label;
+    this.statusDot.dataset.state = presentation.kind;
+    this.retry.hidden = presentation.kind !== "terminal";
   }
 
   private render(items: Message[]): void {
     this.list.replaceChildren();
-    for (const message of [...items].reverse()) {
+    for (const message of chronologicalSnapshot(items)) {
       const item = document.createElement("li");
       const bubble = document.createElement("div");
       const metadata = document.createElement("div");
@@ -184,7 +202,7 @@ class ChatPane {
     }
     this.list.ariaBusy = "false";
     this.empty.hidden = items.length !== 0;
-    this.count.textContent = `${items.length} message${items.length === 1 ? "" : "s"} · latest 50`;
+    this.count.textContent = `${items.length} message${items.length === 1 ? "" : "s"} · latest ${MESSAGE_WATCH_LIMIT}`;
     this.list.scrollTop = this.list.scrollHeight;
   }
 
@@ -192,9 +210,9 @@ class ChatPane {
     event.preventDefault();
     if (this.send.disabled) return;
     const submittedDraft = this.body.value;
-    const body = submittedDraft.trim();
-    if (!body || body.length > 500) {
-      this.error.textContent = "Enter a message (1–500 characters).";
+    const body = normalizeMessageBody(submittedDraft);
+    if (!body) {
+      this.error.textContent = `Enter a message (1–${MESSAGE_BODY_MAX_LENGTH} characters).`;
       this.body.focus();
       return;
     }
@@ -208,9 +226,9 @@ class ChatPane {
       .then((result) => {
         if (this.generation !== token) return;
         if (!result.ok) this.error.textContent = result.error.message;
-        else if (this.body.value === submittedDraft) {
+        else if (shouldClearComposer(this.body.value, submittedDraft)) {
           this.body.value = "";
-          this.characterCount.textContent = "0 / 500";
+          this.characterCount.textContent = `0 / ${MESSAGE_BODY_MAX_LENGTH}`;
           this.body.focus();
         }
       })

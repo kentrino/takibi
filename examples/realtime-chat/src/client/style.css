@@ -76,6 +76,7 @@ h1 {
   margin-left: auto;
   color: #6f655d;
   font-size: 13px;
+  white-space: nowrap;
 }
 .status-dot {
   width: 8px;
@@ -292,15 +293,6 @@ form button:disabled {
   font-size: 11px;
   text-align: center;
 }
-.sr-only {
-  position: absolute;
-  overflow: hidden;
-  width: 1px;
-  height: 1px;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
 @media (max-width: 580px) {
   .shell {
     width: min(100% - 20px, 920px);
@@ -322,9 +314,6 @@ form button:disabled {
     padding-inline: 18px;
   }
   .connection {
-    font-size: 0;
-  }
-  .connection .retry {
-    font-size: 12px;
+    margin-left: 0;
   }
 }

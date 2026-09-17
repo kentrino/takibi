@@ -18,6 +18,9 @@ Cloudflare Worker application around it.
   delivery visible side by side.
 - Changing rooms unsubscribes both old watches before creating the next clients;
   every async callback and send is guarded by the pane's generation number.
+  A successful send clears the composer only when the draft is unchanged, so a
+  newer draft survives an in-flight request. Room changes re-enable Send even
+  if the previous room still has a request in flight.
 - Vite builds a dependency-free browser UI. Wrangler serves those static assets
   and routes `/api/*` to the Worker on the same origin.
 

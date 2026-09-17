@@ -5,7 +5,7 @@
   "description": "Public realtime chat example for Takibi watch snapshots.",
   "type": "module",
   "scripts": {
-    "build": "vp build",
+    "build": "vp build --config vite.client.config.ts",
     "check": "vp check",
     "dev": "pnpm run build && wrangler dev",
     "test": "vp test --root ."

@@ -1,9 +1,11 @@
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
-  root: "src/client",
-  build: {
-    outDir: "../../dist/client",
-    emptyOutDir: true,
+  lint: {
+    options: {
+      typeAware: true,
+      typeCheck: true,
+    },
   },
+  fmt: {},
 });
