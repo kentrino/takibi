@@ -2,6 +2,6 @@ import { render } from "hono/jsx/dom";
 import "./style.css";
 import { ChatGrid } from "./chat-grid.tsx";
 
-const grid = document.getElementById("chat-grid");
-if (!grid) throw new Error("Missing #chat-grid");
-render(<ChatGrid />, grid);
+const root = document.getElementById("chat");
+if (!root) throw new Error("Missing #chat");
+render(<ChatGrid />, root);

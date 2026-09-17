@@ -181,8 +181,7 @@ test("hono serves the page, assets, unknown rooms, and known room prefixes", asy
   expect(home.headers.get("content-type")).toMatch(/text\/html/);
   const html = await home.text();
   expect(html).toContain("Takibi Fireside");
-  expect(html).toContain('id="chat-grid"');
-  expect(html).toContain('id="room"');
+  expect(html).toContain('id="chat"');
   expect(assets).toEqual([]);
 
   const css = await app.fetch(new Request("https://chat.test/main.css"), env);
