@@ -77,6 +77,7 @@ export type HandleOptions<TInitial> = {
   prefix?: string;
 } & { context: TInitial };
 
+/** matched means the path prefix is owned; unknown routes beneath it return a response. */
 export type HandleResult =
   | { matched: true; response: Response }
   | { matched: false; response?: undefined };

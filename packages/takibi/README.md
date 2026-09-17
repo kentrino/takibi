@@ -63,13 +63,18 @@ requires an application data migration.
 `createTakibi<Input, Env>()({ resolve, stub?, services? })` creates a framework-independent
 handler. Every request supplies its input through `handle(request, { context, prefix? })`.
 `resolve` infers the execution context; `stub` receives both the original input and
-that resolved context. `Env` describes the Durable Object bindings used by `services`.
+that resolved context. `Env` types the Durable Object constructor environment and
+the bindings received by `services`; it does not type `context.env`. Put Worker
+bindings in `Input` when the stub resolver needs them. Without services or a need
+to type the Durable Object constructor environment, `createTakibi<Input>()` is sufficient.
 For empty input use `createTakibi()` and pass `context: {}`; with typed bindings use
 `createTakibi<Record<string, never>, Env>()`.
 
 For Hono, install `@takibi/hono-adapter` and mount `takibiServer` on a static
 prefix wildcard. The application chooses the prefix and supplies request context;
-Takibi interprets all collection, action and batch paths beneath it. The adapter
+Takibi interprets all collection, action and batch paths beneath it. `matched: true`
+means the path matches the prefix, even when an unknown collection or invalid route
+produces an error response. `matched: false` allows fallback outside that prefix. The adapter
 checks the context supplier against the handler's required input type.
 
 Migration: remove factory entry options. Handlers and SQLite test forks expose
@@ -1246,6 +1251,71 @@ const page = await client.posts.list({ limit: 50 });
 subscription.unsubscribe();
 const outcome = await subscription.closed; // { reason: "unsubscribed" }
 ```
+
+### Types and UI ownership
+
+The observer's `items` are inferred from the server collection, including document
+metadata. When a separate render function or component field needs a named type,
+derive it from the handler instead of copying the schema:
+
+```ts
+import type { InferCollectionDoc, InferHandlerCollections } from "takibi";
+import type { WatchClientOf, WatchState } from "takibi/watch";
+import type { handler } from "./server";
+
+type Post = InferCollectionDoc<InferHandlerCollections<typeof handler>["posts"]>;
+type PostsSubscription = ReturnType<WatchClientOf<typeof handler>["posts"]["watch"]>;
+type ConnectionStatus = WatchState | "disconnected";
+```
+
+`WatchSubscription<TCode>` and `WatchClosed<TCode>` take a **policy reason code**,
+not a document type. Deriving the subscription from the collection preserves its
+policy reason literals; writing `WatchSubscription<string>` widens those literals.
+It does not change the `closed.reason` discriminator.
+
+`state` reports connection attempts and connectivity, not subscription completion.
+`open` means the socket is connected; wait for `next` to show the initial data.
+Observe `closed` separately to display terminal status:
+
+```ts
+void subscription.closed.then((outcome) => {
+  if (outcome.reason === "unsubscribed") return; // intentional UI cleanup
+  renderConnectionState("disconnected");
+  if (outcome.reason === "server-error" || outcome.reason === "protocol-error") {
+    showError(outcome.error.message);
+  }
+});
+// On unmount or before replacing the subscription:
+// subscription.unsubscribe();
+```
+
+A UI-only `disconnected` state is a normal projection of `closed`, not a value
+emitted by `state`. Retryable failures keep `closed` pending; a terminal outcome
+requires a new `watch` call to retry. When switching rooms or replacing a view,
+unsubscribe the old handle and guard its callbacks and `closed.then` with the
+view's current generation. Unsubscribe suppresses future observer callbacks but
+the old handle's completion promise still settles.
+
+### Named Durable Objects and testing
+
+For one Durable Object per room, validate the room in the Worker, pass it in the
+initial context, and select `namespace.get(namespace.idFromName(resolved.room))`
+in `stub`. Mount the handler at `/api/${room}` and use that same absolute HTTP(S)
+base URL for `createWatchClient`. Both HTTP writes and watch handshakes use the
+stub resolver. `resolve` may simply project validated input into JSON-safe context;
+Worker bindings stay in the initial context rather than being sent to the object.
+See the [realtime chat example](../../examples/realtime-chat) for this arrangement,
+including newest-first snapshots reversed for display.
+
+`withSqliteTestBackend` creates one independent SQLite store per handler and
+bypasses `stub`; it does not emulate named Durable Object routing or WebSocket
+upgrades. Two SQLite handlers demonstrate independent storage, not that production
+room routing is correct. Test the production handler with a namespace test double
+to verify `idFromName`/`get`, and use the Workers runtime to verify actual object
+isolation and watch delivery. Overriding `resolve` currently retains the production
+input context type, so it does not remove required Worker bindings from `handle`.
+
+### Snapshot semantics
 
 The handle is returned synchronously; callbacks start asynchronously. Options
 have the same schema inference, filter compilation, limits (default 50, maximum
