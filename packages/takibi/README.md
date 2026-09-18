@@ -61,7 +61,7 @@ requires an application data migration.
 ## Server
 
 `createTakibi<Input, Env>()({ resolve, stub?, services? })` creates a framework-independent
-handler. Every request supplies its input through `handle(request, { context, prefix? })`.
+handler. Every request supplies its input through `handle(request, { context, stripPrefix? })`.
 `resolve` infers the execution context; `stub` receives both the original input and
 that resolved context. `Env` types the Durable Object constructor environment and
 the bindings received by `services`; it does not type `context.env`. Put Worker
@@ -71,11 +71,17 @@ For empty input use `createTakibi()` and pass `context: {}`; with typed bindings
 `createTakibi<Record<string, never>, Env>()`.
 
 For Hono, install `@takibi/hono-adapter` and mount `takibiServer` on a
-prefix wildcard. The application chooses the prefix and supplies request context;
+path with `app.route(prefix, takibiServer(...))`. The application chooses the prefix and supplies request context;
 Takibi interprets all collection, action and batch paths beneath it. `matched: true`
-means the path matches the prefix, even when an unknown collection or invalid route
-produces an error response. `matched: false` allows fallback outside that prefix. The adapter
-checks the context supplier against the handler's required input type.
+means the handler owns the path, even when an unknown collection or invalid route
+produces an error response. The adapter checks the context supplier against the
+handler's required input type.
+
+`stripPrefix` accepts a string or `(pathname: string) => string`. A string is removed
+at a path-segment boundary; paths outside it return `matched: false`. A function
+receives the original percent-encoded pathname and returns the internal pathname
+with a leading slash; the adapter owns route matching. Omit `stripPrefix` to use
+the whole pathname. The original `Request` is preserved in all cases.
 
 Migration: remove factory entry options. Handlers and SQLite test forks expose
 `handle` and `DurableObject`, without Hono's `request` or `fetch` methods. Use
@@ -147,8 +153,8 @@ export class TenantStore extends handler.DurableObject {}
 type HonoEnv = { Bindings: Initial["env"]; Variables: { di: Initial["di"] } };
 const app = new Hono<HonoEnv>();
 // Register your middleware that sets c.var.di before this route.
-app.use(
-  "/foo/*",
+app.route(
+  "/foo",
   takibiServer({
     handler,
     createContext: (c: Context<HonoEnv>) => ({ di: c.var.di, env: c.env }),

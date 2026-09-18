@@ -64,7 +64,7 @@ test("definition facade preserves initial, env, services, documents and actions"
   }));
   const handler = app.actions({ posts: actions });
   expectTypeOf<Parameters<typeof handler.handle>[1]>().toExtend<{
-    prefix?: string;
+    stripPrefix?: string | ((pathname: string) => string);
     context: Initial;
   }>();
   expectTypeOf(handler.DurableObject).constructorParameters.toEqualTypeOf<
@@ -189,7 +189,10 @@ test("HTTP adapter preserves explicit null context and skips unmatched prefixes"
     return Response.json({ ok: true });
   });
   expect(
-    await handler.handle(new Request("https://test/posts/p1"), { prefix: "/api", context: {} }),
+    await handler.handle(new Request("https://test/posts/p1"), {
+      stripPrefix: "/api",
+      context: {},
+    }),
   ).toEqual({
     matched: false,
   });
@@ -197,6 +200,49 @@ test("HTTP adapter preserves explicit null context and skips unmatched prefixes"
   await handler.handle(new Request("https://test/posts/p1"), { context: null });
   await handler.handle(new Request("https://test/posts/p1"), { context: {} });
   expect(initialValues).toEqual([null, {}]);
+});
+
+test.each([
+  { stripPrefix: undefined, path: "/posts/a%3Ab/" },
+  { stripPrefix: "/api/", path: "/api/posts/a%3Ab/" },
+  { stripPrefix: "", path: "/posts/a%3Ab/" },
+  { stripPrefix: "/", path: "/posts/a%3Ab/" },
+  { stripPrefix: (path: string) => path.slice("/api".length), path: "/api/posts/a%3Ab/" },
+])(
+  "HTTP stripPrefix decodes $path and preserves the original request",
+  async ({ stripPrefix, path }) => {
+    const request = new Request(`https://test${path}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: "updated" }),
+    });
+    const handler = createHttpHandler(async (raw, _initial, decode) => {
+      expect(raw).toBe(request);
+      expect(raw.url).toBe(`https://test${path}`);
+      expect(await decode()).toEqual({
+        kind: "collection",
+        collection: "posts",
+        operation: "update",
+        id: "a:b",
+        input: { title: "updated" },
+      });
+      return new Response();
+    });
+    expect(await handler.handle(request, { stripPrefix, context: {} })).toMatchObject({
+      matched: true,
+    });
+  },
+);
+
+test("string stripPrefix does not claim neighboring paths", async () => {
+  const handler = createHttpHandler(async () => {
+    throw new Error("unmatched requests must not be served");
+  });
+  expect(
+    await handler.handle(new Request("https://test/apix/posts"), {
+      stripPrefix: "/api",
+      context: {},
+    }),
+  ).toEqual({ matched: false });
 });
 
 test("core HTTP entry preserves its value and rejects the Hono surface", async () => {

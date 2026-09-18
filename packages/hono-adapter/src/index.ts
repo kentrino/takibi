@@ -1,35 +1,37 @@
-import type { Context, Env, MiddlewareHandler } from "hono";
-import { routePath } from "hono/route";
-import type { HandleResult } from "takibi";
+import { Hono, type Context, type Env } from "hono";
+import { basePath } from "hono/route";
+import type { HandleOptions, HandleResult } from "takibi";
 
 export type TakibiHttpHandler<TInput> = {
-  handle: (
-    request: Request,
-    options: { prefix?: string; context: TInput },
-  ) => Promise<HandleResult>;
+  handle: (request: Request, options: HandleOptions<TInput>) => Promise<HandleResult>;
 };
 
-/** Resolve the Takibi URL prefix from the mounted Hono route, including :params. */
-function handlerPrefix(c: Context): string {
-  return routePath(c)
-    .replace(/\/?\*$/, "")
-    .replace(/:([A-Za-z0-9_]+)(?:\{[^}]*\})?/g, (_match, name: string) => c.req.param(name) ?? "");
-}
-
-/** Mount on a prefix followed by /*, or on * at the root. */
+/** Mount the returned Hono app with `app.route(prefix, server)`. */
 export function takibiServer<TInput, TEnv extends Env>(options: {
   handler: TakibiHttpHandler<TInput>;
   createContext: (c: Context<TEnv>) => NoInfer<TInput> | Promise<NoInfer<TInput>>;
-}): MiddlewareHandler<TEnv> {
-  return async (c, next) => {
-    const prefix = handlerPrefix(c);
+}): Hono<TEnv> {
+  const app = new Hono<TEnv>();
+  app.use("*", async (c, next) => {
+    const prefix = basePath(c);
+    // Hono decodes Unicode in basePath; count segments to preserve raw URL encoding.
+    const prefixSegments = prefix === "/" ? 0 : prefix.split("/").length - 1;
     const context = await options.createContext(c);
-    const result = await options.handler.handle(c.req.raw, { prefix, context });
+    const result = await options.handler.handle(c.req.raw, {
+      stripPrefix: (pathname) =>
+        "/" +
+        pathname
+          .split("/")
+          .slice(prefixSegments + 1)
+          .join("/"),
+      context,
+    });
     if (result.matched) {
       // Hono cannot reconstruct 101 Switching Protocols from a WebSocket upgrade.
       if (result.response.status < 200) return result.response;
       return c.newResponse(result.response.body, result.response);
     }
     await next();
-  };
+  });
+  return app;
 }

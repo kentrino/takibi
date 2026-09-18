@@ -50,9 +50,15 @@ export function rawPathSegments(pathname: string, count: number): string[] {
 
 export type PublicRequest = ExecuteRequest | ActionInvocation | PublicBatchRequest;
 
-export async function decodePublicHttp(request: Request, prefix?: string): Promise<PublicRequest> {
+export async function decodePublicHttp(
+  request: Request,
+  stripPrefix?: string | ((pathname: string) => string),
+): Promise<PublicRequest> {
   const url = new URL(request.url);
-  const rest = publicPathRemainder(url.pathname, prefix);
+  const rest =
+    typeof stripPrefix === "function"
+      ? normalizePathname(stripPrefix(url.pathname))
+      : publicPathRemainder(url.pathname, stripPrefix);
   const rawSegments = rest === "/" ? [] : rest.slice(1).split("/");
   return decodePublicRoute(request.method, rawSegments, url.searchParams, () =>
     readRequestJson(request),

@@ -14,11 +14,11 @@ export function createChatApp(handler: TakibiHttpHandler<RequestContext> = chatH
     jsxRenderer(({ children }) => <Document>{children}</Document>),
     (c) => c.render(<HomePage />),
   );
-  app.use(
-    "/api/:room/*",
+  app.route(
+    "/api/:room",
     takibiServer({
       handler,
-      createContext: (c: Context<AppEnv, "/api/:room/*">) => ({
+      createContext: (c: Context<AppEnv, "/api/:room">) => ({
         env: c.env,
         room: c.req.param("room"),
       }),

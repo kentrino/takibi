@@ -70,11 +70,12 @@ export type InternalCollectionsOptions = CollectionsOptions & {
 
 export type HandleOptions<TInitial> = {
   /**
-   * Path prefix for REST routes (e.g. `/api/takibi` matches `/api/takibi/posts`
-   * and `/api/takibi/posts/{id}`, but not `/api/takibihose`). Omit to read
-   * collection / id from the whole pathname.
+   * Strip a literal prefix at a path-segment boundary, or let an adapter strip
+   * its mount path from the raw, percent-encoded pathname. Functions return a
+   * pathname with a leading slash. Omit to use the whole pathname.
+   * A nonmatching string prefix returns `matched: false`; functions own matching.
    */
-  prefix?: string;
+  stripPrefix?: string | ((pathname: string) => string);
 } & { context: TInitial };
 
 /** matched means the path prefix is owned; unknown routes beneath it return a response. */

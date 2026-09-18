@@ -396,7 +396,7 @@ test("action input is validated and client routes document actions by id", async
         url: request.url,
         ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) } : {}),
       });
-      const result = await handler.handle(request, { prefix: "/api/fire", context: {} });
+      const result = await handler.handle(request, { stripPrefix: "/api/fire", context: {} });
       return result.response!;
     },
   });
@@ -472,7 +472,7 @@ test("no-input document actions accept a zero-length POST body", async () => {
       headers: headers(),
       body: new Uint8Array(),
     }),
-    { prefix: "/api/fire", context: {} },
+    { stripPrefix: "/api/fire", context: {} },
   );
   expect(result.matched).toBe(true);
   expect(result.response?.status).toBe(200);

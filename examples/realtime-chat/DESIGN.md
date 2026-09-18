@@ -5,7 +5,7 @@ Cloudflare Worker application around it.
 
 - A Hono app owns HTTP. `jsxRenderer` serves the Fireside page. Tailwind styles
   both the server-rendered shell and the client panes. Rooms mount at
-  `/api/:room/*` through `takibiServer`. The `:room` segment is the Durable
+  `/api/:room` through `app.route` and `takibiServer`. The `:room` segment is the Durable
   Object name. Remaining paths fall through to Wrangler assets.
 - One generated Takibi Durable Object stores each room. Lists and watches are
   public `read`. Writes go through the detached `messages.send` action, which

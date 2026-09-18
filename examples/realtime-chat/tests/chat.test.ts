@@ -1,6 +1,6 @@
 import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { createChatApp } from "../src/app.tsx";
 import { chatHandler } from "../src/handler.ts";
 import type { ChatEnv, ChatHandler } from "../src/handler.ts";
@@ -36,7 +36,7 @@ function clientFor(handler: ReturnType<typeof handlerFor>, room: Room) {
   return createClient<ChatHandler>(`https://chat.test/api/${room}`, {
     fetch: async (input, init) => {
       const result = await handler.handle(new Request(input, init), {
-        prefix: `/api/${room}`,
+        stripPrefix: `/api/${room}`,
         context: { room, env: sqliteEnv },
       });
       if (!result.matched) throw new Error("Test request was not matched");
@@ -76,7 +76,14 @@ test("reverses the newest-first snapshot and labels connection states", () => {
   });
 });
 
-test("validates messages and lists the latest messages by createdAt", async () => {
+test("validates messages and lists the latest messages by createdAt", async ({
+  onTestFinished,
+}) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
   using handler = handlerFor();
   const client = clientFor(handler, "lobby");
 
@@ -99,7 +106,9 @@ test("validates messages and lists the latest messages by createdAt", async () =
     displayName: "Alice",
     body: "<em>hello</em>",
   });
+  vi.advanceTimersByTime(1);
   const first = await client.messages.send({ displayName: "Alice", body: "first" });
+  vi.advanceTimersByTime(1);
   const second = await client.messages.send({ displayName: "Bob", body: "second" });
   expect(markup.ok).toBe(true);
   expect(first.ok).toBe(true);
