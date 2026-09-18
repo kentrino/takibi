@@ -11,7 +11,7 @@
 #
 # Targets:
 #   test  - runs the full CI pipeline (type-check, tests, build, packed e2e)
-#   app   - packed full-path tests run by the extracted vitest runner
+#   app   - packed issue-tracker tests on a clean Node runtime
 #
 # Examples:
 #   docker build --target test -t takibi-test .   # fails if any check fails
@@ -47,10 +47,12 @@ RUN pnpm test:e2e
 FROM deps AS build
 RUN pnpm -r build
 
-# --- App image: packed tests + extracted vitest runner --------------------
-# Each test is a separate tsdown bundle (app deps inlined, vitest kept
-# external). The runner is a packed startVitest entry. Same full-path
-# scenario as bench and e2e.
-FROM build AS app
-WORKDIR /app/examples/issue-tracker
-CMD ["node", "dist/run-packed-tests.mjs"]
+# --- App image: packed node:test files on a clean Node runtime ------------
+# Each issue-tracker test is a tsdown bundle with takibi, hono, and zod
+# inlined. The default command is `node --test` — the same full-path
+# scenario bench and e2e use.
+FROM ${NODE_IMAGE} AS app
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/examples/issue-tracker/dist ./
+CMD ["node", "--test", "full-path-scenario.test.mjs"]
