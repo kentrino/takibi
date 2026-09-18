@@ -2,14 +2,25 @@
   "name": "@takibi/issue-tracker",
   "version": "0.0.0",
   "private": true,
-  "description": "Example issue-tracker app used by benchmarks and packed-package e2e.",
+  "description": "Example issue-tracker app used by benchmarks, packed-package e2e, and the app-image full-path test.",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "exports": {
+      ".": "./dist/index.mjs",
+      "./package.json": "./package.json"
+    }
+  },
   "scripts": {
-    "test": "vp test",
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp pack && node --test --test-timeout=30000 dist/full-path-scenario.test.mjs && vp test",
     "check": "vp check"
   },
   "dependencies": {
@@ -26,5 +37,11 @@
   },
   "engines": {
     "node": ">=22.18.0"
+  },
+  "inlinedDependencies": {
+    "@noble/hashes": "2.4.0",
+    "hono": "4.13.7",
+    "tatenuki": "0.2.0",
+    "zod": "4.6.1"
   }
 }

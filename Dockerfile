@@ -11,7 +11,7 @@
 #
 # Targets:
 #   test  - runs the full CI pipeline (type-check, tests, build, packed e2e)
-#   app   - the built SDK on a clean runtime, with a real round-trip smoke test
+#   app   - packed full-path test on a clean Node runtime
 #
 # Examples:
 #   docker build --target test -t takibi-test .   # fails if any check fails
@@ -47,15 +47,11 @@ RUN pnpm test:e2e
 FROM deps AS build
 RUN pnpm -r build
 
-# --- App image: the built SDK on a clean Node runtime ---------------------
-# Takibi is a library, so the "app" image is the publishable SDK artifact. The
-# built takibi package is self-contained (workspace packages are inlined; the
-# only runtime import is the built-in node:sqlite), so it runs with no
-# node_modules. The default command is a real create/read round-trip.
+# --- App image: packed full-path test on a clean Node runtime -------------
+# The issue-tracker pack inlines takibi, hono, and zod into a node:test file.
+# The default command is that packed test — the same scenario bench and e2e use.
 FROM ${NODE_IMAGE} AS app
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build /app/packages/takibi/dist ./takibi/dist
-COPY --from=build /app/packages/takibi/package.json ./takibi/package.json
-COPY docker/app-smoke.mjs ./app-smoke.mjs
-CMD ["node", "app-smoke.mjs"]
+COPY --from=build /app/examples/issue-tracker/dist ./
+CMD ["node", "--test", "full-path-scenario.test.mjs"]
