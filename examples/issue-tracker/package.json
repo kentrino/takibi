@@ -20,7 +20,8 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "test": "vp pack && node --test --test-timeout=30000 dist/full-path-scenario.test.mjs && vp test",
+    "test": "vp test",
+    "test:built": "vp pack && node dist/run-packed-tests.mjs",
     "check": "vp check"
   },
   "dependencies": {
