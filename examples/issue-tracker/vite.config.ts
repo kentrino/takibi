@@ -22,32 +22,17 @@ export default defineConfig({
     },
     {
       entry: {
-        "run-packed-tests": "src/run-packed-tests.ts",
-      },
-      dts: false,
-      clean: false,
-      deps: {
-        neverBundle: [/^vite-plus(?:\/|$)/, /^vitest(?:\/|$)/],
-      },
-      exports: false,
-    },
-    {
-      entry: {
         "*": "tests/*.test.ts",
       },
       dts: false,
       clean: false,
       deps: {
         alwaysBundle: [/^@takibi\//, /^takibi(?:\/|$)/, /^hono(?:\/|$)/, "zod"],
-        neverBundle: [/^vite-plus(?:\/|$)/, /^vitest(?:\/|$)/],
         onlyBundle: false,
       },
       exports: false,
     },
   ],
-  test: {
-    exclude: ["**/node_modules/**", "**/dist/**"],
-  },
   lint: {
     options: {
       typeAware: true,
