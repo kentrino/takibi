@@ -49,21 +49,44 @@ that directory is world-writable and sits _before_ the runtime's Node directory
 on `PATH` for every shell type, so `node` and `pnpm` resolve to Node 22
 everywhere without depending on shell startup files.
 
-## Should we use a Dockerfile instead?
+## The reference Dockerfile
 
-Not for this problem. A custom Dockerfile pins the OS and system packages
-deterministically, which is worth it when a project needs system-level native
-dependencies. But it does **not** remove the Node-shadowing issue: the runtime
-still injects its own Node ahead of whatever the image provides, so you would
-need the same "put our Node ahead on PATH" trick anyway. A custom image also
-gives up conveniences preinstalled on the default image (nvm, the Rust
-toolchain, a browser for computer-use testing, the VNC desktop), and the
-`/usr/local/cargo/bin` directory we rely on may not exist there.
+The repository root [`Dockerfile`](../../Dockerfile) is a **reference**, not the
+image Cloud Agents boot from. Its job is to document the exact toolchain in one
+obvious place so humans (and agents) don't have to rediscover it, and to let
+anyone build and test the workspace in a clean, reproducible container. It is
+intentionally not wired into `.cursor/environment.json`.
 
-For Takibi the committed `.cursor/environment.json` plus `install.sh` on the
-default image is simpler, boots faster, and is fully reproducible. Revisit a
-Dockerfile only if a future dependency genuinely requires custom system
-packages.
+It is multi-stage:
+
+- `test` — installs dependencies and runs the full CI pipeline (`pnpm ready` +
+  `pnpm test:e2e`). `docker build --target test .` fails if any check fails.
+- `app` — the built, publishable SDK on a clean Node runtime. Because the built
+  `takibi` package inlines its workspace dependencies (only `node:sqlite`
+  remains), it runs with no `node_modules`; the default command
+  ([`docker/app-smoke.mjs`](../../docker/app-smoke.mjs)) performs a real
+  create/read round-trip through the SQLite test backend.
+
+```sh
+docker build --target test -t takibi-test .
+docker build --target app  -t takibi-app  .
+docker run --rm takibi-app
+```
+
+Note the Dockerfile installs `git` and pins Node via a `node:22.x` base image,
+so it does not depend on the Cloud Agent runtime or the `/usr/local/cargo/bin`
+trick above — it stands on its own.
+
+## Why not build the Cloud Agent from the Dockerfile?
+
+A custom image for the Cloud Agent does **not** remove the Node-shadowing issue:
+the runtime still injects its own Node ahead of whatever the image provides, so
+you would need the same "put our Node ahead on PATH" trick anyway. A custom
+image also gives up conveniences preinstalled on the default image (nvm, the
+Rust toolchain, a browser for computer-use testing, the VNC desktop), and the
+`/usr/local/cargo/bin` directory we rely on may not exist there. So the Cloud
+Agent keeps using the default image plus `install.sh`, and the Dockerfile stays
+a reference for local/CI use.
 
 ## Updating the environment
 

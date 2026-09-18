@@ -46,7 +46,9 @@ pnpm ready
 
 Cursor Cloud Agents use a committed environment; see
 [Cursor Cloud Agent environment](./docs/playbook/cursor-cloud-agent.md) for how
-it is set up and why Node 22.18+ is enforced.
+it is set up and why Node 22.18+ is enforced. A reference
+[`Dockerfile`](./Dockerfile) (multi-stage `test` and `app` targets) documents
+the toolchain and builds/tests the workspace in a clean container.
 
 Publishing uses Release Please and npm trusted publishing. See
 `docs/playbook/` for GitHub App access, trusted publishers, and first
