@@ -61,9 +61,10 @@ It is multi-stage:
 
 - `test` — installs dependencies and runs the full CI pipeline (`pnpm ready` +
   `pnpm test:e2e`). `docker build --target test .` fails if any check fails.
-- `app` — the packed issue-tracker full-path `node:test` file on a clean Node
-  runtime. `vp pack` inlines `takibi`, `hono`, and `zod`, so the image is just
-  that JS plus Node. The test is the same scenario bench and packed-package
+- `app` — packed issue-tracker tests plus an extracted vitest runner. `vp pack`
+  inlines `takibi`, `hono`, and `zod` into each test bundle and leaves
+  `vite-plus/test` external; `node dist/run-packed-tests.mjs` runs those
+  bundles through vitest. The scenario is the same one bench and packed-package
   e2e use.
 
 ```sh
