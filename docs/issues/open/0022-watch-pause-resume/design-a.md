@@ -6,13 +6,13 @@ Extend the existing subscription handle with `pause(): void` and `resume(): void
 Keep `unsubscribe()` and the always-fulfilling, typed `closed` promise.
 Extend the state callback with `paused` and `closed`:
 
-| State | Meaning |
-| --- | --- |
-| `connecting` | Establishing a connection, including after resume |
-| `open` | Connected; initial data arrives separately through `next` |
-| `reconnecting` | Temporary failure; automatic retry is scheduled |
-| `paused` | Intentionally suspended; no active socket or automatic retries |
-| `closed` | Permanently finished; resume cannot restart this handle |
+| State          | Meaning                                                        |
+| -------------- | -------------------------------------------------------------- |
+| `connecting`   | Establishing a connection, including after resume              |
+| `open`         | Connected; initial data arrives separately through `next`      |
+| `reconnecting` | Temporary failure; automatic retry is scheduled                |
+| `paused`       | Intentionally suspended; no active socket or automatic retries |
+| `closed`       | Permanently finished; resume cannot restart this handle        |
 
 Prefer `closed` over `disconnected`, which can also describe a transient network
 failure or an intentional pause. The completion reason remains in `closed` rather
