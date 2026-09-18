@@ -61,11 +61,10 @@ It is multi-stage:
 
 - `test` — installs dependencies and runs the full CI pipeline (`pnpm ready` +
   `pnpm test:e2e`). `docker build --target test .` fails if any check fails.
-- `app` — the built, publishable SDK on a clean Node runtime. Because the built
-  `takibi` package inlines its workspace dependencies (only `node:sqlite`
-  remains), it runs with no `node_modules`; the default command
-  ([`docker/app-smoke.mjs`](../../docker/app-smoke.mjs)) performs a real
-  create/read round-trip through the SQLite test backend.
+- `app` — the packed issue-tracker full-path `node:test` file on a clean Node
+  runtime. `vp pack` inlines `takibi`, `hono`, and `zod`, so the image is just
+  that JS plus Node. The test is the same scenario bench and packed-package
+  e2e use.
 
 ```sh
 docker build --target test -t takibi-test .
