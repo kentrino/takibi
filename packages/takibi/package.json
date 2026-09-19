@@ -1,6 +1,6 @@
 {
   "name": "takibi",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Typed multi-tenant collection store on Cloudflare Durable Objects.",
   "keywords": [
     "cloudflare",
