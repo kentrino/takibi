@@ -136,7 +136,7 @@ export let fullPathBenchmarkSink = 0;
 export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
   const production = createIssueTrackerHandler();
   const handler = withSqliteTestBackend(production);
-  const app = new Hono().use("*", takibiServer({ handler, createContext: () => ({}) }));
+  const app = new Hono().route("/", takibiServer({ handler, createContext: () => ({}) }));
   const requestCounts = { list: 0, batch: 0 };
   const fetch = (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);

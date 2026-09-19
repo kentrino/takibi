@@ -14,8 +14,8 @@ import type { AppEnv } from "./env";
 
 const app = new Hono<AppEnv>();
 // Install the application's authentication / DI middleware first.
-app.use(
-  "/api/takibi/*",
+app.route(
+  "/api/takibi",
   takibiServer({
     handler,
     createContext: async (c: Context<AppEnv>) => ({
@@ -30,10 +30,11 @@ app.use(
 handler's `createTakibi<Input, Env>()` declaration. Synchronous and asynchronous
 suppliers are supported. Empty input is supplied explicitly with `() => ({})`.
 
-Mount on a **static prefix followed by `/*`**, or `*` / `/*` for the root.
-The adapter reads the complete mounted route from Hono's `routePath`, including
-static prefixes added with `app.route(...)`. Parameterized or embedded-wildcard
-prefixes are not supported.
+`takibiServer` returns a Hono app. Mount it with `app.route("/api/takibi", server)`
+or `app.route("/", server)` for the root; no wildcard suffix is needed.
+The adapter uses Hono's `basePath(c)` to resolve the complete mount path,
+including nested mounts and request parameters. Hono owns route matching
+and parameter resolution.
 
 Takibi receives the original request URL and interprets collection, action and
 `_batch` paths. It also handles the prefix root, trailing slashes and invalid deep
@@ -43,5 +44,9 @@ result continues to the next Hono middleware.
 
 Authentication and request-header changes belong to preceding application
 middleware. The adapter forwards `c.req.raw` and preserves response headers from
-outer Hono middleware. The core handler itself has no Hono dependency and can
-also be called directly with `handler.handle(request, { prefix, context })`.
+outer Hono middleware. WebSocket upgrades (status 101) are returned as
+the original Response because Hono cannot reconstruct them. The core handler itself has no Hono dependency and can
+also be called directly with `handler.handle(request, { stripPrefix, context })`.
+The adapter passes a `stripPrefix` function that removes the matched mount path;
+the original `Request` is passed through unchanged. Direct callers can supply a
+literal prefix string instead, or omit it to use the whole pathname.

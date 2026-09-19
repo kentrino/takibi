@@ -1,0 +1,44 @@
+@import "tailwindcss" source("..");
+
+@theme {
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: Georgia, serif;
+  --color-paper: #f4efe5;
+  --color-ink: #28231f;
+  --color-ember: #e45d2b;
+  --color-ember-ink: #fff8ec;
+  --color-eyebrow: #9a6a50;
+  --color-muted: #6f655d;
+  --color-panel: #fffcf7;
+  --color-line: #ded3c3;
+  --color-controls: #eee5d7;
+  --color-field: #faf7f1;
+  --color-field-line: #d7c8b5;
+  --color-heading-line: #eee6da;
+  --color-person-a: #a43e1c;
+  --color-person-a-bg: #f8d8c5;
+  --color-person-b: #246457;
+  --color-person-b-bg: #cfe9e1;
+  --color-count: #94877c;
+  --color-bubble: #f1e9de;
+  --color-body: #514943;
+  --color-meta: #a0958c;
+  --color-empty: #92867c;
+  --color-error: #b34232;
+  --color-retry: #a94320;
+  --color-dot-pending: #d49a43;
+  --color-dot-open: #4c9a69;
+  --color-dot-terminal: #b34d43;
+  --color-note: #978b80;
+  --color-label: #766a61;
+  --color-help: #7b6f65;
+  --color-select: #352e29;
+}
+
+@layer base {
+  button,
+  select {
+    cursor: pointer;
+  }
+}

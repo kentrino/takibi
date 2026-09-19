@@ -59,7 +59,7 @@ function fixture() {
 test("group mounts delegate root, collection, batch, actions and invalid paths to core", async () => {
   const { handler, hono, createContext, resolved } = fixture();
   using _cleanup = handler;
-  const group = new Hono<AppEnv>().use("/takibi/*", takibiServer({ handler, createContext }));
+  const group = new Hono<AppEnv>().route("/takibi", takibiServer({ handler, createContext }));
   hono.route("/api", group);
   hono.all("*", (c) => c.text("outside", 418));
   const request = (path: string, init?: RequestInit) =>
@@ -106,7 +106,30 @@ test("group mounts delegate root, collection, batch, actions and invalid paths t
   expect(resolved).toContainEqual({ env: { tenant: "tenant-a" }, session: "signed-in" });
 });
 
-test("root wildcard supplies empty input explicitly", async () => {
+test("Hono resolves parameterized mount paths", async () => {
+  using handler = withSqliteTestBackend(
+    createTakibi()({ resolve: () => ({ tenantId: "room" }) })
+      .defineCollections({
+        posts: { schema: z.object({ title: z.string() }), accessPolicy: fullAccess },
+      })
+      .actions({}),
+  );
+  const group = new Hono().route(
+    "/api/:room",
+    takibiServer({ handler, createContext: () => ({}) }),
+  );
+  const app = new Hono().route("/orgs/:org", group);
+  app.all("*", (c) => c.text("outside", 418));
+  for (const room of ["alpha", "beta", "a%2Fb", "%E6%97%A5%E6%9C%AC"]) {
+    expect((await app.request(`/orgs/acme/api/${room}/posts`)).status).toBe(200);
+    expect((await app.request(`/orgs/acme/api/${room}`)).status).toBe(400);
+    expect((await app.request(`/orgs/acme/api/${room}/`)).status).toBe(400);
+  }
+  expect((await app.request("/orgs/acme/api/alpha/missing")).status).toBe(404);
+  expect((await app.request("/orgs/acme/apix/alpha/posts")).status).toBe(418);
+});
+
+test("root and standalone apps supply empty input explicitly", async () => {
   using handler = withSqliteTestBackend(
     createTakibi()({ resolve: () => ({ tenantId: "root" }) })
       .defineCollections({
@@ -114,16 +137,31 @@ test("root wildcard supplies empty input explicitly", async () => {
       })
       .actions({}),
   );
-  for (const path of ["*", "/*"]) {
-    const app = new Hono().use(path, takibiServer({ handler, createContext: () => ({}) }));
+  const server = takibiServer({ handler, createContext: () => ({}) });
+  for (const app of [server, new Hono().route("/", server)]) {
     expect((await app.request("/posts")).status).toBe(200);
     expect((await app.request("/")).status).toBe(400);
   }
 });
 
+test("passes websocket upgrade responses through without reconstruction", async () => {
+  const upgrade = new Response(null, { headers: { Upgrade: "websocket" } });
+  Object.defineProperty(upgrade, "status", { value: 101 });
+  const app = new Hono().route(
+    "/",
+    takibiServer({
+      handler: { handle: async () => ({ matched: true, response: upgrade }) },
+      createContext: () => ({}),
+    }),
+  );
+  const response = await app.request("/");
+  expect(response).toBe(upgrade);
+  expect(response.status).toBe(101);
+});
+
 test("unmatched handlers yield to later middleware", async () => {
-  const app = new Hono().use(
-    "/rpc/*",
+  const app = new Hono().route(
+    "/rpc",
     takibiServer({
       handler: { handle: async () => ({ matched: false }) },
       createContext: () => ({}),
@@ -143,7 +181,7 @@ test("context is checked against handler input independently of Hono bindings", 
     handler,
     createContext: (c: Context<AppEnv>) => ({ env: c.env, session: "ok" }),
   });
-  expectTypeOf(valid).toBeFunction();
+  expectTypeOf(valid).toEqualTypeOf<Hono<AppEnv>>();
   const invalid = () => {
     takibiServer<unknown, AppEnv>({
       // @ts-expect-error explicit type arguments cannot widen a handler's accepted input

@@ -1,0 +1,31 @@
+{
+  "name": "@takibi/realtime-chat",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Public realtime chat example for Takibi watch snapshots.",
+  "type": "module",
+  "scripts": {
+    "build": "vp build --config vite.client.config.ts",
+    "check": "vp check",
+    "dev": "pnpm run build && wrangler dev",
+    "test": "vp test --root ."
+  },
+  "dependencies": {
+    "@takibi/hono-adapter": "workspace:^",
+    "hono": "catalog:",
+    "takibi": "workspace:^",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@tailwindcss/vite": "^4.1.13",
+    "tailwindcss": "^4.1.13",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

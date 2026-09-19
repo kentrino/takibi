@@ -16,11 +16,14 @@ export type HttpHandler<TInitial> = {
 export function createHttpHandler<TInitial>(serve: ServeCall<TInitial>): HttpHandler<TInitial> {
   return {
     async handle(request, options) {
-      if (!matchesPublicPrefix(new URL(request.url).pathname, options.prefix)) {
+      if (
+        typeof options.stripPrefix === "string" &&
+        !matchesPublicPrefix(new URL(request.url).pathname, options.stripPrefix)
+      ) {
         return { matched: false };
       }
       const response = await serve(request, options.context, () =>
-        decodePublicHttp(request, options.prefix),
+        decodePublicHttp(request, options.stripPrefix),
       );
       return { matched: true, response };
     },
