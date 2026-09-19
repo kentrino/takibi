@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/kentrino/takibi/compare/takibi-v0.5.0...takibi-v0.6.0) (2026-09-19)
+
+
+### Features
+
+* **hono-adapter:** substitute route params into the handler prefix ([b58b79c](https://github.com/kentrino/takibi/commit/b58b79c9bf1e048c29013acde3e23c0d8d751e09))
+* **http:** replace prefix handling with stripPrefix and route Hono adapters ([7885617](https://github.com/kentrino/takibi/commit/78856172e3667d41110d0d8c933e01dfacaf0056))
+
+
+### Documentation
+
+* **watch:** clarify lifecycle contracts and record follow-up work ([f69f41c](https://github.com/kentrino/takibi/commit/f69f41c9cf743d0330bf4a9c8f033d6b60c66017))
+
 ## [0.5.0](https://github.com/kentrino/takibi/compare/takibi-v0.4.1...takibi-v0.5.0) (2026-09-17)
 
 

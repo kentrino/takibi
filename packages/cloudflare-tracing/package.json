@@ -1,6 +1,6 @@
 {
   "name": "@takibi/cloudflare-tracing",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Cloudflare Workers native tracing adapter for takibi.",
   "keywords": [
     "cloudflare",

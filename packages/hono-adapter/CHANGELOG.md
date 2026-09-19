@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0](https://github.com/kentrino/takibi/compare/hono-adapter-v0.1.6...hono-adapter-v0.2.0) (2026-09-19)
+
+
+### Features
+
+* **hono-adapter:** substitute route params into the handler prefix ([b58b79c](https://github.com/kentrino/takibi/commit/b58b79c9bf1e048c29013acde3e23c0d8d751e09))
+* **http:** replace prefix handling with stripPrefix and route Hono adapters ([7885617](https://github.com/kentrino/takibi/commit/78856172e3667d41110d0d8c933e01dfacaf0056))
+* **realtime-chat:** migrate example to Hono JSX and Tailwind ([cb33e51](https://github.com/kentrino/takibi/commit/cb33e515433d1db94a95f204ecf6bee1653a96b6))
+
+
+### Bug Fixes
+
+* **hono-adapter:** preserve raw URL encoding when stripping mounted paths ([24ca4b3](https://github.com/kentrino/takibi/commit/24ca4b322a48f81675a41b20528782c9c9c5fda7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * takibi bumped to 0.6.0
+  * peerDependencies
+    * takibi bumped to 0.6.0
+
 ## [0.1.6](https://github.com/kentrino/takibi/compare/hono-adapter-v0.1.5...hono-adapter-v0.1.6) (2026-09-17)
 
 
