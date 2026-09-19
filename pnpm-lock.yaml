@@ -244,6 +244,9 @@ catalogs:
     vite-plus:
       specifier: 0.2.8
       version: 0.2.8
+    wrangler:
+      specifier: ^4.120.0
+      version: 4.123.0
     zod:
       specifier: ^4.4.3
       version: 4.6.1
@@ -305,6 +308,31 @@ importers:
       vite-plus:
         specifier: 'catalog:'
         version: 0.2.8(@arethetypeswrong/core@0.18.5)(@opentelemetry/api@1.9.1)(@types/node@24.13.4)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.8(@arethetypeswrong/core@0.18.5)(@types/node@24.13.4)(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2))(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2)
+
+  examples/realtime-chat:
+    dependencies:
+      takibi:
+        specifier: workspace:^
+        version: link:../../packages/takibi
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.1
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20250803.0
+        version: 4.20260702.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@0.2.8
+        version: '@voidzero-dev/vite-plus-core@0.2.8(@arethetypeswrong/core@0.18.5)(@types/node@24.13.4)(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.8(@arethetypeswrong/core@0.18.5)(@opentelemetry/api@1.9.1)(@types/node@24.13.4)(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.8(@arethetypeswrong/core@0.18.5)(@types/node@24.13.4)(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2))(esbuild@0.28.1)(publint@0.3.24)(typescript@7.0.2)
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.123.0(@cloudflare/workers-types@4.20260702.1)
 
   packages/api:
     dependencies:
