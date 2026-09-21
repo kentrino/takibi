@@ -6,8 +6,11 @@
 # Node onto PATH ahead of the base image's Node, so having a newer Node merely
 # installed is not enough: it stays shadowed. We install a modern Node 22 via
 # nvm (preinstalled on the default image) and expose it through
-# /usr/local/cargo/bin, which precedes the runtime's Node directory on PATH for
-# every kind of shell (login, non-login, interactive, non-interactive).
+# /usr/local/cargo/bin. ~/.local/bin and /usr/local/bin are also on PATH, but
+# both come after the runtime's Node directory, so a symlink there still
+# resolves to the older Node. /usr/local/cargo/bin is the writable directory
+# that precedes it for every shell type. The path is the image's Rust
+# toolchain directory; this script only uses it as that PATH slot.
 #
 # See docs/playbook/cursor-cloud-agent.md for the full rationale.
 set -euo pipefail
