@@ -49,6 +49,12 @@ that directory is world-writable and sits _before_ the runtime's Node directory
 on `PATH` for every shell type, so `node` and `pnpm` resolve to Node 22
 everywhere without depending on shell startup files.
 
+`~/.local/bin` and `/usr/local/bin` are on `PATH` too, and both come _after_
+the runtime Node directory, so a symlink in either one still resolves to the
+older Node. `/usr/local/cargo/bin` is the writable directory that precedes it.
+The path belongs to the image's Rust toolchain; the script only uses it as
+that `PATH` slot.
+
 ## The reference Dockerfile
 
 The repository root [`Dockerfile`](../../Dockerfile) is a **reference**, not the
