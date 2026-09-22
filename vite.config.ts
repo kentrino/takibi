@@ -14,7 +14,6 @@ export default defineConfig({
       "**/CHANGELOG.md",
       "**/worker-configuration.d.ts",
       ".legacy/**",
-      "e2e/consumer-template/**",
       "e2e/.consumer/**",
     ],
   },

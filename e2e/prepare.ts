@@ -7,6 +7,7 @@ export const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 export const e2eRoot = join(repoRoot, "e2e");
 export const tarballDir = join(e2eRoot, ".tarballs");
 export const consumerDir = join(e2eRoot, ".consumer");
+export const consumerTemplateDir = join(e2eRoot, "consumer-template");
 
 export const PUBLIC_PACKAGES = [
   { dir: "packages/takibi", name: "takibi" },
@@ -16,7 +17,21 @@ export const PUBLIC_PACKAGES = [
   { dir: "packages/cloudflare-tracing", name: "@takibi/cloudflare-tracing" },
 ] as const;
 
-const CONSUMER_RUNTIME_PACKAGES = ["takibi", "@takibi/hono-adapter"] as const;
+const CONSUMER_TARBALL_PACKAGES = [
+  ...PUBLIC_PACKAGES,
+  { dir: "examples/issue-tracker", name: "@takibi/issue-tracker" },
+] as const;
+
+const CONSUMER_RUNTIME_PACKAGES = [
+  "takibi",
+  "@takibi/hono-adapter",
+  "@takibi/issue-tracker",
+] as const;
+
+type ConsumerManifest = {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
 
 function run(command: string, args: string[], cwd = repoRoot): string {
   return execFileSync(command, args, {
@@ -40,18 +55,38 @@ export function tarballStem(name: string): string {
 
 export function findTarball(name: string): string {
   const stem = tarballStem(name);
-  const match = readdirSync(tarballDir).find(
-    (file) => file.startsWith(`${stem}-`) && file.endsWith(".tgz"),
-  );
+  const pattern = new RegExp(`^${stem}-\\d.*\\.tgz$`);
+  const match = readdirSync(tarballDir).find((file) => pattern.test(file));
   if (!match) throw new Error(`missing tarball for ${name} in ${tarballDir}`);
   return join(tarballDir, match);
+}
+
+function expandCatalog(deps?: Record<string, string>): void {
+  if (!deps) return;
+  for (const [name, spec] of Object.entries(deps)) {
+    if (spec.startsWith("catalog:")) deps[name] = catalogVersion(name);
+  }
+}
+
+function rewritePackedConsumerManifest(manifest: ConsumerManifest): void {
+  for (const deps of [manifest.dependencies, manifest.devDependencies]) {
+    if (!deps) continue;
+    for (const name of CONSUMER_RUNTIME_PACKAGES) {
+      if (deps[name] !== undefined) deps[name] = `file:${findTarball(name)}`;
+    }
+    expandCatalog(deps);
+    for (const [name, spec] of Object.entries(deps)) {
+      if (spec.startsWith("workspace:")) {
+        throw new Error(`packed consumer left workspace protocol on ${name}`);
+      }
+    }
+  }
 }
 
 export function prepare(): void {
   rmSync(tarballDir, { recursive: true, force: true });
   rmSync(consumerDir, { recursive: true, force: true });
   mkdirSync(tarballDir, { recursive: true });
-  mkdirSync(consumerDir, { recursive: true });
 
   run("pnpm", [
     "--filter",
@@ -64,100 +99,23 @@ export function prepare(): void {
     "@takibi/opentelemetry",
     "--filter",
     "@takibi/cloudflare-tracing",
+    "--filter",
+    "@takibi/issue-tracker",
     "run",
     "build",
   ]);
 
-  for (const pkg of PUBLIC_PACKAGES) {
+  for (const pkg of CONSUMER_TARBALL_PACKAGES) {
     run("pnpm", ["pack", "--pack-destination", tarballDir], join(repoRoot, pkg.dir));
   }
 
-  const takibiManifest = JSON.parse(
-    readFileSync(join(repoRoot, "packages/takibi/package.json"), "utf8"),
-  ) as { devDependencies?: Record<string, string> };
-  const workersTypes = takibiManifest.devDependencies?.["@cloudflare/workers-types"];
-  if (!workersTypes) throw new Error("takibi is missing @cloudflare/workers-types");
+  cpSync(consumerTemplateDir, consumerDir, { recursive: true });
 
-  const tarballs = Object.fromEntries(
-    CONSUMER_RUNTIME_PACKAGES.map((name) => [name, findTarball(name)]),
-  );
-
-  writeFileSync(
-    join(consumerDir, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "takibi-e2e-consumer",
-        private: true,
-        type: "module",
-        dependencies: {
-          takibi: `file:${tarballs.takibi}`,
-          "@takibi/hono-adapter": `file:${tarballs["@takibi/hono-adapter"]}`,
-          hono: catalogVersion("hono"),
-          zod: catalogVersion("zod"),
-        },
-        devDependencies: {
-          "@cloudflare/workers-types": workersTypes,
-          typescript: catalogVersion("typescript"),
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  const manifestPath = join(consumerDir, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ConsumerManifest;
+  rewritePackedConsumerManifest(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(join(consumerDir, ".npmrc"), "ignore-workspace=true\n");
-
-  cpSync(join(e2eRoot, "consumer-template"), consumerDir, { recursive: true });
-  cpSync(join(repoRoot, "examples/issue-tracker/src"), join(consumerDir, "app"), {
-    recursive: true,
-  });
-
-  writeFileSync(
-    join(consumerDir, "tsconfig.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: "esnext",
-          lib: ["es2023"],
-          module: "esnext",
-          moduleResolution: "bundler",
-          allowImportingTsExtensions: true,
-          strict: true,
-          noUnusedLocals: true,
-          noUnusedParameters: true,
-          noEmit: true,
-          verbatimModuleSyntax: true,
-          skipLibCheck: false,
-          types: ["@cloudflare/workers-types"],
-        },
-        include: ["app/handler.ts", "tests/app-types.ts", "tests/published-imports.ts"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(
-    join(consumerDir, "tsconfig.nodenext.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: "esnext",
-          lib: ["es2023"],
-          module: "nodenext",
-          moduleResolution: "nodenext",
-          strict: true,
-          noUnusedLocals: true,
-          noUnusedParameters: true,
-          noEmit: true,
-          verbatimModuleSyntax: true,
-          skipLibCheck: false,
-          types: ["@cloudflare/workers-types"],
-        },
-        include: ["tests/published-imports.ts"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
 
   run("pnpm", ["install", "--ignore-workspace", "--no-frozen-lockfile"], consumerDir);
 }
