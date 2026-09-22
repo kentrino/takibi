@@ -17,7 +17,7 @@ import {
   TENANT_ID,
   type BenchmarkContext,
   type TaskInput,
-} from "~/handler.ts";
+} from "./handler.ts";
 
 export const FULL_PATH_OPERATIONS = {
   directGets: 2,

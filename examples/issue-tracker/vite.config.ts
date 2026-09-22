@@ -12,10 +12,29 @@ export default defineConfig({
       entry: {
         index: "src/index.ts",
       },
-      dts: false,
+      dts: {
+        tsgo: true,
+        tsconfig: "tsconfig.pack.json",
+      },
+      deps: {
+        neverBundle: [/^takibi(?:\/|$)/, /^@takibi\//, /^hono(?:\/|$)/, "zod"],
+        onlyImport: [/^takibi(?:\/|$)/, /^@takibi\//, /^hono(?:\/|$)/, "zod"],
+        onlyBundle: false,
+        dts: {
+          neverBundle: [/^takibi(?:\/|$)/, /^@takibi\//, /^hono(?:\/|$)/, "zod"],
+        },
+      },
       exports: {
         devExports: true,
         customExports(exports) {
+          for (const [key, value] of Object.entries(exports)) {
+            if (typeof value === "string" && value.endsWith(".mjs")) {
+              exports[key] = {
+                types: value.replace(/\.mjs$/, ".d.mts"),
+                import: value,
+              };
+            }
+          }
           return exports;
         },
       },
