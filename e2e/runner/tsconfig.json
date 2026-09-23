@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["prepare.ts", "lint-packed.ts", "package-contract.test.ts", "run.ts"]
+  "include": ["scripts", "tests"]
 }
