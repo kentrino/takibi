@@ -1,0 +1,21 @@
+{
+  "name": "takibi-e2e-consumer",
+  "private": true,
+  "description": "External consumer fixture. Workspace deps locally; packed e2e rewrites takibi and the example to tarballs.",
+  "type": "module",
+  "dependencies": {
+    "@takibi/hono-adapter": "workspace:^",
+    "@takibi/issue-tracker": "workspace:^",
+    "hono": "catalog:",
+    "takibi": "workspace:^",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250803.0",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
