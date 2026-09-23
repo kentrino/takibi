@@ -12,6 +12,7 @@ export type {
   HandleOptions,
   HandleResult,
 } from "./context/types";
+export type { ActionDefinition, ActionDefinitions, ScopedActions } from "./action";
 export { createPrettyConsoleLogger } from "./logging";
 export type {
   Logger,
