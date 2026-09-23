@@ -23,7 +23,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "test": "vp pack && node --test --test-timeout=30000 dist/*.test.mjs",
+    "test": "vp pack && ISSUE_TRACKER_PACK=tests vp pack && node --test --test-timeout=30000 dist/*.test.mjs",
     "check": "vp check"
   },
   "dependencies": {
@@ -42,10 +42,6 @@
     "node": ">=22.18.0"
   },
   "inlinedDependencies": {
-    "@noble/hashes": "2.4.0",
-    "@standard-schema/spec": "1.1.0",
-    "hono": "4.13.7",
-    "tatenuki": "0.2.0",
-    "zod": "4.6.1"
+    "@standard-schema/spec": "1.1.0"
   }
 }
