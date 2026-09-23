@@ -17,11 +17,11 @@ export default defineConfig({
         tsconfig: "tsconfig.pack.json",
       },
       deps: {
-        neverBundle: [/^takibi(?:\/|$)/, /^@takibi\//, /^hono(?:\/|$)/, "zod"],
-        onlyImport: [/^takibi(?:\/|$)/, /^@takibi\//, /^hono(?:\/|$)/, "zod"],
+        neverBundle: [/^takibi(?:\/|$)/, /^@takibi\/hono-adapter(?:\/|$)/, /^hono(?:\/|$)/, "zod"],
+        onlyImport: [/^takibi(?:\/|$)/, /^@takibi\/hono-adapter(?:\/|$)/, /^hono(?:\/|$)/, "zod"],
         onlyBundle: false,
         dts: {
-          neverBundle: [/^takibi(?:\/|$)/, /^@takibi\//, /^hono(?:\/|$)/, "zod"],
+          neverBundle: [/^takibi(?:\/|$)/, /^@takibi\/hono-adapter(?:\/|$)/, /^hono(?:\/|$)/, "zod"],
         },
       },
       exports: {
