@@ -1,7 +1,7 @@
 # Reference multi-stage build for the Takibi monorepo.
 #
 # IMPORTANT: Cursor Cloud Agents do NOT build from this file. They use the
-# default base image plus .cursor/install.sh (see
+# dedicated .cursor/Dockerfile (see
 # docs/playbook/cursor-cloud-agent.md). This Dockerfile is a reference that
 # documents the exact toolchain and lets anyone build and test the workspace in
 # a clean, reproducible container.

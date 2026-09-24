@@ -1,4 +1,6 @@
 {
-  "name": "Takibi",
-  "install": "bash .cursor/install.sh"
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "pnpm install --frozen-lockfile"
 }
