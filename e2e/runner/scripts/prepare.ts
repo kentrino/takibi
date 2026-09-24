@@ -3,11 +3,12 @@ import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } f
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+export const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 export const e2eRoot = join(repoRoot, "e2e");
+export const runnerRoot = join(e2eRoot, "runner");
 export const tarballDir = join(e2eRoot, ".tarballs");
 export const consumerDir = join(e2eRoot, ".consumer");
-export const consumerTemplateDir = join(e2eRoot, "consumer-template");
+export const consumerTemplateDir = join(e2eRoot, "consumer");
 
 export const PUBLIC_PACKAGES = [
   { dir: "packages/takibi", name: "takibi" },

@@ -7,7 +7,7 @@
   "scripts": {
     "check": "vp check",
     "ready": "vp run check && vp run -r test && vp run -r build",
-    "test:e2e": "node e2e/run.ts",
+    "test:e2e": "pnpm --filter takibi-e2e test:e2e",
     "prepare": "vp config"
   },
   "devDependencies": {

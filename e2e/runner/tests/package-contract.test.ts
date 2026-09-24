@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findTarball, PUBLIC_PACKAGES, repoRoot, tarballDir, tarballStem } from "./prepare.ts";
+import {
+  findTarball,
+  PUBLIC_PACKAGES,
+  repoRoot,
+  tarballDir,
+  tarballStem,
+} from "../scripts/prepare.ts";
 
 // Generic packaging and type-resolution checks are delegated to publint
 // (lint-packed.ts) and attw (run.ts). This file only pins the Takibi-specific
