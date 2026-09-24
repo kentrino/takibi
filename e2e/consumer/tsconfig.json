@@ -10,7 +10,7 @@
     "noEmit": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": ["@cloudflare/workers-types"]
+    "types": ["node", "@cloudflare/workers-types"]
   },
-  "include": ["tests/app-types.ts", "tests/published-imports.ts"]
+  "include": ["tests/app-types.ts", "tests/published-imports.ts", "tests/sdk.test.ts"]
 }
