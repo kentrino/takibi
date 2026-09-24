@@ -2,7 +2,7 @@
   "name": "@takibi/issue-tracker",
   "version": "0.0.0",
   "private": true,
-  "description": "Example issue-tracker app used by benchmarks, packed-package e2e, and the app-image full-path test.",
+  "description": "Example issue-tracker app used by benchmarks, packed-package e2e, and the containerized full-path scenario.",
   "files": [
     "dist"
   ],
@@ -22,8 +22,9 @@
   },
   "scripts": {
     "build": "node scripts/pack.ts",
+    "build:test": "ISSUE_TRACKER_PACK=tests vp pack",
     "dev": "vp pack --watch",
-    "test": "node scripts/pack.ts && ISSUE_TRACKER_PACK=tests vp pack && node --test --test-timeout=30000 dist/*.test.mjs",
+    "test": "pnpm run build && pnpm run build:test && node --test --test-timeout=30000 dist/*.test.mjs",
     "check": "vp check"
   },
   "dependencies": {

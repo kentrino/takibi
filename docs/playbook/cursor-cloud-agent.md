@@ -67,15 +67,15 @@ It is multi-stage:
 
 - `test` — installs dependencies and runs the full CI pipeline (`pnpm ready` +
   `pnpm test:e2e`). `docker build --target test .` fails if any check fails.
-- `app` — packed issue-tracker `node:test` files on a clean Node runtime.
+- `scenario` — packed issue-tracker `node:test` file on a clean Node runtime.
   `vp pack` inlines `takibi`, `hono`, and `zod` into each test bundle; the
   default command is `node --test`. The scenario is the same one bench and
   packed-package e2e use.
 
 ```sh
 docker build --target test -t takibi-test .
-docker build --target app  -t takibi-app  .
-docker run --rm takibi-app
+docker build --target scenario -t takibi-scenario .
+docker run --rm takibi-scenario
 ```
 
 Note the Dockerfile installs `git` and pins Node via a `node:22.x` base image,
