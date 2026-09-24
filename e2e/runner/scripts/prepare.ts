@@ -89,6 +89,11 @@ export function prepare(): void {
   rmSync(consumerDir, { recursive: true, force: true });
   mkdirSync(tarballDir, { recursive: true });
 
+  const sourceManifests = CONSUMER_TARBALL_PACKAGES.map((pkg) => {
+    const path = join(repoRoot, pkg.dir, "package.json");
+    return { path, contents: readFileSync(path, "utf8") };
+  });
+
   run("pnpm", [
     "--filter",
     "takibi",
@@ -105,6 +110,12 @@ export function prepare(): void {
     "run",
     "build",
   ]);
+
+  for (const { path, contents } of sourceManifests) {
+    if (readFileSync(path, "utf8") !== contents) {
+      throw new Error(`build modified source manifest: ${path}`);
+    }
+  }
 
   for (const pkg of CONSUMER_TARBALL_PACKAGES) {
     run("pnpm", ["pack", "--pack-destination", tarballDir], join(repoRoot, pkg.dir));
