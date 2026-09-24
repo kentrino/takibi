@@ -12,7 +12,7 @@ export type {
   HandleOptions,
   HandleResult,
 } from "./context/types";
-export type { ActionDefinition, ActionDefinitions, ScopedActions } from "./action";
+export type { ActionDefinition, ScopedActions } from "./action";
 export { createPrettyConsoleLogger } from "./logging";
 export type {
   Logger,
@@ -33,17 +33,7 @@ export {
   UnauthorizedError,
 } from "@takibi/api";
 
-export {
-  and,
-  constrainedPolicyBrand,
-  contextPolicyBrand,
-  fullAccess,
-  grant,
-  none,
-  or,
-  read,
-  write,
-} from "./policy";
+export { and, fullAccess, grant, none, or, read, write } from "./policy";
 export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc } from "./policy";
 export { listWhere, queryImpliesEquality } from "./query";
 
@@ -53,8 +43,6 @@ export type {
   AccessGrant,
   AccessPolicy,
   AccessPolicyFn,
-  PolicyReasonCodeCarrier,
-  PolicyReasonCodeOf,
   ClientCollectionApi,
   CollectionDataInput,
   CollectionApi,
