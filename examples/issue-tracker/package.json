@@ -40,8 +40,5 @@
   },
   "engines": {
     "node": ">=22.18.0"
-  },
-  "inlinedDependencies": {
-    "@standard-schema/spec": "1.1.0"
   }
 }
