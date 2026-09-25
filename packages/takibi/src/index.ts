@@ -33,7 +33,18 @@ export {
   UnauthorizedError,
 } from "@takibi/api";
 
-export { and, fullAccess, grant, none, or, read, write } from "./policy";
+export {
+  and,
+  constrainedPolicyBrand,
+  contextPolicyBrand,
+  fullAccess,
+  grant,
+  none,
+  or,
+  read,
+  write,
+} from "./policy";
+export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc } from "./policy";
 export { listWhere, queryImpliesEquality } from "./query";
 
 export type {
@@ -42,6 +53,8 @@ export type {
   AccessGrant,
   AccessPolicy,
   AccessPolicyFn,
+  PolicyReasonCodeCarrier,
+  PolicyReasonCodeOf,
   ClientCollectionApi,
   CollectionDataInput,
   CollectionApi,

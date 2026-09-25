@@ -21,9 +21,9 @@
     }
   },
   "scripts": {
-    "build": "vp pack",
+    "build": "node scripts/pack.ts",
     "dev": "vp pack --watch",
-    "test": "vp pack && ISSUE_TRACKER_PACK=tests vp pack && node --test --test-timeout=30000 dist/*.test.mjs",
+    "test": "node scripts/pack.ts && ISSUE_TRACKER_PACK=tests vp pack && node --test --test-timeout=30000 dist/*.test.mjs",
     "check": "vp check"
   },
   "dependencies": {
