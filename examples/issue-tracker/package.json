@@ -2,14 +2,29 @@
   "name": "@takibi/issue-tracker",
   "version": "0.0.0",
   "private": true,
-  "description": "Example issue-tracker app used by benchmarks and packed-package e2e.",
+  "description": "Example issue-tracker app used by benchmarks, packed-package e2e, and the containerized full-path scenario.",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    }
+  },
   "scripts": {
-    "test": "vp test",
+    "build": "node scripts/pack.ts",
+    "build:test": "ISSUE_TRACKER_PACK=tests vp pack",
+    "dev": "vp pack --watch",
+    "test": "pnpm run build && pnpm run build:test && node --test --test-timeout=30000 dist/*.test.mjs",
     "check": "vp check"
   },
   "dependencies": {

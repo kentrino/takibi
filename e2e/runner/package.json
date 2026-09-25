@@ -1,0 +1,18 @@
+{
+  "name": "takibi-e2e",
+  "private": true,
+  "description": "Packed-package e2e runner. Builds tarballs and exercises the isolated consumer fixture.",
+  "type": "module",
+  "scripts": {
+    "test:e2e": "node scripts/run.ts"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
+    "@types/node": "catalog:",
+    "publint": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

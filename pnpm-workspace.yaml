@@ -1,6 +1,8 @@
 packages:
   - packages/*
   - examples/*
+  - e2e/runner
+  - e2e/consumer
 
 catalogMode: prefer
 
