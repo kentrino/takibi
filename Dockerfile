@@ -11,12 +11,12 @@
 #
 # Targets:
 #   test  - runs the full CI pipeline (type-check, tests, build, packed e2e)
-#   app   - packed issue-tracker tests on a clean Node runtime
+#   scenario - packed issue-tracker test on a clean Node runtime
 #
 # Examples:
 #   docker build --target test -t takibi-test .   # fails if any check fails
-#   docker build --target app  -t takibi-app  .
-#   docker run --rm takibi-app
+#   docker build --target scenario -t takibi-scenario .
+#   docker run --rm takibi-scenario
 
 # Pin a Node 22 that satisfies the >= 22.18.0 requirement.
 ARG NODE_IMAGE=node:22.23.2-bookworm-slim
@@ -46,12 +46,13 @@ RUN pnpm test:e2e
 # --- Build: compile dist/ for every workspace package ---------------------
 FROM deps AS build
 RUN pnpm -r build
+RUN pnpm --filter @takibi/issue-tracker run build:test
 
-# --- App image: packed node:test files on a clean Node runtime ------------
+# --- Scenario image: packed node:test file on a clean Node runtime --------
 # Each issue-tracker test is a tsdown bundle with takibi, hono, and zod
 # inlined. The default command is `node --test` — the same full-path
 # scenario bench and e2e use.
-FROM ${NODE_IMAGE} AS app
+FROM ${NODE_IMAGE} AS scenario
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/examples/issue-tracker/dist ./
