@@ -1,76 +1,64 @@
 # Cursor Cloud Agent environment
 
-This repository ships a committed Cursor Cloud Agent environment so background
-agents can install, type-check, test, and build Takibi the same way CI does.
-The configuration lives in [`.cursor/environment.json`](../../.cursor/environment.json)
-and [`.cursor/install.sh`](../../.cursor/install.sh).
+This repository defines its Cursor Cloud Agent environment in
+[`.cursor/environment.json`](../../.cursor/environment.json) and
+[`.cursor/Dockerfile`](../../.cursor/Dockerfile).
 
-Because the config is committed, it is versioned with the code, follows
-branches and pull requests, and takes precedence over any dashboard-managed
-environment. There is nothing to click to "save"; updating these files updates
-the environment.
+Cursor resolves a repository environment before personal and team defaults.
+Builds use the configuration from the default branch. When a feature branch
+changes dependencies, its agent can rerun the committed install command.
 
-## What the environment does
+## Environment contents
 
-On checkout the Cloud Agent runs `bash .cursor/install.sh`, which:
+The dedicated Cloud Agent image:
 
-1. Selects a modern **Node 22** (`nvm install 22` + `nvm alias default 22`).
-2. Enables Corepack so `pnpm` matches `packageManager` in `package.json`.
-3. Symlinks `node`/`pnpm`/`npm`/`npx`/`corepack` into `/usr/local/cargo/bin`.
-4. Runs `pnpm install --frozen-lockfile`.
+1. Pins Node to `22.23.2`, satisfying the repository's `>=22.18.0` requirement.
+2. Installs Git and CA certificates.
+3. Enables Corepack.
 
-No long-running service is needed — Takibi is a library monorepo, so there is
-no `start` command. Verify a working environment with the same commands as CI:
+After checking out the repository, Cursor runs the idempotent install command
+from `environment.json`:
 
 ```sh
-pnpm ready      # vp check + recursive test + recursive build
-pnpm test:e2e   # packs the public packages and exercises a consumer
+pnpm install --frozen-lockfile
 ```
 
-## Why Node 22.18+ is required (and why it is not automatic)
+No startup command is needed because Takibi is a library monorepo. Verify an
+agent environment with the same commands used locally:
+
+```sh
+pnpm ready
+pnpm test:e2e
+```
+
+## Why Node 22.18+ is required
 
 Takibi's storage tests use `node:sqlite`'s `StatementSync.columns()`, which was
-added in **Node 22.18.0**. On older Node this fails with:
+added in Node 22.18.0. Older versions fail with:
 
-```
+```text
 TypeError: statement.columns is not a function
 ```
 
-The subtle part: the Cloud Agent runtime injects its own Node binary onto
-`PATH` _ahead_ of the base image's Node. On the image we build from, that
-runtime Node is older than 22.18.0. Simply installing a newer Node via `nvm`
-is **not** enough, because the runtime's Node still wins name resolution —
-including in the non-login, non-interactive shells the agent uses to run
-commands, which never source `~/.bashrc` or `~/.profile`.
+The Cloud Agent image pins a complete toolchain instead of changing global
+`PATH` entries at install time. This keeps setup reproducible and avoids
+depending on implementation details of Cursor's default image.
 
-`.cursor/install.sh` fixes this deterministically by placing symlinks to the
-Node 22 toolchain in `/usr/local/cargo/bin`. On the default Cursor base image
-that directory is world-writable and sits _before_ the runtime's Node directory
-on `PATH` for every shell type, so `node` and `pnpm` resolve to Node 22
-everywhere without depending on shell startup files.
+## Why there are two Dockerfiles
 
-`~/.local/bin` and `/usr/local/bin` are on `PATH` too, and both come _after_
-the runtime Node directory, so a symlink in either one still resolves to the
-older Node. `/usr/local/cargo/bin` is the writable directory that precedes it.
-The path belongs to the image's Rust toolchain; the script only uses it as
-that `PATH` slot.
+The Dockerfiles have different responsibilities:
 
-## The reference Dockerfile
+- [`.cursor/Dockerfile`](../../.cursor/Dockerfile) defines the reusable Cloud
+  Agent base image. It installs tools only; Cursor manages the checkout and
+  runs the install command.
+- [`Dockerfile`](../../Dockerfile) is the repository's standalone verification
+  image. It copies the checkout and provides `test` and `scenario` targets.
 
-The repository root [`Dockerfile`](../../Dockerfile) is a **reference**, not the
-image Cloud Agents boot from. Its job is to document the exact toolchain in one
-obvious place so humans (and agents) don't have to rediscover it, and to let
-anyone build and test the workspace in a clean, reproducible container. It is
-intentionally not wired into `.cursor/environment.json`.
+The standalone targets are:
 
-It is multi-stage:
-
-- `test` — installs dependencies and runs the full CI pipeline (`pnpm ready` +
-  `pnpm test:e2e`). `docker build --target test .` fails if any check fails.
-- `scenario` — packed issue-tracker `node:test` file on a clean Node runtime.
-  `vp pack` inlines `takibi`, `hono`, and `zod` into each test bundle; the
-  default command is `node --test`. The scenario is the same one bench and
-  packed-package e2e use.
+- `test` runs `pnpm ready` and the packed-package E2E suite.
+- `scenario` runs the packed issue-tracker `node:test` bundle on a clean Node
+  runtime.
 
 ```sh
 docker build --target test -t takibi-test .
@@ -78,25 +66,8 @@ docker build --target scenario -t takibi-scenario .
 docker run --rm takibi-scenario
 ```
 
-Note the Dockerfile installs `git` and pins Node via a `node:22.x` base image,
-so it does not depend on the Cloud Agent runtime or the `/usr/local/cargo/bin`
-trick above — it stands on its own.
-
-## Why not build the Cloud Agent from the Dockerfile?
-
-A custom image for the Cloud Agent does **not** remove the Node-shadowing issue:
-the runtime still injects its own Node ahead of whatever the image provides, so
-you would need the same "put our Node ahead on PATH" trick anyway. A custom
-image also gives up conveniences preinstalled on the default image (nvm, the
-Rust toolchain, a browser for computer-use testing, the VNC desktop), and the
-`/usr/local/cargo/bin` directory we rely on may not exist there. So the Cloud
-Agent keeps using the default image plus `install.sh`, and the Dockerfile stays
-a reference for local/CI use.
-
 ## Updating the environment
 
-- Change install behavior in `.cursor/install.sh`; keep it idempotent.
-- Keep `pnpm` pinned via `packageManager` in `package.json`; Corepack honors it.
-- If the base image ever ships Node ≥ 22.18.0 by default as the resolved
-  `node`, the `/usr/local/cargo/bin` symlinks become redundant but remain
-  harmless.
+- Pin a new Node patch version in both Dockerfiles.
+- Keep `pnpm` pinned through `packageManager` in the root `package.json`.
+- Keep the install command idempotent and free of long-running processes.
