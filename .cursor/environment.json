@@ -1,6 +1,3 @@
 {
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
-  "install": "pnpm install --frozen-lockfile"
+  "install": "bash .cursor/install.sh"
 }
