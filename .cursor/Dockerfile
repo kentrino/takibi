@@ -5,6 +5,6 @@ ENV CI=1
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git \
+    && apt-get install -y --no-install-recommends ca-certificates git sudo \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable

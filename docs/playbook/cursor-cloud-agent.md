@@ -1,35 +1,27 @@
 # Cursor Cloud Agent environment
 
 This repository defines its Cursor Cloud Agent environment in
-[`.cursor/environment.json`](../../.cursor/environment.json).
+[`.cursor/environment.json`](../../.cursor/environment.json) and
+[`.cursor/Dockerfile`](../../.cursor/Dockerfile).
 
 Cursor resolves a repository environment before personal and team defaults.
+Builds use the configuration from the default branch. When a feature branch
+changes dependencies, its agent can rerun the committed install command.
 
 ## Environment contents
 
-Cloud Agents currently start from Cursor's default image when no finished
-environment Build is available. That default image injects an older Node onto
-`PATH` ahead of any image-provided Node, so pinning Node only in a Dockerfile
-is not enough for agent shells.
+The dedicated Cloud Agent image:
 
-The committed install script [`.cursor/install.sh`](../../.cursor/install.sh):
+1. Pins Node to `22.23.2`, satisfying the repository's `>=22.18.0` requirement.
+2. Installs Git and CA certificates.
+3. Enables Corepack.
 
-1. Installs Node 22 via `nvm` (already present on the default image).
-2. Exposes `node` / `pnpm` through `/usr/local/cargo/bin`, the writable `PATH`
-   slot that precedes the runtime-injected Node.
-3. Runs `pnpm install --frozen-lockfile`.
-
-`.cursor/environment.json` runs that script:
+After checking out the repository, Cursor runs the idempotent install command
+from `environment.json`:
 
 ```sh
-bash .cursor/install.sh
+pnpm install --frozen-lockfile
 ```
-
-[`.cursor/Dockerfile`](../../.cursor/Dockerfile) remains available for a future
-environment Build that pins `node:22.23.2-bookworm-slim`. Do not add
-`build.dockerfile` to `environment.json` until Builds are enabled and a
-finished Build exists; with `build.dockerfile` and `no_finished_builds`, Cursor
-falls back to the default image and skips the install script entirely.
 
 No startup command is needed because Takibi is a library monorepo. Verify an
 agent environment with the same commands used locally:
@@ -48,13 +40,17 @@ added in Node 22.18.0. Older versions fail with:
 TypeError: statement.columns is not a function
 ```
 
+The Cloud Agent image pins a complete toolchain instead of changing global
+`PATH` entries at install time. This keeps setup reproducible and avoids
+depending on implementation details of Cursor's default image.
+
 ## Why there are two Dockerfiles
 
 The Dockerfiles have different responsibilities:
 
-- [`.cursor/Dockerfile`](../../.cursor/Dockerfile) is the candidate Cloud Agent
-  base image for environment Builds. It installs tools only; Cursor manages the
-  checkout and runs the install command.
+- [`.cursor/Dockerfile`](../../.cursor/Dockerfile) defines the reusable Cloud
+  Agent base image. It installs tools only; Cursor manages the checkout and
+  runs the install command.
 - [`Dockerfile`](../../Dockerfile) is the repository's standalone verification
   image. It copies the checkout and provides `test` and `scenario` targets.
 
@@ -72,11 +68,6 @@ docker run --rm takibi-scenario
 
 ## Updating the environment
 
-- Keep the `cargo/bin` PATH override in `.cursor/install.sh` until a finished
-  environment Build is proven to expose Node `>=22.18.0` as the default `node`
-  in agent shells.
+- Pin a new Node patch version in both Dockerfiles.
 - Keep `pnpm` pinned through `packageManager` in the root `package.json`.
 - Keep the install command idempotent and free of long-running processes.
-- When enabling Builds, validate a draft Build, confirm `node -v` on a fresh
-  agent, then optionally switch `environment.json` to `build.dockerfile` plus a
-  short `install` such as `pnpm install --frozen-lockfile`.
