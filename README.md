@@ -46,7 +46,9 @@ pnpm install
 pnpm ready
 ```
 
-`pnpm ready` type-checks, tests, and builds every workspace package.
+`pnpm ready` type-checks, tests, and builds every workspace package. Node
+`>=22.18.0` is required because the storage tests use
+`node:sqlite`'s `StatementSync.columns()`.
 
 Publishing uses Release Please and npm trusted publishing. See
 `docs/playbook/` for GitHub App access, trusted publishers, and first
