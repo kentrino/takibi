@@ -1,5 +1,5 @@
+import { createIssueTrackerHandler } from "@takibi/issue-tracker";
 import { createClient } from "takibi/client";
-import { createIssueTrackerHandler } from "../app/handler.ts";
 
 const handler = createIssueTrackerHandler();
 export const client = createClient<typeof handler>("https://takibi.example");

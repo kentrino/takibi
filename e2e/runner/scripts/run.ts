@@ -1,13 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import {
-  consumerDir,
-  e2eRoot,
-  findTarball,
-  prepare,
-  PUBLIC_PACKAGES,
-  repoRoot,
-} from "./prepare.ts";
+import { consumerDir, findTarball, prepare, PUBLIC_PACKAGES, runnerRoot } from "./prepare.ts";
 
 function fail(label: string, status: number | null, signal: NodeJS.Signals | null): never {
   const reason = signal === null ? `exit ${String(status)}` : `signal ${signal}`;
@@ -34,7 +27,7 @@ function runAttw(tarball: string): void {
   const result = spawnSync(
     "pnpm",
     ["exec", "attw", tarball, "--profile", "esm-only", "--no-definitely-typed"],
-    { cwd: repoRoot, stdio: "inherit" },
+    { cwd: runnerRoot, stdio: "inherit" },
   );
   if (result.status !== 0) fail(`attw ${tarball}`, result.status, result.signal);
 }
@@ -49,9 +42,9 @@ function runTsc(config: string): void {
 }
 
 prepare();
-runNode(join(e2eRoot, "lint-packed.ts"), e2eRoot);
+runNode(join(import.meta.dirname, "lint-packed.ts"), runnerRoot);
 for (const pkg of PUBLIC_PACKAGES) runAttw(findTarball(pkg.name));
-runNodeTest(join(e2eRoot, "package-contract.test.ts"), e2eRoot);
+runNodeTest(join(runnerRoot, "tests/package-contract.test.ts"), runnerRoot);
 runNodeTest(join(consumerDir, "tests/sdk.test.ts"), consumerDir);
 runTsc("tsconfig.json");
 runTsc("tsconfig.nodenext.json");

@@ -5,10 +5,9 @@ import {
   FULL_PATH_FIXTURE,
   FULL_PATH_OPERATIONS,
   runFullPathScenario,
-} from "../app/index.ts";
+} from "@takibi/issue-tracker";
 
-
-test("packed takibi runs the issue-tracker scenario", { timeout: 30_000 }, async () => {
+test("takibi runs the issue-tracker scenario", { timeout: 30_000 }, async () => {
   assert.deepEqual(FULL_PATH_FIXTURE.counts, {
     members: 12,
     projects: 4,
