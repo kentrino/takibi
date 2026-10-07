@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0](https://github.com/kentrino/takibi/compare/takibi-v0.7.1...takibi-v0.8.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **testing:** An unannotated replacement resolver no longer receives the production input type. Its `context` is now `Record<never, never>`, so code such as `resolve: ({ context }) => ({ tenantId: context.env.tenant })` fails to type-check. Annotate the resolver input, for example `({ context }: { request: Request; context: { env: { tenant: string } } })`, and pass that context to `handle`.
+
+### Features
+
+* **testing:** infer SQLite test resolver input context ([2caca31](https://github.com/kentrino/takibi/commit/2caca31b374dfe74cb25df0b5f20a6e699b6b39d))
+
 ## [0.7.1](https://github.com/kentrino/takibi/compare/takibi-v0.7.0...takibi-v0.7.1) (2026-10-07)
 
 
