@@ -39,7 +39,7 @@ export default defineConfig({
           deps: {
             neverBundle: publishedExternals,
             onlyImport: publishedExternals,
-            onlyBundle: false,
+            onlyBundle: [],
             dts: {
               neverBundle: publishedExternals,
             },

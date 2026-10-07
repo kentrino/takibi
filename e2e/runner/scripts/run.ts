@@ -47,5 +47,6 @@ for (const pkg of PUBLIC_PACKAGES) runAttw(findTarball(pkg.name));
 runNodeTest(join(runnerRoot, "tests/package-contract.test.ts"), runnerRoot);
 runNodeTest(join(consumerDir, "tests/sdk.test.ts"), consumerDir);
 runTsc("tsconfig.json");
+runTsc("tsconfig.node.json");
 runTsc("tsconfig.nodenext.json");
 console.log("e2e: packed consumer scenarios passed");

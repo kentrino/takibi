@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -69,11 +69,14 @@ function expandCatalog(deps?: Record<string, string>): void {
   }
 }
 
-function rewritePackedConsumerManifest(manifest: ConsumerManifest): void {
+function rewritePackedConsumerManifest(
+  manifest: ConsumerManifest,
+  tarballs: Record<string, string>,
+): void {
   for (const deps of [manifest.dependencies, manifest.devDependencies]) {
     if (!deps) continue;
-    for (const name of CONSUMER_RUNTIME_PACKAGES) {
-      if (deps[name] !== undefined) deps[name] = `file:${findTarball(name)}`;
+    for (const [name, spec] of Object.entries(tarballs)) {
+      if (deps[name] !== undefined) deps[name] = spec;
     }
     expandCatalog(deps);
     for (const [name, spec] of Object.entries(deps)) {
@@ -121,13 +124,40 @@ export function prepare(): void {
     run("pnpm", ["pack", "--pack-destination", tarballDir], join(repoRoot, pkg.dir));
   }
 
-  cpSync(consumerTemplateDir, consumerDir, { recursive: true });
+  cpSync(consumerTemplateDir, consumerDir, {
+    recursive: true,
+    filter: (source) => basename(source) !== "node_modules",
+  });
 
   const manifestPath = join(consumerDir, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ConsumerManifest;
-  rewritePackedConsumerManifest(manifest);
+  const tarballs = Object.fromEntries(
+    CONSUMER_RUNTIME_PACKAGES.map((name) => [name, `file:${findTarball(name)}`]),
+  );
+  rewritePackedConsumerManifest(manifest, tarballs);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  writeFileSync(join(consumerDir, ".npmrc"), "ignore-workspace=true\n");
+  // A workspace root of its own detaches the consumer from the repo workspace.
+  // Packed packages depend on each other by semver range, so the overrides keep
+  // those nested ranges on the tarballs instead of the registry.
+  writeFileSync(
+    join(consumerDir, "pnpm-workspace.yaml"),
+    `${JSON.stringify({ packages: ["."], overrides: tarballs }, null, 2)}\n`,
+  );
 
-  run("pnpm", ["install", "--ignore-workspace", "--no-frozen-lockfile"], consumerDir);
+  run("pnpm", ["install", "--no-frozen-lockfile"], consumerDir);
+  assertOnlyPackedRuntimePackages();
+}
+
+function assertOnlyPackedRuntimePackages(): void {
+  const installed = readdirSync(join(consumerDir, "node_modules/.pnpm"));
+  for (const name of CONSUMER_RUNTIME_PACKAGES) {
+    const prefix = `${name.replace("/", "+")}@`;
+    const copies = installed.filter((dir) => dir.startsWith(prefix));
+    const unpacked = copies.filter((dir) => !dir.startsWith(`${prefix}file+`));
+    if (copies.length === 0 || unpacked.length > 0) {
+      throw new Error(
+        `packed consumer resolved ${name} outside the tarballs: ${copies.join(", ")}`,
+      );
+    }
+  }
 }
