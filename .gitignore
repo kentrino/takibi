@@ -52,3 +52,6 @@ packages/**/src/**/*.d.ts
 # Isolated packed-package consumer
 e2e/.consumer
 e2e/.tarballs
+
+# Personal editor MCP config
+.cursor/mcp.json
