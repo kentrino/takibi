@@ -39,9 +39,8 @@ function mustOk<T>(result: TakibiResult<T>, label: string): T {
 }
 
 function mustFail<T>(result: TakibiResult<T>, code: string, label: string): void {
-  assert.equal(result.ok, false, `${label} unexpectedly succeeded`);
-  if (result.ok) return;
-  assert.equal(result.error.code, code, `${label} returned ${result.error.code}, expected ${code}`);
+  if (result.ok) assert.fail(`${label} unexpectedly succeeded`);
+  assert.equal(result.error.code, code, label);
 }
 
 function failureReasonCode<T>(result: TakibiResult<T>): string {
