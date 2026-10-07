@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.8](https://github.com/kentrino/takibi/compare/better-auth-adapter-v0.1.7...better-auth-adapter-v0.1.8) (2026-10-07)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * takibi bumped to 0.7.1
+  * peerDependencies
+    * takibi bumped to 0.7.1
+
 ## [0.1.7](https://github.com/kentrino/takibi/compare/better-auth-adapter-v0.1.6...better-auth-adapter-v0.1.7) (2026-10-07)
 
 
