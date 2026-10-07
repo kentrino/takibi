@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.7](https://github.com/kentrino/takibi/compare/opentelemetry-v0.2.6...opentelemetry-v0.2.7) (2026-10-07)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * takibi bumped to 0.7.1
+  * peerDependencies
+    * takibi bumped to 0.7.1
+
 ## [0.2.6](https://github.com/kentrino/takibi/compare/opentelemetry-v0.2.5...opentelemetry-v0.2.6) (2026-10-07)
 
 
