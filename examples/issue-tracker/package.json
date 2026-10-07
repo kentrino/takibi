@@ -24,7 +24,7 @@
     "build": "vp pack",
     "build:test": "ISSUE_TRACKER_PACK=tests vp pack",
     "dev": "vp pack --watch",
-    "test": "pnpm run build && pnpm run build:test && node --test --test-timeout=30000 dist/*.test.mjs",
+    "test": "pnpm run build:test && node --test --test-timeout=30000 dist-test/*.test.mjs",
     "check": "vp check"
   },
   "dependencies": {

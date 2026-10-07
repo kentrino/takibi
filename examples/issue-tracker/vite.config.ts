@@ -20,8 +20,8 @@ export default defineConfig({
           entry: {
             "*": "tests/*.test.ts",
           },
+          outDir: "dist-test",
           dts: false,
-          clean: false,
           deps: {
             alwaysBundle: [/^@takibi\//, /^takibi(?:\/|$)/, /^hono(?:\/|$)/, "zod"],
             onlyBundle: false,

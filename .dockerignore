@@ -1,6 +1,7 @@
 .git
 **/node_modules
 **/dist
+**/dist-test
 **/dist-ssr
 .pnpm-store
 **/*.tgz

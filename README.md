@@ -50,7 +50,7 @@ pnpm ready
 
 The [`Dockerfile`](./Dockerfile) builds and tests the workspace in a clean
 container. Its `test` target runs `pnpm ready` and the packed-package E2E
-suite; its `scenario` target runs the packed issue-tracker `node:test` bundle
+suite; its `scenario` target runs the bundled issue-tracker `node:test` file
 on a clean Node runtime. Cursor Cloud Agents use `.cursor/Dockerfile` instead.
 
 ```sh

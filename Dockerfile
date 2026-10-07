@@ -11,7 +11,7 @@
 #
 # Targets:
 #   test  - runs the full CI pipeline (type-check, tests, build, packed e2e)
-#   scenario - packed issue-tracker test on a clean Node runtime
+#   scenario - bundled issue-tracker test on a clean Node runtime
 #
 # Examples:
 #   docker build --target test -t takibi-test .   # fails if any check fails
@@ -43,17 +43,15 @@ FROM deps AS test
 RUN pnpm ready
 RUN pnpm test:e2e
 
-# --- Build: compile dist/ for every workspace package ---------------------
+# --- Build: bundle the issue-tracker tests from workspace sources ---------
 FROM deps AS build
-RUN pnpm -r build
 RUN pnpm --filter @takibi/issue-tracker run build:test
 
-# --- Scenario image: packed node:test file on a clean Node runtime --------
+# --- Scenario image: bundled node:test file on a clean Node runtime -------
 # Each issue-tracker test is a tsdown bundle with takibi, hono, and zod
-# inlined. The default command is `node --test` — the same full-path
-# scenario bench and e2e use.
+# inlined from workspace sources. Packed tarballs are verified by test:e2e.
 FROM ${NODE_IMAGE} AS scenario
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build /app/examples/issue-tracker/dist ./
+COPY --from=build /app/examples/issue-tracker/dist-test ./
 CMD ["node", "--test", "full-path-scenario.test.mjs"]
