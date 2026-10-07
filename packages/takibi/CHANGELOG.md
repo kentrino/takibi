@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/kentrino/takibi/compare/takibi-v0.7.0...takibi-v0.7.1) (2026-10-07)
+
+
+### Performance
+
+* reuse traced storage wrappers ([57b33a5](https://github.com/kentrino/takibi/commit/57b33a5a04e24521e6274bd91471d8b31dc67d74))
+
 ## [0.7.0](https://github.com/kentrino/takibi/compare/takibi-v0.6.0...takibi-v0.7.0) (2026-10-07)
 
 
