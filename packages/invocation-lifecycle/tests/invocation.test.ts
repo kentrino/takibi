@@ -453,7 +453,8 @@ test("transactional execution failure is mapped and leaves outcome unknown", asy
   });
 });
 
-test("a transaction commit failure is classified separately", async () => {
+test("a transaction commit failure is classified separately without replay", async () => {
+  let workCalls = 0;
   const result = await runWith("apply", {
     transactionRun: async (work) => {
       await work({ scope: "transaction" });
@@ -461,10 +462,14 @@ test("a transaction commit failure is classified separately", async () => {
     },
     transactionApply: {
       prepare: () => ({ outcome: "succeeded", value: {} }),
-      apply: () => ({ outcome: "succeeded", value: { id: "patient-1" } }),
+      apply: () => {
+        workCalls++;
+        return { outcome: "succeeded", value: { id: "patient-1" } };
+      },
     },
   });
 
+  expect(workCalls).toBe(1);
   expect(result.effects.transaction).toBe("unknown");
   expect(result.settlement).toMatchObject({
     outcome: "failed",

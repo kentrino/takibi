@@ -1,15 +1,17 @@
 ---
 id: "0003"
 title: Transaction callback no-replay contract
-status: proposed
+status: accepted
+implementation: complete
+decided: 2026-10-07
 created: 2026-09-16
 implementation_issues:
-  - ../issues/open/0020-transaction-callback-no-replay/issue.md
+  - ../issues/closed/0020-transaction-callback-no-replay/issue.md
 ---
 
 # Transaction callback no-replay contract
 
-## Proposed contract
+## Contract
 
 `StorageDriver.transaction(callback)` invokes `callback` at most once for each
 transaction call in an invocation attempt. It may invoke it zero times when
@@ -19,7 +21,7 @@ decorators and other supported wrappers must preserve this property.
 
 An execution error, rollback, commit error, or unknown commit outcome must not cause
 the runtime, driver, or wrapper to transparently replay application work. Existing
-error and settlement behavior remains unchanged; this proposal adds no public API,
+error and settlement behavior remains unchanged; this contract adds no public API,
 wire-format, or persistence change.
 
 Atomic action handlers and trusted local `$transaction` callbacks inherit this
@@ -59,13 +61,15 @@ unspecified preserves the correctness hazard.
 
 ## Verification
 
-Contract tests should cover the underlying SQLite transaction behavior and every
-supported wrapper for success, admission failure, callback failure, nested scopes,
-commit failure, and unknown outcomes. Counts must be checked independently from
-invocation retries. A deliberately replaying test double should prove the suite
-detects a violation. The runtime must reject or leave unsupported such a driver,
-not silently repair arbitrary replaying implementations.
+Shared conformance tests exercise local SQLite and Workers SQLite, supported storage
+wrappers individually and composed, and trusted callbacks. They cover success,
+admission failure, callback and nested failure, rollback, injected commit failure,
+and a lost acknowledgement after commit. Counts are held outside storage and
+checked independently of invocation retries. Atomic action and invocation lifecycle
+tests also verify execution counts without changing failure settlement.
 
-These are proposed checks, not completed conformance verification. Exercise both
-the local adapter and Workers backend; a single delegation in the adapter does
-not establish the underlying platform's callback-count guarantee.
+A deliberately replaying driver fails the callback-count assertion. Such drivers
+remain unsupported; the runtime does not silently repair arbitrary replaying
+implementations. Commit failures and unknown outcomes use platform-boundary fault
+injection, not real platform outages. See the
+[closed implementation issue](../issues/closed/0020-transaction-callback-no-replay/issue.md).

@@ -54,12 +54,14 @@ const Input = z.object({
   prefix: z.string(),
   failure: z.enum(["none", "second", "third", "storage", "handler", "policy"]),
 });
+const handlerCalls = new Map<string, number>();
 const transact = app
   .defineAction()
   .input(Input)
   .atomic()
   .policy(fullAccess)
   .handler(async ({ input, collections, $collections }) => {
+    handlerCalls.set(input.prefix, (handlerCalls.get(input.prefix) ?? 0) + 1);
     await $collections.orders.add({ value: "order" }, { id: `${input.prefix}-order` });
     if (input.failure === "handler") throw new Error("handler failed");
     if (input.failure === "policy") {
@@ -137,6 +139,7 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
   await expect(
     backend.invoke("$", "transact", { prefix: `${prefix}-success`, failure: "none" }),
   ).resolves.toMatchObject({ ok: true });
+  expect(handlerCalls.get(`${prefix}-success`)).toBe(1);
   expect(await backend.list("orders")).toContain(`${prefix}-success-order`);
   expect(await backend.list("inventory")).toContain(`${prefix}-success-inventory`);
   expect(await backend.list("events")).toContain(`${prefix}-success-event`);
@@ -146,6 +149,7 @@ async function exerciseAtomicActions(backend: Backend, prefix: string): Promise<
     await expect(
       backend.invoke("$", "transact", { prefix: failedPrefix, failure }),
     ).resolves.toMatchObject({ ok: false });
+    expect(handlerCalls.get(failedPrefix)).toBe(1);
     expect(await backend.list("orders")).not.toContain(`${failedPrefix}-order`);
     expect(await backend.list("inventory")).not.toContain(`${failedPrefix}-inventory`);
     expect(await backend.list("events")).not.toContain(`${failedPrefix}-event`);
