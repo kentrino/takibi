@@ -26,3 +26,21 @@ const result = await this.$collections.$transaction(async ($collections) => {
 `$transaction` is not available on the public client, policy-bound
 `CollectionApi`, or the Durable Object RPC surface. The collection name
 `$transaction` is reserved by `defineCollections()`.
+
+## Callback execution count
+
+`StorageDriver.transaction`, atomic action handlers, and trusted `$transaction`
+callbacks execute at most once per call in one invocation attempt. Admission
+failure may prevent execution entirely. Each explicitly supplied nested callback
+has the same guarantee and joins its enclosing transaction without a savepoint.
+The runtime, SQLite driver, and supported storage wrappers never transparently
+replay application work after execution failure, rollback, commit failure, or an
+unknown commit outcome. Replaying storage implementations are unsupported; the
+runtime does not repair arbitrary replaying drivers. Error and settlement behavior
+is unchanged by this guarantee.
+
+This is not client retry deduplication or exactly-once external delivery. HTTP
+requests, email, and other external effects cannot be rolled back. An effect may
+already have happened when commit fails or its outcome is unknown, and a separate
+invocation or client retry can perform it again. Use application idempotency or an
+outbox when durable delivery is required.

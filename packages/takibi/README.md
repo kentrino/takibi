@@ -693,6 +693,12 @@ writes already completed by that atomic action. Actions without `.atomic()`
 keep the normal per-operation behavior, so an earlier write remains after a
 later failure.
 
+Atomic handlers execute at most once per call in one invocation attempt, and may
+not run if admission fails. Neither execution failures nor rollback, commit
+failure, or an unknown commit outcome trigger transparent replay. A client retry
+or separate invocation can execute the handler again; this does not guarantee
+exactly-once external delivery.
+
 Atomic actions cover only operations performed through Takibi's
 `collection(s)` / `$collection(s)` facades. HTTP requests, email, queue
 publishes, and other external side effects cannot be rolled back, even when
@@ -1020,7 +1026,12 @@ await this.$collections.$transaction(async ($collections) => {
 });
 ```
 
-Nested `$transaction` calls join the enclosing transaction.
+Nested `$transaction` calls join the enclosing transaction. Each supplied callback
+executes at most once per call in one invocation attempt (zero times if admission
+fails), including nested callbacks. Failures and unknown commit outcomes do not
+trigger transparent replay. External effects may already have happened on failure,
+and separate invocations or client retries can repeat them. See the
+[transaction contract](docs/spec/transactions.md#callback-execution-count).
 
 The root facade also owns transport-neutral logical snapshot and reset
 operations:

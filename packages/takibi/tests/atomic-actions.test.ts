@@ -1,3 +1,4 @@
+import { transactionBackend, transactionCases } from "./transaction-callback-contract";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "../src/action";
@@ -126,3 +127,44 @@ test("atomic is idempotent and retained by the runtime registry", () => {
   expect(action.atomic).toBe(true);
   expect(registry.get("$", "action")?.definition.atomic).toBe(true);
 });
+
+for (const scenario of transactionCases.filter((scenario) => scenario !== "nested")) {
+  test(`atomic handler executes at most once on ${scenario}`, async () => {
+    const raw = createSqliteDurableObjectStorage();
+    const error = new Error(`injected ${scenario}`);
+    const storage = createDurableObjectStorage(transactionBackend(raw, scenario, error));
+    const collections = {
+      items: { schema: z.object({ value: z.string() }), accessPolicy: fullAccess },
+    };
+    let calls = 0;
+    const registry = new ActionRegistry();
+    registry.registerRootActions(
+      {
+        effect: createRootActionBuilder<object, RootActionArgs<object, typeof collections>>()
+          .atomic()
+          .policy(fullAccess)
+          .handler(async ({ $collections }) => {
+            calls++;
+            await $collections.items.add({ value: "effect" }, { id: "effect" });
+            if (scenario === "callback") throw error;
+            return "result";
+          }),
+      },
+      new Set(["items"]),
+    );
+    try {
+      const result = executeAction(
+        registry,
+        collections,
+        storage,
+        {},
+        { kind: "action", scope: "$", name: "effect" },
+      );
+      if (scenario === "success") await expect(result).resolves.toBe("result");
+      else await expect(result).rejects.toBe(error);
+      expect(calls).toBe(scenario === "admission" ? 0 : 1);
+    } finally {
+      raw.close();
+    }
+  });
+}
