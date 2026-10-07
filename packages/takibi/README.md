@@ -195,10 +195,16 @@ const client = createClient<typeof takibiHandler>("https://fire.test", {
 });
 ```
 
-Omit `resolve` to keep the production resolver. Use that when tests call
-`handle(request, { context })` with fake application dependencies.
-`handler.request` has an empty initial context, so apps whose production
-resolver needs session dependencies should pass a test resolver.
+An explicit `resolve` replaces the production resolver and defines the returned
+handler's input context. A zero-argument resolver, like one that returns a fixed
+test context, gives `handler.handle()` an empty input context. Annotating the
+resolver input with `{ request: Request; context: TestContext }` makes
+`handler.handle()` require `TestContext` instead. The replacement must still
+return the production resolved context type.
+
+Omit `resolve` to keep both the production resolver and its original input
+context requirement. Use that when tests call `handle(request, { context })`
+with fake application dependencies.
 
 When `createTakibi()({ services })` is configured,
 `withSqliteTestBackend(handler, { services })` takes the test services

@@ -40,6 +40,62 @@ test("withSqliteTestBackend keeps ClientOf collection action names", () => {
     resolve: () => ({ tenantId: "acme" }),
   };
   void invalidOptions;
+
+  const reusableOptions: SqliteTestBackendOptions<
+    AppCtx,
+    { session: string },
+    Record<never, never>
+  > = {
+    resolve: ({ context }): AppCtx => ({ tenantId: context.session, user: null }),
+  };
+  const reusable = withSqliteTestBackend(handler, reusableOptions);
+  expectTypeOf<Parameters<typeof reusable.handle>[1]["context"]>().toEqualTypeOf<
+    { session: string } | Record<string, never>
+  >();
+});
+
+test("replacement resolvers define the SQLite handler input context", () => {
+  type ProductionInitial = { env: { API_TOKEN: string } };
+  const takibi = createTakibi<ProductionInitial>()({
+    resolve: ({ context }): AppCtx => ({
+      tenantId: context.env.API_TOKEN,
+      user: null,
+    }),
+  });
+  const handler = takibi.defineCollections({}).actions({});
+  const inherited = withSqliteTestBackend(handler);
+  const empty = withSqliteTestBackend(handler, {
+    resolve: (): AppCtx => ({ tenantId: "test", user: null }),
+  });
+  const typed = withSqliteTestBackend(handler, {
+    resolve: ({ context }: { request: Request; context: { session: string } }): AppCtx => ({
+      tenantId: context.session,
+      user: null,
+    }),
+  });
+
+  expectTypeOf<Parameters<typeof empty.handle>[1]["context"]>().toEqualTypeOf<
+    Record<string, never>
+  >();
+  expectTypeOf<
+    Parameters<typeof inherited.handle>[1]["context"]
+  >().toEqualTypeOf<ProductionInitial>();
+  expectTypeOf<Parameters<typeof typed.handle>[1]["context"]>().toEqualTypeOf<{
+    session: string;
+  }>();
+  expectTypeOf<(typeof typed)["~takibi"]["initial"]>().toEqualTypeOf<{
+    session: string;
+  }>();
+  expectTypeOf<
+    Parameters<typeof handler.handle>[1]["context"]
+  >().toEqualTypeOf<ProductionInitial>();
+
+  const invalidOutput = () =>
+    withSqliteTestBackend(handler, {
+      // @ts-expect-error replacement resolvers must preserve the production resolved context
+      resolve: () => ({ tenantId: "test" }),
+    });
+  void invalidOutput;
 });
 
 test("non-empty services require a SQLite test backend services value", () => {
@@ -57,4 +113,15 @@ test("non-empty services require a SQLite test backend services value", () => {
   };
   void checkBackend;
   withSqliteTestBackend(handler, { services: { flag: "from-test" } });
+  withSqliteTestBackend(handler, {
+    resolve: () => ({ tenantId: "test", user: null }),
+    services: { flag: "from-test" },
+  });
+  const missingServices = () => {
+    // @ts-expect-error replacement resolvers do not make configured services optional
+    withSqliteTestBackend(handler, {
+      resolve: () => ({ tenantId: "test", user: null }),
+    });
+  };
+  void missingServices;
 });

@@ -55,7 +55,7 @@ stays accurate.
 - `options.context` is the initial context for every request through this
   adapter. Its type is the handler's input type, so a handler whose production
   input requires Worker bindings still needs a value until
-  [issue 0021](../0021-sqlite-test-context-input/issue.md) lands.
+  [issue 0021](../../closed/0021-sqlite-test-context-input/issue.md) lands.
 - Per-user variation is out of scope here;
   [issue 0026](../0026-sqlite-test-typed-client/issue.md) layers per-user
   clients on this adapter.

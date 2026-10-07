@@ -17,19 +17,12 @@ import {
 } from "../src/shared.ts";
 import packageJson from "../package.json" with { type: "json" };
 
-// SQLite bypasses stub, but handle still requires the production input type.
-// Fail loudly if a test accidentally starts using either runtime binding.
-const sqliteEnv: ChatEnv = {
-  get CHAT_ROOMS(): DurableObjectNamespace {
-    throw new Error("SQLite tests must not resolve a Durable Object");
-  },
-  get ASSETS(): Fetcher {
-    throw new Error("SQLite tests must not fetch assets");
-  },
-};
-
 function handlerFor() {
-  return withSqliteTestBackend(chatHandler);
+  return withSqliteTestBackend(chatHandler, {
+    resolve: ({ context }: { request: Request; context: { room: string; env?: ChatEnv } }) => ({
+      room: context.room,
+    }),
+  });
 }
 
 function clientFor(handler: ReturnType<typeof handlerFor>, room: Room) {
@@ -37,7 +30,7 @@ function clientFor(handler: ReturnType<typeof handlerFor>, room: Room) {
     fetch: async (input, init) => {
       const result = await handler.handle(new Request(input, init), {
         stripPrefix: `/api/${room}`,
-        context: { room, env: sqliteEnv },
+        context: { room },
       });
       if (!result.matched) throw new Error("Test request was not matched");
       return result.response;
@@ -183,7 +176,7 @@ test("hono serves the page, assets, and any room prefix", async () => {
       },
     },
     get CHAT_ROOMS(): DurableObjectNamespace {
-      return sqliteEnv.CHAT_ROOMS;
+      throw new Error("SQLite tests must not resolve a Durable Object");
     },
   } satisfies ChatEnv;
 

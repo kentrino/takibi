@@ -46,7 +46,7 @@ under test.
   the [issue 0025](../0025-sqlite-test-fetch/issue.md) adapter bound to
   `handler.handle(request, { context: initial })`.
 - `initial` is typed as the replacement resolver's input type, which requires
-  [issue 0021](../0021-sqlite-test-context-input/issue.md); with no resolver
+  [issue 0021](../../closed/0021-sqlite-test-context-input/issue.md); with no resolver
   override it is the production input type.
 - The base URL is a placeholder because the adapter intercepts the request;
   `createClient` options such as `headers` remain available for behavior that

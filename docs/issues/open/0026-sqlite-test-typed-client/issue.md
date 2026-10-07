@@ -22,7 +22,7 @@ Completion requires obtaining a typed client bound to a caller-supplied initial
 context from the test backend, keeping the production-shaped pipeline (resolve,
 serializability check, execution) intact, and removing the header encoding from
 repository tests and the README. The initial context type follows
-[issue 0021](../0021-sqlite-test-context-input/issue.md); the underlying fetch
+[issue 0021](../../closed/0021-sqlite-test-context-input/issue.md); the underlying fetch
 plumbing follows [issue 0025](../0025-sqlite-test-fetch/issue.md).
 
 ## Rules
@@ -53,5 +53,5 @@ plumbing follows [issue 0025](../0025-sqlite-test-fetch/issue.md).
 - `packages/worker-runtime/src/context/worker-call.ts` — per-request resolve and `assertSerializableContext`
 - `packages/takibi/tests/takibi.test.ts` — `x-test-user` resolver and header helpers
 - `packages/takibi/README.md` — header-based user switching example
-- `docs/issues/open/0021-sqlite-test-context-input/issue.md` — prerequisite: replacement resolver defines its input type
+- `docs/issues/closed/0021-sqlite-test-context-input/issue.md` — prerequisite: replacement resolver defines its input type
 - `docs/issues/open/0025-sqlite-test-fetch/issue.md` — prerequisite: fetch adapter this client wraps

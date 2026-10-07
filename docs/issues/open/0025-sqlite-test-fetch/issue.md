@@ -31,7 +31,7 @@ repository tests updated to use it, and the five helper copies deleted.
   `(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>`.
 - A `{ matched: false }` result must throw rather than fabricate a response.
 - The initial context the adapter passes to `handle` follows the handler's
-  input type; [issue 0021](../0021-sqlite-test-context-input/issue.md) owns
+  input type; [issue 0021](../../closed/0021-sqlite-test-context-input/issue.md) owns
   making that type replaceable by a test resolver.
 
 ## Open Decisions
@@ -51,5 +51,5 @@ repository tests updated to use it, and the five helper copies deleted.
 - `packages/takibi/README.md` — "Node integration tests" documents the nonexistent `handler.request`
 - `packages/takibi/tests/helpers/request.ts` — one of the five duplicated adapters
 - `examples/realtime-chat/tests/chat.test.ts` — inline adapter with `stripPrefix` and dummy env
-- `docs/issues/open/0021-sqlite-test-context-input/issue.md` — owns the replacement resolver's input type
+- `docs/issues/closed/0021-sqlite-test-context-input/issue.md` — owns the replacement resolver's input type
 - `docs/issues/open/0026-sqlite-test-typed-client/issue.md` — builds per-user typed clients on this adapter
