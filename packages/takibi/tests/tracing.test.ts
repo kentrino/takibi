@@ -13,12 +13,15 @@ import {
   internalTracerKey,
   registerGlobalTracer,
   registerTracingContextBackend,
+  resolveTracer,
+  tracedStorage,
   withSpan,
   type TracingContextBackend,
 } from "../src/tracing";
 import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
 import { createRecordingTracer, type RecordedSpan } from "./helpers/recording-tracer";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import type { StorageDriver } from "@takibi/storage";
 import type { WireResponse } from "../src/protocol";
 
 /**
@@ -79,6 +82,17 @@ function createDeferred<T = void>(): {
     resolve = next;
   });
   return { promise, resolve };
+}
+
+function createNoopStorage(transactionScope?: () => StorageDriver): StorageDriver {
+  const storage: StorageDriver = {
+    get: async () => null,
+    put: async () => undefined,
+    delete: async () => false,
+    list: async () => ({ items: [] }),
+    transaction: async (callback) => callback(transactionScope?.() ?? storage),
+  };
+  return storage;
 }
 
 test("A baseline records no internal spans", async () => {
@@ -270,6 +284,95 @@ test("global tracing registration uses a shared symbol-backed config", () => {
       contextBackend: expect.any(Object),
     },
   );
+});
+
+test("traced storage wrappers reuse root and transaction-scoped driver identities", async () => {
+  const first = createNoopStorage();
+  const second = createNoopStorage();
+
+  expect(tracedStorage(first)).toBe(tracedStorage(first));
+  expect(tracedStorage(first)).not.toBe(tracedStorage(second));
+
+  const scoped = createNoopStorage();
+  const root = tracedStorage(createNoopStorage(() => scoped));
+  const observed: StorageDriver[] = [];
+  await root.transaction(async (storage) => {
+    observed.push(storage);
+  });
+  await root.transaction(async (storage) => {
+    observed.push(storage);
+  });
+
+  expect(observed).toHaveLength(2);
+  expect(observed[0]).toBe(observed[1]);
+  expect(observed[0]).toBe(tracedStorage(scoped));
+});
+
+test("cached storage wrappers use replaced tracers and ignore removed tracers", async () => {
+  const storage = tracedStorage(createNoopStorage());
+  const first = createRecordingTracer();
+  const replacement = createRecordingTracer();
+
+  registerGlobalTracer(first.tracer);
+  await bindTracer(resolveTracer(undefined)!, () => storage.get("posts", "first"));
+
+  registerGlobalTracer(replacement.tracer);
+  await bindTracer(resolveTracer(undefined)!, () => storage.get("posts", "replacement"));
+
+  registerGlobalTracer(undefined);
+  expect(resolveTracer(undefined)).toBeUndefined();
+  await storage.get("posts", "untraced");
+
+  expect(first.spans).toHaveLength(1);
+  expect(first.spans[0]).toMatchObject({
+    name: "takibi.storage",
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.document.id": "first",
+      "takibi.storage.operation": "get",
+    },
+  });
+  expect(replacement.spans).toHaveLength(1);
+  expect(replacement.spans[0]).toMatchObject({
+    name: "takibi.storage",
+    attributes: {
+      "takibi.collection.name": "posts",
+      "takibi.document.id": "replacement",
+      "takibi.storage.operation": "get",
+    },
+  });
+});
+
+test("one cached storage wrapper keeps concurrent tracer contexts isolated", async () => {
+  const storage = tracedStorage(createNoopStorage());
+  const first = createRecordingTracer();
+  const second = createRecordingTracer();
+  const release = createDeferred();
+
+  const run = (recording: ReturnType<typeof createRecordingTracer>, name: string) =>
+    bindTracer(recording.tracer, () =>
+      withSpan({ name, kind: "server" }, async () => {
+        await release.promise;
+        await storage.get("posts", name);
+      }),
+    );
+
+  const firstRequest = run(first, "first-request");
+  const secondRequest = run(second, "second-request");
+  release.resolve();
+  await Promise.all([firstRequest, secondRequest]);
+
+  for (const [recording, name] of [
+    [first, "first-request"],
+    [second, "second-request"],
+  ] as const) {
+    expect(recording.spans).toHaveLength(2);
+    const request = spanNamed(recording.spans, name);
+    expect(child(recording.spans, request, "takibi.storage")).toMatchObject({
+      traceId: request.traceId,
+      parentSpanId: request.spanId,
+    });
+  }
 });
 
 test("B global registration matches C span names without collections options", async () => {

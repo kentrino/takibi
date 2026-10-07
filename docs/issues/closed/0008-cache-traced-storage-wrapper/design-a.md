@@ -1,8 +1,15 @@
+---
+title: Cache wrappers by underlying driver identity
+author: OpenAI Codex
+status: accepted
+issue: ./issue.md
+---
+
 # Cache wrappers by underlying driver identity
 
 ## Decision and evidence
 
-Keep 0008 open at P3. `packages/worker-runtime/src/tracing.ts:176` allocates a wrapper and closures per call; its transaction callback calls the local `wrap(scoped)` again. `context/executors.ts:createInProcessExecutor` and `durable-object.ts:fetch` choose raw versus wrapped drivers on every request. The driver lifetime is longer than the individual request.
+Issue 0008 was accepted at P3. `packages/worker-runtime/src/tracing.ts:176` allocated a wrapper and closures per call; its transaction callback called the local `wrap(scoped)` again. `context/executors.ts:createInProcessExecutor` and `durable-object.ts:fetch` chose raw versus wrapped drivers on every request. The driver lifetime is longer than the individual request.
 
 `withSpan` reads the active tracing backend store for each operation; the wrapper captures only its driver, not tracer, span, request, or tenant. History `e441a07` (“preserve span semantics in core”) explicitly assigns kind/attributes/error policy to core and translation to adapters. `59c5178` later consolidates call instrumentation through `traced`; wrapper caching need not change either boundary. The reason wrappers were originally recreated is not documented in the inspected history. No performance regression or measured latency improvement has been established.
 
@@ -33,7 +40,7 @@ Before and after, the get operation uses the currently active request tracer and
 
 Caching in each executor would also save root wrappers but duplicates ownership between Node and DO entry points and misses transaction scopes. Strong `Map` ownership risks retaining dead drivers. A new storage package abstraction adds APIs/wiring without independent domain behavior or benefit. Doing nothing is acceptable if this small allocation saving fails to justify its test/maintenance cost; no urgency or performance claim follows from allocation count alone.
 
-Verified here by source inspection: wrapper allocation, transaction recursion, both request entry paths, and active-context lookup. No benchmark or implementation test was run. Implement identity tests with the same and different fake drivers, including backend-reused scoped identities. Reuse the existing `packages/takibi/tests/tracing.test.ts` Node coverage and Workers tracing path to check counts, attributes, parents, no-tracer behavior, and register/remove/replace across requests. Add concurrent requests with different bound tracers so cache reuse cannot cross-contaminate context. Inspect weak ownership structurally. Backend scoped-driver reuse frequency is unknown and does not affect correctness; a performance claim would additionally require profiling a representative workload.
+At design time, source inspection verified wrapper allocation, transaction recursion, both request entry paths, and active-context lookup; no benchmark or implementation test had been run. Implementation coverage now checks identity with the same and different fake drivers, backend-reused scoped identities, tracer registration changes, and concurrent requests with different bound tracers. Existing Node and Workers coverage checks counts, attributes, parents, and no-tracer behavior. Weak ownership is inspectable from the module-scoped `WeakMap`; there is intentionally no nondeterministic GC test. Backend scoped-driver reuse frequency is unknown and does not affect correctness; a performance claim would additionally require profiling a representative workload.
 
 ## Original Scope
 

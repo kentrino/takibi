@@ -171,16 +171,21 @@ export async function withSpan<T>(
   );
 }
 
+const tracedStorageCache = new WeakMap<StorageDriver, StorageDriver>();
+
 export function tracedStorage(driver: StorageDriver): StorageDriver {
-  const wrap = (next: StorageDriver): StorageDriver => ({
+  const cached = tracedStorageCache.get(driver);
+  if (cached) return cached;
+
+  const traced: StorageDriver = {
     get: (resource, id) =>
-      withSpan(storageSpanSpec("get", resource, id), () => next.get(resource, id)),
+      withSpan(storageSpanSpec("get", resource, id), () => driver.get(resource, id)),
     put: (resource, doc) =>
-      withSpan(storageSpanSpec("put", resource, doc.id), () => next.put(resource, doc)),
+      withSpan(storageSpanSpec("put", resource, doc.id), () => driver.put(resource, doc)),
     delete: (resource, id) =>
-      withSpan(storageSpanSpec("delete", resource, id), () => next.delete(resource, id)),
+      withSpan(storageSpanSpec("delete", resource, id), () => driver.delete(resource, id)),
     list: (resource, opts, plan) =>
-      withSpan(storageSpanSpec("list", resource), () => next.list(resource, opts, plan)),
+      withSpan(storageSpanSpec("list", resource), () => driver.list(resource, opts, plan)),
     transaction: (callback) =>
       withSpan(
         {
@@ -188,10 +193,11 @@ export function tracedStorage(driver: StorageDriver): StorageDriver {
           kind: "internal",
           attributes: storageSpanAttributes("transaction"),
         },
-        () => next.transaction((scoped) => callback(wrap(scoped))),
+        () => driver.transaction((scoped) => callback(tracedStorage(scoped))),
       ),
-  });
-  return wrap(driver);
+  };
+  tracedStorageCache.set(driver, traced);
+  return traced;
 }
 
 function storageSpanSpec(operation: string, collection: string, id?: string): SpanSpec {

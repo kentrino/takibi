@@ -6,9 +6,23 @@ priority: P3
 priority_reason: "This removes small hot-path allocations without changing correctness or user-visible behavior."
 category: performance
 source_issue: 0044-cache-traced-storage-wrapper
+status: closed
+closed_reason: implemented
 ---
 
 # Reuse traced storage wrappers without capturing request tracing state
+
+# Resolution
+
+Implemented a module-scoped weak identity cache for traced storage wrappers. Root and
+transaction-scoped drivers now reuse wrappers without capturing a tracer or request context;
+each operation continues to read the active tracing context at execution time.
+
+Coverage verifies same/different root identities, reused transaction scopes, tracer replacement
+and removal, and concurrent tracer isolation. Existing in-process and Workers tracing suites pass.
+The repository readiness gate's check and build phases pass; its recursive test phase is blocked by
+the pre-existing client boundary test matching `storage` in this worktree's absolute path.
+All non-client workspace tests pass, including both changed packages and their Workers suites.
 
 Tracing creates a new storage wrapper on every request and on each transaction callback, even when the underlying driver identity is unchanged. Reuse wrappers by driver identity while retaining request-local tracer selection, raw drivers for untraced requests, and existing storage span semantics. Completion requires root/scoped identity tests, tracer replacement and removal coverage, and weak cache ownership; the allocation reduction is known, but an end-to-end performance gain is not established.
 
