@@ -25,6 +25,14 @@ export type SqliteTestBackendOptions<TCtx extends object, TInitial, TServices> =
   resolve?: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
 } & ServicesOption<TServices>;
 
+type ReplacementResolverOptions<TCtx extends object, TInitial, TServices> = LoggingOptions & {
+  resolve: (input: ContextResolverInput<TInitial>) => TCtx | Promise<TCtx>;
+} & ServicesOption<TServices>;
+
+type ProductionResolverOptions<TServices> = LoggingOptions & {
+  resolve?: never;
+} & ServicesOption<TServices>;
+
 const createSqliteExecutor: TestingExecutorFactory = ({
   collections,
   registry,
@@ -52,24 +60,44 @@ const createSqliteExecutor: TestingExecutorFactory = ({
 
 export function withSqliteTestBackend<
   THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
+  TInitial = Record<never, never>,
+>(
+  handler: THandler,
+  options: ReplacementResolverOptions<
+    THandler[typeof TAKIBI_BRAND]["context"],
+    TInitial,
+    THandler[typeof TAKIBI_BRAND]["services"]
+  >,
+): TestingForkHandler<THandler, TInitial>;
+export function withSqliteTestBackend<
+  THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
 >(
   handler: THandler,
   ...[options]: keyof THandler[typeof TAKIBI_BRAND]["services"] extends never
-    ? [
-        options?: SqliteTestBackendOptions<
-          THandler[typeof TAKIBI_BRAND]["context"],
-          THandler[typeof TAKIBI_BRAND]["initial"],
-          THandler[typeof TAKIBI_BRAND]["services"]
-        >,
-      ]
-    : [
-        options: SqliteTestBackendOptions<
-          THandler[typeof TAKIBI_BRAND]["context"],
-          THandler[typeof TAKIBI_BRAND]["initial"],
-          THandler[typeof TAKIBI_BRAND]["services"]
-        >,
-      ]
-): TestingForkHandler<THandler> {
+    ? [options?: ProductionResolverOptions<THandler[typeof TAKIBI_BRAND]["services"]>]
+    : [options: ProductionResolverOptions<THandler[typeof TAKIBI_BRAND]["services"]>]
+): TestingForkHandler<THandler>;
+export function withSqliteTestBackend<
+  THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
+  TInitial = THandler[typeof TAKIBI_BRAND]["initial"],
+>(
+  handler: THandler,
+  options: SqliteTestBackendOptions<
+    THandler[typeof TAKIBI_BRAND]["context"],
+    TInitial,
+    THandler[typeof TAKIBI_BRAND]["services"]
+  >,
+): TestingForkHandler<THandler, TInitial & THandler[typeof TAKIBI_BRAND]["initial"]>;
+export function withSqliteTestBackend<
+  THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
+>(
+  handler: THandler,
+  options?: SqliteTestBackendOptions<
+    THandler[typeof TAKIBI_BRAND]["context"],
+    never,
+    THandler[typeof TAKIBI_BRAND]["services"]
+  >,
+): TestingForkHandler<THandler, never> {
   const fork = getTestingFork(handler);
   if (fork === undefined) {
     throw new TypeError("Expected a Takibi handler created by createTakibi()");

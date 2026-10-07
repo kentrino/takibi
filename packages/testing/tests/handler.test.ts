@@ -199,6 +199,39 @@ test("action handler receives SQLite test backend services and keeps production 
   handler[Symbol.dispose]();
 });
 
+test("replacement resolver receives its input without changing the production resolver", async () => {
+  type ProductionInitial = { env: { tenant: string } };
+  type TestInitial = { session: string };
+  const productionInputs: ProductionInitial[] = [];
+  const testInputs: TestInitial[] = [];
+  const context = createTakibi<ProductionInitial>()({
+    resolve: ({ context: initial }) => {
+      productionInputs.push(initial);
+      return { tenantId: initial.env.tenant };
+    },
+  });
+  const production = context.defineCollections({}).actions({});
+  const replacement = withSqliteTestBackend(production, {
+    resolve: ({ context: initial }: { request: Request; context: TestInitial }) => {
+      testInputs.push(initial);
+      return { tenantId: initial.session };
+    },
+  });
+  const inherited = withSqliteTestBackend(production);
+
+  await replacement.handle(new Request("https://takibi.test/unknown"), {
+    context: { session: "test-session" },
+  });
+  await inherited.handle(new Request("https://takibi.test/unknown"), {
+    context: { env: { tenant: "production-tenant" } },
+  });
+
+  expect(testInputs).toEqual([{ session: "test-session" }]);
+  expect(productionInputs).toEqual([{ env: { tenant: "production-tenant" } }]);
+  replacement[Symbol.dispose]();
+  inherited[Symbol.dispose]();
+});
+
 test("MISSING_SERVICES is thrown at SQLite test backend assembly", () => {
   const context = createTakibi()({
     resolve: () => ({ tenantId: "tenant-a" }),

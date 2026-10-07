@@ -1,70 +1,127 @@
-# Design A: `backend.client(initial)` with the resolver still running
+# Design A: compose `testFetch` per user, add no client API
+
+Recommended. Candidates:
+
+- Design A (this file): one `createClient` per user, each bound to
+  `testFetch(handler, { context })` from issue 0025. No new API.
+- [Design B](./design-b.md): a `testClient(handler, options)` helper in
+  `takibi/testing` that returns the typed client.
+- [Design C](./design-c.md): a `backend.client(initial)` method on the testing
+  handler (the previous proposal).
+
+## Findings
+
+Checked on the issue 0021 branch (`04212e4`):
+
+- A replacement resolver annotated as
+  `{ request: Request; context: { user: User } }` makes `handle` require that
+  context. Two `createClient<typeof handler>` instances whose `fetch` calls
+  `handler.handle(request, { context: { user } })` with different users share
+  one database: an admin write was readable by the admin and denied to a member.
+  This was a throwaway probe test with a hand-written adapter, not committed.
+- The original premise, that switching users needs a header round trip, held
+  only before issue 0021. The remaining per-user cost is the fetch adapter,
+  which issue 0025 owns.
+- The header resolvers in `packages/takibi/tests` (`resolveTestContext`) are
+  the test apps' production resolvers passed to `createTakibi`, not replacement
+  resolvers. They exercise request-derived identity, so migrating them is not
+  required and stays out of scope.
+- `ContextResolverInput` is exported from `@takibi/worker-runtime` and
+  `@takibi/testing`, but not from the public `takibi` root or `takibi/testing`
+  entries, so README examples write the resolver input type inline.
+
+Not verified: the original issue says integrating applications copy the header
+pattern. That claim affects priority, not the design.
 
 ## Example
 
-Proposed API; not implemented.
+Before (README today; `handler.request` does not exist, see issue 0025):
 
 ```ts
-// Before: context round-trips through a header
 const handler = withSqliteTestBackend(takibiHandler, {
-  resolve: ({ request }) => ({
-    tenantId: "t",
-    user: JSON.parse(request.headers.get("x-test-user")!),
-  }),
+  resolve: ({ request }) => {
+    const raw = request.headers.get("x-test-user");
+    const user = raw == null ? null : JSON.parse(raw);
+    if (user == null) throw new UnauthorizedError("Sign in required");
+    return { tenantId: "test", principal: user };
+  },
 });
-const client = createClient<typeof takibiHandler>("https://app.test", {
-  fetch: testFetch(handler),
+const client = createClient<typeof takibiHandler>("https://fire.test", {
+  fetch: handler.request,
   headers: { "x-test-user": JSON.stringify({ id: "u1", role: "member" }) },
 });
-
-// After: the initial context flows into the replacement resolver directly
-using backend = withSqliteTestBackend(takibiHandler, {
-  resolve: ({ context }) => ({ tenantId: "t", user: context.user }),
-});
-const admin = backend.client({ user: { id: "u1", role: "admin" } });
-const member = backend.client({ user: { id: "u2", role: "member" } });
-// admin and member share one database
 ```
 
-## Why initial context, not resolved context
+After (requires issue 0025's `testFetch`):
 
-Passing the resolved context directly (a `clientAs(resolved)` shape) was
-considered and rejected. It publishes a test path that never runs the
-production resolver: tests built on it stop exercising authentication and
-tenant extraction, the current fork model (one resolver per `mount`) would
-need a separate per-request injection mechanism, and whether
-`assertSerializableContext` applies to injected contexts would need a new
-decision. Passing the initial context keeps the per-request resolve, the
-existing serializability check, and the current fork model; the only new
-surface is the client factory. The remaining cost over the resolved-context
-shape is one trivial resolver per test file, which keeps the resolve path
-under test.
+```ts
+import { createClient } from "takibi/client";
+import { testFetch, withSqliteTestBackend } from "takibi/testing";
 
-## Behavior
+type TestInput = { user: User | null };
 
-- `backend.client(initial)` returns a `createClient` result whose `fetch` is
-  the [issue 0025](../0025-sqlite-test-fetch/issue.md) adapter bound to
-  `handler.handle(request, { context: initial })`.
-- `initial` is typed as the replacement resolver's input type, which requires
-  [issue 0021](../0021-sqlite-test-context-input/issue.md); with no resolver
-  override it is the production input type.
-- The base URL is a placeholder because the adapter intercepts the request;
-  `createClient` options such as `headers` remain available for behavior that
-  genuinely uses headers.
-- One backend, many clients: `handle` already receives the initial context per
-  request and the resolver runs per request, so per-user clients share the
-  backend's single database with no new mechanism.
+using handler = withSqliteTestBackend(takibiHandler, {
+  resolve: ({ context }: { request: Request; context: TestInput }) => {
+    if (context.user == null) throw new UnauthorizedError("Sign in required");
+    return { tenantId: "test", principal: context.user };
+  },
+});
+const clientAs = (user: User | null) =>
+  createClient<typeof handler>("https://fire.test", {
+    fetch: testFetch(handler, { context: { user } }),
+  });
+
+const admin = clientAs({ id: "u1", role: "admin" });
+const member = clientAs({ id: "u2", role: "member" });
+// Both clients use one database; each request resolves its own principal.
+// clientAs(null) requests fail with UNAUTHORIZED from the resolver.
+```
+
+Without the resolver annotation, `context` is `Record<never, never>` and
+`context.user` is a type error. The README must show the annotation.
+
+## Comparison
+
+|                                                  | A: compose                       | B: `testClient` | C: `backend.client`      |
+| ------------------------------------------------ | -------------------------------- | --------------- | ------------------------ |
+| New public API                                   | none beyond 0025                 | one function    | one method               |
+| Lines per user                                   | 3 (`createClient` + `testFetch`) | 1               | 1                        |
+| `@takibi/client` at runtime in `@takibi/testing` | no                               | yes             | yes                      |
+| Testing handler surface                          | unchanged                        | unchanged       | diverges from production |
+| Client options (`headers`, `batch`, `listAll`)   | native                           | passed through  | passed through           |
+
+A has no API surface to maintain, and each part already has an owner:
+`createClient` builds the typed client, `testFetch` (issue 0025) adapts
+`handle`, and the resolver (issue 0021) defines the input. B saves a placeholder
+base URL and a type argument per test file. That saving only matters if many
+call sites repeat the same `clientAs` wrapper, and it couples the testing
+package to every client option. C was rejected for the reasons in
+[Design C](./design-c.md).
+
+Out of every candidate: a test API that injects an already-resolved context.
+Tests built on it would stop exercising authentication and tenant extraction,
+the fork model (one resolver per fork) would need a per-request injection
+mechanism, and `assertSerializableContext` coverage for injected contexts
+would need a new decision. Passing the initial context keeps the per-request
+resolve and serializability check unchanged.
+
+Adopt B later only if, after issue 0025 migrates the repository tests, three or
+more test files define an identical `clientAs` wrapper.
+
+## Changes
+
+- `packages/takibi/README.md`: replace the "Node integration tests" example with
+  the After example, explain the resolver annotation, and remove the
+  `x-test-user` encoding. If issue 0025 already rewrote that example, extend it
+  instead.
+- `packages/testing/tests/handler.test.ts`: two clients with different initial
+  contexts on one handler share documents; the replacement resolver receives
+  each client's context; a resolver output that fails
+  `assertSerializableContext` still fails the request.
 
 ## Compatibility and verification
 
-- Additive to `takibi/testing`; `@takibi/client` becomes a runtime dependency
-  of `@takibi/testing`.
-- Type tests: the `initial` argument tracks the replacement resolver's input
-  type (empty and typed cases from issue 0021), and the returned client is
-  typed on the handler.
-- Runtime tests: two clients with different users share one database and
-  observe each other's writes; the replacement resolver receives each client's
-  initial context; a resolver output failing `assertSerializableContext` still
-  fails.
-- Migrate `packages/takibi/tests` and the README off the `x-test-user`
-  pattern.
+- No runtime or type changes. Done after issue 0025 lands.
+- Run the README example as a type test (or keep it equivalent to a test in
+  `packages/testing/tests`) so the documented annotation keeps compiling.
+- `pnpm run ready`.

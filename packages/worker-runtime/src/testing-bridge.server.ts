@@ -1,5 +1,5 @@
 import type { TakibiBrandCarrier, TakibiBrandRecord, TAKIBI_BRAND } from "./brand";
-import type { ContextResolver } from "./context/types";
+import type { ContextResolver, HandleOptions } from "./context/types";
 import type { ActionRegistry, CollectionsDef } from "@takibi/api";
 import {
   compileIndexRegistry,
@@ -44,17 +44,36 @@ export type TestingFork<
 
 type BrandedHandler = TakibiBrandCarrier<TakibiBrandRecord<object>>;
 /** Forks recreate the standard handler surface, not user-added properties. */
-export type TestingForkHandler<THandler extends BrandedHandler> = Pick<
-  THandler,
-  Extract<keyof THandler, typeof TAKIBI_BRAND | "handle" | "DurableObject">
-> &
+export type TestingForkHandler<
+  THandler extends BrandedHandler,
+  TInitial = THandler[typeof TAKIBI_BRAND]["initial"],
+> = Pick<THandler, Extract<keyof THandler, "DurableObject">> & {
+  readonly [TAKIBI_BRAND]: TakibiBrandRecord<
+    THandler[typeof TAKIBI_BRAND]["context"],
+    TInitial,
+    THandler[typeof TAKIBI_BRAND]["collections"],
+    THandler[typeof TAKIBI_BRAND]["actions"],
+    THandler[typeof TAKIBI_BRAND]["services"]
+  >;
+} & (THandler extends { handle(request: infer TRequest, options: unknown): infer TResult }
+    ? { handle(request: TRequest, options: HandleOptions<TInitial>): TResult }
+    : {}) &
   Disposable;
 
-type ForkOf<THandler extends BrandedHandler, TResult = THandler & Disposable> = TestingFork<
+type ForkOf<THandler extends BrandedHandler> = <TInitial>(
+  options: TestingForkOptions<
+    THandler[typeof TAKIBI_BRAND]["context"],
+    TInitial,
+    THandler[typeof TAKIBI_BRAND]["services"]
+  >,
+  createExecutor: TestingExecutorFactory,
+) => TestingForkHandler<THandler, TInitial>;
+
+type RegisteredTestingFork<THandler extends BrandedHandler> = TestingFork<
   THandler[typeof TAKIBI_BRAND]["context"],
   THandler[typeof TAKIBI_BRAND]["initial"],
   THandler[typeof TAKIBI_BRAND]["services"],
-  TResult
+  TestingForkHandler<THandler>
 >;
 
 const TESTING_FORKS_SYMBOL = Symbol.for("takibi.testingForks");
@@ -69,14 +88,14 @@ function testingForks(): WeakMap<object, unknown> {
 
 export function registerTestingFork<THandler extends BrandedHandler>(
   handler: THandler,
-  fork: ForkOf<NoInfer<THandler>>,
+  fork: RegisteredTestingFork<NoInfer<THandler>>,
 ): void {
   testingForks().set(handler, fork);
 }
 
 export function getTestingFork<THandler extends BrandedHandler>(
   handler: THandler,
-): ForkOf<THandler, TestingForkHandler<THandler>> | undefined;
+): ForkOf<THandler> | undefined;
 export function getTestingFork(handler: object): TestingFork | undefined;
 export function getTestingFork(handler: object): unknown {
   // The heterogeneous registry restores the callback registered for this exact handler.

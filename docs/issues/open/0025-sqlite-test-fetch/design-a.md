@@ -29,7 +29,7 @@ realtime-chat example keeps its room routing:
 
 ```ts
 fetch: testFetch(handler, {
-  context: { room, env: sqliteEnv },
+  context: { room },
   stripPrefix: `/api/${room}`,
 });
 ```
@@ -53,9 +53,9 @@ stays accurate.
 - Build `new Request(input, init)`, call `handler.handle(request, options)`,
   throw when `matched` is false, otherwise return `response`.
 - `options.context` is the initial context for every request through this
-  adapter. Its type is the handler's input type, so a handler whose production
-  input requires Worker bindings still needs a value until
-  [issue 0021](../0021-sqlite-test-context-input/issue.md) lands.
+  adapter. Its type is the forked handler's input type: an explicit replacement
+  resolver can define a narrower test input, while a fork without one keeps the
+  production input type ([issue 0021](../../closed/0021-sqlite-test-context-input/issue.md)).
 - Per-user variation is out of scope here;
   [issue 0026](../0026-sqlite-test-typed-client/issue.md) layers per-user
   clients on this adapter.

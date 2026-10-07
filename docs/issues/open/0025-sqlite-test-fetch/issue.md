@@ -17,7 +17,7 @@ not compile. Every package works around the gap with an identical
 `requestTakibi` helper in `tests/helpers/request.ts` (five copies: build a
 `Request`, call `handle` with an empty context, throw when the result is not
 `matched`, return the response), the realtime-chat example inlines the same
-closure with `stripPrefix` and a dummy env, and integrating applications report
+closure with `stripPrefix` and a room context, and integrating applications report
 maintaining their own copy.
 
 Completion requires a Takibi-provided adapter assignable to `createClient`'s
@@ -31,8 +31,9 @@ repository tests updated to use it, and the five helper copies deleted.
   `(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>`.
 - A `{ matched: false }` result must throw rather than fabricate a response.
 - The initial context the adapter passes to `handle` follows the handler's
-  input type; [issue 0021](../0021-sqlite-test-context-input/issue.md) owns
-  making that type replaceable by a test resolver.
+  input type. A replacement resolver can define the fork's test input, while
+  omitting one preserves the production input type as implemented by
+  [issue 0021](../../closed/0021-sqlite-test-context-input/issue.md).
 
 ## Open Decisions
 
@@ -50,6 +51,6 @@ repository tests updated to use it, and the five helper copies deleted.
 - `packages/client/src/client.ts` — the `fetch` option type the adapter must satisfy
 - `packages/takibi/README.md` — "Node integration tests" documents the nonexistent `handler.request`
 - `packages/takibi/tests/helpers/request.ts` — one of the five duplicated adapters
-- `examples/realtime-chat/tests/chat.test.ts` — inline adapter with `stripPrefix` and dummy env
-- `docs/issues/open/0021-sqlite-test-context-input/issue.md` — owns the replacement resolver's input type
+- `examples/realtime-chat/tests/chat.test.ts` — inline adapter with `stripPrefix` and a room context
+- `docs/issues/closed/0021-sqlite-test-context-input/issue.md` — owns the replacement resolver's input type
 - `docs/issues/open/0026-sqlite-test-typed-client/issue.md` — builds per-user typed clients on this adapter

@@ -42,6 +42,78 @@ test("withSqliteTestBackend keeps ClientOf collection action names", () => {
   void invalidOptions;
 });
 
+test("replacement resolvers define the SQLite handler input context", () => {
+  type ProductionInitial = { env: { API_TOKEN: string } };
+  const takibi = createTakibi<ProductionInitial>()({
+    resolve: ({ context }): AppCtx => ({
+      tenantId: context.env.API_TOKEN,
+      user: null,
+    }),
+  });
+  const handler = takibi.defineCollections({}).actions({});
+  const inherited = withSqliteTestBackend(handler);
+  const empty = withSqliteTestBackend(handler, {
+    resolve: (): AppCtx => ({ tenantId: "test", user: null }),
+  });
+  const typed = withSqliteTestBackend(handler, {
+    resolve: ({ context }: { request: Request; context: { session: string } }): AppCtx => ({
+      tenantId: context.session,
+      user: null,
+    }),
+  });
+  const reusableOptions: SqliteTestBackendOptions<
+    AppCtx,
+    { session: string },
+    Record<never, never>
+  > = {
+    resolve: ({ context }): AppCtx => ({ tenantId: context.session, user: null }),
+  };
+  const reusable = withSqliteTestBackend(handler, reusableOptions);
+
+  expectTypeOf<Parameters<typeof empty.handle>[1]["context"]>().toEqualTypeOf<
+    Record<never, never>
+  >();
+  expectTypeOf<
+    Parameters<typeof inherited.handle>[1]["context"]
+  >().toEqualTypeOf<ProductionInitial>();
+  expectTypeOf<Parameters<typeof typed.handle>[1]["context"]>().toEqualTypeOf<{
+    session: string;
+  }>();
+  expectTypeOf<(typeof typed)["~takibi"]["initial"]>().toEqualTypeOf<{
+    session: string;
+  }>();
+  expectTypeOf<Parameters<typeof reusable.handle>[1]["context"]>().toEqualTypeOf<
+    { session: string } & ProductionInitial
+  >();
+  expectTypeOf<
+    Parameters<typeof handler.handle>[1]["context"]
+  >().toEqualTypeOf<ProductionInitial>();
+
+  const invalidOutput = () =>
+    withSqliteTestBackend(handler, {
+      // @ts-expect-error replacement resolvers must preserve the production resolved context
+      resolve: () => ({ tenantId: "test" }),
+    });
+  void invalidOutput;
+
+  const invalidInferredInput = () =>
+    withSqliteTestBackend(handler, {
+      resolve: ({ context }): AppCtx => ({
+        // @ts-expect-error unannotated replacement inputs do not expose arbitrary properties
+        tenantId: context.session,
+        user: null,
+      }),
+    });
+  void invalidInferredInput;
+
+  const productionOnlyInput = () =>
+    reusable.handle(new Request("https://takibi.test/unknown"), {
+      // @ts-expect-error ambiguous reusable options require input safe for either resolver
+      context: { env: { API_TOKEN: "production" } },
+    });
+  void productionOnlyInput;
+});
+
 test("non-empty services require a SQLite test backend services value", () => {
   const takibi = createTakibi()({
     resolve: (): AppCtx => ({ tenantId: "acme", user: null }),
@@ -57,4 +129,15 @@ test("non-empty services require a SQLite test backend services value", () => {
   };
   void checkBackend;
   withSqliteTestBackend(handler, { services: { flag: "from-test" } });
+  withSqliteTestBackend(handler, {
+    resolve: () => ({ tenantId: "test", user: null }),
+    services: { flag: "from-test" },
+  });
+  const missingServices = () => {
+    // @ts-expect-error replacement resolvers do not make configured services optional
+    withSqliteTestBackend(handler, {
+      resolve: () => ({ tenantId: "test", user: null }),
+    });
+  };
+  void missingServices;
 });
