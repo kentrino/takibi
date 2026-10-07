@@ -10,6 +10,8 @@ export type SqlBinding = string | number | null;
 export type SqlPredicate = {
   sql: string;
   bindings: SqlBinding[];
+  /** False when `sql` may admit documents the JavaScript predicate rejects. */
+  exact: boolean;
 };
 
 const SQL_OPERATORS: Record<QueryValueOperator, string> = {
@@ -36,6 +38,7 @@ export function compileQueryToSql(expression: QueryExpr): SqlPredicate {
       return {
         sql: `(${predicates.map(({ sql }) => sql).join(" OR ")})`,
         bindings: predicates.flatMap(({ bindings }) => bindings),
+        exact: predicates.every((predicate) => predicate.exact),
       };
     }
     if (
@@ -50,13 +53,15 @@ export function compileQueryToSql(expression: QueryExpr): SqlPredicate {
 
   if (expression.op === "not") {
     const operand = compileQueryToSql(expression.operand);
-    return { sql: `(NOT ${operand.sql})`, bindings: operand.bindings };
+    if (!operand.exact) return { sql: "1", bindings: [], exact: false };
+    return { sql: `(NOT ${operand.sql})`, bindings: operand.bindings, exact: true };
   }
 
   const compiled = expression.operands.map(compileQueryToSql);
   return {
     sql: `(${compiled.map(({ sql }) => sql).join(` ${expression.op.toUpperCase()} `)})`,
     bindings: compiled.flatMap(({ bindings }) => bindings),
+    exact: compiled.every((predicate) => predicate.exact),
   };
 }
 
@@ -67,7 +72,10 @@ function compileStringLeaf(
 ): SqlPredicate {
   const metadataColumn = METADATA_COLUMNS[field];
   if (metadataColumn !== undefined) {
-    return compileStringPredicate(`(${metadataColumn})`, operator, value, []);
+    return {
+      ...compileStringPredicate(`(${metadataColumn})`, operator, value, []),
+      exact: true,
+    };
   }
 
   const prefix =
@@ -76,6 +84,7 @@ function compileStringLeaf(
   return {
     sql: `(${prefix}${predicate.sql}))`,
     bindings: predicate.bindings,
+    exact: true,
   };
 }
 
@@ -89,28 +98,32 @@ function compileStringPredicate(
     return {
       sql: `instr(${expression}, ?) > 0`,
       bindings: [...prefixBindings, value],
+      exact: true,
     };
   }
   if (operator === "startsWith") {
     return {
       sql: `substr(${expression}, 1, length(?)) = ?`,
       bindings: [...prefixBindings, value, value],
+      exact: true,
     };
   }
   return {
     sql: `substr(${expression}, length(${expression}) - length(?) + 1) = ?`,
     bindings: [...prefixBindings, value, value],
+    exact: true,
   };
 }
 
 function compilePresent(field: string): SqlPredicate {
   const metadataColumn = METADATA_COLUMNS[field];
   if (metadataColumn !== undefined) {
-    return { sql: `(${metadataColumn} IS NOT NULL)`, bindings: [] };
+    return { sql: `(${metadataColumn} IS NOT NULL)`, bindings: [], exact: true };
   }
   return {
     sql: "EXISTS (SELECT 1 FROM json_each(data) AS takibi_field WHERE takibi_field.key = ?)",
     bindings: [field],
+    exact: true,
   };
 }
 
@@ -127,32 +140,36 @@ function compileValueLeaf(
   const prefix = "EXISTS (SELECT 1 FROM json_each(data) AS takibi_field WHERE takibi_field.key = ?";
   if (value === null) {
     return operator === "eq"
-      ? { sql: `(${prefix} AND takibi_field.type = 'null'))`, bindings: [field] }
-      : { sql: "0", bindings: [] };
+      ? { sql: `(${prefix} AND takibi_field.type = 'null'))`, bindings: [field], exact: true }
+      : { sql: "0", bindings: [], exact: true };
   }
   if (typeof value === "boolean") {
     return operator === "eq"
       ? {
           sql: `(${prefix} AND takibi_field.type = '${value ? "true" : "false"}'))`,
           bindings: [field],
+          exact: true,
         }
-      : { sql: "0", bindings: [] };
+      : { sql: "0", bindings: [], exact: true };
   }
   if (typeof value === "string") {
     if (operator !== "eq" && requiresJavaScriptTextOrdering(value)) {
       return {
         sql: `(${prefix} AND takibi_field.type = 'text'))`,
         bindings: [field],
+        exact: false,
       };
     }
     return {
       sql: `(${prefix} AND takibi_field.type = 'text' AND takibi_field.atom ${SQL_OPERATORS[operator]} ?))`,
       bindings: [field, value],
+      exact: true,
     };
   }
   return {
     sql: `(${prefix} AND takibi_field.type IN ('integer', 'real') AND takibi_field.atom ${SQL_OPERATORS[operator]} ?))`,
     bindings: [field, value],
+    exact: true,
   };
 }
 
@@ -161,14 +178,14 @@ function compileMetadataLeaf(
   operator: QueryValueOperator,
   value: QueryScalar,
 ): SqlPredicate {
-  if (typeof value !== "string") return { sql: "0", bindings: [] };
+  if (typeof value !== "string") return { sql: "0", bindings: [], exact: true };
   if (operator !== "eq" && requiresJavaScriptTextOrdering(value)) {
-    return { sql: `(${column} IS NOT NULL)`, bindings: [] };
+    return { sql: `(${column} IS NOT NULL)`, bindings: [], exact: false };
   }
-  return { sql: `(${column} ${SQL_OPERATORS[operator]} ?)`, bindings: [value] };
+  return { sql: `(${column} ${SQL_OPERATORS[operator]} ?)`, bindings: [value], exact: true };
 }
 
-function requiresJavaScriptTextOrdering(value: string): boolean {
+export function requiresJavaScriptTextOrdering(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     if (value.charCodeAt(index) >= 0xd800) return true;
   }

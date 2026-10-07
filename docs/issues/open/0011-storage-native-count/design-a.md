@@ -31,7 +31,7 @@ Preferred first step: an aggregate with a version guard over the same candidate 
 
 Use the existing SQL compiler for null/missing/scalars/string/in/ranges, index equality prefix, range, and residual predicates. No parallel dialect. Forward count through logged/traced, initialization, maintenance, migrating and transaction-scoped drivers; audit every StorageDriver implementation/test double. One count operation/span should enclose fallback without leaking a sequence of public storage list spans. Internal SQL diagnostics can still record scan work.
 
-[String candidate safety](../0019-string-range-candidate-safety/issue.md) tracks
+[String candidate safety](../../closed/0019-string-range-candidate-safety/issue.md) tracks
 false-negative SQL candidates. Native COUNT requires an exact predicate; otherwise
 retain residual evaluation through the scan fallback. Migration eligibility does not
 establish query exactness.

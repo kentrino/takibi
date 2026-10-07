@@ -1,10 +1,12 @@
 ---
 id: "0002"
 title: Preserve JavaScript string-query membership through SQLite candidate selection
-status: proposed
+status: accepted
+implementation: complete
 created: 2026-09-16
+decided: 2026-10-08
 implementation_issues:
-  - ../issues/open/0019-string-range-candidate-safety/issue.md
+  - ../issues/closed/0019-string-range-candidate-safety/issue.md
 ---
 
 # Preserve JavaScript string-query membership through SQLite candidate selection
@@ -33,15 +35,15 @@ await posts.list({ where: (q) => q.not(q.label.lt("\uE000")) });
 await posts.list({ index: "byLabel", where: (q) => q.label.lt("\uE000") });
 ```
 
-The SQL compiler should track whether each candidate predicate is exact. AND and OR may compose
-safe supersets, but NOT may negate only an exact predicate; an inexact negated subtree should
-fall back to an unrestricted candidate predicate and final JavaScript evaluation. Apply the same
-rule to metadata fields. Indexed scans must not use a physical string range unless equivalence or
-a safe widening is proved. They may retain equality prefixes, numeric ranges, SQLite index order,
-and keyset cursors. Pagination must continue across rejected candidates until the requested page
-is full or the scan ends. Planner simplifications of combined string bounds must likewise use
-JavaScript membership semantics, not assume that index collation supplies them. The README and
-RFC 0012 should clarify the distinction between query membership and index result/cursor order.
+The SQL compiler tracks whether each candidate predicate is exact. AND and OR may compose
+safe supersets, but NOT negates only an exact predicate; an inexact negated subtree falls
+back to an unrestricted candidate predicate and final JavaScript evaluation. The same rule
+applies to metadata fields. Indexed scans do not use a physical string range unless equivalence
+or a safe widening is proved. They retain equality prefixes, numeric ranges, SQLite index order,
+and keyset cursors. Pagination continues across rejected candidates until the requested page
+is full or the scan ends. Planner simplifications of combined string bounds use JavaScript
+membership semantics, not index collation. README and RFC 0012 distinguish query membership
+from index result and cursor order.
 
 Changing query membership to SQLite order would break existing JavaScript behavior. Persisting a
 UTF-16-order projection would align membership and range scans, but adds storage, backfill, cursor,

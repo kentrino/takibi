@@ -327,15 +327,25 @@ function matchesRangeBound(value: string | number, range: IndexRangeBound): bool
 }
 
 function isGreater(actual: string | number, bound: QueryScalar, inclusive: boolean): boolean {
-  if (!isIndexScalar(bound) || typeof actual !== typeof bound) return false;
-  const delta = compareIndexValue(actual, bound);
+  const delta = compareJavaScriptBound(actual, bound);
+  if (delta === undefined) return false;
   return inclusive ? delta >= 0 : delta > 0;
 }
 
 function isLess(actual: string | number, bound: QueryScalar, inclusive: boolean): boolean {
-  if (!isIndexScalar(bound) || typeof actual !== typeof bound) return false;
-  const delta = compareIndexValue(actual, bound);
+  const delta = compareJavaScriptBound(actual, bound);
+  if (delta === undefined) return false;
   return inclusive ? delta <= 0 : delta < 0;
+}
+
+function compareJavaScriptBound(actual: string | number, bound: QueryScalar): number | undefined {
+  if (typeof actual === "string" && typeof bound === "string") {
+    return actual < bound ? -1 : actual > bound ? 1 : 0;
+  }
+  if (typeof actual === "number" && typeof bound === "number") {
+    return actual < bound ? -1 : actual > bound ? 1 : 0;
+  }
+  return undefined;
 }
 
 function extractRangeBounds(
@@ -346,23 +356,99 @@ function extractRangeBounds(
   const parts = flattenAnd(expression);
   if (parts.some((part) => mentionsFieldUnsafely(part, field))) return undefined;
 
-  const range: IndexRangeBound = {};
+  let lower: LowerBound | undefined;
+  let upper: UpperBound | undefined;
+  let lowerOpen = false;
+  let upperOpen = false;
   let found = false;
   for (const part of parts) {
-    if (
-      !("field" in part) ||
-      part.field !== field ||
-      (part.op !== "gt" && part.op !== "gte" && part.op !== "lt" && part.op !== "lte")
-    ) {
+    if (!isRangeLeaf(part, field)) continue;
+    found = true;
+    if (part.op === "gt" || part.op === "gte") {
+      if (lowerOpen) continue;
+      const next = stricterLower(lower, { op: part.op, value: part.value });
+      if (next === undefined) {
+        lower = undefined;
+        lowerOpen = true;
+      } else {
+        lower = next;
+      }
       continue;
     }
-    if (part.op === "gt") range.gt = part.value;
-    if (part.op === "gte") range.gte = part.value;
-    if (part.op === "lt") range.lt = part.value;
-    if (part.op === "lte") range.lte = part.value;
-    found = true;
+    if (upperOpen) continue;
+    const next = stricterUpper(upper, { op: part.op, value: part.value });
+    if (next === undefined) {
+      upper = undefined;
+      upperOpen = true;
+    } else {
+      upper = next;
+    }
   }
-  return found ? range : undefined;
+  if (!found || (lower === undefined && upper === undefined)) return undefined;
+  const range: IndexRangeBound = {};
+  if (lower?.op === "gt") range.gt = lower.value;
+  if (lower?.op === "gte") range.gte = lower.value;
+  if (upper?.op === "lt") range.lt = upper.value;
+  if (upper?.op === "lte") range.lte = upper.value;
+  return range;
+}
+
+type RangeLeaf = {
+  readonly field: string;
+  readonly op: "gt" | "gte" | "lt" | "lte";
+  readonly value: QueryScalar;
+};
+type LowerBound = { op: "gt" | "gte"; value: QueryScalar };
+type UpperBound = { op: "lt" | "lte"; value: QueryScalar };
+
+function isRangeLeaf(expression: QueryExpr, field: string): expression is RangeLeaf {
+  return (
+    "field" in expression &&
+    expression.field === field &&
+    "value" in expression &&
+    (expression.op === "gt" ||
+      expression.op === "gte" ||
+      expression.op === "lt" ||
+      expression.op === "lte")
+  );
+}
+
+function stricterLower(
+  current: { op: "gt" | "gte"; value: QueryScalar } | undefined,
+  next: { op: "gt" | "gte"; value: QueryScalar },
+): { op: "gt" | "gte"; value: QueryScalar } | undefined {
+  if (current === undefined) return next;
+  const order = compareBoundScalars(next.value, current.value);
+  if (order === undefined) return undefined;
+  if (order < 0) return current;
+  if (order > 0) return next;
+  return current.op === "gt" || next.op === "gt"
+    ? { op: "gt", value: current.value }
+    : { op: "gte", value: current.value };
+}
+
+function stricterUpper(
+  current: { op: "lt" | "lte"; value: QueryScalar } | undefined,
+  next: { op: "lt" | "lte"; value: QueryScalar },
+): { op: "lt" | "lte"; value: QueryScalar } | undefined {
+  if (current === undefined) return next;
+  const order = compareBoundScalars(next.value, current.value);
+  if (order === undefined) return undefined;
+  if (order > 0) return current;
+  if (order < 0) return next;
+  return current.op === "lt" || next.op === "lt"
+    ? { op: "lt", value: current.value }
+    : { op: "lte", value: current.value };
+}
+
+function compareBoundScalars(left: QueryScalar, right: QueryScalar): number | undefined {
+  if (
+    (typeof left === "string" && typeof right === "string") ||
+    (typeof left === "number" && typeof right === "number")
+  ) {
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+  return undefined;
 }
 
 function flattenAnd(expression: QueryExpr): QueryExpr[] {

@@ -6,6 +6,7 @@ import {
   compareUtf8,
   compileIndexRegistry,
   impliedEqualityValue,
+  matchesIndexRange,
   planIndexRange,
   resolveIndexedList,
   type IndexRangePlan,
@@ -91,6 +92,57 @@ test("resolveIndexedList rejects unknown indexes and missing equality prefix", (
     orderField: "createdAt",
     direction: "desc",
   });
+});
+
+test("combined string bounds use JavaScript order", () => {
+  const lower = compileWhere<{ label: string }>((query) =>
+    query.and(
+      query.label.gt("b"),
+      query.label.gt("a"),
+      query.label.gt("\uE000"),
+      query.label.gt("😀"),
+    ),
+  );
+  expect(planIndexRange(["label"], lower)).toEqual({
+    equalities: [],
+    rangeField: "label",
+    range: { gt: "\uE000" },
+  });
+
+  const upper = compileWhere<{ label: string }>((query) =>
+    query.and(query.label.lt("b"), query.label.lt("a")),
+  );
+  expect(planIndexRange(["label"], upper)).toEqual({
+    equalities: [],
+    rangeField: "label",
+    range: { lt: "a" },
+  });
+
+  const numeric = compileWhere<{ score: number }>((query) =>
+    query.and(query.score.gt(1), query.score.gt(10), query.score.lte(20)),
+  );
+  expect(planIndexRange(["score"], numeric)).toEqual({
+    equalities: [],
+    rangeField: "score",
+    range: { gt: 10, lte: 20 },
+  });
+});
+
+test("index range membership follows JavaScript string order", () => {
+  const range: IndexRangePlan = {
+    equalities: [],
+    rangeField: "label",
+    range: { lt: "\uE000" },
+  };
+  expect(matchesIndexRange({ label: "😀" }, range)).toBe(true);
+  expect(matchesIndexRange({ label: "\uE000" }, range)).toBe(false);
+  expect(matchesIndexRange({ label: "a" }, range)).toBe(true);
+  expect(
+    matchesIndexRange({ score: 11 }, { equalities: [], rangeField: "score", range: { gt: 10 } }),
+  ).toBe(true);
+  expect(
+    matchesIndexRange({ score: 10 }, { equalities: [], rangeField: "score", range: { gt: 10 } }),
+  ).toBe(false);
 });
 
 test("UTF-8 byte order matches SQLite BINARY for non-ASCII strings", () => {
