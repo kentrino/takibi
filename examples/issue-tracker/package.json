@@ -21,7 +21,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/pack.ts",
+    "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check"
