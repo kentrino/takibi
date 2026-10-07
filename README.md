@@ -46,7 +46,9 @@ pnpm install
 pnpm ready
 ```
 
-`pnpm ready` type-checks, tests, and builds every workspace package.
+`pnpm ready` type-checks, tests, and builds every workspace package. Node
+`>=22.18.0` is required because the storage tests use
+`node:sqlite`'s `StatementSync.columns()`.
 
 The [`Dockerfile`](./Dockerfile) builds and tests the workspace in a clean
 container. Its `test` target runs `pnpm ready` and the packed-package E2E
