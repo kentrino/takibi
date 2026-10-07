@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "paths": {
+      "takibi": ["../../packages/takibi/dist/index.d.mts"],
+      "takibi/*": ["../../packages/takibi/dist/*.d.mts"],
+      "@takibi/hono-adapter": ["../../packages/hono-adapter/dist/index.d.mts"]
+    }
+  },
+  "include": ["src"]
+}
