@@ -50,17 +50,6 @@ pnpm ready
 `>=22.18.0` is required because the storage tests use
 `node:sqlite`'s `StatementSync.columns()`.
 
-The [`Dockerfile`](./Dockerfile) builds and tests the workspace in a clean
-container. Its `test` target runs `pnpm ready` and the packed-package E2E
-suite; its `scenario` target runs the bundled issue-tracker `node:test` file
-on a clean Node runtime. Cursor Cloud Agents use `.cursor/Dockerfile` instead.
-
-```sh
-docker build --target test -t takibi-test .
-docker build --target scenario -t takibi-scenario .
-docker run --rm takibi-scenario
-```
-
 Publishing uses Release Please and npm trusted publishing. See
 `docs/playbook/` for GitHub App access, trusted publishers, and first
 publish of a new public package.

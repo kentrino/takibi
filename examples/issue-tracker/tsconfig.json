@@ -5,9 +5,6 @@
     "moduleDetection": "force",
     "module": "esnext",
     "moduleResolution": "bundler",
-    "paths": {
-      "~/*": ["./src/*"]
-    },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "types": ["node"],

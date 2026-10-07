@@ -10,7 +10,6 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-dist-test
 *.local
 
 # Accidental tsc emit beside source (declarations belong in dist)
