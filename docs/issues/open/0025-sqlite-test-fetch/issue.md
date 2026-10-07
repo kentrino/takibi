@@ -31,8 +31,9 @@ repository tests updated to use it, and the five helper copies deleted.
   `(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>`.
 - A `{ matched: false }` result must throw rather than fabricate a response.
 - The initial context the adapter passes to `handle` follows the handler's
-  input type; [issue 0021](../../closed/0021-sqlite-test-context-input/issue.md) owns
-  making that type replaceable by a test resolver.
+  input type. A replacement resolver can define the fork's test input, while
+  omitting one preserves the production input type as implemented by
+  [issue 0021](../../closed/0021-sqlite-test-context-input/issue.md).
 
 ## Open Decisions
 

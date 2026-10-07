@@ -60,7 +60,7 @@ const createSqliteExecutor: TestingExecutorFactory = ({
 
 export function withSqliteTestBackend<
   THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
-  TInitial = Record<string, never>,
+  TInitial = Record<never, never>,
 >(
   handler: THandler,
   options: ReplacementResolverOptions<
@@ -87,7 +87,7 @@ export function withSqliteTestBackend<
     TInitial,
     THandler[typeof TAKIBI_BRAND]["services"]
   >,
-): TestingForkHandler<THandler, TInitial | THandler[typeof TAKIBI_BRAND]["initial"]>;
+): TestingForkHandler<THandler, TInitial & THandler[typeof TAKIBI_BRAND]["initial"]>;
 export function withSqliteTestBackend<
   THandler extends TakibiBrandCarrier<TakibiBrandRecord<object>>,
 >(

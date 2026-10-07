@@ -3,7 +3,7 @@ import { withSqliteTestBackend } from "takibi/testing";
 import { expect, test, vi } from "vite-plus/test";
 import { createChatApp } from "../src/app.tsx";
 import { chatHandler } from "../src/handler.ts";
-import type { ChatEnv, ChatHandler } from "../src/handler.ts";
+import type { ChatEnv, ChatHandler, RequestContext } from "../src/handler.ts";
 import {
   DISPLAY_NAME_MAX_LENGTH,
   MESSAGE_BODY_MAX_LENGTH,
@@ -19,7 +19,7 @@ import packageJson from "../package.json" with { type: "json" };
 
 function handlerFor() {
   return withSqliteTestBackend(chatHandler, {
-    resolve: ({ context }: { request: Request; context: { room: string; env?: ChatEnv } }) => ({
+    resolve: ({ context }: { request: Request; context: Pick<RequestContext, "room"> }) => ({
       room: context.room,
     }),
   });

@@ -40,18 +40,6 @@ test("withSqliteTestBackend keeps ClientOf collection action names", () => {
     resolve: () => ({ tenantId: "acme" }),
   };
   void invalidOptions;
-
-  const reusableOptions: SqliteTestBackendOptions<
-    AppCtx,
-    { session: string },
-    Record<never, never>
-  > = {
-    resolve: ({ context }): AppCtx => ({ tenantId: context.session, user: null }),
-  };
-  const reusable = withSqliteTestBackend(handler, reusableOptions);
-  expectTypeOf<Parameters<typeof reusable.handle>[1]["context"]>().toEqualTypeOf<
-    { session: string } | Record<string, never>
-  >();
 });
 
 test("replacement resolvers define the SQLite handler input context", () => {
@@ -73,9 +61,17 @@ test("replacement resolvers define the SQLite handler input context", () => {
       user: null,
     }),
   });
+  const reusableOptions: SqliteTestBackendOptions<
+    AppCtx,
+    { session: string },
+    Record<never, never>
+  > = {
+    resolve: ({ context }): AppCtx => ({ tenantId: context.session, user: null }),
+  };
+  const reusable = withSqliteTestBackend(handler, reusableOptions);
 
   expectTypeOf<Parameters<typeof empty.handle>[1]["context"]>().toEqualTypeOf<
-    Record<string, never>
+    Record<never, never>
   >();
   expectTypeOf<
     Parameters<typeof inherited.handle>[1]["context"]
@@ -86,6 +82,9 @@ test("replacement resolvers define the SQLite handler input context", () => {
   expectTypeOf<(typeof typed)["~takibi"]["initial"]>().toEqualTypeOf<{
     session: string;
   }>();
+  expectTypeOf<Parameters<typeof reusable.handle>[1]["context"]>().toEqualTypeOf<
+    { session: string } & ProductionInitial
+  >();
   expectTypeOf<
     Parameters<typeof handler.handle>[1]["context"]
   >().toEqualTypeOf<ProductionInitial>();
@@ -96,6 +95,23 @@ test("replacement resolvers define the SQLite handler input context", () => {
       resolve: () => ({ tenantId: "test" }),
     });
   void invalidOutput;
+
+  const invalidInferredInput = () =>
+    withSqliteTestBackend(handler, {
+      resolve: ({ context }): AppCtx => ({
+        // @ts-expect-error unannotated replacement inputs do not expose arbitrary properties
+        tenantId: context.session,
+        user: null,
+      }),
+    });
+  void invalidInferredInput;
+
+  const productionOnlyInput = () =>
+    reusable.handle(new Request("https://takibi.test/unknown"), {
+      // @ts-expect-error ambiguous reusable options require input safe for either resolver
+      context: { env: { API_TOKEN: "production" } },
+    });
+  void productionOnlyInput;
 });
 
 test("non-empty services require a SQLite test backend services value", () => {
