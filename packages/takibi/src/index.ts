@@ -12,6 +12,7 @@ export type {
   HandleOptions,
   HandleResult,
 } from "./context/types";
+export type { ActionDefinition, ScopedActions } from "./action";
 export { createPrettyConsoleLogger } from "./logging";
 export type {
   Logger,
@@ -33,6 +34,7 @@ export {
 } from "@takibi/api";
 
 export { and, fullAccess, grant, none, or, read, write } from "./policy";
+export type { ConstrainedPolicy, ContextPolicy, InferPolicyDoc } from "./policy";
 export { listWhere, queryImpliesEquality } from "./query";
 
 export type {

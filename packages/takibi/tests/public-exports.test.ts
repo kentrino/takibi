@@ -23,4 +23,6 @@ test("specialized entry contracts stay off the root entry", () => {
   expectTypeOf(Takibi).not.toHaveProperty("createClient");
   expectTypeOf(Takibi).not.toHaveProperty("withSqliteTestBackend");
   expectTypeOf(Takibi).not.toHaveProperty("registerGlobalTracer");
+  expectTypeOf(Takibi).not.toHaveProperty("constrainedPolicyBrand");
+  expectTypeOf(Takibi).not.toHaveProperty("contextPolicyBrand");
 });
