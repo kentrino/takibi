@@ -1,57 +1,38 @@
 ---
-title: Obtain per-user typed clients from the SQLite test backend
+title: Document per-user typed clients over one SQLite test backend
 author: Cursor Agent
-cost: 2
+cost: 1
 priority: P2
-priority_reason: "Switching test users requires encoding context into an x-test-user header and parsing it back in a replacement resolver, a pattern repeated across the README, repository tests, and integrating applications."
+priority_reason: "The README still teaches switching test users by JSON-encoding them into an x-test-user header, although a typed initial context now carries the user without serialization."
 category: devex
 ---
 
-# Obtain per-user typed clients from the SQLite test backend
+# Document per-user typed clients over one SQLite test backend
 
-Tests that exercise per-user authorization replace the production resolver with
-one that reads a JSON-encoded user from the `x-test-user` header. The round
-trip exists only because tests enter through `handle(request, ...)`; the
-pattern is repeated in the README, `packages/takibi/tests`, and integrating
-applications, and it puts context serialization into the test's precondition.
-Each `withSqliteTestBackend` call creates an independent database, so tests
-that share data across users must vary the context per request inside one
-handler, which today is only possible through headers.
+Authorization tests need several users against one shared SQLite test database.
+The README's Node integration example switches users by JSON-encoding them into
+an `x-test-user` header and parsing it back in a replacement resolver. Since
+[issue 0021](../../closed/0021-sqlite-test-context-input/issue.md), a replacement
+resolver can type its input context and `handle(request, { context })` passes a
+different context per request, so per-user clients already work without the
+header round trip. The supported pattern is undocumented and untested.
 
-Completion requires obtaining a typed client bound to a caller-supplied initial
-context from the test backend, keeping the production-shaped pipeline (resolve,
-serializability check, execution) intact, and removing the header encoding from
-repository tests and the README. The initial context type follows
-[issue 0021](../../closed/0021-sqlite-test-context-input/issue.md); the underlying fetch
-plumbing follows [issue 0025](../0025-sqlite-test-fetch/issue.md).
-
-## Rules
-
-- The replacement resolver still runs per request. Do not publish a test API
-  that injects an already-resolved context bypassing `resolve`: such tests
-  would stop exercising authentication and tenant extraction, the fork model
-  (one resolver per `mount`) would need a separate per-request injection
-  mechanism, and whether `assertSerializableContext` applies to injected
-  contexts would need a new decision.
-- The resolver's output continues through the existing
-  `assertSerializableContext` check.
-- `@takibi/testing` may promote `@takibi/client` from a devDependency to a
-  runtime dependency; the direction introduces no cycle.
-
-## Open Decisions
-
-- Method name and shape on the test backend (`client(initial)`).
-- Whether a backend-level default initial context merges with or is replaced
-  by the per-client value.
+This is resolved when the README shows per-user typed clients sharing one
+backend through the initial context, and tests prove that each client's context
+reaches the replacement resolver and that its output still passes
+`assertSerializableContext`. The pattern builds on the fetch adapter from
+[issue 0025](../0025-sqlite-test-fetch/issue.md). Injecting an already-resolved
+context that bypasses `resolve` stays out of scope.
 
 [Design](./design-a.md)
 
 ## Related Files
 
-- `packages/testing/src/testing.server.ts` — `withSqliteTestBackend` and `SqliteTestBackendOptions`
+- `packages/takibi/README.md` — "Node integration tests" header-based user switching example
+- `packages/testing/src/testing.server.ts` — `withSqliteTestBackend` replacement resolver input
+- `packages/testing/tests/handler.test.ts` — replacement resolver runtime tests
 - `packages/worker-runtime/src/testing-bridge.server.ts` — `TestingForkHandler` surface
 - `packages/worker-runtime/src/context/worker-call.ts` — per-request resolve and `assertSerializableContext`
-- `packages/takibi/tests/takibi.test.ts` — `x-test-user` resolver and header helpers
-- `packages/takibi/README.md` — header-based user switching example
-- `docs/issues/closed/0021-sqlite-test-context-input/issue.md` — prerequisite: replacement resolver defines its input type
-- `docs/issues/open/0025-sqlite-test-fetch/issue.md` — prerequisite: fetch adapter this client wraps
+- `packages/takibi/tests/takibi.test.ts` — header resolver used as a test app's production resolver
+- `docs/issues/closed/0021-sqlite-test-context-input/issue.md` — replacement resolver defines the input type
+- `docs/issues/open/0025-sqlite-test-fetch/issue.md` — prerequisite fetch adapter

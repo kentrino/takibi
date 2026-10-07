@@ -17,7 +17,7 @@ not compile. Every package works around the gap with an identical
 `requestTakibi` helper in `tests/helpers/request.ts` (five copies: build a
 `Request`, call `handle` with an empty context, throw when the result is not
 `matched`, return the response), the realtime-chat example inlines the same
-closure with `stripPrefix` and a dummy env, and integrating applications report
+closure with `stripPrefix` and a room context, and integrating applications report
 maintaining their own copy.
 
 Completion requires a Takibi-provided adapter assignable to `createClient`'s
@@ -51,6 +51,6 @@ repository tests updated to use it, and the five helper copies deleted.
 - `packages/client/src/client.ts` — the `fetch` option type the adapter must satisfy
 - `packages/takibi/README.md` — "Node integration tests" documents the nonexistent `handler.request`
 - `packages/takibi/tests/helpers/request.ts` — one of the five duplicated adapters
-- `examples/realtime-chat/tests/chat.test.ts` — inline adapter with `stripPrefix` and dummy env
+- `examples/realtime-chat/tests/chat.test.ts` — inline adapter with `stripPrefix` and a room context
 - `docs/issues/closed/0021-sqlite-test-context-input/issue.md` — owns the replacement resolver's input type
 - `docs/issues/open/0026-sqlite-test-typed-client/issue.md` — builds per-user typed clients on this adapter

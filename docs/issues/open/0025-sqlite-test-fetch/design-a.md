@@ -29,7 +29,7 @@ realtime-chat example keeps its room routing:
 
 ```ts
 fetch: testFetch(handler, {
-  context: { room, env: sqliteEnv },
+  context: { room },
   stripPrefix: `/api/${room}`,
 });
 ```
