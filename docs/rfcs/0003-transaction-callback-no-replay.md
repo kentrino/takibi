@@ -1,15 +1,17 @@
 ---
 id: "0003"
 title: Transaction callback no-replay contract
-status: proposed
+status: accepted
+implementation: complete
 created: 2026-09-16
+decided: 2026-10-08
 implementation_issues:
   - ../issues/closed/0020-transaction-callback-no-replay/issue.md
 ---
 
 # Transaction callback no-replay contract
 
-## Proposed contract
+## Contract
 
 `StorageDriver.transaction(callback)` invokes `callback` at most once for each
 transaction call in an invocation attempt. It may invoke it zero times when
@@ -19,7 +21,7 @@ decorators and other supported wrappers must preserve this property.
 
 An execution error, rollback, commit error, or unknown commit outcome must not cause
 the runtime, driver, or wrapper to transparently replay application work. Existing
-error and settlement behavior remains unchanged; this proposal adds no public API,
+error and settlement behavior remains unchanged; this contract adds no public API,
 wire-format, or persistence change.
 
 Atomic action handlers and trusted local `$transaction` callbacks inherit this
@@ -59,7 +61,7 @@ unspecified preserves the correctness hazard.
 
 ## Verification
 
-The tests below are complete; no RFC acceptance decision has been recorded.
+The tests below are complete.
 
 Shared conformance tests exercise local SQLite and Workers SQLite, supported storage
 wrappers individually and composed, and trusted callbacks. They cover success,

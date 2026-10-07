@@ -43,7 +43,7 @@ status: accepted
 implementation: pending
 decided: 2026-09-16
 implementation_issues:
-  - ../issues/closed/0020-transaction-callback-no-replay/issue.md
+  - ../issues/open/0020-transaction-callback-no-replay/issue.md
 ```
 
 Include only fields that apply. `created` is the RFC's creation date; `decided`

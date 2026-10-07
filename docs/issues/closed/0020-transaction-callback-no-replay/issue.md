@@ -13,7 +13,7 @@ closed_reason: implemented
 
 Atomic handlers and trusted transaction callbacks can perform external effects, but the storage interface leaves callback replay unspecified. Define and verify execution-count guarantees without changing the public API or current error behavior. Completion requires documentation and conformance tests for the SQLite backend and supported wrappers, including nested scopes, failures, unknown commit outcomes, and detection of a deliberately replaying test double. Distinguish this from client retry deduplication or exactly-once external delivery.
 
-[Proposed RFC](../../../rfcs/0003-transaction-callback-no-replay.md)
+[Accepted RFC](../../../rfcs/0003-transaction-callback-no-replay.md)
 
 ## Related Files
 
@@ -42,8 +42,8 @@ same matrix. A deliberately replaying driver is detected by the count assertion.
 Atomic handler counts and lifecycle unknown-outcome settlement have regression
 coverage as well. The internal `afterInitialization` wrapper is exercised end to
 end for success and handler failures by the Workers atomic-action tests; it is not
-part of the full fault-injection matrix. RFC 0003 remains proposed because no
-acceptance decision has been recorded.
+part of the full fault-injection matrix. RFC 0003 was accepted on 2026-10-08,
+with implementation complete.
 
 No failing-before-fix test was needed because the implementation already conforms;
 the negative replay test verifies the conformance check itself. Commit and unknown
