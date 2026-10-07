@@ -69,6 +69,7 @@ test("indexed scans keep equality prefixes and numeric bounds but not unsafe str
   const unsafeSql = compileIndexedScanSql("posts", unsafe!, { limit: 10 });
   expect(unsafeSql.bindings).not.toContain("\uE000");
   expect(unsafeSql.sql).not.toContain("< ?");
+  expect(unsafeSql.sql).not.toContain("AND 1");
 
   const ascii = resolveIndexedList(
     "posts",
@@ -96,6 +97,7 @@ test("indexed scans keep equality prefixes and numeric bounds but not unsafe str
   );
   const prefixedSql = compileIndexedScanSql("posts", prefixed!, { limit: 10 });
   expect(prefixedSql.sql).toContain("= ?");
+  expect(prefixedSql.sql).not.toContain("AND 1");
   expect(prefixedSql.bindings).toContain("u1");
   expect(prefixedSql.bindings).not.toContain("\uE000");
 

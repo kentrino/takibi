@@ -53,7 +53,7 @@ export function compileIndexedScanSql(
     residual?: Parameters<typeof compileQueryToSql>[0];
     limit: number;
   },
-): SqlPredicate {
+): Pick<SqlPredicate, "sql" | "bindings"> {
   const scanFields = scanFieldsFrom(scan);
   const clauses = ["collection = ?"];
   const bindings: SqlBinding[] = [collection];
@@ -83,12 +83,10 @@ export function compileIndexedScanSql(
     bindings.push(...keyset.bindings);
   }
 
-  let exact = rangePredicate?.exact ?? true;
   if (args.residual) {
     const residual = compileQueryToSql(args.residual);
     clauses.push(residual.sql);
     bindings.push(...residual.bindings);
-    exact &&= residual.exact;
   }
 
   const order = scanFields
@@ -102,7 +100,6 @@ export function compileIndexedScanSql(
          ORDER BY ${order}
          LIMIT ?`,
     bindings: [...bindings, args.limit],
-    exact,
   };
 }
 
@@ -141,9 +138,7 @@ function compileRangePredicate(plan: IndexRangePlan): SqlPredicate | undefined {
   push(">=", range.gte);
   push("<", range.lt);
   push("<=", range.lte);
-  if (clauses.length === 0) {
-    return exact ? undefined : { sql: "1", bindings: [], exact: false };
-  }
+  if (clauses.length === 0) return undefined;
   return { sql: `(${clauses.join(" AND ")})`, bindings, exact };
 }
 
