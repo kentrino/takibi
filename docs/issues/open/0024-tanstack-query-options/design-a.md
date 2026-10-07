@@ -20,7 +20,7 @@ const postsAtom = atomWithQuery(() =>
   takibiQueryOptions({
     queryKey: ["posts"],
     queryFn: () => client.posts.list(),
-  })
+  }),
 );
 ```
 
@@ -31,7 +31,7 @@ const createPostAtom = atomWithMutation(() =>
   takibiMutationOptions({
     mutationFn: (input: PostInput) => client.posts.add(input),
     invalidate: ["posts"],
-  })
+  }),
 );
 ```
 

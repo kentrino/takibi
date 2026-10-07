@@ -31,7 +31,7 @@ if (!result.ok && result.error.kind === "validation") {
   extra public data.
 - `toTakibiFailure` checks for it after `SchemaValidationError` and before the
   operation fallback, and emits `{ kind: "validation", code: "VALIDATION",
-  message, status: 400, issues }`. `statusOf` and `emitFailure` need no change
+message, status: 400, issues }`. `statusOf` and `emitFailure` need no change
   because they read `TakibiError.status` and `code`.
 - The constructor takes wire-shaped `ValidationIssue`s, so the issues are
   JSON-safe by type and need no `normalizeValidationIssues` pass. The default

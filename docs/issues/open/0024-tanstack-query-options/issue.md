@@ -18,7 +18,7 @@ const postsAtom = atomWithQuery(() =>
   takibiQueryOptions({
     queryKey: ["posts"],
     queryFn: () => client.posts.list(),
-  })
+  }),
 );
 ```
 
