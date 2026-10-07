@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { takibiServer } from "@takibi/hono-adapter";
 import { type TakibiResult } from "takibi";
@@ -30,33 +31,23 @@ export const FULL_PATH_OPERATIONS = {
 
 export const FULL_PATH_EXPECTED_CHECKSUM = 2_310_661_680;
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(`Full-path invariant failed: ${message}`);
-}
-
 function mustOk<T>(result: TakibiResult<T>, label: string): T {
   if (!result.ok) {
-    throw new Error(`${label} failed with ${result.error.code}: ${result.error.message}`);
+    assert.fail(`${label} failed with ${result.error.code}: ${result.error.message}`);
   }
   return result.data;
 }
 
 function mustFail<T>(result: TakibiResult<T>, code: string, label: string): void {
-  if (result.ok) throw new Error(`${label} unexpectedly succeeded`);
-  assert(result.error.code === code, `${label} returned ${result.error.code}, expected ${code}`);
+  assert.equal(result.ok, false, `${label} unexpectedly succeeded`);
+  if (result.ok) return;
+  assert.equal(result.error.code, code, `${label} returned ${result.error.code}, expected ${code}`);
 }
 
 function failureReasonCode<T>(result: TakibiResult<T>): string {
   if (result.ok || result.error.kind !== "operation" || !("reason" in result.error)) return "";
   const reason = result.error.reason as { code?: unknown } | undefined;
   return typeof reason?.code === "string" ? reason.code : "";
-}
-
-function sameValues(actual: readonly string[], expected: readonly string[], label: string): void {
-  assert(
-    actual.length === expected.length && actual.every((value, index) => value === expected[index]),
-    `${label} order mismatch: ${actual.join(",")}`,
-  );
 }
 
 function checksum(parts: readonly string[]): number {
@@ -173,8 +164,8 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
 
     const firstMember = mustOk(await editor.members.get("member-01"), "seed initialization get");
     const firstProject = mustOk(await editor.projects.get("project-01"), "project get");
-    assert(firstMember.email === "member01@example.test", "seeded member changed");
-    assert(firstProject.key === "PRJ1", "seeded project changed");
+    assert.equal(firstMember.email, "member01@example.test");
+    assert.equal(firstProject.key, "PRJ1");
 
     const indexed = mustOk(
       await editor.tasks.list({
@@ -193,12 +184,8 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       "project/status/priority indexed list",
     );
     const indexedTaskIds = indexed.items.map((task) => task.id);
-    sameValues(
-      indexedTaskIds,
-      ["task-01", "task-13", "task-25", "task-37", "task-49"],
-      "project indexed list",
-    );
-    assert(indexed.nextCursor === undefined, "unexpected indexed list cursor");
+    assert.deepEqual(indexedTaskIds, ["task-01", "task-13", "task-25", "task-37", "task-49"]);
+    assert.equal(indexed.nextCursor, undefined);
 
     const assigned = mustOk(
       await editor.tasks.list({
@@ -215,11 +202,7 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       "assignee indexed list",
     );
     const assigneeTaskIds = assigned.items.map((task) => task.id);
-    sameValues(
-      assigneeTaskIds,
-      ["task-49", "task-37", "task-25", "task-13", "task-01"],
-      "assignee indexed list",
-    );
+    assert.deepEqual(assigneeTaskIds, ["task-49", "task-37", "task-25", "task-13", "task-01"]);
 
     const listRequestsBefore = requestCounts.list;
     const allTasks = mustOk(
@@ -230,8 +213,8 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       "task listAll",
     );
     const listAllPages = requestCounts.list - listRequestsBefore;
-    assert(allTasks.length === 60, `listAll returned ${allTasks.length} tasks`);
-    assert(listAllPages === 4, `listAll used ${listAllPages} pages`);
+    assert.equal(allTasks.length, 60);
+    assert.equal(listAllPages, 4);
 
     const temporary = mustOk(
       await editor.tasks.add(benchmarkTask(), { id: "task-benchmark-temp" }),
@@ -244,7 +227,7 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       }),
       "revision update",
     );
-    assert(updatedTemporary.rev === temporary.rev + 1, "revision did not advance");
+    assert.equal(updatedTemporary.rev, temporary.rev + 1);
     const stale = await editor.tasks.update("task-benchmark-temp", {
       title: "Task benchmark stale lifecycle",
       rev: temporary.rev,
@@ -275,7 +258,7 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       }),
       "complete action",
     );
-    assert(completed.rev === reprioritized.rev + 1, "complete revision mismatch");
+    assert.equal(completed.rev, reprioritized.rev + 1);
     const reopened = mustOk(
       await editor.tasks.reopen("task-02", {
         eventId: "activity-action-reopen",
@@ -328,14 +311,13 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
     const batchResults = await Promise.all(
       Array.from({ length: BATCH_READ_COUNT }, (_, index) => batched.tasks.get(id("task", index))),
     );
-    assert(requestCounts.batch === 1, `batch route called ${requestCounts.batch} times`);
+    assert.equal(requestCounts.batch, 1);
     const batchTaskIds = batchResults.map(
       (result, index) => mustOk(result, `batch item ${index}`).id,
     );
-    sameValues(
+    assert.deepEqual(
       batchTaskIds,
       Array.from({ length: BATCH_READ_COUNT }, (_, index) => id("task", index)),
-      "batch item mapping",
     );
 
     const invalid = await editor.tasks.add({
@@ -357,7 +339,7 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       sequence: 107,
     });
     mustFail(denied, "FORBIDDEN", "viewer action");
-    assert(failureReasonCode(denied) === "EDITOR_REQUIRED", "viewer denial reason changed");
+    assert.equal(failureReasonCode(denied), "EDITOR_REQUIRED");
 
     mustOk(await editor.tasks.delete("task-benchmark-temp"), "temporary task delete");
     const deleted = await editor.tasks.get("task-benchmark-temp");
@@ -385,14 +367,16 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
         "final activity",
       ).length,
     };
-    assert(
-      JSON.stringify(finalCounts) ===
-        JSON.stringify({ members: 12, projects: 4, tasks: 61, comments: 101, activityEvents: 46 }),
-      `final counts changed: ${JSON.stringify(finalCounts)}`,
-    );
+    assert.deepEqual(finalCounts, {
+      members: 12,
+      projects: 4,
+      tasks: 61,
+      comments: 101,
+      activityEvents: 46,
+    });
     const changedTask = mustOk(await editor.tasks.get("task-02"), "changed task");
-    assert(changedTask.assigneeId === "member-03", "assignment side effect missing");
-    assert(changedTask.status === "TODO", "reopen side effect missing");
+    assert.equal(changedTask.assigneeId, "member-03");
+    assert.equal(changedTask.status, "TODO");
     mustOk(await editor.comments.get("comment-benchmark-action"), "action comment side effect");
     mustOk(await editor.activityEvents.get("activity-action-root"), "root activity side effect");
 
@@ -422,10 +406,7 @@ export async function runFullPathScenario(): Promise<FullPathScenarioReport> {
       Object.values(failures).join(","),
       String(reopened.rev),
     ]);
-    assert(
-      finalChecksum === FULL_PATH_EXPECTED_CHECKSUM,
-      `checksum ${finalChecksum} !== ${FULL_PATH_EXPECTED_CHECKSUM}`,
-    );
+    assert.equal(finalChecksum, FULL_PATH_EXPECTED_CHECKSUM);
     fullPathBenchmarkSink = finalChecksum;
 
     return {
