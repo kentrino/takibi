@@ -954,7 +954,12 @@ columns. There is no unindexed `orderBy` and no automatic index selection.
 
 The SQLite storage implementation compiles predicates to parameterized SQL,
 uses the declared expression index for the chosen order, and performs a final
-JavaScript check to preserve missing / null / type semantics. The Node test
+JavaScript check to preserve missing / null / type semantics. String comparisons
+in `where` use JavaScript UTF-16 order. Index result order and cursors use
+SQLite BINARY order. Those orders differ for some Unicode strings, so a string
+range narrows in SQL only when the comparison agrees with JavaScript; otherwise
+the candidate set stays wide enough that the JavaScript check still sees every
+match. Numeric ranges and equality prefixes still narrow in SQL. The Node test
 backend exercises this same storage path. Treat `nextCursor` as opaque; do not
 inspect, modify, or guess cursor values.
 
@@ -1237,7 +1242,8 @@ operation failure.
   Keep embedded arrays small and bounded.
 - `list` returns full documents. Without `index` the order is id ascending.
   With `index`, order follows the declared field tuple (and `orderBy` on that
-  index). It does not offer unindexed `orderBy`, offset, or projection. Each
+  index) in SQLite BINARY order. String `where` membership stays on JavaScript
+  UTF-16 order. It does not offer unindexed `orderBy`, offset, or projection. Each
   page defaults to **50** documents and is capped at **200**. `listAll` walks
   those pages (default page size 200) and stops at a client safety cap of
   **10_000** documents unless `createClient({ listAll })` or the call site sets

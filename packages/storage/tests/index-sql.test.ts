@@ -50,3 +50,63 @@ test("index DDL and scan SQL stay parameterized", () => {
   expect(compiled.bindings).toContain("u1'; DROP TABLE takibi_documents; --");
   expect(compiled.bindings.at(-1)).toBe(20);
 });
+
+test("indexed scans keep equality prefixes and numeric bounds but not unsafe string bounds", () => {
+  const registry = compileIndexRegistry({
+    posts: {
+      indexes: {
+        byLabel: ["label"] as const,
+        byOwner: ["ownerId", "label"] as const,
+        byScore: ["score"] as const,
+      },
+    },
+  });
+  const unsafe = resolveIndexedList(
+    "posts",
+    { index: "byLabel", where: { field: "label", op: "lt", value: "\uE000" } },
+    registry,
+  );
+  const unsafeSql = compileIndexedScanSql("posts", unsafe!, { limit: 10 });
+  expect(unsafeSql.bindings).not.toContain("\uE000");
+  expect(unsafeSql.sql).not.toContain("< ?");
+  expect(unsafeSql.sql).not.toContain("AND 1");
+
+  const ascii = resolveIndexedList(
+    "posts",
+    { index: "byLabel", where: { field: "label", op: "gte", value: "m" } },
+    registry,
+  );
+  const asciiSql = compileIndexedScanSql("posts", ascii!, { limit: 10 });
+  expect(asciiSql.sql).toContain(">= ?");
+  expect(asciiSql.bindings).toContain("m");
+
+  const prefixed = resolveIndexedList(
+    "posts",
+    {
+      index: "byOwner",
+      where: {
+        op: "and",
+        operands: [
+          { field: "ownerId", op: "eq", value: "u1" },
+          { field: "label", op: "lt", value: "\uE000" },
+        ],
+      },
+      orderBy: { field: "label", direction: "asc" },
+    },
+    registry,
+  );
+  const prefixedSql = compileIndexedScanSql("posts", prefixed!, { limit: 10 });
+  expect(prefixedSql.sql).toContain("= ?");
+  expect(prefixedSql.sql).not.toContain("AND 1");
+  expect(prefixedSql.bindings).toContain("u1");
+  expect(prefixedSql.bindings).not.toContain("\uE000");
+
+  const numeric = resolveIndexedList(
+    "posts",
+    { index: "byScore", where: { field: "score", op: "gt", value: 15 } },
+    registry,
+  );
+  const numericSql = compileIndexedScanSql("posts", numeric!, { limit: 10 });
+  expect(numericSql.sql).toContain("> ?");
+  expect(numericSql.bindings).toContain(15);
+});

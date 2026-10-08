@@ -3,18 +3,21 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { BadRequestError } from "@takibi/api";
 import { expect, test } from "vite-plus/test";
 import {
+  compareDocumentIndexOrder,
+  compareUtf8,
   compileIndexRegistry,
   compileIndexedScanSql,
   createDurableObjectStorage,
   physicalIndexName,
   reconcileCollectionIndexes,
   resolveIndexedList,
+  type StorageDriver,
   type StoredDocument,
 } from "@takibi/storage";
-import type { QueryExpr, WithMetadata } from "@takibi/shared-types";
+import type { QueryExpr, StorageListOptions, WithMetadata } from "@takibi/shared-types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
-import { composeAnd, listWhere } from "@takibi/query";
+import { composeAnd, listWhere, matchesQuery } from "@takibi/query";
 
 const TS = "2026-08-19T00:00:00.000Z";
 
@@ -597,3 +600,204 @@ test("SQLite query plan uses the declared expression index and reconcile drops r
     expect(names).toEqual([physicalIndexName("posts", "byCreator", ["ownerId", "createdAt"])]);
   });
 });
+
+test("string candidate filters preserve JavaScript matches across indexes and pages", async () => {
+  const stub = storageStub("string-candidate-safety");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const registry = compileIndexRegistry({
+      posts: {
+        indexes: {
+          byLabel: ["label"] as const,
+          byOwner: ["ownerId", "label"] as const,
+          byScore: ["score"] as const,
+          byCreated: ["createdAt"] as const,
+        },
+      },
+    });
+    const sqlite = createDurableObjectStorage(state.storage, registry);
+    const gapCount = 130;
+    const rows: Array<{
+      id: string;
+      ownerId: string;
+      score: number;
+      label?: string | number | null;
+      createdAt?: string;
+    }> = [
+      { id: "empty", ownerId: "u1", label: "", score: 1 },
+      { id: "ascii", ownerId: "u1", label: "a", score: 1 },
+      { id: "emoji", ownerId: "u1", label: "😀", score: 1 },
+      { id: "high", ownerId: "u1", label: "\uE000", score: 1 },
+      { id: "num", ownerId: "u1", label: 1, score: 1 },
+      { id: "nil", ownerId: "u1", label: null, score: 1 },
+      { id: "miss", ownerId: "u1", score: 1 },
+      { id: "other", ownerId: "u2", label: "a", score: 1 },
+      { id: "big", ownerId: "u1", label: "a", score: 30 },
+      { id: "\uE000", ownerId: "u1", label: "\uFFFF", score: 1 },
+      { id: "😀", ownerId: "u1", label: "\uFFFF", score: 1 },
+      { id: "time-high", ownerId: "u1", label: "\uFFFF", score: 1, createdAt: "\uE000" },
+      { id: "time-emoji", ownerId: "u1", label: "\uFFFF", score: 1, createdAt: "😀" },
+    ];
+    for (let index = 0; index < gapCount; index += 1) {
+      rows.push({
+        id: `gap-${String(index).padStart(3, "0")}`,
+        ownerId: "u1",
+        label: "\uFFFF",
+        score: 1,
+      });
+    }
+    const documents: StoredDocument[] = rows.map((row) => ({
+      ...meta({ id: row.id, ownerId: row.ownerId, score: row.score }),
+      ...(row.label !== undefined ? { label: row.label } : {}),
+      ...(row.createdAt !== undefined ? { createdAt: row.createdAt } : {}),
+    }));
+    for (const document of documents) await sqlite.put("posts", document);
+
+    const ltHigh: QueryExpr = { field: "label", op: "lt", value: "\uE000" };
+    const notLt: QueryExpr = { op: "not", operand: ltHigh };
+    const nested: QueryExpr = {
+      op: "and",
+      operands: [
+        { field: "ownerId", op: "eq", value: "u1" },
+        {
+          op: "or",
+          operands: [ltHigh, { field: "label", op: "eq", value: "\uE000" }],
+        },
+      ],
+    };
+    const negatedAnd: QueryExpr = {
+      op: "not",
+      operand: {
+        op: "and",
+        operands: [{ field: "ownerId", op: "eq", value: "u1" }, ltHigh],
+      },
+    };
+
+    const unindexed = (where: QueryExpr) => collectIds(sqlite, { where, limit: 1 });
+    const unindexedLt = await unindexed(ltHigh);
+    expect(unindexedLt).toEqual(expectedIds(documents, ltHigh));
+    expect(unindexedLt).toContain("emoji");
+    expect(unindexedLt).not.toContain("high");
+    const unindexedNot = await unindexed(notLt);
+    expect(unindexedNot).toEqual(expectedIds(documents, notLt));
+    expect(unindexedNot).toEqual(expect.arrayContaining(["high", "num", "nil", "miss", "\uE000"]));
+    expect(unindexedNot).not.toContain("emoji");
+    expect(await unindexed(nested)).toEqual(expectedIds(documents, nested));
+    expect(await unindexed(negatedAnd)).toEqual(expectedIds(documents, negatedAnd));
+
+    const idLt: QueryExpr = { field: "id", op: "lt", value: "\uE000" };
+    const createdLt: QueryExpr = { field: "createdAt", op: "lt", value: "\uE000" };
+    const unindexedId = await unindexed(idLt);
+    expect(unindexedId).toContain("😀");
+    expect(unindexedId).not.toContain("\uE000");
+    const unindexedIdNot = await unindexed({ op: "not", operand: idLt });
+    expect(unindexedIdNot).toContain("\uE000");
+    expect(unindexedIdNot).not.toContain("😀");
+    const unindexedCreated = await unindexed(createdLt);
+    expect(unindexedCreated).toContain("time-emoji");
+    expect(unindexedCreated).not.toContain("time-high");
+    expect(await unindexed({ op: "not", operand: createdLt })).toEqual(["time-high"]);
+
+    const scoreGt: QueryExpr = { field: "score", op: "gt", value: 15 };
+    expect(await unindexed(scoreGt)).toEqual(["big"]);
+    expect(await collectIds(sqlite, { index: "byScore", where: scoreGt, limit: 10 })).toEqual([
+      "big",
+    ]);
+
+    for (const direction of ["asc", "desc"] as const) {
+      const where = ltHigh;
+      const ids = await collectIds(sqlite, {
+        index: "byLabel",
+        where,
+        orderBy: { field: "label", direction },
+        limit: 1,
+      });
+      expect(ids).toEqual(expectedIndexedIds(documents, ["label"], direction, where));
+      expect(ids).toContain("emoji");
+      expect(ids).not.toContain("high");
+      expect(ids).not.toContain("nil");
+      expect(ids).not.toContain("miss");
+
+      const negated = await collectIds(sqlite, {
+        index: "byLabel",
+        where: notLt,
+        orderBy: { field: "label", direction },
+        limit: 50,
+      });
+      expect(negated).toEqual(expectedIndexedIds(documents, ["label"], direction, notLt));
+      expect(negated).toContain("high");
+      expect(negated).toContain("num");
+      expect(negated).not.toContain("emoji");
+      expect(negated).not.toContain("nil");
+
+      const created = await collectIds(sqlite, {
+        index: "byCreated",
+        where: createdLt,
+        orderBy: { field: "createdAt", direction },
+        limit: 50,
+      });
+      expect(created).toEqual(expectedIndexedIds(documents, ["createdAt"], direction, createdLt));
+      expect(created).toContain("time-emoji");
+      expect(created).not.toContain("time-high");
+    }
+
+    const prefixed: QueryExpr = {
+      op: "and",
+      operands: [{ field: "ownerId", op: "eq", value: "u1" }, ltHigh],
+    };
+    const prefixedIds = await collectIds(sqlite, {
+      index: "byOwner",
+      where: prefixed,
+      orderBy: { field: "label", direction: "asc" },
+      limit: 1,
+    });
+    expect(prefixedIds).toEqual(expectedIndexedIds(documents, ["label"], "asc", prefixed));
+    expect(prefixedIds).toContain("emoji");
+    expect(prefixedIds).not.toContain("other");
+    expect(prefixedIds).not.toContain("high");
+  });
+});
+
+async function collectIds(storage: StorageDriver, options: StorageListOptions): Promise<string[]> {
+  const ids: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await storage.list("posts", {
+      ...options,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    ids.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return ids;
+}
+
+function expectedIds(
+  documents: ReadonlyArray<Record<string, unknown>>,
+  where: QueryExpr,
+): string[] {
+  return documents
+    .filter((document) => matchesQuery(document, where))
+    .sort((left, right) => compareUtf8(String(left.id), String(right.id)))
+    .map((document) => String(document.id));
+}
+
+function expectedIndexedIds(
+  documents: ReadonlyArray<Record<string, unknown>>,
+  fields: readonly string[],
+  direction: "asc" | "desc",
+  where: QueryExpr,
+): string[] {
+  return documents
+    .filter((document) => indexable(document, fields) && matchesQuery(document, where))
+    .sort((left, right) => compareDocumentIndexOrder(left, right, fields, direction))
+    .map((document) => String(document.id));
+}
+
+function indexable(document: Record<string, unknown>, fields: readonly string[]): boolean {
+  return fields.every((field) => {
+    const value = document[field];
+    return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
+  });
+}

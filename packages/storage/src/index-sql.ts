@@ -1,6 +1,11 @@
 import type { IndexRangePlan, ResolvedIndexScan } from "./indexes";
 import type { QueryScalar } from "@takibi/shared-types";
-import { compileQueryToSql, type SqlBinding, type SqlPredicate } from "./sql-query";
+import {
+  compileQueryToSql,
+  requiresJavaScriptTextOrdering,
+  type SqlBinding,
+  type SqlPredicate,
+} from "./sql-query";
 
 const METADATA_COLUMNS: Readonly<Record<string, string>> = {
   id: "id",
@@ -48,10 +53,14 @@ export function compileIndexedScanSql(
     residual?: Parameters<typeof compileQueryToSql>[0];
     limit: number;
   },
-): SqlPredicate {
+): Pick<SqlPredicate, "sql" | "bindings"> {
   const scanFields = scanFieldsFrom(scan);
   const clauses = ["collection = ?"];
   const bindings: SqlBinding[] = [collection];
+
+  for (const field of scan.index.fields) {
+    clauses.push(indexValuePresentClause(field));
+  }
 
   for (const equality of scan.range.equalities) {
     clauses.push(`${indexColumnExpression(equality.field)} = ?`);
@@ -115,24 +124,22 @@ function compileRangePredicate(plan: IndexRangePlan): SqlPredicate | undefined {
   const clauses: string[] = [];
   const bindings: SqlBinding[] = [];
   const range = plan.range;
-  if (range.gt !== undefined) {
-    clauses.push(`${expr} > ?`);
-    bindings.push(asBinding(range.gt));
-  }
-  if (range.gte !== undefined) {
-    clauses.push(`${expr} >= ?`);
-    bindings.push(asBinding(range.gte));
-  }
-  if (range.lt !== undefined) {
-    clauses.push(`${expr} < ?`);
-    bindings.push(asBinding(range.lt));
-  }
-  if (range.lte !== undefined) {
-    clauses.push(`${expr} <= ?`);
-    bindings.push(asBinding(range.lte));
-  }
+  let exact = true;
+  const push = (operator: string, value: QueryScalar | undefined) => {
+    if (value === undefined) return;
+    if (!canPushIndexBound(value)) {
+      exact = false;
+      return;
+    }
+    clauses.push(`${expr} ${operator} ?`);
+    bindings.push(asBinding(value));
+  };
+  push(">", range.gt);
+  push(">=", range.gte);
+  push("<", range.lt);
+  push("<=", range.lte);
   if (clauses.length === 0) return undefined;
-  return { sql: `(${clauses.join(" AND ")})`, bindings };
+  return { sql: `(${clauses.join(" AND ")})`, bindings, exact };
 }
 
 function compileKeysetPredicate(
@@ -146,7 +153,19 @@ function compileKeysetPredicate(
   return {
     sql: `(${expressions.join(", ")}) ${operator} (${expressions.map(() => "?").join(", ")})`,
     bindings: values.map(asBinding),
+    exact: true,
   };
+}
+
+function indexValuePresentClause(field: string): string {
+  const metadata = METADATA_COLUMNS[field];
+  if (metadata !== undefined) return `${metadata} IS NOT NULL`;
+  return `json_type(data, ${sqlString(jsonPath(field))}) IN ('text', 'integer', 'real')`;
+}
+
+function canPushIndexBound(value: QueryScalar): boolean {
+  if (typeof value === "number") return true;
+  return typeof value === "string" && !requiresJavaScriptTextOrdering(value);
 }
 
 function jsonPath(field: string): string {
