@@ -19,6 +19,9 @@ only. Do not import it from Worker or browser production entries.
 
 Handlers returned by `withSqliteTestBackend` implement `Symbol.asyncDispose`
 and `Symbol.dispose`. Both close the in-memory database after startup and
-in-flight work settled. A startup failure that no request reported rejects
-`Symbol.asyncDispose`; `Symbol.dispose` cannot return it, so it goes to the
-configured logger instead and never becomes an unhandled rejection.
+in-flight work settled. A startup failure that no request reported is
+reported exactly once, by whichever disposal is called first:
+`Symbol.asyncDispose` rejects with it; `Symbol.dispose` cannot return it, so
+it emits a `takibi.error` event to the configured logger, or calls
+`console.error` when no logger is configured, and never leaves an unhandled
+rejection. The disposal called second does not report it again.

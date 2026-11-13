@@ -178,10 +178,12 @@ The returned handler implements `Symbol.asyncDispose` and `Symbol.dispose`;
 use `await using` / `using` or call one from test teardown when a suite keeps
 handlers alive for a long time. Both close the database once startup and
 in-flight work settled. If startup failed (for example a `seed` threw) and no
-request reported that failure, `await handler[Symbol.asyncDispose]()` rejects
-with it. `handler[Symbol.dispose]()` returns before closing finishes and never
-throws or leaves an unhandled rejection: it reports such a failure to the
-configured `logger` (as a `takibi.error` event) and otherwise drops it. Use the
+request reported that failure, the disposal called first reports it, exactly
+once: `await handler[Symbol.asyncDispose]()` rejects with it.
+`handler[Symbol.dispose]()` returns before closing finishes and never throws or
+leaves an unhandled rejection: it reports the failure to the configured
+`logger` (as a `takibi.error` event), or with `console.error` when no logger is
+configured. A disposal called after the first does not report it again. Use the
 async form when a test must observe startup failures.
 
 ```ts
