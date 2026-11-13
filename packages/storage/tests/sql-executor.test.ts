@@ -1,6 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { expect, test } from "vite-plus/test";
-import { SqlExecutor, type SqlConnection, type SqlResult, type SqlRow } from "@takibi/storage";
+import {
+  isSqlCommitOutcomeUnknown,
+  SQL_COMMIT_OUTCOME_UNKNOWN,
+  SqlExecutor,
+  sqlCommitOutcomeUnknown,
+  type SqlConnection,
+  type SqlResult,
+  type SqlRow,
+} from "@takibi/storage";
 
 const empty = <Row extends SqlRow>(): SqlResult<Row> => ({ rows: [] });
 
@@ -245,4 +253,38 @@ test("an async context store is scoped per executor", async () => {
     );
   });
   expect(second.log).toEqual(["other database", "BEGIN", "ROLLBACK"]);
+});
+
+test("an unknown commit outcome reaches the caller unchanged and nothing is retried", async () => {
+  const unknown = sqlCommitOutcomeUnknown(new Error("connection reset"));
+  let commits = 0;
+  let statements = 0;
+  const sql = new SqlExecutor({
+    async exec<Row extends SqlRow>() {
+      statements += 1;
+      if (statements === 1) throw unknown;
+      return empty<Row>();
+    },
+    async transaction(body) {
+      await body({ exec: async <Row extends SqlRow>() => empty<Row>() });
+      commits += 1;
+      throw unknown;
+    },
+  });
+  let calls = 0;
+  await expect(
+    sql.transaction(async (tx) => {
+      calls += 1;
+      await tx.exec("INSERT");
+    }),
+  ).rejects.toBe(unknown);
+  expect({ calls, commits }).toEqual({ calls: 1, commits: 1 });
+  expect(isSqlCommitOutcomeUnknown(unknown)).toBe(true);
+  expect(unknown).toMatchObject({ code: SQL_COMMIT_OUTCOME_UNKNOWN, status: 500 });
+
+  // An autocommit write with an unknown outcome is not retried either.
+  await expect(sql.exec("INSERT")).rejects.toBe(unknown);
+  expect(statements).toBe(1);
+  // The executor keeps serving later calls.
+  await expect(sql.exec("SELECT")).resolves.toEqual({ rows: [] });
 });

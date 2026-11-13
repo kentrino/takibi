@@ -1,6 +1,11 @@
 export { openSqliteStorage } from "./storage";
 export type { SqliteStorage } from "./storage";
-export { SqlExecutor } from "./sql-executor";
+export {
+  isSqlCommitOutcomeUnknown,
+  SQL_COMMIT_OUTCOME_UNKNOWN,
+  SqlExecutor,
+  sqlCommitOutcomeUnknown,
+} from "./sql-executor";
 export type {
   SqlAsyncContext,
   SqlConnection,

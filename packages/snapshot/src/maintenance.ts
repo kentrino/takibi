@@ -4,7 +4,11 @@ import {
   type CollectionsDef,
   type TrustedCollectionsApi,
 } from "@takibi/api";
-import type { SqlExecutor, SqlStatementExecutor } from "@takibi/storage";
+import {
+  isSqlCommitOutcomeUnknown,
+  type SqlExecutor,
+  type SqlStatementExecutor,
+} from "@takibi/storage";
 import type {
   LeaseHandle,
   MaintenancePurpose,
@@ -416,7 +420,9 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
         valueKey,
         documentId,
       );
-    } catch {
+    } catch (error) {
+      // Only a rejected insert is a duplicate; an unknown commit outcome is not.
+      if (isSqlCommitOutcomeUnknown(error)) throw error;
       throw new SnapshotInvalidDocumentError(
         `Unique constraint violated: ${collection}.${constraint}`,
       );

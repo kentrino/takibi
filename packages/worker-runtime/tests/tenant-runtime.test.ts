@@ -7,7 +7,7 @@ import {
   type CollectionsDef,
 } from "@takibi/api";
 import { fullAccess } from "@takibi/policy";
-import { SqlExecutor, type SqlStatementExecutor } from "@takibi/storage";
+import { SqlExecutor, sqlCommitOutcomeUnknown, type SqlStatementExecutor } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { createTenantRuntime, type TenantHost } from "../src/tenant-runtime";
 import type { WatchHost, WatchSocket } from "../src/watch-runtime";
@@ -209,6 +209,69 @@ test("a watch host receives recovery and commit fan-out through the runtime", as
   expect(JSON.parse(socket.send.mock.lastCall![0]).items).toHaveLength(2);
   expect(socket.close).not.toHaveBeenCalled();
   close();
+});
+
+test("an unknown commit outcome reaches the caller unchanged and still fans out to watch", async () => {
+  const inner = createNodeSqliteExecutor();
+  const unknown = sqlCommitOutcomeUnknown(new Error("acknowledgement lost"));
+  let armed = false;
+  // Once armed, the next commit succeeds, but its acknowledgement is lost.
+  const sql = new SqlExecutor({
+    exec: (query, ...bindings) => inner.exec(query, ...bindings),
+    async transaction(body) {
+      const result = await inner.transaction(body);
+      if (armed) {
+        armed = false;
+        throw unknown;
+      }
+      return result;
+    },
+  });
+  const pending: Promise<unknown>[] = [];
+  const socket = {
+    readyState: 1,
+    send: vi.fn<(message: string) => void>(),
+    close: vi.fn(),
+    deserializeAttachment: () =>
+      JSON.stringify({ version: 1, collection: "posts", list: { limit: 10 }, context: {} }),
+  };
+  const watch: WatchHost = {
+    sockets: () => [socket],
+    accept: () => {
+      throw new Error("not used");
+    },
+    waitUntil: (promise) => {
+      pending.push(promise);
+    },
+  };
+  const drain = async () => {
+    while (pending.length) await Promise.all(pending.splice(0));
+  };
+  const runtime = runtimeOver(immediateHost(watch), sql);
+  await runtime.ready;
+  await drain();
+  const sentAfterStartup = socket.send.mock.calls.length;
+
+  armed = true;
+  let calls = 0;
+  await expect(
+    runtime.collectionsApi.$transaction(async (tx) => {
+      calls += 1;
+      await tx.posts.add({ title: "second", score: 2 }, { id: "second" });
+    }),
+  ).rejects.toBe(unknown);
+  expect(calls).toBe(1);
+  await drain();
+  // Not treated as "nothing changed": subscribers re-read and see the write.
+  expect(socket.send).toHaveBeenCalledTimes(sentAfterStartup + 1);
+  expect(JSON.parse(socket.send.mock.lastCall![0]).items).toHaveLength(2);
+
+  const response = await runtime.execute(execution(), (local) =>
+    local.execute({}, { ...getWelcome, id: "second" }),
+  );
+  expect(response).toMatchObject({ ok: true, data: { id: "second" } });
+  await runtime.close();
+  inner.close();
 });
 
 function gatedHost(): TenantHost & { release(): void } {

@@ -5,6 +5,7 @@ import {
   openSqliteStorage,
   observeCommits,
   SqlExecutor,
+  sqlCommitOutcomeUnknown,
   type StorageDriver,
 } from "@takibi/storage";
 import { createMigratingStorage } from "../src/migrations";
@@ -149,7 +150,9 @@ async function checkEntryPoint(
   id: string,
   run: EntryPoint,
 ): Promise<void> {
-  const error = new Error(`injected ${scenario}`);
+  // An unknown outcome is reported the way a connection reports it.
+  const error =
+    scenario === "unknown" ? sqlCommitOutcomeUnknown() : new Error(`injected ${scenario}`);
   const storage = wrap(await injectedTransactionStorage(raw, scenario, error));
   const calls = { outer: 0, nested: 0 };
   const result = run(storage, id, async (scope) => {

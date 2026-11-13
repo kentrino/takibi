@@ -44,3 +44,15 @@ requests, email, and other external effects cannot be rolled back. An effect may
 already have happened when commit fails or its outcome is unknown, and a separate
 invocation or client retry can perform it again. Use application idempotency or an
 outbox when durable delivery is required.
+
+## Unknown commit outcome
+
+A backend that reaches its database over a network can lose the response to
+`COMMIT`. The transaction (or a single write outside one) then rejects with a
+`TakibiError` whose code is `SQL_COMMIT_OUTCOME_UNKNOWN` (status 500): the writes
+may or may not be durable. The runtime passes this error through unchanged; it
+neither retries the commit nor replays the callback, and it never reports the
+outcome as a rollback. Watch subscribers to the touched collections are
+re-evaluated as if the write committed. Read the data again before deciding to
+retry. Durable Objects and local SQLite files always know their commit outcome
+and never raise this error.

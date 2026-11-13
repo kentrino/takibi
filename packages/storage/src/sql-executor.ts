@@ -23,18 +23,54 @@ export type SqlStatementExecutor = {
 
 /**
  * What a host adapter provides for one SQLite database (Durable Object
- * storage, Node's built-in SQLite, ...). A connection needs no ordering
- * guarantees of its own; {@link SqlExecutor} serialises every use of it,
- * including statements inside one transaction, and lets `body` settle only
- * after every statement it issued settled.
+ * storage, Node's built-in SQLite, libSQL, ...). A connection needs no
+ * ordering guarantees of its own; {@link SqlExecutor} serialises every use of
+ * it, including statements inside one transaction, and lets `body` settle
+ * only after every statement it issued settled.
  *
  * `transaction` must invoke `body` at most once, commit when it fulfils, roll
  * back when it rejects, and never replay it. Statements `body` issues through
- * `tx` belong to that transaction.
+ * `tx` belong to that transaction. When `body` rejects, `transaction` rejects
+ * with that same rejection value.
+ *
+ * A rejection means the work did not take effect, with one exception: when
+ * the connection cannot tell whether a commit took effect (the response to
+ * `COMMIT`, or to an autocommit write through `exec`, was lost), it rejects
+ * with {@link sqlCommitOutcomeUnknown} (`SQL_COMMIT_OUTCOME_UNKNOWN`) instead.
+ * The work may or may not be durable. A connection never retries a statement
+ * or a commit to find out. A connection that always knows its commit outcome
+ * (a Durable Object, a local SQLite file) never raises it.
+ *
+ * Bindings are strings, finite numbers, and `null`. Result rows map column
+ * names to `string`, `number`, or `null`; an integer outside the safe integer
+ * range rejects rather than losing precision.
  */
 export type SqlConnection = SqlStatementExecutor & {
   transaction<T>(body: (tx: SqlStatementExecutor) => Promise<T>): Promise<T>;
 };
+
+/** The {@link TakibiError} code of an unknown commit outcome. */
+export const SQL_COMMIT_OUTCOME_UNKNOWN = "SQL_COMMIT_OUTCOME_UNKNOWN";
+
+/**
+ * The error a connection raises when it cannot tell whether a commit took
+ * effect. Everything above the port passes it through unchanged.
+ */
+export function sqlCommitOutcomeUnknown(cause?: unknown): TakibiError {
+  const error = new TakibiError(
+    SQL_COMMIT_OUTCOME_UNKNOWN,
+    "The database did not confirm whether the write was committed; it may or may not have " +
+      "taken effect. Read the data again before retrying.",
+    500,
+  );
+  if (cause !== undefined) error.cause = cause;
+  return error;
+}
+
+/** True for the error of an unknown commit outcome. */
+export function isSqlCommitOutcomeUnknown(error: unknown): boolean {
+  return error instanceof TakibiError && error.code === SQL_COMMIT_OUTCOME_UNKNOWN;
+}
 
 /**
  * An async context store. Node's `AsyncLocalStorage` satisfies it; this
@@ -87,6 +123,9 @@ type OpenTransaction = { readonly executor: SqlExecutor; open: boolean };
  * callback's first `await`) still waits forever. Calls from independent work
  * wait for the transaction as usual. Takibi never nests port transactions;
  * nested storage transactions join the outer one above this port.
+ *
+ * Every rejection of the connection, including `SQL_COMMIT_OUTCOME_UNKNOWN`,
+ * reaches the caller unchanged; the executor never retries.
  */
 export class SqlExecutor implements SqlStatementExecutor {
   readonly #connection: SqlConnection;

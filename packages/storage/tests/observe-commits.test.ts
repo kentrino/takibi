@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { observeCommits } from "../src/observe-commits";
+import { sqlCommitOutcomeUnknown } from "../src/sql-executor";
 import type { StorageDriver, StoredDocument } from "../src/types";
 
 function fixture() {
@@ -70,4 +71,40 @@ it("retains joined nested writes when their error is caught by the outer transac
     expect(publish).not.toHaveBeenCalled();
   });
   expect(publish).toHaveBeenCalledExactlyOnceWith(new Set(["posts"]));
+});
+
+it("publishes the touched collections when the commit outcome is unknown", async () => {
+  const { observed, publish, driver } = fixture();
+  const unknown = sqlCommitOutcomeUnknown();
+  driver.transaction = async (run) => {
+    await run(driver);
+    throw unknown;
+  };
+  await expect(
+    observed.transaction(async (tx) => {
+      await tx.put("posts", doc);
+      await tx.transaction(async (nested) => {
+        await nested.delete("users", "a");
+      });
+    }),
+  ).rejects.toBe(unknown);
+  expect(publish).toHaveBeenCalledExactlyOnceWith(new Set(["posts", "users"]));
+
+  publish.mockClear();
+  driver.put = async () => {
+    throw unknown;
+  };
+  driver.delete = async () => {
+    throw unknown;
+  };
+  await expect(observed.put("posts", doc)).rejects.toBe(unknown);
+  await expect(observed.delete("users", "a")).rejects.toBe(unknown);
+  expect(publish.mock.calls).toEqual([[new Set(["posts"])], [new Set(["users"])]]);
+
+  publish.mockClear();
+  driver.put = async () => {
+    throw new Error("rejected write");
+  };
+  await expect(observed.put("posts", doc)).rejects.toThrow("rejected write");
+  expect(publish).not.toHaveBeenCalled();
 });

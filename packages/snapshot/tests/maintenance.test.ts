@@ -6,8 +6,10 @@ import {
   createMaintenanceGatedCollections,
   MaintenanceController,
   MemoryMaintenanceBackend,
+  SqliteMaintenanceBackend,
   type SnapshotLifecycle,
 } from "@takibi/snapshot";
+import { SqlExecutor, sqlCommitOutcomeUnknown, type SqlRow } from "@takibi/storage";
 
 const lifecycle: SnapshotLifecycle = {
   listCollections() {
@@ -143,4 +145,25 @@ test("drain waits for in-flight normal work before admitting maintenance", async
   const lease = await acquire;
   expect(admitted).toBe(true);
   await controller.release(lease);
+});
+
+test("staging a unique value reports an unknown commit outcome as itself, not as a duplicate", async () => {
+  const unknown = sqlCommitOutcomeUnknown();
+  let duplicate = false;
+  const sql = new SqlExecutor({
+    async exec<Row extends SqlRow>(query: string) {
+      if (query.includes("INSERT INTO takibi_restore_staging_unique")) {
+        if (duplicate) throw new Error("UNIQUE constraint failed");
+        throw unknown;
+      }
+      return { rows: [] as Row[] };
+    },
+    transaction: (body) => body({ exec: async <Row extends SqlRow>() => ({ rows: [] as Row[] }) }),
+  });
+  const backend = await SqliteMaintenanceBackend.open(sql);
+  await expect(backend.stageUnique("owner", "records", "byEmail", "a", "r1")).rejects.toBe(unknown);
+  duplicate = true;
+  await expect(backend.stageUnique("owner", "records", "byEmail", "a", "r2")).rejects.toMatchObject(
+    { code: "SNAPSHOT_INVALID_DOCUMENT" },
+  );
 });
