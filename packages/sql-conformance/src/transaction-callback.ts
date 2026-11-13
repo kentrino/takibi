@@ -216,5 +216,23 @@ export function defineTransactionCallbackTests(target: ConformanceTarget): void 
           ));
       }
     }
+    // The check itself must notice a replay, or every case above passes vacuously.
+    test("the check detects a wrapper that replays the callback", () =>
+      target.withDatabase("callback-replaying-wrapper", async (sql) => {
+        const replaying: TransactionWrapper = {
+          expectsSpans: false,
+          wrap: (driver) => ({
+            ...driver,
+            transaction: (callback) =>
+              driver.transaction(async (scope) => {
+                await callback(scope);
+                return callback(scope);
+              }),
+          }),
+        };
+        await expect(checkTransactionCallbackContract(sql, replaying, "success")).rejects.toThrow(
+          "transaction callbacks must not be replayed",
+        );
+      }));
   });
 }
