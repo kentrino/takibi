@@ -485,20 +485,22 @@ async function insertSeed(
   sql: SqlStatementExecutor,
   seed: SnapshotStoredDocument,
 ): Promise<number> {
-  return (
-    await sql.exec(
-      `INSERT OR IGNORE INTO takibi_documents
-         (collection, id, created_at, updated_at, schema_version, revision, data)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      seed.collection,
-      seed.id,
-      seed.createdAt,
-      seed.updatedAt,
-      seed.schemaVersion,
-      seed.revision,
-      JSON.stringify(seed.data),
-    )
-  ).rowsWritten;
+  // Count inserted rows with RETURNING: a host's write counter may include
+  // index entries (Durable Object SQLite does), which would not equal 0 or 1.
+  const { rows } = await sql.exec<{ id: string }>(
+    `INSERT OR IGNORE INTO takibi_documents
+       (collection, id, created_at, updated_at, schema_version, revision, data)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     RETURNING id`,
+    seed.collection,
+    seed.id,
+    seed.createdAt,
+    seed.updatedAt,
+    seed.schemaVersion,
+    seed.revision,
+    JSON.stringify(seed.data),
+  );
+  return rows.length;
 }
 
 async function assertOwner(

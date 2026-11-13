@@ -4,13 +4,13 @@ import type { SqlBinding } from "./sql-query";
 export type SqlRow = Record<string, unknown>;
 
 export type SqlResult<Row extends SqlRow = SqlRow> = {
-  /** Every result row, fully materialized. Empty for statements without result columns. */
-  rows: Row[];
   /**
-   * Rows written by the statement. Takibi reads it only for statements without
-   * result columns (no RETURNING); adapters may report 0 for row-returning statements.
+   * Every result row, fully materialized. Empty for statements without result
+   * columns. The port carries no write count: hosts count writes differently
+   * (Durable Object SQLite counts index entries too), so callers that need to
+   * know what a write touched use `RETURNING`.
    */
-  rowsWritten: number;
+  rows: Row[];
 };
 
 /** Runs single statements against one SQLite database. */

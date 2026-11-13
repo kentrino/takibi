@@ -16,8 +16,7 @@ import {
 function durableSql(storage: DurableObjectStorage): SqlExecutor {
   const statements: SqlStatementExecutor = {
     async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
-      const cursor = storage.sql.exec(query, ...bindings);
-      return { rows: cursor.toArray() as Row[], rowsWritten: cursor.rowsWritten };
+      return { rows: storage.sql.exec(query, ...bindings).toArray() as Row[] };
     },
   };
   return new SqlExecutor({

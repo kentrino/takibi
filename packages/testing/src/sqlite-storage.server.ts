@@ -30,9 +30,10 @@ export function createNodeSqliteExecutor(
     async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
       const statement = database.prepare(query);
       if (statement.columns().length === 0) {
-        return { rows: [], rowsWritten: Number(statement.run(...bindings).changes) };
+        statement.run(...bindings);
+        return { rows: [] };
       }
-      return { rows: statement.all(...bindings) as Row[], rowsWritten: 0 };
+      return { rows: statement.all(...bindings) as Row[] };
     },
   };
   const connection: SqlConnection = {

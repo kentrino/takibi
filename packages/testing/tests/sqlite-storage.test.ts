@@ -2,18 +2,18 @@ import { expect, test } from "vite-plus/test";
 import { openSqliteStorage } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 
-test("Node SQLite executor returns rows for SELECT and rowsWritten for writes", async () => {
+test("Node SQLite executor returns rows for SELECT and RETURNING, none for plain writes", async () => {
   const sql = createNodeSqliteExecutor();
   await sql.exec("CREATE TABLE items (id TEXT PRIMARY KEY, title TEXT)");
   const written = await sql.exec("INSERT INTO items (id, title) VALUES (?, ?)", "p1", "hello");
-  expect(written).toEqual({ rows: [], rowsWritten: 1 });
+  expect(written).toEqual({ rows: [] });
 
-  const ignored = await sql.exec(
-    "INSERT OR IGNORE INTO items (id, title) VALUES (?, ?)",
+  const ignored = await sql.exec<{ id: string }>(
+    "INSERT OR IGNORE INTO items (id, title) VALUES (?, ?) RETURNING id",
     "p1",
     "again",
   );
-  expect(ignored.rowsWritten).toBe(0);
+  expect(ignored.rows).toEqual([]);
 
   const selected = await sql.exec<{ id: string; title: string }>("SELECT id, title FROM items");
   expect(selected.rows).toEqual([{ id: "p1", title: "hello" }]);

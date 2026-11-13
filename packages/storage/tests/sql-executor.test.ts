@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { expect, test } from "vite-plus/test";
 import { SqlExecutor, type SqlConnection, type SqlResult, type SqlRow } from "@takibi/storage";
 
-const empty = <Row extends SqlRow>(): SqlResult<Row> => ({ rows: [], rowsWritten: 0 });
+const empty = <Row extends SqlRow>(): SqlResult<Row> => ({ rows: [] });
 
 /**
  * A connection with the weakest behaviour an adapter may have: an outer

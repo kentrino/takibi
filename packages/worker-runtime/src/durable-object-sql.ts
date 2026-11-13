@@ -21,9 +21,7 @@ export function createDurableObjectSqlExecutor(storage: DurableObjectStorage): S
   const statements: SqlStatementExecutor = {
     async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
       // Look up `storage.sql` on every call; never cache the bound method.
-      const cursor = storage.sql.exec(query, ...bindings);
-      const rows = cursor.toArray() as Row[];
-      return { rows, rowsWritten: cursor.rowsWritten };
+      return { rows: storage.sql.exec(query, ...bindings).toArray() as Row[] };
     },
   };
   return new SqlExecutor({

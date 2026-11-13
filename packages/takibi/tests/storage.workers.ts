@@ -413,12 +413,46 @@ test("Workers generated Durable Object streams and restores an owner snapshot", 
   });
 });
 
+test("Workers Durable Object restores a snapshot that omits a seed of an indexed collection", async () => {
+  const stub = storageStub("indexed-seed-restore");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const context = createTakibi()({
+      resolve: () => ({ tenantId: "indexed-seed-restore" }),
+    });
+    const handler = context
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string(), score: z.number() }),
+          accessPolicy: fullAccess,
+          // Two secondary indexes: workerd's write counter would report 3 per inserted seed.
+          indexes: { byTitle: ["title"], byScore: ["score"] },
+          seed: () => ({ seeded: { title: "seed", score: 1 } }),
+        },
+      })
+      .actions({});
+    const object = new handler.DurableObject(state, {});
+    await object.$collections.posts.add({ title: "snapshot", score: 2 }, { id: "p1" });
+    await object.$collections.posts.delete("seeded");
+    const encoded = await new Response(await object.$collections.$exportSnapshot()).text();
+
+    await expect(
+      object.$collections.$restoreSnapshot(
+        new Blob([encoded]).stream() as ReadableStream<Uint8Array>,
+      ),
+    ).resolves.toMatchObject({ documentsRestored: 1, seedsInserted: 1 });
+    await expect(object.$collections.posts.get("seeded")).resolves.toMatchObject({
+      title: "seed",
+    });
+  });
+});
+
 /** The Durable Object SQL connection without the executor's queue in front of it. */
 function rawDurableConnection(storage: DurableObjectStorage): SqlConnection {
   const statements: SqlStatementExecutor = {
     async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
-      const cursor = storage.sql.exec(query, ...bindings);
-      return { rows: cursor.toArray() as Row[], rowsWritten: cursor.rowsWritten };
+      return { rows: storage.sql.exec(query, ...bindings).toArray() as Row[] };
     },
   };
   return { ...statements, transaction: (body) => storage.transaction(() => body(statements)) };
