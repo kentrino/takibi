@@ -29,7 +29,7 @@ export type {
 export { createDurableObjectClass } from "./durable-object";
 export { seedCollections } from "./tenant-runtime";
 export { createDurableObjectSqlExecutor } from "./durable-object-sql";
-export { createDurableObjectCollectionsApi, createTakibiSnapshotLifecycle } from "./snapshot";
+export { createTakibiSnapshotLifecycle } from "./snapshot";
 export {
   decodePublicHttp,
   decodePublicRoute,

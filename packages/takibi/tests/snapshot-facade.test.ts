@@ -14,9 +14,6 @@ test("Takibi snapshot modules re-export the owner package bindings", () => {
   expect(MaintenanceMemoryFacade.MemoryMaintenanceBackend).toBe(
     SnapshotPkg.MemoryMaintenanceBackend,
   );
-  expect(SnapshotFacade.createDurableObjectCollectionsApi).toBe(
-    RuntimePkg.createDurableObjectCollectionsApi,
-  );
   expect(SnapshotFacade.createTakibiSnapshotLifecycle).toBe(
     RuntimePkg.createTakibiSnapshotLifecycle,
   );

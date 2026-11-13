@@ -4,13 +4,9 @@ import {
   TakibiError,
   type CollectionDefinition,
   type CollectionsDef,
-  type DurableObjectCollectionsApi,
-  type TrustedCollectionsApi,
 } from "@takibi/api";
 import { TAKIBI_VERSION_KEY } from "@takibi/shared-types";
 import {
-  attachSnapshotOperations,
-  type MaintenanceController,
   type SnapshotLifecycle,
   type SnapshotStoredDocument,
   type SnapshotUniqueConstraint,
@@ -19,21 +15,6 @@ import { assertDocumentIndexFields, compareUtf8, type StoredDocument } from "@ta
 import { currentCollectionVersion, validateStoredDocumentForRestore } from "./migrations";
 import { prepareAddDoc } from "./typed-storage";
 import type { InternalLogger } from "./logging";
-
-export function createDurableObjectCollectionsApi<TCollections extends CollectionsDef>(
-  trusted: TrustedCollectionsApi<TCollections>,
-  collections: TCollections,
-  maintenance: MaintenanceController,
-  ready: Promise<void>,
-  logger?: InternalLogger,
-): DurableObjectCollectionsApi<TCollections> {
-  return attachSnapshotOperations(
-    trusted,
-    maintenance,
-    (operation) => ready.then(operation),
-    createTakibiSnapshotLifecycle(collections, logger),
-  );
-}
 
 export function createTakibiSnapshotLifecycle(
   collections: CollectionsDef,
