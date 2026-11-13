@@ -251,13 +251,7 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
       ),
       admit,
     ),
-    maintenance,
-    (operation) =>
-      admit(async () => {
-        const result = await operation();
-        // Only `$exportSnapshot` resolves with a stream; it keeps reading the database.
-        return result instanceof ReadableStream ? (trackExport(result) as typeof result) : result;
-      }),
+    { operation: (run) => admit(() => run(maintenance)), exportStream: trackExport },
     createTakibiSnapshotLifecycle(collections, logger),
   );
 
