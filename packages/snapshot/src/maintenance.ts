@@ -171,7 +171,19 @@ export class MaintenanceController {
     try {
       await this.#waitForIdle();
       const token = crypto.randomUUID();
-      const lease = await this.backend.acquire(token, purpose, LEASE_TTL_SECONDS);
+      let lease: { expiresAt: number } | undefined;
+      try {
+        lease = await this.backend.acquire(token, purpose, LEASE_TTL_SECONDS);
+      } catch (error) {
+        // The lease may be held in the database although acquire failed.
+        // Drop it by this owner token (idempotent, so not a replay), so it
+        // does not refuse the next acquire until it expires. If that fails
+        // too, the lease still expires on its own.
+        if (isSqlCommitOutcomeUnknown(error)) {
+          await this.backend.release(token).catch(() => undefined);
+        }
+        throw error;
+      }
       if (lease === undefined) throw new MaintenanceLockedError();
       this.#current = { token, purpose, expiresAt: lease.expiresAt };
       return this.#current;
@@ -194,10 +206,18 @@ export class MaintenanceController {
   }
 
   async release(lease: LeaseHandle): Promise<void> {
-    await this.backend.release(lease.token);
-    if (this.#current?.token === lease.token) this.#current = undefined;
-    // A normal operation may already have noticed expiry and cleared #current.
-    if (!this.blocked) this.#notify();
+    try {
+      await this.backend.release(lease.token);
+    } catch (error) {
+      // Whether or not the release committed, the work that held the lease
+      // is over: stop excluding normal operations rather than until expiry.
+      // A lease row left behind only refuses the next acquire until it
+      // expires. Renew needs no such care: on an unknown outcome the handle
+      // keeps its older, earlier expiry.
+      if (isSqlCommitOutcomeUnknown(error)) this.complete(lease);
+      throw error;
+    }
+    this.complete(lease);
   }
 
   complete(lease: LeaseHandle): void {
