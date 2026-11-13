@@ -51,8 +51,12 @@ and local libSQL connections. It covers the SQL port contract, transactions
 ([at most once, never replayed](../../packages/takibi/docs/spec/transactions.md), rollback,
 nested joins), uniqueness, list results, cursors and isolation, layout migration, index
 reconciliation, maintenance leases, and snapshot export, restore, and reset. These are
-identical across backends. Watch is not yet available outside Durable Objects; it needs a
-WebSocket host of its own.
+identical across backends.
+
+List watches (`takibi/watch`) are supported on the Durable Object backend only. A host
+without a watch capability gets no commit fan-out, and the tenant runtime refuses every
+watch upgrade with `WATCH_UNAVAILABLE` (400; `upgradeWatch` in
+`packages/worker-runtime/src/tenant-runtime.ts`).
 
 ## Remote connections and unknown commit outcomes
 
@@ -90,10 +94,13 @@ later remains compatible while retracting it would not. The connection packages 
   database-enforced uniqueness, cross-process watch fan-out, and maintenance exclusion;
   [issue 0012](../issues/open/0012-turso-backend-feasibility/issue.md) still measures it.
 - Shared-table multi-tenancy and database-per-user provisioning.
+- Watch outside Durable Objects; revisit when there is demand. It is not free: the watch
+  socket registry and its lifecycle are the Hibernation API, so another host would need its
+  own socket registry, recovery, and shutdown.
 - Queue timeouts or cancellation in the executor.
 
 ## Implementation
 
 In progress: the `node:sqlite` and libSQL connections, the unknown-outcome signal, and the
 conformance suite exist. Still required: the Node host (tenant registry, startup
-exclusion, lifecycle, public entry point) and watch over ordinary WebSockets.
+exclusion, lifecycle, public entry point).
