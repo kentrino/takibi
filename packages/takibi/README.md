@@ -1113,7 +1113,11 @@ Caller-supplied ids are still accepted; creation-order lexicographic sort is
 guaranteed only for library-generated ULIDs.
 
 Takibi versions its internal SQL layout in `takibi_metadata` and migrates known
-layout versions synchronously during activation. A newer unknown layout fails closed.
+layout versions during activation, inside the startup that runs under
+`blockConcurrencyWhile` before the object handles any request. A newer unknown
+layout, or a failed layout migration, fails closed: the startup error breaks the
+Durable Object, so the request that activated it and later requests reject with
+that error instead of being served.
 Layout version 2 moves a valid version 1 `data.rev` value into the revision column,
 defaults a missing or invalid legacy value to `1`, and removes `rev` from the JSON.
 The table rebuild and layout-version update are one transaction.
