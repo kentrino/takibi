@@ -11,24 +11,31 @@ import {
   createMaintenanceGatedCollections,
   MaintenanceController,
   SqliteMaintenanceBackend,
-  type MaintenanceBackend,
 } from "@takibi/snapshot";
 import {
   compileIndexRegistry,
   observeCommits,
   openSqliteStorage,
+  type IndexRegistry,
   type SqlExecutor,
+  type SqliteIndexAdmin,
   type StorageDriver,
 } from "@takibi/storage";
 import { applyStorageLogging } from "./context/runtime";
-import { createTrustedCollections } from "./executor";
+import { createTrustedCollections, TRUSTED_COLLECTION_METHODS } from "./executor";
 import { resolveLocalExecution, type LocalExecution } from "./invocation-execution";
 import type { InternalLogger } from "./logging";
 import { createMigratingStorage } from "./migrations";
 import { createTakibiSnapshotLifecycle } from "./snapshot";
 import { tracedStorage, type SpanContext, type SpanKind } from "./tracing";
 import { storageAdd } from "./typed-storage";
-import { WatchRuntime, type WatchHost, type WatchSocket } from "./watch-runtime";
+import {
+  closeWatchSocket,
+  sendWatchProtocolError,
+  WatchRuntime,
+  type WatchHost,
+  type WatchSocket,
+} from "./watch-runtime";
 
 /** What a tenant runtime needs from the process that hosts it. */
 export interface TenantHost<TUpgrade = Response> {
@@ -97,44 +104,22 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
 };
 
 /**
- * Assemble one tenant: storage, maintenance, migrating and logged storage,
- * commit fan-out to watch, and the single startup sequence
- * open storage layout -> open maintenance layout -> maintenance cleanup ->
- * index reconcile -> seed -> watch recover.
+ * Assemble one tenant behind a single startup sequence:
+ * open database -> maintenance cleanup -> index reconcile -> seed -> watch recover.
  *
- * Startup is the only place that opens the database. Components wired before
- * it (the maintenance controller, migrating storage, watch, and the trusted
- * collections) reach the opened storage and backend through forwarders that
- * throw before startup opened them; every entry point goes through one
- * admission step that waits for startup and tracks the work for `close()`.
+ * Startup is the only place that opens the database, and everything that
+ * needs the opened database (maintenance, migrating and logged storage, watch,
+ * trusted collections) is built there, over it. What exists before startup
+ * holds no database handle: `collectionsApi`, `execute`, and `upgradeWatch`
+ * reach the started tenant only through one admission step, which waits for
+ * startup, refuses work once closing began, and tracks the work for
+ * `close()`. Watch socket events need nothing from the database.
  */
 export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrade = Response>(
   input: TenantRuntimeInput<TCollections, TUpgrade>,
 ): TenantRuntime<TCollections, TUpgrade> {
   const { collections, registry, logger, services, sql, host } = input;
   const indexRegistry = compileIndexRegistry(collections);
-  let opened: { storage: StorageDriver; backend: SqliteMaintenanceBackend } | undefined;
-  const current = () => {
-    if (opened === undefined) {
-      throw new TakibiError("TENANT_NOT_STARTED", "Tenant storage used before startup", 500);
-    }
-    return opened;
-  };
-  let watch: WatchRuntime<TUpgrade> | undefined;
-  const maintenance = new MaintenanceController(
-    openedBackend(() => current().backend),
-    (purpose) => watch?.maintenanceChanged(purpose),
-  );
-  const migrating = createMigratingStorage(
-    collections,
-    openedStorage(() => current().storage),
-    logger,
-  );
-  // Commit observation only feeds watch fan-out.
-  const driver = applyStorageLogging(
-    host.watch ? observeCommits(migrating, (changed) => watch?.invalidate(changed)) : migrating,
-    logger,
-  );
   let closed = false;
   let closing: Promise<void> | undefined;
   let startupFailure: { error: unknown; reported: boolean } | undefined;
@@ -148,28 +133,19 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     );
     return work;
   };
-  if (host.watch) {
-    const watchHost = host.watch;
-    watch = new WatchRuntime(
-      {
-        sockets: () => watchHost.sockets(),
-        accept: (attachment) => watchHost.accept(attachment),
-        // Fan-out reads the database; close() waits for it like any other work.
-        waitUntil: (promise) => watchHost.waitUntil(track(promise)),
-      },
-      collections,
-      driver,
-      maintenance,
-      logger,
-    );
-  }
+  let tenant: StartedTenant<TCollections, TUpgrade> | undefined;
   const ready = host.runStartup(async () => {
-    const { storage, indexes } = await openSqliteStorage(sql, indexRegistry);
-    opened = { storage, backend: await SqliteMaintenanceBackend.open(sql) };
-    await maintenance.cleanupAbandoned();
-    await indexes.reconcile({ reader: driver, collections, registry: indexRegistry });
-    await seedCollections(collections, driver, logger);
-    watch?.recover();
+    const database = await openTenantDatabase(sql, indexRegistry);
+    const started = assembleTenant(input, database, track);
+    await started.maintenance.cleanupAbandoned();
+    await database.indexes.reconcile({
+      reader: started.driver,
+      collections,
+      registry: indexRegistry,
+    });
+    await seedCollections(collections, started.driver, logger);
+    started.watch?.recover();
+    tenant = started;
   });
   const startupSettled = ready.then(
     () => undefined,
@@ -178,18 +154,25 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     },
   );
   /** Wait for startup; reject with the startup failure, which then counts as reported. */
-  const started = async (): Promise<void> => {
+  const started = async (): Promise<StartedTenant<TCollections, TUpgrade>> => {
     await startupSettled;
     if (startupFailure !== undefined) {
       startupFailure.reported = true;
       throw startupFailure.error;
     }
+    if (tenant === undefined) {
+      throw new Error("TenantHost.runStartup settled without running startup");
+    }
+    return tenant;
   };
   /**
    * The single admission point of every entry point: refuse once closing has
-   * begun, otherwise wait for startup and run `operation` as tracked work.
+   * begun, otherwise wait for startup and run `operation` on the started
+   * tenant as tracked work.
    */
-  const admit = <T>(operation: () => Promise<T>): Promise<T> => {
+  const admit = <T>(
+    operation: (tenant: StartedTenant<TCollections, TUpgrade>) => Promise<T>,
+  ): Promise<T> => {
     if (closed) return Promise.reject(closedError());
     return track(started().then(operation));
   };
@@ -244,14 +227,8 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
   // reports TENANT_CLOSED before a held lease, and a call waiting for startup
   // does not count as a running normal operation yet.
   const collectionsApi = attachSnapshotOperations(
-    admitCollections(
-      createMaintenanceGatedCollections(
-        createTrustedCollections(collections, driver, logger),
-        maintenance,
-      ),
-      admit,
-    ),
-    { operation: (run) => admit(() => run(maintenance)), exportStream: trackExport },
+    admittedCollections(collections, (call) => admit((tenant) => call(tenant.collections))),
+    { operation: (run) => admit((tenant) => run(tenant.maintenance)), exportStream: trackExport },
     createTakibiSnapshotLifecycle(collections, logger),
   );
 
@@ -259,14 +236,14 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     ready,
     collectionsApi,
     execute(execution, run) {
-      return admit(() =>
-        maintenance.runNormal(async () => {
+      return admit((tenant) =>
+        tenant.maintenance.runNormal(async () => {
           const local = await resolveLocalExecution({
             collections,
             registry,
             logger,
             services,
-            storage: execution.traced ? tracedStorage(driver) : driver,
+            storage: execution.traced ? tracedStorage(tenant.driver) : tenant.driver,
             spanKind: execution.spanKind,
             parentSpan: execution.parentSpan,
             request: execution.request,
@@ -276,18 +253,18 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
       );
     },
     upgradeWatch(request) {
-      return admit(async () => {
-        if (!watch) {
+      return admit(async (tenant) => {
+        if (!tenant.watch) {
           throw new TakibiError("WATCH_UNAVAILABLE", "This host does not support watch", 400);
         }
-        return watch.upgrade(request);
+        return tenant.watch.upgrade(request);
       });
     },
     watchMessage(socket) {
-      watch?.protocolError(socket);
+      if (host.watch) sendWatchProtocolError(socket);
     },
     watchClose(socket, code) {
-      watch?.close(socket, code);
+      if (host.watch) closeWatchSocket(socket, code);
     },
     close() {
       closed = true;
@@ -307,6 +284,78 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
         }
       })());
     },
+  };
+}
+
+/** One tenant's opened database: data plane, index control plane, and maintenance, on one executor. */
+type TenantDatabase = {
+  storage: StorageDriver;
+  indexes: SqliteIndexAdmin;
+  maintenance: SqliteMaintenanceBackend;
+};
+
+/** Open the document/index layout, then the maintenance layout, on `sql`. */
+async function openTenantDatabase(
+  sql: SqlExecutor,
+  registry: IndexRegistry,
+): Promise<TenantDatabase> {
+  const { storage, indexes } = await openSqliteStorage(sql, registry);
+  return { storage, indexes, maintenance: await SqliteMaintenanceBackend.open(sql) };
+}
+
+/** What startup builds over the opened database; every admitted entry point runs on it. */
+type StartedTenant<TCollections extends CollectionsDef, TUpgrade> = {
+  maintenance: MaintenanceController;
+  /** Migrating, logged storage that also feeds watch fan-out when the host carries watch. */
+  driver: StorageDriver;
+  /** Trusted collections behind the maintenance gate, not yet admitted. */
+  collections: TrustedCollectionsApi<TCollections>;
+  watch: WatchRuntime<TUpgrade> | undefined;
+};
+
+/** Wire maintenance, storage wrappers, watch, and trusted collections over `database`. */
+function assembleTenant<TCollections extends CollectionsDef, TUpgrade>(
+  input: TenantRuntimeInput<TCollections, TUpgrade>,
+  database: TenantDatabase,
+  track: <T>(work: Promise<T>) => Promise<T>,
+): StartedTenant<TCollections, TUpgrade> {
+  const { collections, logger, host } = input;
+  // Watch and maintenance refer to each other: a maintenance window closes or
+  // resumes watches, and watch reads run as normal work under maintenance.
+  // Both are built here, before any commit or maintenance change can happen.
+  let watch: WatchRuntime<TUpgrade> | undefined;
+  const maintenance = new MaintenanceController(database.maintenance, (purpose) =>
+    watch?.maintenanceChanged(purpose),
+  );
+  const migrating = createMigratingStorage(collections, database.storage, logger);
+  // Commit observation only feeds watch fan-out.
+  const driver = applyStorageLogging(
+    host.watch ? observeCommits(migrating, (changed) => watch?.invalidate(changed)) : migrating,
+    logger,
+  );
+  if (host.watch) {
+    const watchHost = host.watch;
+    watch = new WatchRuntime(
+      {
+        sockets: () => watchHost.sockets(),
+        accept: (attachment) => watchHost.accept(attachment),
+        // Fan-out reads the database; close() waits for it like any other work.
+        waitUntil: (promise) => watchHost.waitUntil(track(promise)),
+      },
+      collections,
+      driver,
+      maintenance,
+      logger,
+    );
+  }
+  return {
+    maintenance,
+    driver,
+    collections: createMaintenanceGatedCollections(
+      createTrustedCollections(collections, driver, logger),
+      maintenance,
+    ),
+    watch,
   };
 }
 
@@ -330,65 +379,28 @@ export async function seedCollections(
   }
 }
 
-/** Route every trusted collection method and `$transaction` through `admit`. */
-function admitCollections<TCollections extends CollectionsDef>(
-  api: TrustedCollectionsApi<TCollections>,
-  admit: <T>(operation: () => Promise<T>) => Promise<T>,
+/**
+ * The trusted collections API that exists before startup: every collection
+ * method and `$transaction` goes through `admit`, which waits for startup and
+ * calls the same method on the API startup built.
+ */
+function admittedCollections<TCollections extends CollectionsDef>(
+  collections: TCollections,
+  admit: <T>(call: (api: TrustedCollectionsApi<TCollections>) => Promise<T>) => Promise<T>,
 ): TrustedCollectionsApi<TCollections> {
-  const collectionProxies = new Map<PropertyKey, object>();
-  const admitted =
-    (target: object, member: (...args: unknown[]) => unknown) =>
-    (...args: unknown[]) =>
-      admit(async () => Reflect.apply(member, target, args));
-  return new Proxy(api, {
-    get(target, property, receiver) {
-      const value = Reflect.get(target, property, receiver) as unknown;
-      if (property === "$transaction" && typeof value === "function") {
-        return admitted(target, value as (...args: unknown[]) => unknown);
-      }
-      if (typeof value !== "object" || value === null) return value;
-      const cached = collectionProxies.get(property);
-      if (cached !== undefined) return cached;
-      const proxy = new Proxy(value, {
-        get(collection, method, collectionReceiver) {
-          const member = Reflect.get(collection, method, collectionReceiver) as unknown;
-          return typeof member === "function"
-            ? admitted(collection, member as (...args: unknown[]) => unknown)
-            : member;
-        },
-      });
-      collectionProxies.set(property, proxy);
-      return proxy;
-    },
-  });
-}
-
-/** Storage calls forwarded to the storage startup opened. */
-function openedStorage(current: () => StorageDriver): StorageDriver {
-  return {
-    get: (resource, id) => current().get(resource, id),
-    put: (resource, doc) => current().put(resource, doc),
-    delete: (resource, id) => current().delete(resource, id),
-    list: (resource, options, plan) => current().list(resource, options, plan),
-    transaction: (callback) => current().transaction(callback),
-  };
-}
-
-/** Maintenance backend calls forwarded to the backend startup opened. */
-function openedBackend(current: () => MaintenanceBackend): MaintenanceBackend {
-  return {
-    cleanupAbandoned: () => current().cleanupAbandoned(),
-    acquire: (owner, purpose, ttl) => current().acquire(owner, purpose, ttl),
-    renew: (owner, purpose, ttl) => current().renew(owner, purpose, ttl),
-    release: (owner) => current().release(owner),
-    scanDocuments: (cursor, limit) => current().scanDocuments(cursor, limit),
-    clearStaging: (owner) => current().clearStaging(owner),
-    stageDocument: (owner, document) => current().stageDocument(owner, document),
-    stageUnique: (owner, collection, constraint, valueKey, documentId) =>
-      current().stageUnique(owner, collection, constraint, valueKey, documentId),
-    hasStagedDocument: (owner, collection, id) =>
-      current().hasStagedDocument(owner, collection, id),
-    finalizeRestore: (owner, seeds, expected) => current().finalizeRestore(owner, seeds, expected),
-    reset: (owner, seeds) => current().reset(owner, seeds),
-  };
+  type Methods = Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const api = Object.create(null) as Record<string, unknown>;
+  for (const name of Object.keys(collections)) {
+    api[name] = Object.fromEntries(
+      TRUSTED_COLLECTION_METHODS.map((method) => [
+        method,
+        (...args: unknown[]) =>
+          admit((started) => (started[name as keyof typeof started] as Methods)[method]!(...args)),
+      ]),
+    );
+  }
+  api.$transaction = (
+    callback: ($collections: TrustedCollectionsApi<TCollections>) => Promise<unknown>,
+  ) => admit((started) => started.$transaction(callback));
+  return api as TrustedCollectionsApi<TCollections>;
 }

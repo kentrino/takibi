@@ -463,6 +463,28 @@ export function createPolicyCollections<
   return api;
 }
 
+/** Every method of one trusted collection, as `createTrustedCollections` defines them. */
+export const TRUSTED_COLLECTION_METHODS = [
+  "add",
+  "set",
+  "get",
+  "update",
+  "delete",
+  "list",
+  "listAll",
+  "count",
+  "updateMany",
+  "deleteMany",
+  "consumeOne",
+  "incrementOne",
+] as const satisfies readonly (keyof TrustedCollectionApi<unknown>)[];
+
+/** `never` exactly when the list above names every `TrustedCollectionApi` method. */
+export type UnlistedTrustedCollectionMethod = Exclude<
+  keyof TrustedCollectionApi<unknown>,
+  (typeof TRUSTED_COLLECTION_METHODS)[number]
+>;
+
 export function createTrustedCollections<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,
