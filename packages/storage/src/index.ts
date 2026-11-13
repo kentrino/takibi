@@ -1,6 +1,7 @@
 export { createSqliteStorage } from "./storage";
 export type { SqliteStorageDriver } from "./storage";
-export type { SqlExecutor, SqlResult, SqlRow, SqlStatementExecutor } from "./sql-executor";
+export { SqlExecutor } from "./sql-executor";
+export type { SqlConnection, SqlResult, SqlRow, SqlStatementExecutor } from "./sql-executor";
 export {
   afterIndexCursor,
   assertCollectionIndexes,

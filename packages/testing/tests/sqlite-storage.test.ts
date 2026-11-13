@@ -60,3 +60,39 @@ test("close is idempotent", () => {
   sql.close();
   sql.close();
 });
+
+const macrotask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+test("a statement issued during an open transaction is not rolled back with it", async () => {
+  const sql = createNodeSqliteExecutor();
+  await sql.exec("CREATE TABLE items (id TEXT PRIMARY KEY)");
+  const transaction = sql.transaction(async (tx) => {
+    await tx.exec("INSERT INTO items (id) VALUES (?)", "rolled");
+    await macrotask();
+    throw new Error("roll back");
+  });
+  await macrotask();
+  const outside = sql.exec("INSERT INTO items (id) VALUES (?)", "outside");
+  await expect(transaction).rejects.toThrow("roll back");
+  await outside;
+  expect((await sql.exec("SELECT id FROM items")).rows).toEqual([{ id: "outside" }]);
+  sql.close();
+});
+
+test("overlapping transactions run one after the other instead of nesting BEGIN", async () => {
+  const sql = createNodeSqliteExecutor();
+  await sql.exec("CREATE TABLE items (id TEXT PRIMARY KEY)");
+  const first = sql.transaction(async (tx) => {
+    await macrotask();
+    await tx.exec("INSERT INTO items (id) VALUES (?)", "first");
+  });
+  const second = sql.transaction(async (tx) => {
+    await tx.exec("INSERT INTO items (id) VALUES (?)", "second");
+  });
+  await Promise.all([first, second]);
+  expect((await sql.exec("SELECT id FROM items ORDER BY id")).rows).toEqual([
+    { id: "first" },
+    { id: "second" },
+  ]);
+  sql.close();
+});

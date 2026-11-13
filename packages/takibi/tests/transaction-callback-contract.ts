@@ -4,7 +4,7 @@ import { z } from "zod";
 import {
   createSqliteStorage,
   observeCommits,
-  type SqlExecutor,
+  SqlExecutor,
   type StorageDriver,
 } from "@takibi/storage";
 import { createMigratingStorage } from "../src/migrations";
@@ -42,7 +42,7 @@ export async function injectedTransactionStorage(
   error: Error,
 ): Promise<StorageDriver> {
   let armed = false;
-  const executor: SqlExecutor = {
+  const executor = new SqlExecutor({
     exec: (query, ...bindings) => raw.exec(query, ...bindings),
     async transaction(callback) {
       if (!armed) return raw.transaction(callback);
@@ -55,7 +55,7 @@ export async function injectedTransactionStorage(
       if (scenario === "unknown") throw error;
       return result;
     },
-  };
+  });
   const storage = createSqliteStorage(executor);
   await storage.initialize();
   armed = true;

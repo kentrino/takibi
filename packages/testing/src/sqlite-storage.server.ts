@@ -1,5 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
-import type { SqlBinding, SqlExecutor, SqlRow } from "@takibi/storage";
+import {
+  SqlExecutor,
+  type SqlBinding,
+  type SqlConnection,
+  type SqlRow,
+  type SqlStatementExecutor,
+} from "@takibi/storage";
 
 export type NodeSqliteExecutor = SqlExecutor & {
   close(): void;
@@ -8,12 +14,15 @@ export type NodeSqliteExecutor = SqlExecutor & {
 /**
  * Implements the Takibi SQL port over an in-memory `node:sqlite` database.
  * One connection serves every statement; a transaction is BEGIN/COMMIT on that
- * connection, so statements issued while it is open belong to it.
+ * connection. `intercept` wraps the raw connection before the executor
+ * serialises it, for tests that inject faults at the port.
  */
-export function createNodeSqliteExecutor(): NodeSqliteExecutor {
+export function createNodeSqliteExecutor(
+  intercept?: (connection: SqlConnection) => SqlConnection,
+): NodeSqliteExecutor {
   const database = new DatabaseSync(":memory:");
   let closed = false;
-  const executor: NodeSqliteExecutor = {
+  const statements: SqlStatementExecutor = {
     async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
       const statement = database.prepare(query);
       if (statement.columns().length === 0) {
@@ -21,10 +30,13 @@ export function createNodeSqliteExecutor(): NodeSqliteExecutor {
       }
       return { rows: statement.all(...bindings) as Row[], rowsWritten: 0 };
     },
-    async transaction(callback) {
+  };
+  const connection: SqlConnection = {
+    ...statements,
+    async transaction(body) {
       database.exec("BEGIN");
       try {
-        const result = await callback(executor);
+        const result = await body(statements);
         database.exec("COMMIT");
         return result;
       } catch (error) {
@@ -33,11 +45,13 @@ export function createNodeSqliteExecutor(): NodeSqliteExecutor {
         throw error;
       }
     },
+  };
+  const executor = new SqlExecutor(intercept ? intercept(connection) : connection);
+  return Object.assign(executor, {
     close() {
       if (closed) return;
       closed = true;
       database.close();
     },
-  };
-  return executor;
+  });
 }

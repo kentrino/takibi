@@ -7,7 +7,7 @@ import {
   type CollectionsDef,
 } from "@takibi/api";
 import { fullAccess } from "@takibi/policy";
-import type { SqlExecutor, SqlStatementExecutor } from "@takibi/storage";
+import { SqlExecutor, type SqlStatementExecutor } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { createTenantRuntime, type TenantHost } from "../src/tenant-runtime";
 import type { WatchHost, WatchSocket } from "../src/watch-runtime";
@@ -33,10 +33,10 @@ function recordingSql(): { sql: SqlExecutor; statements: string[]; close: () => 
       return executor.exec(query, ...bindings);
     },
   });
-  const sql: SqlExecutor = {
+  const sql = new SqlExecutor({
     ...record(inner),
     transaction: (callback) => inner.transaction((scoped) => callback(record(scoped))),
-  };
+  });
   return { sql, statements, close: () => inner.close() };
 }
 
@@ -112,14 +112,14 @@ test("a request executes against seeded data after startup", async () => {
 
 test("startup failure reaches the host and every later execution", async () => {
   const failure = new Error("layout failed");
-  const sql: SqlExecutor = {
+  const sql = new SqlExecutor({
     exec: async () => {
       throw failure;
     },
     transaction: async () => {
       throw failure;
     },
-  };
+  });
   const runtime = runtimeOver(immediateHost(), sql);
   await expect(runtime.ready).rejects.toBe(failure);
   await expect(runtime.execute(execution(), async () => "unreached")).rejects.toBe(failure);

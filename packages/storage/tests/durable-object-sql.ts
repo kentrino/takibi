@@ -1,9 +1,10 @@
 import {
   createSqliteStorage,
+  SqlExecutor,
   type IndexRegistry,
   type SqlBinding,
-  type SqlExecutor,
   type SqlRow,
+  type SqlStatementExecutor,
   type SqliteStorageDriver,
 } from "@takibi/storage";
 
@@ -13,17 +14,16 @@ import {
  * package, so it cannot be imported here.
  */
 export function durableSql(storage: DurableObjectStorage): SqlExecutor {
-  const executor: SqlExecutor = {
+  const statements: SqlStatementExecutor = {
     async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
       const cursor = storage.sql.exec(query, ...bindings);
-      const rows = cursor.toArray() as Row[];
-      return { rows, rowsWritten: cursor.rowsWritten };
-    },
-    transaction(callback) {
-      return storage.transaction(() => callback(executor));
+      return { rows: cursor.toArray() as Row[], rowsWritten: cursor.rowsWritten };
     },
   };
-  return executor;
+  return new SqlExecutor({
+    ...statements,
+    transaction: (body) => storage.transaction(() => body(statements)),
+  });
 }
 
 export function durableStorage(

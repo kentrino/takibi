@@ -7,6 +7,8 @@ import { createMigratingStorage } from "../src/migrations";
 import { fullAccess } from "../src/policy";
 import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
 import { createSqliteStorage } from "../src/storage";
+import { SqliteMaintenanceBackend } from "../src/maintenance";
+import { SqlExecutor, type SqlConnection } from "@takibi/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
@@ -402,5 +404,45 @@ test("Workers generated Durable Object streams and restores an owner snapshot", 
     await expect(object.$collections.posts.get("p1")).resolves.toMatchObject({
       title: "snapshot",
     });
+  });
+});
+
+test("a driver write during a failing Durable Object restore transaction survives its rollback", async () => {
+  const stub = storageStub("restore-interleaving");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    // Awaiting a timer inside an open Durable Object transaction stalls under
+    // workerd here, so the restore yields microtasks before its document wipe.
+    // workerd also starts the transaction closure later than call time, so this
+    // pins the outcome on the real platform rather than forcing the overlap.
+    const microtasks = async () => {
+      for (let index = 0; index < 50; index += 1) await Promise.resolve();
+    };
+    const slowWipe = (connection: SqlConnection): SqlConnection => ({
+      exec: (query, ...bindings) => connection.exec(query, ...bindings),
+      transaction: (body) =>
+        connection.transaction((tx) =>
+          body({
+            async exec(query, ...bindings) {
+              if (query === "DELETE FROM takibi_documents") await microtasks();
+              return tx.exec(query, ...bindings);
+            },
+          }),
+        ),
+    });
+    const sql = new SqlExecutor(slowWipe(createDurableObjectSqlExecutor(state.storage)));
+    const storage = createSqliteStorage(sql);
+    await storage.initialize();
+    const backend = new SqliteMaintenanceBackend(sql);
+    await backend.cleanupAbandoned();
+    await storage.put("posts", meta({ id: "before" }));
+    expect(await backend.acquire("owner", "restore", 30)).toBeDefined();
+
+    const restore = backend.finalizeRestore("owner", [], 1);
+    const write = storage.put("posts", meta({ id: "during" }));
+    await expect(restore).rejects.toThrow("Seed reconciliation count mismatch");
+    await write;
+    expect((await storage.list("posts")).items.map(({ id }) => id)).toEqual(["before", "during"]);
   });
 });

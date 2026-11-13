@@ -102,19 +102,13 @@ export function createSqliteStorage(
 ): SqliteStorageDriver {
   let initialization: Promise<void> | undefined;
   const initialize = (): Promise<void> => (initialization ??= initializeStorageLayout(executor));
-  let operationQueue = Promise.resolve();
-  const coordinate = <T>(operation: () => T | Promise<T>): Promise<T> => {
-    const result = operationQueue.then(initialize).then(operation);
-    operationQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  };
 
+  // Ordering and isolation come from the executor: each statement and each
+  // transaction runs alone, so no driver statement can land inside another
+  // transaction on the same database.
   const createDriver = (sql: SqlStatementExecutor, transactionBound: boolean): StorageDriver => {
     const execute = <T>(operation: () => T | Promise<T>): Promise<T> =>
-      transactionBound ? Promise.resolve().then(operation) : coordinate(operation);
+      transactionBound ? Promise.resolve().then(operation) : initialize().then(operation);
     const driver: StorageDriver = {
       get(resource, id) {
         return execute(async () => {
@@ -187,7 +181,9 @@ export function createSqliteStorage(
         if (transactionBound) {
           return callback(driver);
         }
-        return coordinate(() => executor.transaction((tx) => callback(createDriver(tx, true))));
+        return initialize().then(() =>
+          executor.transaction((tx) => callback(createDriver(tx, true))),
+        );
       },
     };
     return driver;
