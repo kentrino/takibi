@@ -1,7 +1,10 @@
 import { expect, test } from "vite-plus/test";
 import { SqliteMaintenanceBackend } from "@takibi/snapshot";
-import { openSqliteStorage, SqlExecutor, type SqlConnection } from "@takibi/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
+import { openSqliteStorage, type SqlConnection } from "@takibi/storage";
+import {
+  createSqliteDurableObjectStorage,
+  type SqliteDurableObjectStorage,
+} from "@takibi/testing/durable-object-storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { createDurableObjectSqlExecutor } from "../src/durable-object-sql";
 
@@ -27,6 +30,25 @@ function slowRestoreWipe(connection: SqlConnection): SqlConnection {
   };
 }
 
+/**
+ * Yields to the event loop at the start of every Durable Object transaction,
+ * after it began, so the production adapter itself must keep other statements
+ * out of it.
+ */
+function slowDurableTransactions(storage: SqliteDurableObjectStorage): DurableObjectStorage {
+  return new Proxy(storage, {
+    get(target, property, receiver) {
+      if (property !== "transaction") return Reflect.get(target, property, receiver) as unknown;
+      return <T>(closure: (transaction: DurableObjectTransaction) => Promise<T>) =>
+        target.transaction(async (transaction) => {
+          // Longer than the test's own yield, so its write arrives while this is open.
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+          return closure(transaction);
+        });
+    },
+  });
+}
+
 const adapters = {
   "node:sqlite": () => {
     const sql = createNodeSqliteExecutor(slowRestoreWipe);
@@ -34,7 +56,7 @@ const adapters = {
   },
   "Durable Object": () => {
     const storage = createSqliteDurableObjectStorage();
-    const sql = new SqlExecutor(slowRestoreWipe(createDurableObjectSqlExecutor(storage)));
+    const sql = createDurableObjectSqlExecutor(slowDurableTransactions(storage));
     return { sql, close: () => storage.close() };
   },
 };
