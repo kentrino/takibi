@@ -37,7 +37,6 @@
     "@takibi/storage": "workspace:^"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250803.0",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
