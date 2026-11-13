@@ -27,6 +27,7 @@ export type {
   PrettyConsoleLoggerOptions,
 } from "./logging";
 export { createDurableObjectClass, seedCollections } from "./durable-object";
+export { createDurableObjectSqlExecutor } from "./durable-object-sql";
 export { createDurableObjectCollectionsApi, createTakibiSnapshotLifecycle } from "./snapshot";
 export {
   decodePublicHttp,

@@ -3,8 +3,9 @@ import type { ContextResolver, HandleOptions } from "./context/types";
 import type { ActionRegistry, CollectionsDef } from "@takibi/api";
 import {
   compileIndexRegistry,
-  createDurableObjectStorage,
+  createSqliteStorage,
   reconcileCollectionIndexes,
+  type SqlExecutor,
 } from "@takibi/storage";
 import { initializeMaintenanceLayout } from "@takibi/snapshot";
 import { createInProcessExecutor, type Executor } from "./context/executors";
@@ -104,35 +105,39 @@ export function getTestingFork(handler: object): unknown {
 
 /**
  * Assemble seed initialization, migrations, index reconciliation, logging
- * wrappers, and in-process execution around a supplied Durable Object storage
- * backend. Callers own the backend lifetime.
+ * wrappers, and in-process execution around a supplied SQL executor. Callers
+ * own the executor lifetime.
  */
 export function createInProcessRuntime<TCtx extends object>(input: {
   collections: CollectionsDef<TCtx>;
   registry: ActionRegistry;
   logger: InternalLogger | undefined;
   services: unknown;
-  storage: DurableObjectStorage;
+  sql: SqlExecutor;
 }): {
   execute: Executor<unknown, TCtx>;
 } {
-  const { collections, registry, logger, services, storage } = input;
+  const { collections, registry, logger, services, sql } = input;
   const indexRegistry = compileIndexRegistry(collections);
-  const rawStorage = createDurableObjectStorage(storage, indexRegistry);
-  initializeMaintenanceLayout(storage.sql);
+  const rawStorage = createSqliteStorage(sql, indexRegistry);
   const driver = applyStorageLogging(
     createMigratingStorage(collections, rawStorage, logger),
     logger,
   );
   const ready = (async () => {
+    await rawStorage.initialize();
+    await initializeMaintenanceLayout(sql);
     await reconcileCollectionIndexes({
-      sql: storage.sql,
+      sql,
       collections,
       storage: driver,
       registry: indexRegistry,
     });
     await seedCollections(collections, driver, logger);
   })();
+  // Every execution awaits `ready` and reports its failure. Startup is async, so
+  // a runtime disposed before its first request must not leak an unhandled rejection.
+  ready.catch(() => undefined);
   return {
     execute: createInProcessExecutor(collections, registry, logger, services, driver, ready),
   };

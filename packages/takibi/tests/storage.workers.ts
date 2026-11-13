@@ -5,12 +5,17 @@ import { z } from "zod";
 import { createTakibi } from "../src/context";
 import { createMigratingStorage } from "../src/migrations";
 import { fullAccess } from "../src/policy";
-import { createDurableObjectStorage } from "../src/storage";
+import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
+import { createSqliteStorage } from "../src/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
 
 const TS = "2026-08-19T00:00:00.000Z";
+
+function durableStorage(storage: DurableObjectStorage) {
+  return createSqliteStorage(createDurableObjectSqlExecutor(storage));
+}
 
 function meta<T extends Record<string, unknown>>(
   document: {
@@ -29,7 +34,7 @@ test("Workers Durable Object SQLite satisfies the shared storage contract", asyn
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = durableStorage(state.storage);
     await expect(observeStorageContract(storage)).resolves.toEqual(
       expectedStorageContractObservation,
     );
@@ -41,7 +46,7 @@ test("actual SQLite-backed DO satisfies query contracts and stores no document K
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const sqlite = createDurableObjectStorage(state.storage);
+    const sqlite = durableStorage(state.storage);
     const documents = [
       meta({
         id: "a",
@@ -173,9 +178,9 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
   const stub = storageStub("layout-version");
   await stub.ping();
 
-  await runInDurableObject(stub, (_instance, state) => {
-    createDurableObjectStorage(state.storage);
-    createDurableObjectStorage(state.storage);
+  await runInDurableObject(stub, async (_instance, state) => {
+    await durableStorage(state.storage).initialize();
+    await durableStorage(state.storage).initialize();
     expect(
       state.storage.sql
         .exec<{ value: number }>(
@@ -190,7 +195,7 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
       999,
       "layout_version",
     );
-    expect(() => createDurableObjectStorage(state.storage)).toThrow(
+    await expect(durableStorage(state.storage).initialize()).rejects.toThrow(
       /Unsupported Takibi storage layout version/,
     );
   });
@@ -201,7 +206,7 @@ test("SQL pushdown includes stale rows and filters them after lazy migration", a
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const raw = createDurableObjectStorage(state.storage);
+    const raw = durableStorage(state.storage);
     await raw.put("posts", meta({ id: "a", title: "MATCH", visible: true }));
     await raw.put("posts", meta({ id: "b", title: "OTHER", visible: false }));
     const storage = createMigratingStorage(
@@ -241,7 +246,7 @@ test("documents survive Durable Object eviction", async () => {
   const stub = storageStub("eviction");
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = durableStorage(state.storage);
     await storage.put("posts", {
       ...meta({ id: "persistent", title: "still here" }),
       rev: 2 ** 63,
@@ -252,7 +257,7 @@ test("documents survive Durable Object eviction", async () => {
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = durableStorage(state.storage);
     await expect(storage.get("posts", "persistent")).resolves.toEqual({
       ...meta({ id: "persistent", title: "still here" }),
       rev: 2 ** 63,
@@ -305,7 +310,7 @@ test("version 1 rows migrate revisions out of JSON and survive eviction", async 
       );
     }
 
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = durableStorage(state.storage);
     await expect(storage.get("posts", "valid")).resolves.toMatchObject({
       title: "valid",
       rev: 2 ** 63,
@@ -328,7 +333,7 @@ test("version 1 rows migrate revisions out of JSON and survive eviction", async 
   await evictDurableObject(stub);
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = durableStorage(state.storage);
     await expect(storage.get("posts", "valid")).resolves.toMatchObject({
       title: "valid",
       rev: 2 ** 63,
@@ -341,7 +346,7 @@ test("Workers SQLite round-trips revisions across numeric storage boundaries", a
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = durableStorage(state.storage);
     const revisions = [1, 2 ** 53, 2 ** 63];
     for (const [index, revision] of revisions.entries()) {
       await storage.put("posts", {

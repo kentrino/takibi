@@ -11,11 +11,9 @@ import type {
   TakibiBrandRecord,
   TAKIBI_BRAND,
 } from "@takibi/worker-runtime";
-import { createSqliteDurableObjectStorage } from "./sqlite-storage.server";
+import { createNodeSqliteExecutor, type NodeSqliteExecutor } from "./sqlite-storage.server";
 
-const storageFinalizer = new FinalizationRegistry<
-  ReturnType<typeof createSqliteDurableObjectStorage>
->((storage) => storage.close());
+const storageFinalizer = new FinalizationRegistry<NodeSqliteExecutor>((storage) => storage.close());
 
 type ServicesOption<TServices> = keyof TServices extends never
   ? { services?: TServices }
@@ -39,13 +37,13 @@ const createSqliteExecutor: TestingExecutorFactory = ({
   logger,
   services,
 }) => {
-  const storage = createSqliteDurableObjectStorage();
+  const storage = createNodeSqliteExecutor();
   const runtime = createInProcessRuntime({
     collections,
     registry,
     logger,
     services,
-    storage,
+    sql: storage,
   });
   let disposed = false;
   const dispose = () => {

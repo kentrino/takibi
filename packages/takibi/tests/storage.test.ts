@@ -1,7 +1,12 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
-import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteStorage } from "../src/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import {
+  createDurableObjectSqlExecutor,
+  createSqliteDurableObjectStorage,
+  durableSqliteStorage,
+} from "../../testing/tests/helpers/durable-object-storage";
 import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
@@ -71,7 +76,7 @@ function createVersionOneStorage(
 }
 
 test("Node SQLite satisfies the shared storage contract", async () => {
-  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const storage = createSqliteStorage(createNodeSqliteExecutor());
   await expect(observeStorageContract(storage)).resolves.toEqual(
     expectedStorageContractObservation,
   );
@@ -94,7 +99,7 @@ test("monotonic ULID: same-ms generation order matches lexicographic order", () 
 });
 
 test("SQLite pagination preserves order, boundary, and nextCursor", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
 
   const docs = [
     meta({ id: "c", title: "C" }),
@@ -143,7 +148,7 @@ test("SQLite pagination preserves order, boundary, and nextCursor", async () => 
 });
 
 test("SQLite filters before limit with query-bound cursors", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
   const docs = [
     meta({ id: "a", ownerId: "u2", score: 30 }),
     meta({ id: "b", ownerId: "u1", score: 10 }),
@@ -185,7 +190,7 @@ test("SQLite filters before limit with query-bound cursors", async () => {
 });
 
 test("SQLite supports in and case-sensitive string matching", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
   const documents = [
     meta({ id: "a", value: "YR Clinic" }),
     meta({ id: "b", value: "yr clinic" }),
@@ -214,7 +219,7 @@ test("SQLite supports in and case-sensitive string matching", async () => {
 });
 
 test("DO SQLite list finds sparse matches across internal chunks", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
 
   for (let index = 0; index < 300; index += 1) {
     const id = index.toString().padStart(3, "0");
@@ -231,7 +236,7 @@ test("DO SQLite list finds sparse matches across internal chunks", async () => {
 });
 
 test("DO SQLite get isolates collections sharing the same id", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
   await durable.put("posts", meta({ id: "p1", title: "hi" }));
   await durable.put("comments", meta({ id: "p1", title: "other" }));
 
@@ -242,7 +247,7 @@ test("DO SQLite get isolates collections sharing the same id", async () => {
 
 test("DO SQLite layout stores revision in a dedicated REAL column", async () => {
   const backing = createSqliteDurableObjectStorage();
-  const durable = createDurableObjectStorage(backing);
+  const durable = durableSqliteStorage(backing);
   const document = { ...meta({ id: "p1", title: "one" }), rev: 7 };
 
   await durable.put("posts", document);
@@ -274,14 +279,14 @@ test("DO SQLite layout stores revision in a dedicated REAL column", async () => 
   ).toEqual({ revision: 7, json_revision_type: null });
   await expect(durable.get("posts", "p1")).resolves.toEqual(document);
 
-  createDurableObjectStorage(backing);
+  await durableSqliteStorage(backing).initialize();
   await expect(durable.get("posts", "p1")).resolves.toEqual(document);
 });
 
 test("storage layout initialization does not own maintenance tables", async () => {
   const { initializeMaintenanceLayout } = await import("../src/maintenance");
   const backing = createSqliteDurableObjectStorage();
-  const storage = createDurableObjectStorage(backing);
+  const storage = durableSqliteStorage(backing);
   await storage.put("posts", meta({ id: "p1", title: "preserved" }));
 
   expect(
@@ -299,7 +304,7 @@ test("storage layout initialization does not own maintenance tables", async () =
     backing.sql.exec("UPDATE takibi_metadata SET value = ? WHERE key = ?", 3, "layout_version");
   });
 
-  const migrated = createDurableObjectStorage(backing);
+  const migrated = durableSqliteStorage(backing);
   await expect(migrated.get("posts", "p1")).resolves.toMatchObject({ title: "preserved" });
   expect(
     backing.sql
@@ -317,7 +322,7 @@ test("storage layout initialization does not own maintenance tables", async () =
       .one().value,
   ).toBe(4);
 
-  initializeMaintenanceLayout(backing.sql);
+  await initializeMaintenanceLayout(createDurableObjectSqlExecutor(backing));
   expect(
     backing.sql
       .exec<{ name: string }>(
@@ -345,7 +350,8 @@ test("DO SQLite migrates version 1 revisions and normalizes legacy values", asyn
     { id: "string", data: { title: "string", rev: "4" } },
   ]);
 
-  const durable = createDurableObjectStorage(backing);
+  const durable = durableSqliteStorage(backing);
+  await durable.initialize();
 
   expect(
     backing.sql
@@ -371,7 +377,7 @@ test("DO SQLite migrates version 1 revisions and normalizes legacy values", asyn
   });
 });
 
-test("DO SQLite keeps version 1 intact when revision migration copy fails", () => {
+test("DO SQLite keeps version 1 intact when revision migration copy fails", async () => {
   const backing = createVersionOneStorage([{ id: "p1", data: { title: "one", rev: 3 } }]);
   const exec = backing.sql.exec.bind(backing.sql);
   let rejectedCopy = false;
@@ -383,7 +389,7 @@ test("DO SQLite keeps version 1 intact when revision migration copy fails", () =
     return exec(query, ...bindings);
   }) as DurableObjectStorage["sql"]["exec"];
 
-  expect(() => createDurableObjectStorage(backing)).toThrow("copy-failed");
+  await expect(durableSqliteStorage(backing).initialize()).rejects.toThrow("copy-failed");
   expect(rejectedCopy).toBe(true);
   expect(
     backing.sql
@@ -408,7 +414,7 @@ test("DO SQLite keeps version 1 intact when revision migration copy fails", () =
 });
 
 test("DO SQLite round-trips revisions beyond safe and signed 64-bit integer limits", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
   const revisions = [1, 2 ** 53, 2 ** 63];
 
   for (const [index, revision] of revisions.entries()) {
@@ -435,7 +441,7 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     indexes: { byOwner: ["ownerId", "createdAt"] as const },
   };
   const registry = compileIndexRegistry({ posts });
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage(), registry);
+  const durable = createSqliteStorage(createNodeSqliteExecutor(), registry);
 
   const docs = [
     { ...meta({ id: "c", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-01T00:00:00.000Z" },

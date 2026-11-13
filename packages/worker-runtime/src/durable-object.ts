@@ -15,14 +15,16 @@ import {
   createMaintenanceGatedCollections,
   initializeMaintenanceLayout,
   MaintenanceController,
+  SqliteMaintenanceBackend,
 } from "@takibi/snapshot";
 import {
   observeCommits,
   compileIndexRegistry,
-  createDurableObjectStorage,
+  createSqliteStorage,
   reconcileCollectionIndexes,
   type StorageDriver,
 } from "@takibi/storage";
+import { createDurableObjectSqlExecutor } from "./durable-object-sql";
 import { createMigratingStorage } from "./migrations";
 import { parseWireRequest } from "./protocol";
 import { createDurableObjectCollectionsApi } from "./snapshot";
@@ -58,9 +60,9 @@ export function createDurableObjectClass<
     constructor(state: DurableObjectState, env: TEnv) {
       this.#services = createServices ? createServices({ env }) : {};
       const registry = compileIndexRegistry(collections);
-      const rawStorage = createDurableObjectStorage(state.storage, registry);
-      initializeMaintenanceLayout(state.storage.sql);
-      this.#maintenance = new MaintenanceController(state.storage, (purpose) =>
+      const sql = createDurableObjectSqlExecutor(state.storage);
+      const rawStorage = createSqliteStorage(sql, registry);
+      this.#maintenance = new MaintenanceController(new SqliteMaintenanceBackend(sql), (purpose) =>
         this.#watch?.maintenanceChanged(purpose),
       );
       this.#driver = applyStorageLogging(
@@ -71,9 +73,13 @@ export function createDurableObjectClass<
       );
       this.#watch = new WatchRuntime(state, collections, this.#driver, this.#maintenance, logger);
       this.#ready = state.blockConcurrencyWhile(async () => {
+        // Layout initialization used to run synchronously in the constructor;
+        // the async SQL port moves it to the head of startup instead.
+        await rawStorage.initialize();
+        await initializeMaintenanceLayout(sql);
         await this.#maintenance.cleanupAbandoned();
         await reconcileCollectionIndexes({
-          sql: state.storage.sql,
+          sql,
           collections,
           storage: this.#driver,
           registry,

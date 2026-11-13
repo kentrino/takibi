@@ -4,6 +4,7 @@ import {
   type CollectionsDef,
   type TrustedCollectionsApi,
 } from "@takibi/api";
+import type { SqlExecutor, SqlStatementExecutor } from "@takibi/storage";
 import type {
   LeaseHandle,
   MaintenancePurpose,
@@ -18,12 +19,12 @@ export type {
   SnapshotStoredDocument,
 } from "./types";
 
-type LeaseRow = Record<string, SqlStorageValue> & {
+type LeaseRow = {
   owner_token: string;
   expires_at: number;
 };
 
-type SnapshotDocumentRow = Record<string, SqlStorageValue> & {
+type SnapshotDocumentRow = {
   collection: string;
   id: string;
   created_at: string;
@@ -37,8 +38,8 @@ const LEASE_KEY = "global";
 const LEASE_TTL_SECONDS = 30;
 const DRAIN_TIMEOUT_MS = 5_000;
 
-export function initializeMaintenanceLayout(sql: SqlStorage): void {
-  sql.exec(
+export async function initializeMaintenanceLayout(sql: SqlStatementExecutor): Promise<void> {
+  await sql.exec(
     `CREATE TABLE IF NOT EXISTS takibi_maintenance_lease (
       lease_key TEXT PRIMARY KEY CHECK (lease_key = 'global'),
       owner_token TEXT NOT NULL CHECK (owner_token <> ''),
@@ -47,7 +48,7 @@ export function initializeMaintenanceLayout(sql: SqlStorage): void {
       expires_at REAL NOT NULL
     ) WITHOUT ROWID`,
   );
-  sql.exec(
+  await sql.exec(
     `CREATE TABLE IF NOT EXISTS takibi_restore_staging_documents (
       owner_token TEXT NOT NULL,
       collection TEXT NOT NULL,
@@ -66,7 +67,7 @@ export function initializeMaintenanceLayout(sql: SqlStorage): void {
       PRIMARY KEY (owner_token, collection, id)
     ) WITHOUT ROWID`,
   );
-  sql.exec(
+  await sql.exec(
     `CREATE TABLE IF NOT EXISTS takibi_restore_staging_unique (
       owner_token TEXT NOT NULL,
       collection TEXT NOT NULL,
@@ -121,10 +122,10 @@ export class MaintenanceController {
   #idleResolvers = new Set<() => void>();
 
   constructor(
-    storage: DurableObjectStorage | MaintenanceBackend,
+    backend: MaintenanceBackend,
     private readonly onChange?: (purpose: MaintenancePurpose | undefined) => void,
   ) {
-    this.backend = "sql" in storage ? new SqliteMaintenanceBackend(storage) : storage;
+    this.backend = backend;
   }
 
   get blocked(): boolean {
@@ -256,19 +257,25 @@ export function createMaintenanceGatedCollections<TCollections extends Collectio
   });
 }
 
-export class SqliteMaintenanceBackend {
-  readonly #storage: DurableObjectStorage;
+export class SqliteMaintenanceBackend implements MaintenanceBackend {
+  readonly #sql: SqlExecutor;
+  #layout: Promise<void> | undefined;
 
-  constructor(storage: DurableObjectStorage) {
-    initializeMaintenanceLayout(storage.sql);
-    this.#storage = storage;
+  /** The maintenance layout is created lazily, before the first backend operation. */
+  constructor(sql: SqlExecutor) {
+    this.#sql = sql;
+  }
+
+  #ready(): Promise<void> {
+    return (this.#layout ??= initializeMaintenanceLayout(this.#sql));
   }
 
   async cleanupAbandoned(): Promise<void> {
-    await this.#storage.transaction(async () => {
-      this.#storage.sql.exec("DELETE FROM takibi_restore_staging_unique");
-      this.#storage.sql.exec("DELETE FROM takibi_restore_staging_documents");
-      this.#storage.sql.exec("DELETE FROM takibi_maintenance_lease");
+    await this.#ready();
+    await this.#sql.transaction(async (tx) => {
+      await tx.exec("DELETE FROM takibi_restore_staging_unique");
+      await tx.exec("DELETE FROM takibi_restore_staging_documents");
+      await tx.exec("DELETE FROM takibi_maintenance_lease");
     });
   }
 
@@ -277,9 +284,10 @@ export class SqliteMaintenanceBackend {
     purpose: MaintenancePurpose,
     ttlSeconds: number,
   ): Promise<{ expiresAt: number } | undefined> {
-    return this.#storage.transaction(async () => {
-      const row = this.#storage.sql
-        .exec<LeaseRow>(
+    await this.#ready();
+    return this.#sql.transaction(async (tx) => {
+      const row = (
+        await tx.exec<LeaseRow>(
           `INSERT INTO takibi_maintenance_lease
              (lease_key, owner_token, purpose, acquired_at, expires_at)
            VALUES (?, ?, ?, unixepoch('now', 'subsec'), unixepoch('now', 'subsec') + ?)
@@ -295,7 +303,7 @@ export class SqliteMaintenanceBackend {
           purpose,
           ttlSeconds,
         )
-        .toArray()[0];
+      ).rows[0];
       return row?.owner_token === ownerToken ? { expiresAt: row.expires_at * 1_000 } : undefined;
     });
   }
@@ -305,9 +313,10 @@ export class SqliteMaintenanceBackend {
     purpose: MaintenancePurpose,
     ttlSeconds: number,
   ): Promise<number | undefined> {
-    return this.#storage.transaction(async () => {
-      const row = this.#storage.sql
-        .exec<LeaseRow>(
+    await this.#ready();
+    return this.#sql.transaction(async (tx) => {
+      const row = (
+        await tx.exec<LeaseRow>(
           `UPDATE takibi_maintenance_lease
            SET expires_at = unixepoch('now', 'subsec') + ?
            WHERE lease_key = ?
@@ -320,14 +329,15 @@ export class SqliteMaintenanceBackend {
           ownerToken,
           purpose,
         )
-        .toArray()[0];
+      ).rows[0];
       return row?.owner_token === ownerToken ? row.expires_at * 1_000 : undefined;
     });
   }
 
   async release(ownerToken: string): Promise<void> {
-    await this.#storage.transaction(async () => {
-      this.#storage.sql.exec(
+    await this.#ready();
+    await this.#sql.transaction(async (tx) => {
+      await tx.exec(
         "DELETE FROM takibi_maintenance_lease WHERE lease_key = ? AND owner_token = ?",
         LEASE_KEY,
         ownerToken,
@@ -339,40 +349,35 @@ export class SqliteMaintenanceBackend {
     cursor: SnapshotScanCursor | undefined,
     limit: number,
   ): Promise<SnapshotStoredDocument[]> {
-    const rows =
+    await this.#ready();
+    const { rows } =
       cursor === undefined
-        ? this.#storage.sql
-            .exec<SnapshotDocumentRow>(
-              `SELECT collection, id, created_at, updated_at, schema_version, revision, data
+        ? await this.#sql.exec<SnapshotDocumentRow>(
+            `SELECT collection, id, created_at, updated_at, schema_version, revision, data
                FROM takibi_documents
                ORDER BY collection ASC, id ASC
                LIMIT ?`,
-              limit,
-            )
-            .toArray()
-        : this.#storage.sql
-            .exec<SnapshotDocumentRow>(
-              `SELECT collection, id, created_at, updated_at, schema_version, revision, data
+            limit,
+          )
+        : await this.#sql.exec<SnapshotDocumentRow>(
+            `SELECT collection, id, created_at, updated_at, schema_version, revision, data
                FROM takibi_documents
                WHERE collection > ? OR (collection = ? AND id > ?)
                ORDER BY collection ASC, id ASC
                LIMIT ?`,
-              cursor.collection,
-              cursor.collection,
-              cursor.id,
-              limit,
-            )
-            .toArray();
+            cursor.collection,
+            cursor.collection,
+            cursor.id,
+            limit,
+          );
     return rows.map(decodeSnapshotRow);
   }
 
   async clearStaging(ownerToken: string): Promise<void> {
-    await this.#storage.transaction(async () => {
-      this.#storage.sql.exec(
-        "DELETE FROM takibi_restore_staging_unique WHERE owner_token = ?",
-        ownerToken,
-      );
-      this.#storage.sql.exec(
+    await this.#ready();
+    await this.#sql.transaction(async (tx) => {
+      await tx.exec("DELETE FROM takibi_restore_staging_unique WHERE owner_token = ?", ownerToken);
+      await tx.exec(
         "DELETE FROM takibi_restore_staging_documents WHERE owner_token = ?",
         ownerToken,
       );
@@ -380,7 +385,8 @@ export class SqliteMaintenanceBackend {
   }
 
   async stageDocument(ownerToken: string, document: SnapshotStoredDocument): Promise<void> {
-    this.#storage.sql.exec(
+    await this.#ready();
+    await this.#sql.exec(
       `INSERT INTO takibi_restore_staging_documents
          (owner_token, collection, id, created_at, updated_at, schema_version, revision, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -402,8 +408,9 @@ export class SqliteMaintenanceBackend {
     valueKey: string,
     documentId: string,
   ): Promise<void> {
+    await this.#ready();
     try {
-      this.#storage.sql.exec(
+      await this.#sql.exec(
         `INSERT INTO takibi_restore_staging_unique
            (owner_token, collection, constraint_name, value_key, document_id)
          VALUES (?, ?, ?, ?, ?)`,
@@ -421,9 +428,10 @@ export class SqliteMaintenanceBackend {
   }
 
   async hasStagedDocument(ownerToken: string, collection: string, id: string): Promise<boolean> {
+    await this.#ready();
     return (
-      this.#storage.sql
-        .exec<{ found: number }>(
+      (
+        await this.#sql.exec<{ found: number }>(
           `SELECT 1 AS found
            FROM takibi_restore_staging_documents
            WHERE owner_token = ? AND collection = ? AND id = ?`,
@@ -431,7 +439,7 @@ export class SqliteMaintenanceBackend {
           collection,
           id,
         )
-        .toArray()[0] !== undefined
+      ).rows[0] !== undefined
     );
   }
 
@@ -440,10 +448,11 @@ export class SqliteMaintenanceBackend {
     seeds: readonly SnapshotStoredDocument[],
     expectedSeedsInserted: number,
   ): Promise<void> {
-    await this.#storage.transaction(async () => {
-      this.#assertOwner(ownerToken, "restore");
-      this.#storage.sql.exec("DELETE FROM takibi_documents");
-      this.#storage.sql.exec(
+    await this.#ready();
+    await this.#sql.transaction(async (tx) => {
+      await assertOwner(tx, ownerToken, "restore");
+      await tx.exec("DELETE FROM takibi_documents");
+      await tx.exec(
         `INSERT INTO takibi_documents
            (collection, id, created_at, updated_at, schema_version, revision, data)
          SELECT collection, id, created_at, updated_at, schema_version, revision, data
@@ -454,34 +463,37 @@ export class SqliteMaintenanceBackend {
       );
       let inserted = 0;
       for (const seed of seeds) {
-        inserted += this.#insertSeed(seed);
+        inserted += await insertSeed(tx, seed);
       }
       if (inserted !== expectedSeedsInserted) {
         throw new SnapshotInvalidDocumentError("Seed reconciliation count mismatch");
       }
-      this.#storage.sql.exec(
-        "DELETE FROM takibi_restore_staging_unique WHERE owner_token = ?",
-        ownerToken,
-      );
-      this.#storage.sql.exec(
+      await tx.exec("DELETE FROM takibi_restore_staging_unique WHERE owner_token = ?", ownerToken);
+      await tx.exec(
         "DELETE FROM takibi_restore_staging_documents WHERE owner_token = ?",
         ownerToken,
       );
-      this.#deleteLease(ownerToken);
+      await deleteLease(tx, ownerToken);
     });
   }
 
   async reset(ownerToken: string, seeds: readonly SnapshotStoredDocument[]): Promise<void> {
-    await this.#storage.transaction(async () => {
-      this.#assertOwner(ownerToken, "reset");
-      this.#storage.sql.exec("DELETE FROM takibi_documents");
-      for (const seed of seeds) this.#insertSeed(seed);
-      this.#deleteLease(ownerToken);
+    await this.#ready();
+    await this.#sql.transaction(async (tx) => {
+      await assertOwner(tx, ownerToken, "reset");
+      await tx.exec("DELETE FROM takibi_documents");
+      for (const seed of seeds) await insertSeed(tx, seed);
+      await deleteLease(tx, ownerToken);
     });
   }
+}
 
-  #insertSeed(seed: SnapshotStoredDocument): number {
-    return this.#storage.sql.exec(
+async function insertSeed(
+  sql: SqlStatementExecutor,
+  seed: SnapshotStoredDocument,
+): Promise<number> {
+  return (
+    await sql.exec(
       `INSERT OR IGNORE INTO takibi_documents
          (collection, id, created_at, updated_at, schema_version, revision, data)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -492,35 +504,39 @@ export class SqliteMaintenanceBackend {
       seed.schemaVersion,
       seed.revision,
       JSON.stringify(seed.data),
-    ).rowsWritten;
-  }
+    )
+  ).rowsWritten;
+}
 
-  #assertOwner(ownerToken: string, purpose: MaintenancePurpose): void {
-    const row = this.#storage.sql
-      .exec<LeaseRow>(
-        `SELECT owner_token, expires_at
+async function assertOwner(
+  sql: SqlStatementExecutor,
+  ownerToken: string,
+  purpose: MaintenancePurpose,
+): Promise<void> {
+  const row = (
+    await sql.exec<LeaseRow>(
+      `SELECT owner_token, expires_at
          FROM takibi_maintenance_lease
          WHERE lease_key = ?
            AND owner_token = ?
            AND purpose = ?
            AND expires_at > unixepoch('now', 'subsec')`,
-        LEASE_KEY,
-        ownerToken,
-        purpose,
-      )
-      .toArray()[0];
-    if (row?.owner_token !== ownerToken) {
-      throw new MaintenanceLockedError("Maintenance lease expired or ownership was lost");
-    }
-  }
-
-  #deleteLease(ownerToken: string): void {
-    this.#storage.sql.exec(
-      "DELETE FROM takibi_maintenance_lease WHERE lease_key = ? AND owner_token = ?",
       LEASE_KEY,
       ownerToken,
-    );
+      purpose,
+    )
+  ).rows[0];
+  if (row?.owner_token !== ownerToken) {
+    throw new MaintenanceLockedError("Maintenance lease expired or ownership was lost");
   }
+}
+
+async function deleteLease(sql: SqlStatementExecutor, ownerToken: string): Promise<void> {
+  await sql.exec(
+    "DELETE FROM takibi_maintenance_lease WHERE lease_key = ? AND owner_token = ?",
+    LEASE_KEY,
+    ownerToken,
+  );
 }
 
 function decodeSnapshotRow(row: SnapshotDocumentRow): SnapshotStoredDocument {

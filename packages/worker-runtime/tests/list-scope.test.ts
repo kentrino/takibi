@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
-import { createDurableObjectStorage, compileIndexRegistry } from "@takibi/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import { createSqliteStorage, compileIndexRegistry } from "@takibi/storage";
 import { grant, none, read, fullAccess } from "@takibi/policy";
 import { createTakibi } from "@takibi/worker-runtime";
 import { createClient } from "@takibi/client";
@@ -81,13 +81,13 @@ test("public HTTP and root actions share owner ranges and sanitize callback fail
 });
 type Post = z.infer<typeof schema>;
 type Context = { user: string | null; admin?: boolean };
-const databases: ReturnType<typeof createSqliteDurableObjectStorage>[] = [];
+const databases: ReturnType<typeof createNodeSqliteExecutor>[] = [];
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 
 async function fixture(size = 5) {
-  const db = createSqliteDurableObjectStorage();
+  const db = createNodeSqliteExecutor();
   databases.push(db);
   const owner = vi.fn((ctx: AccessContext<Context>) =>
     ctx.user ? grant(listWhere<Post>((q) => q.owner.eq(ctx.user!))) : none,
@@ -95,7 +95,7 @@ async function fixture(size = 5) {
   const definitions: CollectionsDef<Context> = {
     posts: { schema, accessPolicy: (ctx) => (ctx.admin ? read : owner(ctx)) },
   };
-  const storage = createDurableObjectStorage(
+  const storage = createSqliteStorage(
     db,
     compileIndexRegistry({
       posts: { indexes: { byOwner: ["owner", "createdAt"] as const } },

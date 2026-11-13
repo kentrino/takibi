@@ -6,7 +6,7 @@ import { createTakibi, fullAccess, type SnapshotRestoreReport } from "takibi";
 import { MaintenanceController } from "../src/maintenance";
 import { MemoryMaintenanceBackend } from "../src/maintenance-memory";
 import { createDurableObjectCollectionsApi } from "../src/snapshot";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "../../testing/tests/helpers/durable-object-storage";
 import type { TrustedCollectionsApi } from "../src/types";
 
 const encoder = new TextEncoder();

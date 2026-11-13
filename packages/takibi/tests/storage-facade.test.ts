@@ -8,7 +8,7 @@ import * as SqlQueryFacade from "../src/sql-query";
 import * as StorageFacade from "../src/storage";
 
 test("Takibi storage modules re-export the owner package bindings", () => {
-  expect(StorageFacade.createDurableObjectStorage).toBe(StoragePkg.createDurableObjectStorage);
+  expect(StorageFacade.createSqliteStorage).toBe(StoragePkg.createSqliteStorage);
   expect(IndexFacade.compileIndexRegistry).toBe(StoragePkg.compileIndexRegistry);
   expect(IndexFacade.resolveIndexedList).toBe(StoragePkg.resolveIndexedList);
   expect(IndexSqlFacade.physicalIndexName).toBe(StoragePkg.physicalIndexName);

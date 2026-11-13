@@ -3,8 +3,8 @@ import { z } from "zod";
 import { NotFoundError, TakibiError } from "../src/errors";
 import { executeOperation } from "../src/executor";
 import { fullAccess, none, write } from "takibi";
-import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteStorage } from "../src/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { prepareSetDoc, storageAdd, storageSet, storageUpdate } from "../src/typed-storage";
 import type { StoredDocument, WithMetadata } from "../src/types";
 
@@ -18,7 +18,7 @@ function meta<T extends Record<string, unknown>>(doc: { id: string } & T): WithM
 }
 
 function createStorage() {
-  return createDurableObjectStorage(createSqliteDurableObjectStorage());
+  return createSqliteStorage(createNodeSqliteExecutor());
 }
 
 // SQLite orders text keys by their UTF-8 byte representation.
@@ -113,7 +113,7 @@ test("revision precondition must not leak document existence to denied callers",
 // deeply nested document kills the isolate with RangeError instead of failing
 // cleanly as INVALID_DOCUMENT.
 test("storing a deeply nested document fails with a clean TakibiError, not a stack overflow", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = createSqliteStorage(createNodeSqliteExecutor());
   let tree: unknown = null;
   for (let index = 0; index < 200_000; index += 1) tree = [tree];
 

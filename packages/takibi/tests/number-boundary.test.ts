@@ -3,8 +3,8 @@ import { BadRequestError } from "../src/errors";
 import { decodePublicHttp } from "../src/http";
 import { decodeWireRequest, isWireResponse } from "../src/protocol";
 import { normalizeValidationIssues } from "../src/result";
-import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteStorage } from "../src/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import type { StoredDocument } from "../src/types";
 
 const context = { tenantId: "tenant-a" };
@@ -32,7 +32,7 @@ function operationFailure(status: number) {
 }
 
 async function seedPosts(count: number) {
-  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const storage = createSqliteStorage(createNodeSqliteExecutor());
   const ts = "2026-08-26T00:00:00.000Z";
   for (let index = 0; index < count; index += 1) {
     await storage.put("posts", {

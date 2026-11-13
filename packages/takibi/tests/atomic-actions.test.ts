@@ -1,11 +1,11 @@
-import { transactionBackend, transactionCases } from "./transaction-callback-contract";
+import { injectedTransactionStorage, transactionCases } from "./transaction-callback-contract";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "../src/action";
 import { executeAction } from "../src/action-executor";
 import { fullAccess, none } from "../src/policy";
-import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteStorage } from "../src/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import type { CollectionsDef, StorageDriver, StoredDocument } from "../src/types";
 
 const TS = "2026-08-19T00:00:00.000Z";
@@ -15,7 +15,7 @@ function document(id: string, value: string): StoredDocument {
 }
 
 function createStorage() {
-  return createDurableObjectStorage(createSqliteDurableObjectStorage());
+  return createSqliteStorage(createNodeSqliteExecutor());
 }
 
 test("SQLite transactions commit, roll back, and join nested transactions", async () => {
@@ -130,9 +130,9 @@ test("atomic is idempotent and retained by the runtime registry", () => {
 
 for (const scenario of transactionCases.filter((scenario) => scenario !== "nested")) {
   test(`atomic handler executes at most once on ${scenario}`, async () => {
-    const raw = createSqliteDurableObjectStorage();
+    const raw = createNodeSqliteExecutor();
     const error = new Error(`injected ${scenario}`);
-    const storage = createDurableObjectStorage(transactionBackend(raw, scenario, error));
+    const storage = await injectedTransactionStorage(raw, scenario, error);
     const collections = {
       items: { schema: z.object({ value: z.string() }), accessPolicy: fullAccess },
     };

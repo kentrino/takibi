@@ -1,13 +1,13 @@
 import { expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
-import { createDurableObjectStorage, observeCommits } from "@takibi/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import { createSqliteStorage, observeCommits } from "@takibi/storage";
 import { createMigratingStorage } from "../src/migrations";
 import { fullAccess } from "@takibi/policy";
 it("observes user writes outside migration storage without publishing lazy migration commits", async () => {
-  const sqlite = createSqliteDurableObjectStorage();
+  const sqlite = createNodeSqliteExecutor();
   try {
-    const raw = createDurableObjectStorage(sqlite);
+    const raw = createSqliteStorage(sqlite);
     const legacy = {
       id: "old",
       title: "legacy",

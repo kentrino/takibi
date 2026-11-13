@@ -1,12 +1,12 @@
 import { requestTakibi } from "./helpers/request";
 import { createClient } from "@takibi/client";
 import { fullAccess, none } from "@takibi/policy";
-import { createDurableObjectStorage } from "@takibi/storage";
-import { createTakibi } from "@takibi/worker-runtime";
+import { createSqliteStorage } from "@takibi/storage";
+import { createDurableObjectSqlExecutor, createTakibi } from "@takibi/worker-runtime";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "@takibi/testing";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "./helpers/durable-object-storage";
 
 type User = { id: string; role: "admin" | "guest" };
 
@@ -92,7 +92,7 @@ test("SQLite-backed handler Durable Object applies migrations on read", async ()
     })
     .actions({});
   const storage = createSqliteDurableObjectStorage();
-  const durable = createDurableObjectStorage(storage);
+  const durable = createSqliteStorage(createDurableObjectSqlExecutor(storage));
   await durable.put("settings", {
     id: "default",
     name: "Clinic",

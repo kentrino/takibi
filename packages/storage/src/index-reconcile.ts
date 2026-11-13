@@ -11,6 +11,7 @@ import {
   type IndexedCollectionSource,
   type IndexRegistry,
 } from "./indexes";
+import type { SqlStatementExecutor } from "./sql-executor";
 import type { StorageDriver } from "./types";
 
 const BACKFILL_PAGE_SIZE = 200;
@@ -29,15 +30,15 @@ export async function backfillIndexedCollections(
 }
 
 export async function reconcileCollectionIndexes(args: {
-  sql: SqlStorage;
+  sql: SqlStatementExecutor;
   collections: Record<string, IndexedCollectionSource>;
   storage: StorageDriver;
   registry?: IndexRegistry;
 }): Promise<void> {
   const registry = args.registry ?? compileIndexRegistry(args.collections);
   const desired = desiredCatalog(args.collections, registry);
-  const catalog = readCatalog(args.sql);
-  const physicalPresent = listPhysicalTakibiIndexes(args.sql);
+  const catalog = await readCatalog(args.sql);
+  const physicalPresent = await listPhysicalTakibiIndexes(args.sql);
   let ddl = false;
 
   const desiredByPhysical = new Map(desired.map((row) => [row.physicalName, row]));
@@ -50,8 +51,8 @@ export async function reconcileCollectionIndexes(args: {
       (row) => row.collection === existing.collection && row.publicName === existing.publicName,
     );
     if (next && next.physicalName === existing.physicalName) continue;
-    args.sql.exec(compileDropIndexSql(existing.physicalName));
-    args.sql.exec(
+    await args.sql.exec(compileDropIndexSql(existing.physicalName));
+    await args.sql.exec(
       "DELETE FROM takibi_index_catalog WHERE physical_name = ?",
       existing.physicalName,
     );
@@ -61,7 +62,7 @@ export async function reconcileCollectionIndexes(args: {
 
   for (const name of physicalPresent) {
     if (!desiredByPhysical.has(name) && !catalog.some((row) => row.physicalName === name)) {
-      args.sql.exec(compileDropIndexSql(name));
+      await args.sql.exec(compileDropIndexSql(name));
       ddl = true;
     }
   }
@@ -80,14 +81,14 @@ export async function reconcileCollectionIndexes(args: {
         await backfillCollection(row.definition, args.storage, row.collection);
         backfilled.add(row.collection);
       }
-      args.sql.exec(compileCreateIndexSql(row));
-      writeCatalog(args.sql, row);
+      await args.sql.exec(compileCreateIndexSql(row));
+      await writeCatalog(args.sql, row);
       ddl = true;
     }
   }
 
   if (ddl) {
-    args.sql.exec("PRAGMA optimize");
+    await args.sql.exec("PRAGMA optimize");
   }
 }
 
@@ -139,25 +140,23 @@ function desiredCatalog(
   return rows;
 }
 
-function readCatalog(sql: SqlStorage): CatalogRecord[] {
-  return sql
-    .exec<{
-      physical_name: string;
-      collection: string;
-      public_name: string;
-      fields_json: string;
-      schema_version: number;
-    }>(
-      "SELECT physical_name, collection, public_name, fields_json, schema_version FROM takibi_index_catalog",
-    )
-    .toArray()
-    .map((row) => ({
-      physicalName: row.physical_name,
-      collection: row.collection,
-      publicName: row.public_name,
-      fields: parseCatalogFields(row.fields_json, row.collection, row.public_name),
-      schemaVersion: row.schema_version,
-    }));
+async function readCatalog(sql: SqlStatementExecutor): Promise<CatalogRecord[]> {
+  const { rows } = await sql.exec<{
+    physical_name: string;
+    collection: string;
+    public_name: string;
+    fields_json: string;
+    schema_version: number;
+  }>(
+    "SELECT physical_name, collection, public_name, fields_json, schema_version FROM takibi_index_catalog",
+  );
+  return rows.map((row) => ({
+    physicalName: row.physical_name,
+    collection: row.collection,
+    publicName: row.public_name,
+    fields: parseCatalogFields(row.fields_json, row.collection, row.public_name),
+    schemaVersion: row.schema_version,
+  }));
 }
 
 function parseCatalogFields(json: string, collection: string, publicName: string): string[] {
@@ -177,8 +176,8 @@ function parseCatalogFields(json: string, collection: string, publicName: string
   return fields;
 }
 
-function writeCatalog(sql: SqlStorage, row: CatalogRecord): void {
-  sql.exec(
+async function writeCatalog(sql: SqlStatementExecutor, row: CatalogRecord): Promise<void> {
+  await sql.exec(
     `INSERT INTO takibi_index_catalog
        (physical_name, collection, public_name, fields_json, schema_version)
      VALUES (?, ?, ?, ?, ?)
@@ -195,14 +194,12 @@ function writeCatalog(sql: SqlStorage, row: CatalogRecord): void {
   );
 }
 
-function listPhysicalTakibiIndexes(sql: SqlStorage): string[] {
-  return sql
-    .exec<{ name: string }>(
-      `SELECT name FROM sqlite_master
+async function listPhysicalTakibiIndexes(sql: SqlStatementExecutor): Promise<string[]> {
+  const { rows } = await sql.exec<{ name: string }>(
+    `SELECT name FROM sqlite_master
        WHERE type = 'index' AND name LIKE 'takibi_idx_%'`,
-    )
-    .toArray()
-    .map((row) => row.name);
+  );
+  return rows.map((row) => row.name);
 }
 
 function catalogKey(collection: string, publicName: string): string {

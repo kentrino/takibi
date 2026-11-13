@@ -16,9 +16,18 @@ import {
 } from "takibi";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
-import { MaintenanceController } from "../src/maintenance";
-import { createDurableObjectStorage } from "../src/storage";
+import {
+  createDurableObjectSqlExecutor,
+  createSqliteDurableObjectStorage,
+  durableSqliteStorage,
+} from "../../testing/tests/helpers/durable-object-storage";
+import { MaintenanceController, SqliteMaintenanceBackend } from "../src/maintenance";
+
+function sqliteMaintenance(storage: DurableObjectStorage): MaintenanceController {
+  return new MaintenanceController(
+    new SqliteMaintenanceBackend(createDurableObjectSqlExecutor(storage)),
+  );
+}
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -1307,7 +1316,7 @@ test("expired export cannot complete or release a successor maintenance lease", 
   partial.push((await reader.read()).value!);
   backing.sql.exec("UPDATE takibi_maintenance_lease SET expires_at = 0");
 
-  const successor = new MaintenanceController(backing);
+  const successor = sqliteMaintenance(backing);
   const successorLease = await successor.acquire("reset");
   await expect(async () => {
     while (true) {
@@ -1333,8 +1342,8 @@ test("expired export cannot complete or release a successor maintenance lease", 
 
 test("Durable Object activation clears abandoned maintenance and restore staging", async () => {
   const backing = createSqliteDurableObjectStorage();
-  createDurableObjectStorage(backing);
-  const first = new MaintenanceController(backing);
+  await durableSqliteStorage(backing).initialize();
+  const first = sqliteMaintenance(backing);
   const lease = await first.acquire("restore");
   await first.backend.stageDocument(lease.token, {
     collection: "posts",
