@@ -42,8 +42,10 @@ export type SqlStatementExecutor = {
  * (a Durable Object, a local SQLite file) never raises it.
  *
  * Bindings are strings, finite numbers, and `null`. Result rows map column
- * names to `string`, `number`, or `null`; an integer outside the safe integer
- * range rejects rather than losing precision.
+ * names to `string`, `number`, or `null`. An INTEGER result outside the safe
+ * integer range is backend-defined (rejected by `node:sqlite` and libSQL,
+ * rounded to the nearest double by Durable Objects); the engine never reads
+ * one, and the conformance suite pins both behaviours.
  */
 export type SqlConnection = SqlStatementExecutor & {
   transaction<T>(body: (tx: SqlStatementExecutor) => Promise<T>): Promise<T>;

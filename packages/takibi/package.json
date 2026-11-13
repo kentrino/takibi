@@ -82,6 +82,7 @@
     "@takibi/query": "workspace:^",
     "@takibi/shared-types": "workspace:^",
     "@takibi/snapshot": "workspace:^",
+    "@takibi/sql-conformance": "workspace:^",
     "@takibi/storage": "workspace:^",
     "@takibi/testing": "workspace:^",
     "@takibi/utility": "workspace:^",

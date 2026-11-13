@@ -4,7 +4,7 @@ import {
   checkTransactionCallbackContract,
   transactionCases,
   transactionWrappers,
-} from "./transaction-callback-contract";
+} from "@takibi/sql-conformance";
 
 for (const [name, wrapper] of Object.entries(transactionWrappers)) {
   for (const scenario of transactionCases) {

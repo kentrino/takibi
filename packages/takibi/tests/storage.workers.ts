@@ -16,7 +16,10 @@ import {
   type SqlStatementExecutor,
 } from "@takibi/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
-import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
+import {
+  expectedStorageContractObservation,
+  observeStorageContract,
+} from "@takibi/sql-conformance";
 import type { StorageTestObject } from "./worker";
 
 const TS = "2026-08-19T00:00:00.000Z";
