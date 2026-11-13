@@ -173,8 +173,8 @@ function desiredCatalog(
   return rows;
 }
 
-async function readCatalog(sql: SqlStatementExecutor): Promise<CatalogRecord[]> {
-  const { rows } = await sql.exec<{
+async function readCatalog(sql: SqlExecutor): Promise<CatalogRecord[]> {
+  const { rows } = await sql.read<{
     physical_name: string;
     collection: string;
     public_name: string;
@@ -227,8 +227,8 @@ async function writeCatalog(sql: SqlStatementExecutor, row: CatalogRecord): Prom
   );
 }
 
-async function listPhysicalTakibiIndexes(sql: SqlStatementExecutor): Promise<string[]> {
-  const { rows } = await sql.exec<{ name: string }>(
+async function listPhysicalTakibiIndexes(sql: SqlExecutor): Promise<string[]> {
+  const { rows } = await sql.read<{ name: string }>(
     `SELECT name FROM sqlite_master
        WHERE type = 'index' AND name LIKE 'takibi_idx_%'`,
   );

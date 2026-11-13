@@ -33,10 +33,19 @@ export type SqlStatementExecutor = {
  * `tx` belong to that transaction. When `body` rejects, `transaction` rejects
  * with that same rejection value.
  *
- * A rejection means the work did not take effect, with one exception: when
- * the connection cannot tell whether a commit took effect (the response to
- * `COMMIT`, or to an autocommit write through `exec`, was lost), it rejects
- * with {@link sqlCommitOutcomeUnknown} (`SQL_COMMIT_OUTCOME_UNKNOWN`) instead.
+ * Outside a transaction, `exec` runs one autocommit statement, which may
+ * write. `read` runs one autocommit statement that the caller guarantees
+ * writes nothing. `read` is optional; without it the executor sends reads
+ * through `exec`.
+ *
+ * A rejection means nothing took effect, with one exception. A connection
+ * that can lose a response (one that reaches its database over a network)
+ * rejects with {@link sqlCommitOutcomeUnknown} (`SQL_COMMIT_OUTCOME_UNKNOWN`)
+ * when it sent a write and cannot tell whether it was committed. Only two
+ * calls can do that: `transaction`, when `COMMIT` was sent but not confirmed,
+ * and `exec`. A statement inside a transaction commits nothing by itself and
+ * a `read` writes nothing, so their failures are ordinary rejections; a
+ * connection that can report an unknown outcome therefore implements `read`.
  * The work may or may not be durable. A connection never retries a statement
  * or a commit to find out. A connection that always knows its commit outcome
  * (a Durable Object, a local SQLite file) never raises it.
@@ -49,6 +58,10 @@ export type SqlStatementExecutor = {
  */
 export type SqlConnection = SqlStatementExecutor & {
   transaction<T>(body: (tx: SqlStatementExecutor) => Promise<T>): Promise<T>;
+  read?<Row extends SqlRow = SqlRow>(
+    query: string,
+    ...bindings: SqlBinding[]
+  ): Promise<SqlResult<Row>>;
 };
 
 /** The {@link TakibiError} code of an unknown commit outcome. */
@@ -147,6 +160,24 @@ export class SqlExecutor implements SqlStatementExecutor {
   ): Promise<SqlResult<Row>> {
     if (this.#isReentrant()) return Promise.reject(reentrantCallError());
     return this.#serialize(() => this.#connection.exec<Row>(query, ...bindings));
+  }
+
+  /**
+   * Like {@link exec}, for a statement that writes nothing. Its failure is
+   * never `SQL_COMMIT_OUTCOME_UNKNOWN`. Inside a transaction callback, read
+   * through `tx.exec`.
+   */
+  read<Row extends SqlRow = SqlRow>(
+    query: string,
+    ...bindings: SqlBinding[]
+  ): Promise<SqlResult<Row>> {
+    if (this.#isReentrant()) return Promise.reject(reentrantCallError());
+    const connection = this.#connection;
+    return this.#serialize(() =>
+      connection.read === undefined
+        ? connection.exec<Row>(query, ...bindings)
+        : connection.read<Row>(query, ...bindings),
+    );
   }
 
   transaction<T>(callback: (tx: SqlStatementExecutor) => Promise<T>): Promise<T> {

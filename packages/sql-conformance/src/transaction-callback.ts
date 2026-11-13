@@ -47,6 +47,7 @@ export async function injectedTransactionStorage(
   let armed = false;
   const executor = new SqlExecutor({
     exec: (query, ...bindings) => raw.exec(query, ...bindings),
+    read: (query, ...bindings) => raw.read(query, ...bindings),
     async transaction(callback) {
       if (!armed) return raw.transaction(callback);
       if (scenario === "admission") throw error;

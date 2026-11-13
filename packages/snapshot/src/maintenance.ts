@@ -355,14 +355,14 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   ): Promise<SnapshotStoredDocument[]> {
     const { rows } =
       cursor === undefined
-        ? await this.#sql.exec<SnapshotDocumentRow>(
+        ? await this.#sql.read<SnapshotDocumentRow>(
             `SELECT collection, id, created_at, updated_at, schema_version, revision, data
                FROM takibi_documents
                ORDER BY collection ASC, id ASC
                LIMIT ?`,
             limit,
           )
-        : await this.#sql.exec<SnapshotDocumentRow>(
+        : await this.#sql.read<SnapshotDocumentRow>(
             `SELECT collection, id, created_at, updated_at, schema_version, revision, data
                FROM takibi_documents
                WHERE collection > ? OR (collection = ? AND id > ?)
@@ -432,7 +432,7 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   async hasStagedDocument(ownerToken: string, collection: string, id: string): Promise<boolean> {
     return (
       (
-        await this.#sql.exec<{ found: number }>(
+        await this.#sql.read<{ found: number }>(
           `SELECT 1 AS found
            FROM takibi_restore_staging_documents
            WHERE owner_token = ? AND collection = ? AND id = ?`,
