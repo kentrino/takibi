@@ -32,6 +32,7 @@ Where it runs:
 | -------------- | -------------------------------------------------- |
 | Durable Object | `packages/takibi/tests/sql-conformance.workers.ts` |
 | `node:sqlite`  | `packages/node-sqlite/tests/conformance.test.ts`   |
+| libSQL (local) | `packages/libsql/tests/conformance.test.ts`        |
 
 The package depends on the engine packages (including `@takibi/worker-runtime` for the
 tenant runtime) and on no connection, so each connection package can run it without a

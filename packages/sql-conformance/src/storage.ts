@@ -240,26 +240,6 @@ export function defineStorageTests(target: ConformanceTarget): void {
         // Reconciling again changes nothing.
         await reconcileCollectionIndexes({ storage, collections: first, registry: firstRegistry });
 
-        const scan = resolveIndexedList(
-          "posts",
-          {
-            index: "byOwner",
-            where: { field: "ownerId", op: "eq", value: "u1" },
-            orderBy: { field: "createdAt", direction: "desc" },
-          },
-          firstRegistry,
-        );
-        const compiled = compileIndexedScanSql("posts", scan!, { limit: 20 });
-        const plan = (
-          await sql.exec<{ detail: string }>(
-            `EXPLAIN QUERY PLAN ${compiled.sql}`,
-            ...compiled.bindings,
-          )
-        ).rows
-          .map((row) => row.detail)
-          .join("\n");
-        expect(plan).toContain(physicalIndexName("posts", "byOwner", ["ownerId", "createdAt"]));
-
         const renamed = { posts: { indexes: { byCreator: ["ownerId", "createdAt"] as const } } };
         await reconcileCollectionIndexes({
           storage,
@@ -276,6 +256,30 @@ export function defineStorageTests(target: ConformanceTarget): void {
           await sql.exec<{ public_name: string }>("SELECT public_name FROM takibi_index_catalog")
         ).rows.map((row) => plain(row)!.public_name);
         expect(catalog).toEqual(["byCreator"]);
+
+        // The planner uses the reconciled partial expression index. This runs
+        // last: libSQL (libsql 0.5.29) leaves an EXPLAIN statement active, and
+        // a later DROP INDEX on the same connection then fails with
+        // SQLITE_LOCKED. The engine itself never issues EXPLAIN.
+        const scan = resolveIndexedList(
+          "posts",
+          {
+            index: "byCreator",
+            where: { field: "ownerId", op: "eq", value: "u1" },
+            orderBy: { field: "createdAt", direction: "desc" },
+          },
+          compileIndexRegistry(renamed),
+        );
+        const compiled = compileIndexedScanSql("posts", scan!, { limit: 20 });
+        const plan = (
+          await sql.exec<{ detail: string }>(
+            `EXPLAIN QUERY PLAN ${compiled.sql}`,
+            ...compiled.bindings,
+          )
+        ).rows
+          .map((row) => row.detail)
+          .join("\n");
+        expect(plan).toContain(physicalIndexName("posts", "byCreator", ["ownerId", "createdAt"]));
       }));
 
     test("index reconciliation refuses documents missing an indexed field and changes nothing", () =>
