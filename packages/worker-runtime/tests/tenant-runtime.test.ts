@@ -388,6 +388,39 @@ test("close cancels an open export stream, releasing its lease, and later reads 
   close();
 });
 
+test("close after reading part of an export stream leaves no read running against the database", async () => {
+  const { sql, statements, close } = recordingSql();
+  const runtime = runtimeOver(immediateHost(), sql);
+  const reader = (await runtime.collectionsApi.$exportSnapshot()).getReader();
+  await expect(reader.read()).resolves.toMatchObject({ done: false });
+  await runtime.close();
+  expect(statements.at(-1)).toMatch(/^DELETE FROM takibi_maintenance_lease WHERE lease_key = \?/);
+  const issued = statements.length;
+  // Nothing started before close() may reach the database afterwards.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(statements).toHaveLength(issued);
+  await expect(reader.read()).rejects.toMatchObject({ code: "TENANT_CLOSED" });
+  expect(statements).toHaveLength(issued);
+  close();
+});
+
+test("an export stream cancelled during a read releases its lease only after that read", async () => {
+  const { sql, statements, close } = recordingSql();
+  const runtime = runtimeOver(immediateHost(), sql);
+  const reader = (await runtime.collectionsApi.$exportSnapshot()).getReader();
+  await reader.read(); // header
+  const reading = reader.read(); // scans the first page
+  const cancelled = reader.cancel();
+  await Promise.allSettled([reading, cancelled]);
+  const releases = statements.filter((statement) =>
+    statement.startsWith("DELETE FROM takibi_maintenance_lease WHERE lease_key = ?"),
+  );
+  expect(releases).toHaveLength(1);
+  expect(statements.at(-1)).toBe(releases[0]);
+  await runtime.close();
+  close();
+});
+
 test("close waits for watch fan-out still pending in waitUntil", async () => {
   const inner = createNodeSqliteExecutor();
   let hold: Promise<void> | undefined;
