@@ -1,35 +1,13 @@
-import { WatchRuntime } from "./watch-runtime";
-import {
-  type ActionRegistry,
-  type CollectionDefinition,
-  type CollectionsDef,
-  type DurableObjectCollectionsApi,
-} from "@takibi/api";
-import { applyStorageLogging, errorResponse } from "./context/runtime";
+import type { ActionRegistry, CollectionsDef, DurableObjectCollectionsApi } from "@takibi/api";
+import { WATCH_PROTOCOL } from "@takibi/protocol";
+import { errorResponse } from "./context/runtime";
 import type { InternalCollectionsOptions } from "./context/types";
-import { createTrustedCollections } from "./executor";
-import type { PublicRequest } from "./http";
-import { resolveLocalExecution } from "./invocation-execution";
-import type { InternalLogger } from "./logging";
-import {
-  createMaintenanceGatedCollections,
-  initializeMaintenanceLayout,
-  MaintenanceController,
-  SqliteMaintenanceBackend,
-} from "@takibi/snapshot";
-import {
-  observeCommits,
-  compileIndexRegistry,
-  createSqliteStorage,
-  reconcileCollectionIndexes,
-  type StorageDriver,
-} from "@takibi/storage";
 import { createDurableObjectSqlExecutor } from "./durable-object-sql";
-import { createMigratingStorage } from "./migrations";
+import type { PublicRequest } from "./http";
+import type { InternalLogger } from "./logging";
 import { parseWireRequest } from "./protocol";
-import { createDurableObjectCollectionsApi } from "./snapshot";
-import { bindTracer, extractTraceContext, resolveTracer, tracedStorage } from "./tracing";
-import { storageAdd } from "./typed-storage";
+import { createTenantRuntime, type TenantHost, type TenantRuntime } from "./tenant-runtime";
+import { bindTracer, extractTraceContext, resolveTracer } from "./tracing";
 
 type DurableObjectClass<TCollections, TEnv> = new (
   state: DurableObjectState,
@@ -37,6 +15,32 @@ type DurableObjectClass<TCollections, TEnv> = new (
 ) => DurableObject & {
   $collections: DurableObjectCollectionsApi<TCollections>;
 };
+
+/** Startup under `blockConcurrencyWhile`; watch over Hibernation API sockets. */
+export function createDurableObjectHost(state: DurableObjectState): TenantHost<Response> {
+  return {
+    runStartup: (startup) => state.blockConcurrencyWhile(startup),
+    watch: {
+      sockets: () => state.getWebSockets(),
+      accept(attachment) {
+        const [client, server] = Object.values(new WebSocketPair());
+        // serializeAttachment itself also enforces the platform's structured-clone limit.
+        server.serializeAttachment(attachment);
+        state.acceptWebSocket(server);
+        return {
+          socket: server,
+          respond: () =>
+            new Response(null, {
+              status: 101,
+              webSocket: client,
+              headers: { "sec-websocket-protocol": WATCH_PROTOCOL },
+            }),
+        };
+      },
+      waitUntil: (promise) => state.waitUntil(promise),
+    },
+  };
+}
 
 export function createDurableObjectClass<
   TCollections extends CollectionsDef,
@@ -50,74 +54,36 @@ export function createDurableObjectClass<
   createServices?: (input: { env: TEnv }) => TServices,
 ): DurableObjectClass<TCollections, TEnv> {
   return class TakibiTenantObject implements DurableObject {
-    readonly #watch: WatchRuntime;
-    readonly #driver: StorageDriver;
-    readonly #ready: Promise<void>;
-    readonly #services: TServices | Record<never, never>;
-    readonly #maintenance: MaintenanceController;
+    readonly #runtime: TenantRuntime<TCollections>;
     readonly $collections: DurableObjectCollectionsApi<TCollections>;
 
     constructor(state: DurableObjectState, env: TEnv) {
-      this.#services = createServices ? createServices({ env }) : {};
-      const registry = compileIndexRegistry(collections);
-      const sql = createDurableObjectSqlExecutor(state.storage);
-      const rawStorage = createSqliteStorage(sql, registry);
-      this.#maintenance = new MaintenanceController(new SqliteMaintenanceBackend(sql), (purpose) =>
-        this.#watch?.maintenanceChanged(purpose),
-      );
-      this.#driver = applyStorageLogging(
-        observeCommits(createMigratingStorage(collections, rawStorage, logger), (changed) =>
-          this.#watch?.invalidate(changed),
-        ),
-        logger,
-      );
-      this.#watch = new WatchRuntime(state, collections, this.#driver, this.#maintenance, logger);
-      this.#ready = state.blockConcurrencyWhile(async () => {
-        // Layout initialization used to run synchronously in the constructor;
-        // the async SQL port moves it to the head of startup instead.
-        await rawStorage.initialize();
-        await initializeMaintenanceLayout(sql);
-        await this.#maintenance.cleanupAbandoned();
-        await reconcileCollectionIndexes({
-          sql,
-          collections,
-          storage: this.#driver,
-          registry,
-        });
-        await seedCollections(collections, this.#driver, logger);
-        this.#watch.recover();
-      });
-      this.$collections = createDurableObjectCollectionsApi(
-        createMaintenanceGatedCollections(
-          createTrustedCollections(
-            collections,
-            afterInitialization(this.#driver, this.#ready),
-            logger,
-          ),
-          this.#maintenance,
-        ),
+      const services = createServices ? createServices({ env }) : {};
+      this.#runtime = createTenantRuntime({
         collections,
-        this.#maintenance,
-        this.#ready,
+        registry,
         logger,
-      );
+        services,
+        sql: createDurableObjectSqlExecutor(state.storage),
+        host: createDurableObjectHost(state),
+      });
+      this.$collections = this.#runtime.collectionsApi;
     }
 
     webSocketMessage(socket: WebSocket, _message: string | ArrayBuffer): void {
-      this.#watch.protocolError(socket);
+      this.#runtime.watchMessage(socket);
     }
     webSocketClose(socket: WebSocket): void {
-      this.#watch.close(socket);
+      this.#runtime.watchClose(socket);
     }
     webSocketError(socket: WebSocket): void {
-      this.#watch.close(socket, 1011);
+      this.#runtime.watchClose(socket, 1011);
     }
 
     async fetch(request: Request): Promise<Response> {
       if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
         try {
-          await this.#ready;
-          return await this.#watch.upgrade(request);
+          return await this.#runtime.upgradeWatch(request);
         } catch (error) {
           return errorResponse(error, logger);
         }
@@ -131,22 +97,13 @@ export function createDurableObjectClass<
             const body = parseWireRequest(await request.text());
             const { context, ...decoded } = body;
             invocation = decoded;
-            await this.#ready;
-            return await this.#maintenance.runNormal(async () => {
-              const local = await resolveLocalExecution({
-                collections,
-                registry,
-                logger,
-                services: this.#services,
-                storage: tracer ? tracedStorage(this.#driver) : this.#driver,
-                spanKind: "server",
-                parentSpan: extracted?.span,
-                request,
-              });
-              return decoded.kind === "batch"
-                ? local.executeBatchHttp(context, decoded.items)
-                : local.executeHttp(context, decoded);
-            });
+            return await this.#runtime.execute(
+              { request, traced: !!tracer, spanKind: "server", parentSpan: extracted?.span },
+              (local) =>
+                decoded.kind === "batch"
+                  ? local.executeBatchHttp(context, decoded.items)
+                  : local.executeHttp(context, decoded),
+            );
           } catch (err) {
             return errorResponse(err, logger, invocation, request);
           }
@@ -157,46 +114,5 @@ export function createDurableObjectClass<
       };
       return tracer ? bindTracer(tracer, execute) : execute();
     }
-  };
-}
-
-export async function seedCollections(
-  collections: Record<string, CollectionDefinition>,
-  driver: StorageDriver,
-  logger?: InternalLogger,
-): Promise<void> {
-  for (const [collection, definition] of Object.entries(collections)) {
-    if (!definition.seed) continue;
-
-    const documents = await definition.seed();
-    for (const [id, data] of Object.entries(documents)) {
-      if (await driver.get(collection, id)) continue;
-      await storageAdd(definition, driver, collection, data, { id }, logger);
-    }
-  }
-}
-
-function afterInitialization(driver: StorageDriver, ready: Promise<void>): StorageDriver {
-  return {
-    async get(resource, id) {
-      await ready;
-      return driver.get(resource, id);
-    },
-    async put(resource, doc) {
-      await ready;
-      return driver.put(resource, doc);
-    },
-    async delete(resource, id) {
-      await ready;
-      return driver.delete(resource, id);
-    },
-    async list(resource, options, plan) {
-      await ready;
-      return driver.list(resource, options, plan);
-    },
-    async transaction(callback) {
-      await ready;
-      return driver.transaction(callback);
-    },
   };
 }

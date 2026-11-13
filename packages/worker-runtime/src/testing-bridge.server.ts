@@ -1,18 +1,10 @@
 import type { TakibiBrandCarrier, TakibiBrandRecord, TAKIBI_BRAND } from "./brand";
 import type { ContextResolver, HandleOptions } from "./context/types";
 import type { ActionRegistry, CollectionsDef } from "@takibi/api";
-import {
-  compileIndexRegistry,
-  createSqliteStorage,
-  reconcileCollectionIndexes,
-  type SqlExecutor,
-} from "@takibi/storage";
-import { initializeMaintenanceLayout } from "@takibi/snapshot";
-import { createInProcessExecutor, type Executor } from "./context/executors";
-import { applyStorageLogging } from "./context/runtime";
-import { seedCollections } from "./durable-object";
+import type { SqlExecutor } from "@takibi/storage";
+import type { Executor } from "./context/executors";
 import type { InternalLogger, LoggingOptions } from "./logging";
-import { createMigratingStorage } from "./migrations";
+import { createTenantRuntime, type TenantHost } from "./tenant-runtime";
 
 export type TestingForkOptions<
   TCtx extends object = object,
@@ -104,9 +96,22 @@ export function getTestingFork(handler: object): unknown {
 }
 
 /**
- * Assemble seed initialization, migrations, index reconciliation, logging
- * wrappers, and in-process execution around a supplied SQL executor. Callers
- * own the executor lifetime.
+ * In-process host: startup runs immediately (requests await `ready`), and
+ * there is no watch. Startup is async, so a runtime disposed before its first
+ * request must not leak an unhandled rejection; every execution awaits `ready`
+ * and reports its failure.
+ */
+const inProcessHost: TenantHost = {
+  runStartup(startup) {
+    const ready = startup();
+    ready.catch(() => undefined);
+    return ready;
+  },
+};
+
+/**
+ * The tenant runtime over a supplied SQL executor, executing invocations in
+ * process. Callers own the executor lifetime.
  */
 export function createInProcessRuntime<TCtx extends object>(input: {
   collections: CollectionsDef<TCtx>;
@@ -117,28 +122,15 @@ export function createInProcessRuntime<TCtx extends object>(input: {
 }): {
   execute: Executor<unknown, TCtx>;
 } {
-  const { collections, registry, logger, services, sql } = input;
-  const indexRegistry = compileIndexRegistry(collections);
-  const rawStorage = createSqliteStorage(sql, indexRegistry);
-  const driver = applyStorageLogging(
-    createMigratingStorage(collections, rawStorage, logger),
-    logger,
-  );
-  const ready = (async () => {
-    await rawStorage.initialize();
-    await initializeMaintenanceLayout(sql);
-    await reconcileCollectionIndexes({
-      sql,
-      collections,
-      storage: driver,
-      registry: indexRegistry,
-    });
-    await seedCollections(collections, driver, logger);
-  })();
-  // Every execution awaits `ready` and reports its failure. Startup is async, so
-  // a runtime disposed before its first request must not leak an unhandled rejection.
-  ready.catch(() => undefined);
+  const runtime = createTenantRuntime({ ...input, host: inProcessHost });
   return {
-    execute: createInProcessExecutor(collections, registry, logger, services, driver, ready),
+    execute: ({ request, ctx, invocation, tracer, resolveSpan }) =>
+      runtime.execute(
+        { request, traced: !!tracer, spanKind: "internal", parentSpan: resolveSpan },
+        (local) =>
+          invocation.kind === "batch"
+            ? local.executeBatch(ctx, invocation.items)
+            : local.execute(ctx, invocation),
+      ),
   };
 }
