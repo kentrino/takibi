@@ -9,50 +9,60 @@ import {
 } from "@takibi/storage";
 
 /**
- * Where the database lives, which decides whether a failure can leave a
- * commit's outcome unknown.
+ * Where the database lives, which decides whether a failed write can leave
+ * its commit outcome unknown.
  *
- * - `local`: a file or `:memory:` opened in process. A failed commit was
- *   rolled back; the outcome is always known.
- * - `remote`: a `libsql:`, `http(s):` or `ws(s):` URL. A response can be lost.
- * - `replica`: a local file with `syncUrl` (embedded replica). Writes go to
- *   the primary unless offline writes are enabled, so a response can be lost.
+ * - `local`: a file or `:memory:` opened in process. A failed statement or
+ *   commit was rolled back; the outcome is always known.
+ * - `remote`: a libSQL server reached over HTTP (Turso, `sqld`). A response
+ *   can be lost after the server committed.
  */
-export type LibsqlLocation = "local" | "remote" | "replica";
-
-/** Error codes the client raises before it sends anything to the database. */
-const NOT_SENT = new Set(["TRANSACTION_CLOSED", "CLIENT_CLOSED", "TRANSACTION_ACTIVE"]);
+export type LibsqlLocation = "local" | "remote";
 
 /**
- * True when `error` proves the database answered (or was never asked), so
- * the write it failed certainly did not take effect.
+ * True when a failed remote write certainly did not commit. Everything else
+ * is reported as an unknown outcome, so this must only ever err towards
+ * `false`.
  *
- * Remote errors carry the server's response as a hrana `ResponseError` cause;
- * any other failure (a dropped connection, a fetch error, an HTTP 5xx, a
- * protocol error) may have happened after the server committed. Local and
- * replica statements fail with SQLite result codes (`SQLITE_*`) when the
- * engine rejected them.
+ * It relies only on the client's public error surface (`LibsqlError` and its
+ * `code`, exported by `@libsql/client`):
+ *
+ * - `SQLITE_*`: the server's SQLite rejected the statement (a constraint,
+ *   `SQLITE_BUSY`, ...), so it did not take effect. libSQL servers report
+ *   SQLite result codes under their names; `sqld` 0.24.32 does, as the
+ *   remote integration test shows.
+ * - `TRANSACTION_CLOSED`: the client refused to send `COMMIT` because the
+ *   transaction was already closed.
+ *
+ * Transport failures never carry such a code: a failed `fetch` is not a
+ * `LibsqlError` at all, and an HTTP error status, a protocol error or a
+ * closed stream map to `SERVER_ERROR`, `HRANA_PROTO_ERROR`,
+ * `HRANA_CLOSED_ERROR` or `UNKNOWN` (checked for `@libsql/client` 0.18.0;
+ * `tests/connection.test.ts` pins the version). Server errors that are not
+ * SQLite result codes (`SQL_PARSE_ERROR`, a stream timeout, ...) are treated
+ * as unknown too: rare for the engine's statements, and safe.
  */
-export function provesNotCommitted(location: LibsqlLocation, error: unknown): boolean {
-  if (location === "local") return true;
-  if (!(error instanceof LibsqlError)) return false;
-  if (NOT_SENT.has(error.code)) return true;
-  if (location === "remote") {
-    return error.cause instanceof Error && error.cause.name === "ResponseError";
-  }
-  return error.code.startsWith("SQLITE_");
-}
-
-/** Rethrow a failed write as itself, or as an unknown commit outcome when it may have committed. */
-function classify(location: LibsqlLocation, error: unknown): unknown {
-  return provesNotCommitted(location, error) ? error : sqlCommitOutcomeUnknown(error);
+export function remoteFailureProvesNotCommitted(error: unknown): boolean {
+  return (
+    error instanceof LibsqlError &&
+    (error.code.startsWith("SQLITE_") || error.code === "TRANSACTION_CLOSED")
+  );
 }
 
 /**
  * A {@link SqlConnection} over a libSQL client. The client must use
- * `intMode: "number"` and, for a local or replica database, exactly one
- * connection (`concurrency: 1`), so per-connection pragmas apply to every
- * statement; {@link openLibsqlConnection} creates it that way.
+ * `intMode: "number"`, and a local one exactly one connection
+ * (`concurrency: 1`) so per-connection pragmas apply to every statement;
+ * {@link openLibsqlConnection} creates it that way. A remote client may also
+ * be created by the caller (for example `@libsql/client/web` inside a
+ * Cloudflare Worker) and passed with `location: "remote"`.
+ *
+ * On a remote database, a failed `exec` (an autocommit statement that may
+ * write) or a failed `COMMIT` rejects with `SQL_COMMIT_OUTCOME_UNKNOWN`
+ * unless {@link remoteFailureProvesNotCommitted}. A failed `read` or a failed
+ * statement inside a transaction is an ordinary rejection: neither commits
+ * anything. Nothing here, nor in the client (checked for 0.18.0), retries a
+ * statement or a commit.
  */
 export function libsqlConnection(
   client: Client,
@@ -64,6 +74,11 @@ export function libsqlConnection(
       throw new TakibiError("SQL_CONNECTION_CLOSED", "The libSQL connection is closed", 500);
     }
   };
+  /** Rethrow a failed write as itself, or as an unknown outcome when it may have committed. */
+  const classify = (error: unknown): unknown =>
+    location === "local" || remoteFailureProvesNotCommitted(error)
+      ? error
+      : sqlCommitOutcomeUnknown(error);
   const run = async <Row extends SqlRow>(
     target: Client | Transaction,
     query: string,
@@ -79,15 +94,17 @@ export function libsqlConnection(
       try {
         return await run<Row>(client, query, bindings);
       } catch (error) {
-        // An autocommit statement commits on its own.
-        throw classify(location, error);
+        // An autocommit statement that may write commits on its own.
+        throw classify(error);
       }
+    },
+    async read<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
+      assertOpen();
+      return run<Row>(client, query, bindings);
     },
     async transaction(body) {
       assertOpen();
-      // `write` mode starts with BEGIN IMMEDIATE. Nothing here, nor in the
-      // client (checked for @libsql/client 0.18.0), retries a statement or a
-      // commit.
+      // `write` mode starts with BEGIN IMMEDIATE.
       const transaction = await client.transaction("write");
       const tx: SqlStatementExecutor = {
         // Inside a transaction nothing commits per statement: a lost
@@ -106,7 +123,7 @@ export function libsqlConnection(
         try {
           await transaction.commit();
         } catch (error) {
-          throw classify(location, error);
+          throw classify(error);
         }
         return result;
       } finally {
