@@ -191,7 +191,7 @@ export {
   normalizeInvocationFailure,
   toWireFailure,
 } from "./context/runtime";
-export { createInProcessExecutor, createStubExecutor } from "./context/executors";
+export { createStubExecutor } from "./context/executors";
 export type { Executor, ExecutorInput } from "./context/executors";
 export { ownStringEntries } from "./context/own-entries";
 export {
