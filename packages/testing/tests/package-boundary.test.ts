@@ -124,12 +124,19 @@ test("testing package keeps a one-way dependency graph", () => {
   expect(testing.name).toBe("@takibi/testing");
   expect(testing.exports?.["."]).toBe("./src/index.ts");
   expect(testing.exports?.["./sqlite-storage"]).toBe("./src/sqlite-storage.server.ts");
+  expect(testing.exports?.["./durable-object-storage"]).toBe(
+    "./src/durable-object-storage.server.ts",
+  );
   expect(testing.files).toEqual(["dist", "README.md", "LICENSE"]);
   expect(testing.publishConfig?.exports).toMatchObject({
     ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" },
     "./sqlite-storage": {
       types: "./dist/sqlite-storage.d.mts",
       import: "./dist/sqlite-storage.mjs",
+    },
+    "./durable-object-storage": {
+      types: "./dist/durable-object-storage.d.mts",
+      import: "./dist/durable-object-storage.mjs",
     },
   });
   expect(testing.dependencies).toEqual({

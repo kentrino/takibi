@@ -6,7 +6,7 @@ import { createDurableObjectSqlExecutor, createTakibi } from "@takibi/worker-run
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "@takibi/testing";
-import { createSqliteDurableObjectStorage } from "./helpers/durable-object-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 
 type User = { id: string; role: "admin" | "guest" };
 

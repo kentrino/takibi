@@ -10,7 +10,7 @@ import {
   type Logger,
 } from "takibi";
 import type { WireRequest } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "../../testing/tests/helpers/durable-object-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 
 const Post = z.object({ title: z.string() });
 

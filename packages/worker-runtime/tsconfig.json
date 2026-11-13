@@ -7,6 +7,7 @@
     "moduleResolution": "bundler",
     "paths": {
       "@takibi/testing": ["../testing/src/index.ts"],
+      "@takibi/testing/durable-object-storage": ["../testing/src/durable-object-storage.server.ts"],
       "@takibi/testing/sqlite-storage": ["../testing/src/sqlite-storage.server.ts"]
     },
     "resolveJsonModule": true,

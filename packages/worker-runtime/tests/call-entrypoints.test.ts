@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "@takibi/testing";
-import { createSqliteDurableObjectStorage } from "../../testing/tests/helpers/durable-object-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 import { fullAccess } from "@takibi/policy";
 import {
   createTakibi,

@@ -4,6 +4,7 @@ export default defineConfig({
   pack: {
     entry: {
       index: "src/index.ts",
+      "durable-object-storage": "src/durable-object-storage.server.ts",
       "sqlite-storage": "src/sqlite-storage.server.ts",
     },
     dts: {

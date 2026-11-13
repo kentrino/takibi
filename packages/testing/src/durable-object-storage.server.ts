@@ -1,22 +1,11 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { openSqliteStorage, type IndexRegistry, type SqliteStorage } from "@takibi/storage";
-import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
-
-export { createDurableObjectSqlExecutor };
-
-/** Storage engine over the production Durable Object adapter. */
-export function durableSqliteStorage(
-  storage: DurableObjectStorage,
-  registry?: IndexRegistry,
-): Promise<SqliteStorage> {
-  return openSqliteStorage(createDurableObjectSqlExecutor(storage), registry);
-}
 
 /**
- * Test-only stand-in for a SQLite-backed `DurableObjectStorage`, for Node tests
- * that construct the generated Durable Object class directly or inject faults
- * through `storage.sql.exec`. Production and `@takibi/testing` code run on the
- * `SqlExecutor` port instead.
+ * Test-only stand-in for a SQLite-backed `DurableObjectStorage` over an
+ * in-memory `node:sqlite` database, for Node tests that construct the
+ * generated Durable Object class or drive the Durable Object SQL adapter.
+ * Tests that only need a storage driver or a tenant runtime use
+ * `createNodeSqliteExecutor` from `@takibi/testing/sqlite-storage` instead.
  */
 export type SqliteDurableObjectStorage = DurableObjectStorage & {
   close(): void;
@@ -26,7 +15,7 @@ export function createSqliteDurableObjectStorage(): SqliteDurableObjectStorage {
   const database = new DatabaseSync(":memory:");
   let closed = false;
   const sql = {
-    exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SQLInputValue[]) {
+    exec<T extends Record<string, unknown>>(query: string, ...bindings: SQLInputValue[]) {
       const statement = database.prepare(query);
       const columnNames = statement.columns().map(({ name }) => name);
       const { rows, rowsWritten } =

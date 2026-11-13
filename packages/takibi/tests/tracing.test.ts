@@ -20,7 +20,7 @@ import {
 } from "../src/tracing";
 import { createFailingDocumentWriteStorage } from "./helpers/failing-storage";
 import { createRecordingTracer, type RecordedSpan } from "./helpers/recording-tracer";
-import { createSqliteDurableObjectStorage } from "../../testing/tests/helpers/durable-object-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 import type { StorageDriver } from "@takibi/storage";
 import type { WireResponse } from "../src/protocol";
 

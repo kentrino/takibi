@@ -3,7 +3,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "takibi";
-import { createSqliteDurableObjectStorage } from "../../testing/tests/helpers/durable-object-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 
 const metadata = {
   createdAt: "2026-01-01T00:00:00.000Z",

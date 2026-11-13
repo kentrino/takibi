@@ -5,10 +5,9 @@ import { compileIndexedScanSql, physicalIndexName } from "../src/index-sql";
 import { reconcileCollectionIndexes } from "../src/index-reconcile";
 import { compileIndexRegistry, resolveIndexedList } from "../src/indexes";
 import { createMigratingStorage } from "../src/migrations";
-import {
-  createSqliteDurableObjectStorage,
-  durableSqliteStorage,
-} from "../../testing/tests/helpers/durable-object-storage";
+import { openSqliteStorage } from "../src/storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import { all, onStatement } from "./helpers/node-sql";
 import type { CollectionsDef, WithMetadata } from "../src/types";
 
 const TS = "2026-08-09T14:12:00.000Z";
@@ -32,39 +31,41 @@ test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
   "index reconcile rejects invalid catalog fields %s before changing indexes",
   async (fieldsJson) => {
     const collections = { posts };
-    const backing = createSqliteDurableObjectStorage();
-    const storage = await durableSqliteStorage(backing, compileIndexRegistry(collections));
+    const sql = createNodeSqliteExecutor();
+    const storage = await openSqliteStorage(sql, compileIndexRegistry(collections));
     await reconcileCollectionIndexes({
       collections,
       storage,
     });
-    backing.sql.exec("UPDATE takibi_index_catalog SET fields_json = ?", fieldsJson);
-    const before = backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray();
+    await sql.exec("UPDATE takibi_index_catalog SET fields_json = ?", fieldsJson);
+    const before = await all(sql, "SELECT * FROM takibi_index_catalog");
     await expect(
       reconcileCollectionIndexes({
         collections,
         storage,
       }),
     ).rejects.toThrow(/Invalid index catalog fields/);
-    expect(backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray()).toEqual(before);
+    expect(await all(sql, "SELECT * FROM takibi_index_catalog")).toEqual(before);
+    sql.close();
   },
 );
 
 test("index reconcile rejects a registry with missing definitions before dropping existing indexes", async () => {
   const collections = { posts };
-  const backing = createSqliteDurableObjectStorage();
-  const storage = await durableSqliteStorage(backing, compileIndexRegistry(collections));
+  const sql = createNodeSqliteExecutor();
+  const storage = await openSqliteStorage(sql, compileIndexRegistry(collections));
   await reconcileCollectionIndexes({
     collections,
     storage,
   });
-  const snapshot = () => ({
-    catalog: backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray(),
-    physical: backing.sql
-      .exec("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'takibi_idx_%'")
-      .toArray(),
+  const snapshot = async () => ({
+    catalog: await all(sql, "SELECT * FROM takibi_index_catalog"),
+    physical: await all(
+      sql,
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'takibi_idx_%'",
+    ),
   });
-  const before = snapshot();
+  const before = await snapshot();
   const registry = compileIndexRegistry({ missing: posts });
 
   await expect(
@@ -74,14 +75,15 @@ test("index reconcile rejects a registry with missing definitions before droppin
       registry,
     }),
   ).rejects.toThrow("Missing collection definition for missing");
-  expect(snapshot()).toEqual(before);
+  expect(await snapshot()).toEqual(before);
+  sql.close();
 });
 
 test("SQLite query plan uses the declared expression index", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
-  const backing = createSqliteDurableObjectStorage();
-  const durable = await durableSqliteStorage(backing, registry);
+  const sql = createNodeSqliteExecutor();
+  const durable = await openSqliteStorage(sql, registry);
   const migrating = createMigratingStorage(collections as unknown as CollectionsDef, durable);
   await reconcileCollectionIndexes({
     collections,
@@ -106,16 +108,21 @@ test("SQLite query plan uses the declared expression index", async () => {
   );
   expect(scan).toBeDefined();
   const compiled = compileIndexedScanSql("posts", scan!, { limit: 20 });
-  const plan = backing.sql
-    .exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${compiled.sql}`, ...compiled.bindings)
-    .toArray()
+  const plan = (
+    await all<{ detail: string }>(sql, `EXPLAIN QUERY PLAN ${compiled.sql}`, ...compiled.bindings)
+  )
     .map((row) => row.detail)
     .join("\n");
   expect(plan).toContain(physicalIndexName("posts", "byOwner", ["ownerId", "createdAt"]));
 });
 
 test("index reconcile drops renamed indexes and optimizes only after DDL", async () => {
-  const backing = createSqliteDurableObjectStorage();
+  let optimizeCount = 0;
+  const sql = createNodeSqliteExecutor(
+    onStatement((query) => {
+      if (query === "PRAGMA optimize") optimizeCount += 1;
+    }),
+  );
   const first = {
     posts: {
       ...posts,
@@ -123,14 +130,8 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
     },
   };
   const firstRegistry = compileIndexRegistry(first);
-  const durable = await durableSqliteStorage(backing, firstRegistry);
+  const durable = await openSqliteStorage(sql, firstRegistry);
   const migrating = createMigratingStorage(first as unknown as CollectionsDef, durable);
-  let optimizeCount = 0;
-  const exec = backing.sql.exec.bind(backing.sql);
-  backing.sql.exec = ((query: string, ...bindings: never[]) => {
-    if (query === "PRAGMA optimize") optimizeCount += 1;
-    return exec(query, ...bindings);
-  }) as DurableObjectStorage["sql"]["exec"];
 
   await reconcileCollectionIndexes({
     collections: first,
@@ -162,25 +163,24 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
   });
   expect(optimizeCount).toBe(2);
 
-  const names = backing.sql
-    .exec<{ name: string }>(
+  const names = (
+    await all<{ name: string }>(
+      sql,
       `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'takibi_idx_%'`,
     )
-    .toArray()
-    .map((row) => row.name);
+  ).map((row) => row.name);
   expect(names).toEqual([physicalIndexName("posts", "byCreator", ["ownerId", "createdAt"])]);
-  const catalog = backing.sql
-    .exec<{ public_name: string }>("SELECT public_name FROM takibi_index_catalog")
-    .toArray()
-    .map((row) => row.public_name);
+  const catalog = (
+    await all<{ public_name: string }>(sql, "SELECT public_name FROM takibi_index_catalog")
+  ).map((row) => row.public_name);
   expect(catalog).toEqual(["byCreator"]);
 });
 
 test("SQLite backfill preserves indexed order for mixed keys", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
-  const backing = createSqliteDurableObjectStorage();
-  const durable = await durableSqliteStorage(backing, registry);
+  const sql = createNodeSqliteExecutor();
+  const durable = await openSqliteStorage(sql, registry);
   const migratingDurable = createMigratingStorage(
     collections as unknown as CollectionsDef,
     durable,
