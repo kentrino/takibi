@@ -366,6 +366,17 @@ test("close waits for an in-flight snapshot restore and refuses new snapshot ope
   await expect(runtime.collectionsApi.$exportSnapshot()).rejects.toMatchObject({
     code: "TENANT_CLOSED",
   });
+  // The restore still holds its maintenance lease; closing is reported first,
+  // as for `execute`, not the lease.
+  await expect(runtime.collectionsApi.posts.get("welcome")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  await expect(runtime.collectionsApi.$transaction(async () => "unreached")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  await expect(runtime.execute(execution(), async () => "unreached")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
   source.enqueue(new TextEncoder().encode(encoded));
   source.close();
   await expect(restoring).resolves.toMatchObject({ documentsRestored: 1 });

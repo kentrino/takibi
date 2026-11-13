@@ -247,10 +247,16 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
       { highWaterMark: 0 },
     );
   };
+  // Admission wraps the maintenance gate, as in `execute`: a closed runtime
+  // reports TENANT_CLOSED before a held lease, and a call waiting for startup
+  // does not count as a running normal operation yet.
   const collectionsApi = attachSnapshotOperations(
-    createMaintenanceGatedCollections(
-      admitCollections(createTrustedCollections(collections, driver, logger), admit),
-      maintenance,
+    admitCollections(
+      createMaintenanceGatedCollections(
+        createTrustedCollections(collections, driver, logger),
+        maintenance,
+      ),
+      admit,
     ),
     maintenance,
     (operation) =>
