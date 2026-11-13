@@ -32,4 +32,21 @@ the client.
 
 The package is private: the storage port is internal, and the connection has no use
 until a host exists. It must pass the shared `@takibi/sql-conformance` suite, which runs
-here against local files and `:memory:`.
+here against local files and `:memory:`, and against a real libSQL server.
+
+## Remote tests against `sqld`
+
+`tests/remote.test.ts` runs the conformance suite against a local `sqld` (libSQL server,
+Hrana over HTTP, one namespace per test), plus real failure paths through a proxy that
+loses a request or a response (reads, autocommit writes, statements in a transaction,
+`COMMIT`) and a server killed mid-transaction. It needs an `sqld` binary:
+
+```sh
+gh release download libsql-server-v0.24.32 -R tursodatabase/libsql \
+  -p 'libsql-server-aarch64-apple-darwin.tar.xz*'   # or x86_64-unknown-linux-gnu, ...
+shasum -a 256 -c libsql-server-*.tar.xz.sha256 && tar xf libsql-server-*.tar.xz
+TAKIBI_SQLD=$PWD/libsql-server-aarch64-apple-darwin/sqld pnpm -C packages/libsql test
+```
+
+Without `TAKIBI_SQLD` those tests are reported as skipped. CI does not set it yet, so
+remote support is verified locally against `sqld` 0.24.32, not against Turso Cloud.
