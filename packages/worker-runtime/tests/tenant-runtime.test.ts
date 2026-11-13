@@ -15,7 +15,7 @@ import type { WatchHost, WatchSocket } from "../src/watch-runtime";
 // The runtime runs here on node:sqlite with plain in-memory hosts: no Durable
 // Object state, storage double, or Cloudflare globals.
 
-const collections = {
+const definitions = {
   posts: defineCollection({
     schema: z.object({ title: z.string(), score: z.number() }),
     accessPolicy: fullAccess,
@@ -23,6 +23,9 @@ const collections = {
     seed: async () => ({ welcome: { title: "hello", score: 1 } }),
   }),
 };
+// `CollectionsDef` erases schemas, and its `unique`/`indexes` key types then
+// evaluate to `never`, so typed definitions need this one explicit widening.
+const collections = definitions as unknown as CollectionsDef;
 
 function recordingSql(): { sql: SqlExecutor; statements: string[]; close: () => void } {
   const inner = createNodeSqliteExecutor();
@@ -54,8 +57,7 @@ function immediateHost(watch?: WatchHost): TenantHost & { startups: number } {
 
 function runtimeOver(host: TenantHost, sql: SqlExecutor) {
   return createTenantRuntime({
-    // `CollectionsDef` erases schemas, so typed index keys need an explicit widening.
-    collections: collections as unknown as CollectionsDef,
+    collections,
     registry: new ActionRegistry(),
     logger: undefined,
     services: {},
@@ -207,4 +209,86 @@ test("a watch host receives recovery and commit fan-out through the runtime", as
   expect(JSON.parse(socket.send.mock.lastCall![0]).items).toHaveLength(2);
   expect(socket.close).not.toHaveBeenCalled();
   close();
+});
+
+function gatedHost(): TenantHost & { release(): void } {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  return {
+    release: () => release(),
+    async runStartup(startup) {
+      await gate;
+      return startup();
+    },
+  };
+}
+
+test("close waits for startup, then rejects new work without touching the database", async () => {
+  const { sql, statements, close } = recordingSql();
+  const host = gatedHost();
+  const runtime = runtimeOver(host, sql);
+  let closed = false;
+  const closing = runtime.close().then(() => (closed = true));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(closed).toBe(false);
+  host.release();
+  await closing;
+  expect(statements.some((statement) => /takibi_metadata/.test(statement))).toBe(true);
+  const issued = statements.length;
+  await expect(runtime.execute(execution(), async () => "unreached")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  await expect(runtime.collectionsApi.posts.get("welcome")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  expect(statements).toHaveLength(issued);
+  close();
+});
+
+test("close waits for in-flight executions", async () => {
+  const { sql, close } = recordingSql();
+  const runtime = runtimeOver(immediateHost(), sql);
+  await runtime.ready;
+  let release!: () => void;
+  const running = runtime.execute(execution(), async (local) => {
+    await new Promise<void>((resolve) => (release = resolve));
+    return local.execute({}, getWelcome);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let closed = false;
+  const closing = runtime.close().then(() => (closed = true));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(closed).toBe(false);
+  release();
+  await expect(running).resolves.toMatchObject({ ok: true });
+  await closing;
+  close();
+});
+
+test("close reports a startup failure that no call reported, and only once", async () => {
+  const failure = new Error("seed failed");
+  const failing: CollectionsDef = {
+    posts: { ...collections.posts!, seed: async () => Promise.reject(failure) },
+  };
+  const unobserved = createTenantRuntime({
+    collections: failing,
+    registry: new ActionRegistry(),
+    logger: undefined,
+    services: {},
+    sql: createNodeSqliteExecutor(),
+    host: immediateHost(),
+  });
+  await expect(unobserved.close()).rejects.toBe(failure);
+  await expect(unobserved.close()).rejects.toBe(failure);
+
+  const observed = createTenantRuntime({
+    collections: failing,
+    registry: new ActionRegistry(),
+    logger: undefined,
+    services: {},
+    sql: createNodeSqliteExecutor(),
+    host: immediateHost(),
+  });
+  await expect(observed.execute(execution(), async () => "unreached")).rejects.toBe(failure);
+  await expect(observed.close()).resolves.toBeUndefined();
 });

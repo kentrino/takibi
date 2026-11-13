@@ -95,23 +95,15 @@ export function getTestingFork(handler: object): unknown {
   return testingForks().get(handler);
 }
 
-/**
- * In-process host: startup runs immediately (requests await `ready`), and
- * there is no watch. Startup is async, so a runtime disposed before its first
- * request must not leak an unhandled rejection; every execution awaits `ready`
- * and reports its failure.
- */
+/** In-process host: startup runs immediately (executions wait for it), and there is no watch. */
 const inProcessHost: TenantHost = {
-  runStartup(startup) {
-    const ready = startup();
-    ready.catch(() => undefined);
-    return ready;
-  },
+  runStartup: (startup) => startup(),
 };
 
 /**
  * The tenant runtime over a supplied SQL executor, executing invocations in
- * process. Callers own the executor lifetime.
+ * process. Callers own the executor: call `close()` and close the executor
+ * after it settles.
  */
 export function createInProcessRuntime<TCtx extends object>(input: {
   collections: CollectionsDef<TCtx>;
@@ -121,6 +113,8 @@ export function createInProcessRuntime<TCtx extends object>(input: {
   sql: SqlExecutor;
 }): {
   execute: Executor<unknown, TCtx>;
+  /** See `TenantRuntime.close`. */
+  close(): Promise<void>;
 } {
   const runtime = createTenantRuntime({ ...input, host: inProcessHost });
   return {
@@ -132,5 +126,6 @@ export function createInProcessRuntime<TCtx extends object>(input: {
             ? local.executeBatch(ctx, invocation.items)
             : local.execute(ctx, invocation),
       ),
+    close: () => runtime.close(),
   };
 }

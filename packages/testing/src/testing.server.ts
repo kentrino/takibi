@@ -50,7 +50,9 @@ const createSqliteExecutor: TestingExecutorFactory = ({
     if (disposed) return;
     disposed = true;
     storageFinalizer.unregister(runtime.execute);
-    storage.close();
+    // Close the database only after startup and in-flight work settled. A
+    // startup failure that no request reported surfaces as this rejection.
+    void runtime.close().finally(() => storage.close());
   };
   storageFinalizer.register(runtime.execute, storage, runtime.execute);
   return { execute: runtime.execute, dispose };

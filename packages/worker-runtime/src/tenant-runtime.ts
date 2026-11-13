@@ -61,7 +61,11 @@ export type TenantExecutionInput = {
 
 /** One tenant's storage, maintenance, watch, and request execution over a SQL port. */
 export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Response> = {
-  /** Settles when startup finished; rejects with the startup failure. */
+  /**
+   * Settles when startup finished; rejects with the startup failure. The
+   * runtime itself observes it: a failure is reported by every later call and,
+   * if no call reported it, by `close()`.
+   */
   readonly ready: Promise<void>;
   /** Trusted collections with snapshot export, restore, and reset. */
   readonly collectionsApi: DurableObjectCollectionsApi<TCollections>;
@@ -72,6 +76,13 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
   /** A client sent a frame; watch sockets are server-push only. */
   watchMessage(socket: WatchSocket): void;
   watchClose(socket: WatchSocket, code?: number): void;
+  /**
+   * Stop accepting executions and watch upgrades (they reject with
+   * `TENANT_CLOSED`), then wait for startup and in-flight executions to settle.
+   * Rejects with the startup failure if startup failed and no call reported it
+   * yet. Idempotent. The host closes the SQL executor after it settles.
+   */
+  close(): Promise<void>;
 };
 
 /**
@@ -83,7 +94,7 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
  * Startup is the only place that opens the database. Components wired before
  * it (the maintenance controller, migrating storage, watch, and the trusted
  * collections) reach the opened storage and backend through forwarders that
- * throw before startup opened them; every entry point awaits `ready` first.
+ * throw before startup opened them; every entry point waits for startup first.
  */
 export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrade = Response>(
   input: TenantRuntimeInput<TCollections, TUpgrade>,
@@ -115,6 +126,10 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
   if (host.watch) {
     watch = new WatchRuntime(host.watch, collections, driver, maintenance, logger);
   }
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  let startupFailure: { error: unknown; reported: boolean } | undefined;
+  const inflight = new Set<Promise<unknown>>();
   const ready = host.runStartup(async () => {
     const storage = await openSqliteStorage(sql, indexRegistry);
     opened = { storage, backend: await SqliteMaintenanceBackend.open(sql) };
@@ -128,9 +143,32 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     await seedCollections(collections, driver, logger);
     watch?.recover();
   });
+  const startupSettled = ready.then(
+    () => undefined,
+    (error: unknown) => {
+      startupFailure = { error, reported: false };
+    },
+  );
+  /** Wait for startup; reject when closed or with the startup failure. */
+  const started = async (): Promise<void> => {
+    if (closed) throw closedError();
+    await startupSettled;
+    if (startupFailure !== undefined) {
+      startupFailure.reported = true;
+      throw startupFailure.error;
+    }
+  };
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    inflight.add(work);
+    void work.then(
+      () => inflight.delete(work),
+      () => inflight.delete(work),
+    );
+    return work;
+  };
   const collectionsApi = attachSnapshotOperations(
     createMaintenanceGatedCollections(
-      createTrustedCollections(collections, afterInitialization(driver, ready), logger),
+      createTrustedCollections(collections, afterStartup(driver, started), logger),
       maintenance,
     ),
     maintenance,
@@ -141,24 +179,27 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
   return {
     ready,
     collectionsApi,
-    async execute(execution, run) {
-      await ready;
-      return maintenance.runNormal(async () => {
-        const local = await resolveLocalExecution({
-          collections,
-          registry,
-          logger,
-          services,
-          storage: execution.traced ? tracedStorage(driver) : driver,
-          spanKind: execution.spanKind,
-          parentSpan: execution.parentSpan,
-          request: execution.request,
-        });
-        return run(local);
-      });
+    execute(execution, run) {
+      return track(
+        started().then(() =>
+          maintenance.runNormal(async () => {
+            const local = await resolveLocalExecution({
+              collections,
+              registry,
+              logger,
+              services,
+              storage: execution.traced ? tracedStorage(driver) : driver,
+              spanKind: execution.spanKind,
+              parentSpan: execution.parentSpan,
+              request: execution.request,
+            });
+            return run(local);
+          }),
+        ),
+      );
     },
     async upgradeWatch(request) {
-      await ready;
+      await started();
       if (!watch) {
         throw new TakibiError("WATCH_UNAVAILABLE", "This host does not support watch", 400);
       }
@@ -170,7 +211,22 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     watchClose(socket, code) {
       watch?.close(socket, code);
     },
+    close() {
+      closed = true;
+      return (closing ??= (async () => {
+        await startupSettled;
+        while (inflight.size > 0) await Promise.allSettled(inflight);
+        if (startupFailure !== undefined && !startupFailure.reported) {
+          startupFailure.reported = true;
+          throw startupFailure.error;
+        }
+      })());
+    },
   };
+}
+
+function closedError(): TakibiError {
+  return new TakibiError("TENANT_CLOSED", "This tenant runtime is closed", 503);
 }
 
 export async function seedCollections(
@@ -189,26 +245,26 @@ export async function seedCollections(
   }
 }
 
-function afterInitialization(driver: StorageDriver, ready: Promise<void>): StorageDriver {
+function afterStartup(driver: StorageDriver, started: () => Promise<void>): StorageDriver {
   return {
     async get(resource, id) {
-      await ready;
+      await started();
       return driver.get(resource, id);
     },
     async put(resource, doc) {
-      await ready;
+      await started();
       return driver.put(resource, doc);
     },
     async delete(resource, id) {
-      await ready;
+      await started();
       return driver.delete(resource, id);
     },
     async list(resource, options, plan) {
-      await ready;
+      await started();
       return driver.list(resource, options, plan);
     },
     async transaction(callback) {
-      await ready;
+      await started();
       return driver.transaction(callback);
     },
   };
