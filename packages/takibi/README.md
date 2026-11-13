@@ -174,8 +174,15 @@ reuses Takibi's production SQLite storage, migrations, index reconciliation,
 seeds, actions, logging, and tracing paths. Each call creates a separate
 database.
 
-The returned handler implements `Symbol.dispose`; use `using` or call the
-method from test teardown when a suite keeps handlers alive for a long time.
+The returned handler implements `Symbol.asyncDispose` and `Symbol.dispose`;
+use `await using` / `using` or call one from test teardown when a suite keeps
+handlers alive for a long time. Both close the database once startup and
+in-flight work settled. If startup failed (for example a `seed` threw) and no
+request reported that failure, `await handler[Symbol.asyncDispose]()` rejects
+with it. `handler[Symbol.dispose]()` returns before closing finishes and never
+throws or leaves an unhandled rejection: it reports such a failure to the
+configured `logger` (as a `takibi.error` event) and otherwise drops it. Use the
+async form when a test must observe startup failures.
 
 ```ts
 import { createClient } from "takibi/client";
@@ -1113,7 +1120,11 @@ Caller-supplied ids are still accepted; creation-order lexicographic sort is
 guaranteed only for library-generated ULIDs.
 
 Takibi versions its internal SQL layout in `takibi_metadata` and migrates known
-layout versions synchronously during activation. A newer unknown layout fails closed.
+layout versions during activation, inside the startup that runs under
+`blockConcurrencyWhile` before the object handles any request. A newer unknown
+layout, or a failed layout migration, fails closed: the startup error breaks the
+Durable Object, so the request that activated it and later requests reject with
+that error instead of being served.
 Layout version 2 moves a valid version 1 `data.rev` value into the revision column,
 defaults a missing or invalid legacy value to `1`, and removes `rev` from the JSON.
 The table rebuild and layout-version update are one transaction.

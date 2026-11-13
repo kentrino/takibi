@@ -1,7 +1,9 @@
 import { expect, test } from "vite-plus/test";
 import { BadRequestError } from "../src/errors";
-import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { openSqliteStorage } from "../src/storage";
+import { createNodeSqliteExecutor, type NodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import type { SqlConnection } from "@takibi/storage";
+import { all, one, onStatement } from "./helpers/node-sql";
 import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
@@ -27,22 +29,23 @@ function encodeCursor(cursor: Record<string, unknown>): string {
     .replace(/=+$/, "");
 }
 
-function createVersionOneStorage(
+async function createVersionOneDatabase(
   rows: Array<{
     id: string;
     data: Record<string, unknown>;
   }>,
-): DurableObjectStorage {
-  const storage = createSqliteDurableObjectStorage();
-  storage.transactionSync(() => {
-    storage.sql.exec(
+  intercept?: (connection: SqlConnection) => SqlConnection,
+): Promise<NodeSqliteExecutor> {
+  const sql = createNodeSqliteExecutor(intercept);
+  await sql.transaction(async (tx) => {
+    await tx.exec(
       `CREATE TABLE takibi_metadata (
         key TEXT PRIMARY KEY,
         value INTEGER NOT NULL
       ) WITHOUT ROWID`,
     );
-    storage.sql.exec("INSERT INTO takibi_metadata (key, value) VALUES (?, ?)", "layout_version", 1);
-    storage.sql.exec(
+    await tx.exec("INSERT INTO takibi_metadata (key, value) VALUES (?, ?)", "layout_version", 1);
+    await tx.exec(
       `CREATE TABLE takibi_documents (
         collection TEXT NOT NULL,
         id TEXT NOT NULL,
@@ -54,7 +57,7 @@ function createVersionOneStorage(
       ) WITHOUT ROWID`,
     );
     for (const row of rows) {
-      storage.sql.exec(
+      await tx.exec(
         `INSERT INTO takibi_documents
           (collection, id, created_at, updated_at, schema_version, data)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -67,11 +70,21 @@ function createVersionOneStorage(
       );
     }
   });
-  return storage;
+  return sql;
 }
 
+const takibiTables = async (sql: NodeSqliteExecutor) =>
+  (
+    await all<{ name: string }>(
+      sql,
+      `SELECT name FROM sqlite_master
+       WHERE type = 'table' AND name LIKE 'takibi_%'
+       ORDER BY name`,
+    )
+  ).map(({ name }) => name);
+
 test("Node SQLite satisfies the shared storage contract", async () => {
-  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const storage = await openSqliteStorage(createNodeSqliteExecutor());
   await expect(observeStorageContract(storage)).resolves.toEqual(
     expectedStorageContractObservation,
   );
@@ -94,7 +107,7 @@ test("monotonic ULID: same-ms generation order matches lexicographic order", () 
 });
 
 test("SQLite pagination preserves order, boundary, and nextCursor", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
 
   const docs = [
     meta({ id: "c", title: "C" }),
@@ -143,7 +156,7 @@ test("SQLite pagination preserves order, boundary, and nextCursor", async () => 
 });
 
 test("SQLite filters before limit with query-bound cursors", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
   const docs = [
     meta({ id: "a", ownerId: "u2", score: 30 }),
     meta({ id: "b", ownerId: "u1", score: 10 }),
@@ -185,7 +198,7 @@ test("SQLite filters before limit with query-bound cursors", async () => {
 });
 
 test("SQLite supports in and case-sensitive string matching", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
   const documents = [
     meta({ id: "a", value: "YR Clinic" }),
     meta({ id: "b", value: "yr clinic" }),
@@ -214,7 +227,7 @@ test("SQLite supports in and case-sensitive string matching", async () => {
 });
 
 test("DO SQLite list finds sparse matches across internal chunks", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
 
   for (let index = 0; index < 300; index += 1) {
     const id = index.toString().padStart(3, "0");
@@ -231,7 +244,7 @@ test("DO SQLite list finds sparse matches across internal chunks", async () => {
 });
 
 test("DO SQLite get isolates collections sharing the same id", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
   await durable.put("posts", meta({ id: "p1", title: "hi" }));
   await durable.put("comments", meta({ id: "p1", title: "other" }));
 
@@ -240,94 +253,82 @@ test("DO SQLite get isolates collections sharing the same id", async () => {
   expect(await durable.get("posts", "missing")).toBeNull();
 });
 
-test("DO SQLite layout stores revision in a dedicated REAL column", async () => {
-  const backing = createSqliteDurableObjectStorage();
-  const durable = createDurableObjectStorage(backing);
+test("SQLite layout stores revision in a dedicated REAL column", async () => {
+  const sql = createNodeSqliteExecutor();
+  const durable = await openSqliteStorage(sql);
   const document = { ...meta({ id: "p1", title: "one" }), rev: 7 };
 
   await durable.put("posts", document);
 
   expect(
-    backing.sql
-      .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
-      .one().value,
+    (
+      await one<{ value: number }>(
+        sql,
+        "SELECT value FROM takibi_metadata WHERE key = ?",
+        "layout_version",
+      )
+    ).value,
   ).toBe(4);
   expect(
-    backing.sql
-      .exec<{ name: string; type: string; notnull: number }>(
-        `SELECT name, type, "notnull"
-         FROM pragma_table_info('takibi_documents')
-         WHERE name = 'revision'`,
-      )
-      .one(),
+    await one<{ name: string; type: string; notnull: number }>(
+      sql,
+      `SELECT name, type, "notnull"
+       FROM pragma_table_info('takibi_documents')
+       WHERE name = 'revision'`,
+    ),
   ).toEqual({ name: "revision", type: "REAL", notnull: 1 });
   expect(
-    backing.sql
-      .exec<{ revision: number; json_revision_type: string | null }>(
-        `SELECT revision, json_type(data, '$.rev') AS json_revision_type
-         FROM takibi_documents
-         WHERE collection = ? AND id = ?`,
-        "posts",
-        "p1",
-      )
-      .one(),
+    await one<{ revision: number; json_revision_type: string | null }>(
+      sql,
+      `SELECT revision, json_type(data, '$.rev') AS json_revision_type
+       FROM takibi_documents
+       WHERE collection = ? AND id = ?`,
+      "posts",
+      "p1",
+    ),
   ).toEqual({ revision: 7, json_revision_type: null });
   await expect(durable.get("posts", "p1")).resolves.toEqual(document);
 
-  createDurableObjectStorage(backing);
+  await openSqliteStorage(sql);
   await expect(durable.get("posts", "p1")).resolves.toEqual(document);
+  sql.close();
 });
 
 test("storage layout initialization does not own maintenance tables", async () => {
-  const { initializeMaintenanceLayout } = await import("../src/maintenance");
-  const backing = createSqliteDurableObjectStorage();
-  const storage = createDurableObjectStorage(backing);
+  const { SqliteMaintenanceBackend } = await import("../src/maintenance");
+  const sql = createNodeSqliteExecutor();
+  const storage = await openSqliteStorage(sql);
   await storage.put("posts", meta({ id: "p1", title: "preserved" }));
 
-  expect(
-    backing.sql
-      .exec<{ name: string }>(
-        `SELECT name FROM sqlite_master
-         WHERE type = 'table' AND name LIKE 'takibi_%'
-         ORDER BY name`,
-      )
-      .toArray()
-      .map(({ name }) => name),
-  ).toEqual(["takibi_documents", "takibi_index_catalog", "takibi_metadata"]);
+  expect(await takibiTables(sql)).toEqual([
+    "takibi_documents",
+    "takibi_index_catalog",
+    "takibi_metadata",
+  ]);
 
-  backing.transactionSync(() => {
-    backing.sql.exec("UPDATE takibi_metadata SET value = ? WHERE key = ?", 3, "layout_version");
+  await sql.transaction(async (tx) => {
+    await tx.exec("UPDATE takibi_metadata SET value = ? WHERE key = ?", 3, "layout_version");
   });
 
-  const migrated = createDurableObjectStorage(backing);
+  const migrated = await openSqliteStorage(sql);
   await expect(migrated.get("posts", "p1")).resolves.toMatchObject({ title: "preserved" });
+  expect(await takibiTables(sql)).toEqual([
+    "takibi_documents",
+    "takibi_index_catalog",
+    "takibi_metadata",
+  ]);
   expect(
-    backing.sql
-      .exec<{ name: string }>(
-        `SELECT name FROM sqlite_master
-         WHERE type = 'table' AND name LIKE 'takibi_%'
-         ORDER BY name`,
+    (
+      await one<{ value: number }>(
+        sql,
+        "SELECT value FROM takibi_metadata WHERE key = ?",
+        "layout_version",
       )
-      .toArray()
-      .map(({ name }) => name),
-  ).toEqual(["takibi_documents", "takibi_index_catalog", "takibi_metadata"]);
-  expect(
-    backing.sql
-      .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
-      .one().value,
+    ).value,
   ).toBe(4);
 
-  initializeMaintenanceLayout(backing.sql);
-  expect(
-    backing.sql
-      .exec<{ name: string }>(
-        `SELECT name FROM sqlite_master
-         WHERE type = 'table' AND name LIKE 'takibi_%'
-         ORDER BY name`,
-      )
-      .toArray()
-      .map(({ name }) => name),
-  ).toEqual([
+  await SqliteMaintenanceBackend.open(sql);
+  expect(await takibiTables(sql)).toEqual([
     "takibi_documents",
     "takibi_index_catalog",
     "takibi_maintenance_lease",
@@ -335,26 +336,26 @@ test("storage layout initialization does not own maintenance tables", async () =
     "takibi_restore_staging_documents",
     "takibi_restore_staging_unique",
   ]);
+  sql.close();
 });
 
-test("DO SQLite migrates version 1 revisions and normalizes legacy values", async () => {
-  const backing = createVersionOneStorage([
+test("SQLite migrates version 1 revisions and normalizes legacy values", async () => {
+  const sql = await createVersionOneDatabase([
     { id: "valid", data: { title: "valid", rev: 9 } },
     { id: "missing", data: { title: "missing" } },
     { id: "fractional", data: { title: "fractional", rev: 1.5 } },
     { id: "string", data: { title: "string", rev: "4" } },
   ]);
 
-  const durable = createDurableObjectStorage(backing);
+  const durable = await openSqliteStorage(sql);
 
   expect(
-    backing.sql
-      .exec<{ id: string; revision: number; json_revision_type: string | null }>(
-        `SELECT id, revision, json_type(data, '$.rev') AS json_revision_type
-         FROM takibi_documents
-         ORDER BY id`,
-      )
-      .toArray(),
+    await all<{ id: string; revision: number; json_revision_type: string | null }>(
+      sql,
+      `SELECT id, revision, json_type(data, '$.rev') AS json_revision_type
+       FROM takibi_documents
+       ORDER BY id`,
+    ),
   ).toEqual([
     { id: "fractional", revision: 1, json_revision_type: null },
     { id: "missing", revision: 1, json_revision_type: null },
@@ -369,46 +370,52 @@ test("DO SQLite migrates version 1 revisions and normalizes legacy values", asyn
     title: "missing",
     rev: 1,
   });
+  sql.close();
 });
 
-test("DO SQLite keeps version 1 intact when revision migration copy fails", () => {
-  const backing = createVersionOneStorage([{ id: "p1", data: { title: "one", rev: 3 } }]);
-  const exec = backing.sql.exec.bind(backing.sql);
+test("SQLite keeps version 1 intact when revision migration copy fails", async () => {
   let rejectedCopy = false;
-  backing.sql.exec = ((query: string, ...bindings: never[]) => {
-    if (query.includes("INSERT INTO takibi_documents_v2")) {
-      rejectedCopy = true;
-      throw new Error("copy-failed");
-    }
-    return exec(query, ...bindings);
-  }) as DurableObjectStorage["sql"]["exec"];
+  const sql = await createVersionOneDatabase(
+    [{ id: "p1", data: { title: "one", rev: 3 } }],
+    onStatement((query) => {
+      if (query.includes("INSERT INTO takibi_documents_v2")) {
+        rejectedCopy = true;
+        throw new Error("copy-failed");
+      }
+    }),
+  );
 
-  expect(() => createDurableObjectStorage(backing)).toThrow("copy-failed");
+  await expect(openSqliteStorage(sql)).rejects.toThrow("copy-failed");
   expect(rejectedCopy).toBe(true);
   expect(
-    backing.sql
-      .exec<{ value: number }>("SELECT value FROM takibi_metadata WHERE key = ?", "layout_version")
-      .one().value,
+    (
+      await one<{ value: number }>(
+        sql,
+        "SELECT value FROM takibi_metadata WHERE key = ?",
+        "layout_version",
+      )
+    ).value,
   ).toBe(1);
   expect(
-    backing.sql
-      .exec<{ name: string }>("SELECT name FROM pragma_table_info('takibi_documents')")
-      .toArray()
-      .map(({ name }) => name),
+    (
+      await all<{ name: string }>(sql, "SELECT name FROM pragma_table_info('takibi_documents')")
+    ).map(({ name }) => name),
   ).not.toContain("revision");
   expect(
-    backing.sql
-      .exec<{ data: string }>(
+    (
+      await one<{ data: string }>(
+        sql,
         "SELECT data FROM takibi_documents WHERE collection = ? AND id = ?",
         "posts",
         "p1",
       )
-      .one().data,
+    ).data,
   ).toBe('{"title":"one","rev":3}');
+  sql.close();
 });
 
 test("DO SQLite round-trips revisions beyond safe and signed 64-bit integer limits", async () => {
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
   const revisions = [1, 2 ** 53, 2 ** 63];
 
   for (const [index, revision] of revisions.entries()) {
@@ -435,7 +442,7 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     indexes: { byOwner: ["ownerId", "createdAt"] as const },
   };
   const registry = compileIndexRegistry({ posts });
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage(), registry);
+  const durable = await openSqliteStorage(createNodeSqliteExecutor(), registry);
 
   const docs = [
     { ...meta({ id: "c", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-01T00:00:00.000Z" },

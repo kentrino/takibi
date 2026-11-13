@@ -1,1 +1,1 @@
-export { createDurableObjectStorage } from "@takibi/storage";
+export { openSqliteStorage } from "@takibi/storage";

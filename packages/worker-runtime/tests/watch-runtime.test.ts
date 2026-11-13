@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { WatchRuntime } from "../src/watch-runtime";
+import { WatchRuntime, type WatchHost } from "../src/watch-runtime";
 import { MaintenanceController, type MaintenanceBackend } from "@takibi/snapshot";
 import type { StorageDriver } from "@takibi/storage";
 import type { WatchAttachment } from "@takibi/protocol";
@@ -24,12 +24,12 @@ function socket(value: unknown = JSON.stringify(attachment)) {
 function fixture(sockets: ReturnType<typeof socket>[]) {
   vi.stubGlobal("WebSocket", { OPEN: 1 });
   const pending: Promise<unknown>[] = [];
-  const state = {
-    getWebSockets: () => sockets,
+  const host = {
+    sockets: () => sockets,
     waitUntil: (p: Promise<unknown>) => {
       pending.push(p);
     },
-  } as unknown as DurableObjectState;
+  } as unknown as WatchHost;
   const storage = {
     transaction: async (run: (tx: StorageDriver) => unknown) => run(storage),
   } as StorageDriver;
@@ -40,7 +40,7 @@ function fixture(sockets: ReturnType<typeof socket>[]) {
   const maintenance = new MaintenanceController(backend, (purpose) =>
     runtime.maintenanceChanged(purpose),
   );
-  const runtime = new WatchRuntime(state, {}, storage, maintenance, undefined);
+  const runtime = new WatchRuntime(host, {}, storage, maintenance, undefined);
   const drain = async () => {
     while (pending.length) await Promise.all(pending.splice(0));
   };

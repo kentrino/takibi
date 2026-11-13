@@ -26,8 +26,10 @@ export type {
   LoggingOptions,
   PrettyConsoleLoggerOptions,
 } from "./logging";
-export { createDurableObjectClass, seedCollections } from "./durable-object";
-export { createDurableObjectCollectionsApi, createTakibiSnapshotLifecycle } from "./snapshot";
+export { createDurableObjectClass } from "./durable-object";
+export { seedCollections } from "./tenant-runtime";
+export { createDurableObjectSqlExecutor } from "./durable-object-sql";
+export { createTakibiSnapshotLifecycle } from "./snapshot";
 export {
   decodePublicHttp,
   decodePublicRoute,
@@ -189,7 +191,7 @@ export {
   normalizeInvocationFailure,
   toWireFailure,
 } from "./context/runtime";
-export { createInProcessExecutor, createStubExecutor } from "./context/executors";
+export { createStubExecutor } from "./context/executors";
 export type { Executor, ExecutorInput } from "./context/executors";
 export { ownStringEntries } from "./context/own-entries";
 export {

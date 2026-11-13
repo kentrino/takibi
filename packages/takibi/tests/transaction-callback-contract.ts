@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { expect } from "vite-plus/test";
 import { z } from "zod";
-import { createDurableObjectStorage, observeCommits, type StorageDriver } from "@takibi/storage";
+import {
+  openSqliteStorage,
+  observeCommits,
+  SqlExecutor,
+  type StorageDriver,
+} from "@takibi/storage";
 import { createMigratingStorage } from "../src/migrations";
 import { loggedStorage, resolveLogging } from "../src/logging";
 import {
@@ -27,30 +32,33 @@ const collections = {
   items: { schema: z.object({ value: z.string() }), accessPolicy: fullAccess },
 };
 
-// Inject failures at the platform boundary. Unknown means commit succeeded but its
-// acknowledgement was lost; commit means failure before commit, with rollback.
-export function transactionBackend(
-  raw: DurableObjectStorage,
+// Inject failures at the platform boundary (the SQL port). Unknown means commit
+// succeeded but its acknowledgement was lost; commit means failure before commit,
+// with rollback. Injection is armed after storage layout initialization, which
+// also runs in a port transaction, so only transactions under test fail.
+export async function injectedTransactionStorage(
+  raw: SqlExecutor,
   scenario: TransactionCase,
   error: Error,
-): DurableObjectStorage {
-  return new Proxy(raw, {
-    get(target, property) {
-      if (property === "transaction")
-        return async <T>(callback: (tx: DurableObjectTransaction) => Promise<T>) => {
-          if (scenario === "admission") throw error;
-          const result = await target.transaction(async (tx) => {
-            const value = await callback(tx);
-            if (scenario === "commit") throw error;
-            return value;
-          });
-          if (scenario === "unknown") throw error;
-          return result;
-        };
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
+): Promise<StorageDriver> {
+  let armed = false;
+  const executor = new SqlExecutor({
+    exec: (query, ...bindings) => raw.exec(query, ...bindings),
+    async transaction(callback) {
+      if (!armed) return raw.transaction(callback);
+      if (scenario === "admission") throw error;
+      const result = await raw.transaction(async (tx) => {
+        const value = await callback(tx);
+        if (scenario === "commit") throw error;
+        return value;
+      });
+      if (scenario === "unknown") throw error;
+      return result;
     },
   });
+  const storage = await openSqliteStorage(executor);
+  armed = true;
+  return storage;
 }
 
 const logger = resolveLogging({ logger: { log() {} }, logLevel: "debug" });
@@ -112,7 +120,7 @@ const entryPoints: Record<string, EntryPoint> = {
 };
 
 export async function checkTransactionCallbackContract(
-  raw: DurableObjectStorage,
+  raw: SqlExecutor,
   wrapper: TransactionWrapper,
   scenario: TransactionCase,
 ): Promise<void> {
@@ -135,14 +143,14 @@ export async function checkTransactionCallbackContract(
 }
 
 async function checkEntryPoint(
-  raw: DurableObjectStorage,
+  raw: SqlExecutor,
   wrap: TransactionWrapper["wrap"],
   scenario: TransactionCase,
   id: string,
   run: EntryPoint,
 ): Promise<void> {
   const error = new Error(`injected ${scenario}`);
-  const storage = wrap(createDurableObjectStorage(transactionBackend(raw, scenario, error)));
+  const storage = wrap(await injectedTransactionStorage(raw, scenario, error));
   const calls = { outer: 0, nested: 0 };
   const result = run(storage, id, async (scope) => {
     calls.outer++;

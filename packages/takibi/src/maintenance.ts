@@ -1,6 +1,5 @@
 export {
   createMaintenanceGatedCollections,
-  initializeMaintenanceLayout,
   MaintenanceController,
   SqliteMaintenanceBackend,
 } from "@takibi/snapshot";

@@ -5,8 +5,9 @@ import { z } from "zod";
 import { createTakibi, fullAccess, type SnapshotRestoreReport } from "takibi";
 import { MaintenanceController } from "../src/maintenance";
 import { MemoryMaintenanceBackend } from "../src/maintenance-memory";
-import { createDurableObjectCollectionsApi } from "../src/snapshot";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { attachSnapshotOperations } from "@takibi/snapshot";
+import { createTakibiSnapshotLifecycle } from "../src/snapshot";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 import type { TrustedCollectionsApi } from "../src/types";
 
 const encoder = new TextEncoder();
@@ -586,11 +587,11 @@ test("memory maintenance backend round-trips logical snapshot metadata", async (
     revision: 7,
     data: { value: "memory" },
   });
-  const sourceApi = createDurableObjectCollectionsApi(
+  const sourceApi = attachSnapshotOperations(
     {} as TrustedCollectionsApi<typeof collections>,
-    collections,
     new MaintenanceController(sourceBackend),
-    Promise.resolve(),
+    (operation) => operation(),
+    createTakibiSnapshotLifecycle(collections),
   );
   const encoded = await new Response(await sourceApi.$exportSnapshot()).text();
 
@@ -604,11 +605,11 @@ test("memory maintenance backend round-trips logical snapshot metadata", async (
     revision: 1,
     data: { value: "removed" },
   });
-  const targetApi = createDurableObjectCollectionsApi(
+  const targetApi = attachSnapshotOperations(
     {} as TrustedCollectionsApi<typeof collections>,
-    collections,
     new MaintenanceController(targetBackend),
-    Promise.resolve(),
+    (operation) => operation(),
+    createTakibiSnapshotLifecycle(collections),
   );
 
   await expect(restore({ $collections: targetApi }, encoded)).resolves.toMatchObject({

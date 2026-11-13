@@ -5,10 +5,10 @@ import { createClient } from "takibi/client";
 import { withSqliteTestBackend } from "takibi/testing";
 import { createTakibi, fullAccess } from "takibi";
 import { nextDocumentRevision } from "../src/revision";
-import { createDurableObjectStorage } from "../src/storage";
+import { openSqliteStorage } from "../src/storage";
 import { storageSet } from "../src/typed-storage";
 import type { StoredDocument } from "../src/types";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 
 type AppCtx = { tenantId: string };
 
@@ -96,13 +96,13 @@ test("SQLite documents stored without rev read as revision 1", async () => {
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
   } as unknown as StoredDocument;
-  const durable = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
   await durable.put("posts", legacy);
   expect(await durable.get("posts", "legacy")).toMatchObject({ title: "old", rev: 1 });
 });
 
 test("SQLite-backed updates advance revisions beyond numeric storage boundaries", async () => {
-  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const storage = await openSqliteStorage(createNodeSqliteExecutor());
   const definition = {
     schema: z.object({ title: z.string() }),
     accessPolicy: fullAccess,

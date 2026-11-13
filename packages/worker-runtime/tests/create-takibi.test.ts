@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { ActionDefinitions } from "@takibi/api";
 import { createClient } from "@takibi/client";
 import { withSqliteTestBackend } from "@takibi/testing";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
 import * as Policy from "@takibi/policy";
 import { fullAccess, grant, none, type AccessContext } from "@takibi/policy";
 import { createTakibi, type TakibiHandler } from "@takibi/worker-runtime";

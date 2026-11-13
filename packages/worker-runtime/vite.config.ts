@@ -6,6 +6,7 @@ const testingSrc = fileURLToPath(new URL("../testing/src/", import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
+      "@takibi/testing/durable-object-storage": `${testingSrc}durable-object-storage.server.ts`,
       "@takibi/testing/sqlite-storage": `${testingSrc}sqlite-storage.server.ts`,
       "@takibi/testing": `${testingSrc}index.ts`,
     },

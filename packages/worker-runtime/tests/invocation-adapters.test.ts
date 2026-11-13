@@ -10,9 +10,9 @@ import {
   type RootActionArgs,
 } from "@takibi/api";
 import { fullAccess, none } from "@takibi/policy";
-import { createDurableObjectStorage } from "@takibi/storage";
+import { openSqliteStorage, type StorageDriver } from "@takibi/storage";
 import { runInvocation, type InvocationAdapters } from "@takibi/invocation-lifecycle";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { createBoundInvocationAdapters, type TakibiAdapterMap } from "@takibi/worker-runtime";
 import { getTakibiRawInput, toTakibiInvocation } from "@takibi/worker-runtime";
 import { executeAction, classifyAction, identifyClassifiedAction } from "../src/action-executor";
@@ -199,7 +199,7 @@ async function createAdapters(actionEvents?: string[]) {
         return { id: doc.id, value: `${doc.value}!` };
       }),
   });
-  const storage = createDurableObjectStorage(createSqliteDurableObjectStorage());
+  const storage: StorageDriver = await openSqliteStorage(createNodeSqliteExecutor());
   const adapters: InvocationAdapters<Map> = await createBoundInvocationAdapters<Ctx>({
     collections,
     storage,

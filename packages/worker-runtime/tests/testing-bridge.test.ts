@@ -54,7 +54,7 @@ test("withSqliteTestBackend looks up the same WeakMap registration", async () =>
 });
 
 test("register and get share one WeakMap even across duplicate module evaluation", () => {
-  const target = { id: "probe", [Symbol.dispose]() {} };
+  const target = { id: "probe", [Symbol.dispose]() {}, async [Symbol.asyncDispose]() {} };
   const handler = assignTakibiBrand<typeof target, {}, {}, object>(target, {
     collections: {},
     actions: {},

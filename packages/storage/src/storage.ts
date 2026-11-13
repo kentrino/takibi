@@ -13,7 +13,9 @@ import { compileQueryToSql } from "./sql-query";
 import type { QueryExpr, StorageListOptions, WithMetadata } from "@takibi/shared-types";
 import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "@takibi/shared-types";
 import { documentRevision, withDocumentRevision } from "./revision";
+import type { SqlExecutor, SqlResult, SqlRow, SqlStatementExecutor } from "./sql-executor";
 import type { StorageDriver, StorageListPlan, StoredDocument } from "./types";
+import { reconcileIndexes, type ReconcileIndexesOptions } from "./index-reconcile";
 
 type ListIdCursor = {
   index?: never;
@@ -73,11 +75,11 @@ type PreparedList = {
       };
 };
 
-type LayoutRow = Record<string, SqlStorageValue> & {
+type LayoutRow = {
   value: number;
 };
 
-type DocumentRow = Record<string, SqlStorageValue> & {
+type DocumentRow = {
   id: string;
   created_at: string;
   updated_at: string;
@@ -86,122 +88,118 @@ type DocumentRow = Record<string, SqlStorageValue> & {
   data: string;
 };
 
-export function createDurableObjectStorage(
-  storage: DurableObjectStorage,
-  registry: IndexRegistry = EMPTY_INDEX_REGISTRY,
-): StorageDriver {
-  initializeStorageLayout(storage);
-  let operationQueue = Promise.resolve();
-  const coordinate = <T>(operation: () => T | Promise<T>): Promise<T> => {
-    const result = operationQueue.then(operation, operation);
-    operationQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  };
+/**
+ * The storage driver over an initialised Takibi SQLite layout, plus the one
+ * catalog operation that needs the database below the driver. It never hands
+ * out the SQL executor: holders and wrappers of the driver see only
+ * {@link StorageDriver}.
+ */
+export type SqliteStorage = StorageDriver & {
+  /**
+   * Bring physical indexes and the index catalog in line with `collections`;
+   * see `reconcileCollectionIndexes`.
+   */
+  reconcileIndexes(options: ReconcileIndexesOptions): Promise<void>;
+};
 
-  const createDriver = (transactionBound: boolean): StorageDriver => {
-    const execute = <T>(operation: () => T | Promise<T>): Promise<T> =>
-      transactionBound ? Promise.resolve().then(operation) : coordinate(operation);
+/**
+ * Create or migrate the Takibi document/index layout on `executor`, then
+ * return the storage driver over it. This is the only way to obtain a SQLite
+ * storage driver, so every driver runs on an initialised layout. Rejects
+ * with `STORAGE_LAYOUT_VERSION` when the stored layout is unsupported or its
+ * migration fails.
+ */
+export async function openSqliteStorage(
+  executor: SqlExecutor,
+  registry: IndexRegistry = EMPTY_INDEX_REGISTRY,
+): Promise<SqliteStorage> {
+  await initializeStorageLayout(executor);
+  // Ordering and isolation come from the executor: each statement and each
+  // transaction runs alone, so no driver statement can land inside another
+  // transaction on the same database.
+  const createDriver = (sql: SqlStatementExecutor, transactionBound: boolean): StorageDriver => {
     const driver: StorageDriver = {
-      get(resource, id) {
-        return execute(() => {
-          const rows = storage.sql
-            .exec<DocumentRow>(
-              `SELECT id, created_at, updated_at, schema_version, revision, data
-               FROM takibi_documents
-               WHERE collection = ? AND id = ?`,
-              resource,
-              id,
-            )
-            .toArray();
-          return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
-        });
-      },
-      put(resource, doc) {
-        return execute(() => {
-          const encoded = encodeDocument(doc);
-          storage.sql.exec(
-            `INSERT INTO takibi_documents
-               (collection, id, created_at, updated_at, schema_version, revision, data)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (collection, id) DO UPDATE SET
-               created_at = excluded.created_at,
-               updated_at = excluded.updated_at,
-               schema_version = excluded.schema_version,
-               revision = excluded.revision,
-               data = excluded.data`,
-            resource,
-            doc.id,
-            doc.createdAt,
-            doc.updatedAt,
-            encoded.schemaVersion,
-            encoded.revision,
-            encoded.data,
-          );
-        });
-      },
-      delete(resource, id) {
-        return execute(
-          () =>
-            storage.sql
-              .exec<{ id: string }>(
-                `DELETE FROM takibi_documents
-                 WHERE collection = ? AND id = ?
-                 RETURNING id`,
-                resource,
-                id,
-              )
-              .toArray().length > 0,
+      async get(resource, id) {
+        const { rows } = await sql.exec<DocumentRow>(
+          `SELECT id, created_at, updated_at, schema_version, revision, data
+             FROM takibi_documents
+             WHERE collection = ? AND id = ?`,
+          resource,
+          id,
         );
+        return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
+      },
+      async put(resource, doc) {
+        const encoded = encodeDocument(doc);
+        await sql.exec(
+          `INSERT INTO takibi_documents
+             (collection, id, created_at, updated_at, schema_version, revision, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (collection, id) DO UPDATE SET
+             created_at = excluded.created_at,
+             updated_at = excluded.updated_at,
+             schema_version = excluded.schema_version,
+             revision = excluded.revision,
+             data = excluded.data`,
+          resource,
+          doc.id,
+          doc.createdAt,
+          doc.updatedAt,
+          encoded.schemaVersion,
+          encoded.revision,
+          encoded.data,
+        );
+      },
+      async delete(resource, id) {
+        const { rows } = await sql.exec<{ id: string }>(
+          `DELETE FROM takibi_documents
+           WHERE collection = ? AND id = ?
+           RETURNING id`,
+          resource,
+          id,
+        );
+        return rows.length > 0;
       },
       async list(resource, opts, plan) {
         const prepared = await prepareList(resource, opts, registry);
         if (prepared.scan.kind === "index") {
-          const readChunk = createSqlIndexChunkReader(storage.sql, resource, prepared, plan);
-          return paginateIndex(
-            prepared,
-            prepared.scan.resolved,
-            (startAfter, limit) => execute(() => readChunk(startAfter, limit)),
-            plan,
-          );
+          const readChunk = createSqlIndexChunkReader(sql, resource, prepared, plan);
+          return paginateIndex(prepared, prepared.scan.resolved, readChunk, plan);
         }
-        const readChunk = createSqlChunkReader(storage.sql, resource, prepared, plan);
-        return paginate(
-          prepared,
-          (startAfter, limit) => execute(() => readChunk(startAfter, limit)),
-          plan,
-        );
+        return paginate(prepared, createSqlChunkReader(sql, resource, prepared, plan), plan);
       },
       transaction(callback) {
         if (transactionBound) {
           return callback(driver);
         }
-        return coordinate(() => storage.transaction(() => callback(createDriver(true))));
+        return executor.transaction((tx) => callback(createDriver(tx, true)));
       },
     };
     return driver;
   };
-  return createDriver(false);
+  const storage: SqliteStorage = {
+    ...createDriver(executor, false),
+    reconcileIndexes: (options) =>
+      reconcileIndexes(executor, { ...options, reader: options.reader ?? storage }),
+  };
+  return storage;
 }
 
-function initializeStorageLayout(storage: DurableObjectStorage): void {
-  if (typeof storage.transactionSync !== "function" || storage.sql === undefined) {
-    throw new TakibiError("STORAGE_BACKEND", "Takibi requires a SQLite-backed Durable Object", 500);
-  }
-
-  storage.transactionSync(() => {
-    storage.sql.exec(
+async function initializeStorageLayout(executor: SqlExecutor): Promise<void> {
+  await executor.transaction(async (sql) => {
+    await sql.exec(
       `CREATE TABLE IF NOT EXISTS takibi_metadata (
         key TEXT PRIMARY KEY,
         value INTEGER NOT NULL
       ) WITHOUT ROWID`,
     );
 
-    const row = storage.sql
-      .exec<LayoutRow>("SELECT value FROM takibi_metadata WHERE key = ?", STORAGE_LAYOUT_KEY)
-      .toArray()[0];
+    const row = (
+      await sql.exec<LayoutRow>(
+        "SELECT value FROM takibi_metadata WHERE key = ?",
+        STORAGE_LAYOUT_KEY,
+      )
+    ).rows[0];
     let version = row?.value ?? 0;
     if (!Number.isInteger(version) || version < 0 || version > STORAGE_LAYOUT_VERSION) {
       throw new TakibiError(
@@ -213,14 +211,14 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
 
     while (version < STORAGE_LAYOUT_VERSION) {
       if (version === 0) {
-        createDocumentTable(storage.sql, "takibi_documents");
-        createIndexCatalog(storage.sql);
+        await createDocumentTable(sql, "takibi_documents");
+        await createIndexCatalog(sql);
         version = STORAGE_LAYOUT_VERSION;
       } else if (version === 1) {
-        migrateVersionOneToTwo(storage.sql);
+        await migrateVersionOneToTwo(sql);
         version = 2;
       } else if (version === 2) {
-        createIndexCatalog(storage.sql);
+        await createIndexCatalog(sql);
         version = 3;
       } else if (version === 3) {
         // Maintenance/staging tables are owned by the snapshot/maintenance
@@ -233,7 +231,7 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
           500,
         );
       }
-      storage.sql.exec(
+      await sql.exec(
         `INSERT INTO takibi_metadata (key, value)
          VALUES (?, ?)
          ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
@@ -244,12 +242,15 @@ function initializeStorageLayout(storage: DurableObjectStorage): void {
   });
 }
 
-function createIndexCatalog(sql: SqlStorage): void {
-  sql.exec(createIndexCatalogTableSql());
+async function createIndexCatalog(sql: SqlStatementExecutor): Promise<void> {
+  await sql.exec(createIndexCatalogTableSql());
 }
 
-function createDocumentTable(sql: SqlStorage, table: "takibi_documents" | "takibi_documents_v2") {
-  sql.exec(
+async function createDocumentTable(
+  sql: SqlStatementExecutor,
+  table: "takibi_documents" | "takibi_documents_v2",
+): Promise<void> {
+  await sql.exec(
     `CREATE TABLE ${table} (
       collection TEXT NOT NULL,
       id TEXT NOT NULL,
@@ -269,10 +270,10 @@ function createDocumentTable(sql: SqlStorage, table: "takibi_documents" | "takib
   );
 }
 
-function migrateVersionOneToTwo(sql: SqlStorage): void {
-  sql.exec("ALTER TABLE takibi_documents RENAME TO takibi_documents_v1");
-  createDocumentTable(sql, "takibi_documents_v2");
-  sql.exec(
+async function migrateVersionOneToTwo(sql: SqlStatementExecutor): Promise<void> {
+  await sql.exec("ALTER TABLE takibi_documents RENAME TO takibi_documents_v1");
+  await createDocumentTable(sql, "takibi_documents_v2");
+  await sql.exec(
     `INSERT INTO takibi_documents_v2
       (collection, id, created_at, updated_at, schema_version, revision, data)
      SELECT
@@ -297,14 +298,14 @@ function migrateVersionOneToTwo(sql: SqlStorage): void {
     MAX_FINITE_DOUBLE,
   );
 
-  const oldCount = sql
-    .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_documents_v1")
-    .one().count;
-  const newCount = sql
-    .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_documents_v2")
-    .one().count;
-  const invalidCount = sql
-    .exec<{ count: number }>(
+  const oldCount = singleRow(
+    await sql.exec<{ count: number }>("SELECT count(*) AS count FROM takibi_documents_v1"),
+  ).count;
+  const newCount = singleRow(
+    await sql.exec<{ count: number }>("SELECT count(*) AS count FROM takibi_documents_v2"),
+  ).count;
+  const invalidCount = singleRow(
+    await sql.exec<{ count: number }>(
       `SELECT count(*) AS count
        FROM takibi_documents_v2
        WHERE revision < 1
@@ -317,8 +318,8 @@ function migrateVersionOneToTwo(sql: SqlStorage): void {
          OR json_type(data) <> 'object'
          OR json_type(data, '$.rev') IS NOT NULL`,
       MAX_FINITE_DOUBLE,
-    )
-    .one().count;
+    ),
+  ).count;
   if (oldCount !== newCount || invalidCount !== 0) {
     throw new TakibiError(
       "STORAGE_LAYOUT_VERSION",
@@ -327,19 +328,27 @@ function migrateVersionOneToTwo(sql: SqlStorage): void {
     );
   }
 
-  sql.exec("DROP TABLE takibi_documents_v1");
-  sql.exec("ALTER TABLE takibi_documents_v2 RENAME TO takibi_documents");
+  await sql.exec("DROP TABLE takibi_documents_v1");
+  await sql.exec("ALTER TABLE takibi_documents_v2 RENAME TO takibi_documents");
+}
+
+/** Same contract as the Durable Object cursor's `one()`: exactly one row or throw. */
+function singleRow<Row extends SqlRow>(result: SqlResult<Row>): Row {
+  if (result.rows.length !== 1) {
+    throw new Error(`Expected exactly one row, got ${result.rows.length}`);
+  }
+  return result.rows[0]!;
 }
 
 function createSqlChunkReader(
-  sql: SqlStorage,
+  sql: SqlStatementExecutor,
   resource: string,
   prepared: PreparedList,
   plan: StorageListPlan | undefined,
 ): ReadChunk {
   const predicate = prepared.where === undefined ? undefined : compileQueryToSql(prepared.where);
 
-  return (startAfter, limit) => {
+  return async (startAfter, limit) => {
     const clauses = ["collection = ?"];
     const bindings: Array<string | number | null> = [resource];
     if (startAfter !== undefined) {
@@ -357,22 +366,20 @@ function createSqlChunkReader(
     }
     bindings.push(limit);
 
-    return sql
-      .exec<DocumentRow>(
-        `SELECT id, created_at, updated_at, schema_version, revision, data
+    const { rows } = await sql.exec<DocumentRow>(
+      `SELECT id, created_at, updated_at, schema_version, revision, data
          FROM takibi_documents
          WHERE ${clauses.join(" AND ")}
          ORDER BY id ASC
          LIMIT ?`,
-        ...bindings,
-      )
-      .toArray()
-      .map((row) => ({ id: row.id, document: withDocumentRevision(rowToDocument(row)) }));
+      ...bindings,
+    );
+    return rows.map((row) => ({ id: row.id, document: withDocumentRevision(rowToDocument(row)) }));
   };
 }
 
 function createSqlIndexChunkReader(
-  sql: SqlStorage,
+  sql: SqlStatementExecutor,
   resource: string,
   prepared: PreparedList,
   _plan: StorageListPlan | undefined,
@@ -381,16 +388,14 @@ function createSqlIndexChunkReader(
     throw new TakibiError("INVALID_DOCUMENT", "Indexed scan required", 500);
   }
   const scan = prepared.scan.resolved;
-  return (startAfter, limit) => {
+  return async (startAfter, limit) => {
     const compiled = compileIndexedScanSql(resource, scan, {
       ...(startAfter === undefined ? {} : { startAfter }),
       ...(prepared.where === undefined ? {} : { residual: prepared.where }),
       limit,
     });
-    return sql
-      .exec<DocumentRow>(compiled.sql, ...compiled.bindings)
-      .toArray()
-      .map((row) => ({ id: row.id, document: withDocumentRevision(rowToDocument(row)) }));
+    const { rows } = await sql.exec<DocumentRow>(compiled.sql, ...compiled.bindings);
+    return rows.map((row) => ({ id: row.id, document: withDocumentRevision(rowToDocument(row)) }));
   };
 }
 

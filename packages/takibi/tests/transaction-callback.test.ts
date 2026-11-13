@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import {
   checkTransactionCallbackContract,
   transactionCases,
@@ -9,7 +9,7 @@ import {
 for (const [name, wrapper] of Object.entries(transactionWrappers)) {
   for (const scenario of transactionCases) {
     test(`${name}: ${scenario} does not replay callbacks`, async () => {
-      const raw = createSqliteDurableObjectStorage();
+      const raw = createNodeSqliteExecutor();
       try {
         await checkTransactionCallbackContract(raw, wrapper, scenario);
       } finally {
@@ -20,7 +20,7 @@ for (const [name, wrapper] of Object.entries(transactionWrappers)) {
 }
 
 test("conformance check detects an unsupported replaying driver", async () => {
-  const raw = createSqliteDurableObjectStorage();
+  const raw = createNodeSqliteExecutor();
   try {
     await expect(
       checkTransactionCallbackContract(

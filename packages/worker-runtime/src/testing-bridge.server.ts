@@ -1,17 +1,10 @@
 import type { TakibiBrandCarrier, TakibiBrandRecord, TAKIBI_BRAND } from "./brand";
 import type { ContextResolver, HandleOptions } from "./context/types";
 import type { ActionRegistry, CollectionsDef } from "@takibi/api";
-import {
-  compileIndexRegistry,
-  createDurableObjectStorage,
-  reconcileCollectionIndexes,
-} from "@takibi/storage";
-import { initializeMaintenanceLayout } from "@takibi/snapshot";
-import { createInProcessExecutor, type Executor } from "./context/executors";
-import { applyStorageLogging } from "./context/runtime";
-import { seedCollections } from "./durable-object";
+import type { SqlExecutor } from "@takibi/storage";
+import type { Executor } from "./context/executors";
 import type { InternalLogger, LoggingOptions } from "./logging";
-import { createMigratingStorage } from "./migrations";
+import { createTenantRuntime, type TenantHost } from "./tenant-runtime";
 
 export type TestingForkOptions<
   TCtx extends object = object,
@@ -29,7 +22,12 @@ export type TestingExecutorFactory = <TCtx extends object>(input: {
   services: unknown;
 }) => {
   execute: Executor<unknown, TCtx>;
-  dispose(): void;
+  /**
+   * Release the backend once startup and in-flight work settled. Idempotent:
+   * every call returns the same promise. Rejects with a startup failure that
+   * no execution reported.
+   */
+  close(): Promise<void>;
 };
 
 export type TestingFork<
@@ -58,7 +56,8 @@ export type TestingForkHandler<
 } & (THandler extends { handle(request: infer TRequest, options: unknown): infer TResult }
     ? { handle(request: TRequest, options: HandleOptions<TInitial>): TResult }
     : {}) &
-  Disposable;
+  Disposable &
+  AsyncDisposable;
 
 type ForkOf<THandler extends BrandedHandler> = <TInitial>(
   options: TestingForkOptions<
@@ -102,38 +101,37 @@ export function getTestingFork(handler: object): unknown {
   return testingForks().get(handler);
 }
 
+/** In-process host: startup runs immediately (executions wait for it), and there is no watch. */
+const inProcessHost: TenantHost = {
+  runStartup: (startup) => startup(),
+};
+
 /**
- * Assemble seed initialization, migrations, index reconciliation, logging
- * wrappers, and in-process execution around a supplied Durable Object storage
- * backend. Callers own the backend lifetime.
+ * The tenant runtime over a supplied SQL executor, executing invocations in
+ * process. Callers own the executor: call `close()` and close the executor
+ * after it settles.
  */
 export function createInProcessRuntime<TCtx extends object>(input: {
   collections: CollectionsDef<TCtx>;
   registry: ActionRegistry;
   logger: InternalLogger | undefined;
   services: unknown;
-  storage: DurableObjectStorage;
+  sql: SqlExecutor;
 }): {
   execute: Executor<unknown, TCtx>;
+  /** See `TenantRuntime.close`. */
+  close(): Promise<void>;
 } {
-  const { collections, registry, logger, services, storage } = input;
-  const indexRegistry = compileIndexRegistry(collections);
-  const rawStorage = createDurableObjectStorage(storage, indexRegistry);
-  initializeMaintenanceLayout(storage.sql);
-  const driver = applyStorageLogging(
-    createMigratingStorage(collections, rawStorage, logger),
-    logger,
-  );
-  const ready = (async () => {
-    await reconcileCollectionIndexes({
-      sql: storage.sql,
-      collections,
-      storage: driver,
-      registry: indexRegistry,
-    });
-    await seedCollections(collections, driver, logger);
-  })();
+  const runtime = createTenantRuntime({ ...input, host: inProcessHost });
   return {
-    execute: createInProcessExecutor(collections, registry, logger, services, driver, ready),
+    execute: ({ request, ctx, invocation, tracer, resolveSpan }) =>
+      runtime.execute(
+        { request, traced: !!tracer, spanKind: "internal", parentSpan: resolveSpan },
+        (local) =>
+          invocation.kind === "batch"
+            ? local.executeBatch(ctx, invocation.items)
+            : local.execute(ctx, invocation),
+      ),
+    close: () => runtime.close(),
   };
 }

@@ -1,4 +1,14 @@
-export { createDurableObjectStorage } from "./storage";
+export { openSqliteStorage } from "./storage";
+export type { SqliteStorage } from "./storage";
+export { SqlExecutor } from "./sql-executor";
+export type {
+  SqlAsyncContext,
+  SqlConnection,
+  SqlExecutorOptions,
+  SqlResult,
+  SqlRow,
+  SqlStatementExecutor,
+} from "./sql-executor";
 export {
   afterIndexCursor,
   assertCollectionIndexes,
@@ -35,6 +45,7 @@ export {
 } from "./index-sql";
 export type { IndexCatalogRow } from "./index-sql";
 export { backfillIndexedCollections, reconcileCollectionIndexes } from "./index-reconcile";
+export type { ReconcileIndexesOptions } from "./index-reconcile";
 export { documentRevision, withDocumentRevision } from "./revision";
 export type { StorageDriver, StorageListPlan, StorageReadTransform, StoredDocument } from "./types";
 export { observeCommits } from "./observe-commits";

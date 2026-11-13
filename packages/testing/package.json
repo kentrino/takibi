@@ -13,6 +13,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./durable-object-storage": "./src/durable-object-storage.server.ts",
     "./sqlite-storage": "./src/sqlite-storage.server.ts",
     "./package.json": "./package.json"
   },
@@ -21,6 +22,10 @@
       ".": {
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs"
+      },
+      "./durable-object-storage": {
+        "types": "./dist/durable-object-storage.d.mts",
+        "import": "./dist/durable-object-storage.mjs"
       },
       "./sqlite-storage": {
         "types": "./dist/sqlite-storage.d.mts",

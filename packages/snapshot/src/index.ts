@@ -1,7 +1,6 @@
 export { attachSnapshotOperations } from "./snapshot";
 export {
   createMaintenanceGatedCollections,
-  initializeMaintenanceLayout,
   MaintenanceController,
   SqliteMaintenanceBackend,
 } from "./maintenance";

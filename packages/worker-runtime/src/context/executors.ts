@@ -1,7 +1,5 @@
-import type { ActionRegistry, CollectionsDef } from "@takibi/api";
 import { TakibiError } from "@takibi/api";
 import type { PublicRequest } from "../http";
-import { resolveLocalExecution } from "../invocation-execution";
 import { withLoggedSpan, type InternalLogger } from "../logging";
 import { batchSpanAttributes, invocationSpanAttributes, TAKIBI_SPAN } from "../otel-helper";
 import {
@@ -11,8 +9,7 @@ import {
   type WireRequest,
   type WireResponse,
 } from "../protocol";
-import { injectTraceparent, tracedStorage, type SpanContext, type TakibiTracer } from "../tracing";
-import type { StorageDriver } from "@takibi/storage";
+import { injectTraceparent, type SpanContext, type TakibiTracer } from "../tracing";
 import { debugInvocationFields } from "./runtime";
 import type { ContextStubResolver } from "./types";
 
@@ -34,33 +31,6 @@ export type ExecutorInput<TInitial = unknown, TCtx extends object = object> = {
 export type Executor<TInitial = unknown, TCtx extends object = object> = (
   input: ExecutorInput<TInitial, TCtx>,
 ) => Promise<WireResponse>;
-
-export function createInProcessExecutor<TCtx extends object>(
-  collections: CollectionsDef<TCtx>,
-  registry: ActionRegistry,
-  logger: InternalLogger | undefined,
-  services: unknown,
-  driver: StorageDriver,
-  ready: Promise<void>,
-): Executor<unknown, TCtx> {
-  return async ({ request, ctx, invocation, tracer, resolveSpan }) => {
-    await ready;
-    const local = await resolveLocalExecution({
-      collections,
-      registry,
-      logger,
-      services,
-      storage: tracer ? tracedStorage(driver) : driver,
-      spanKind: "internal",
-      parentSpan: resolveSpan,
-      request,
-    });
-    if (invocation.kind === "batch") {
-      return local.executeBatch(ctx, invocation.items);
-    }
-    return local.execute(ctx, invocation);
-  };
-}
 
 export function createStubExecutor<TInitial, TCtx extends object>(
   resolveStub: ContextStubResolver<TCtx, TInitial> | undefined,

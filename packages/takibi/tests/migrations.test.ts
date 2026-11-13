@@ -2,8 +2,11 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { createTakibi, fullAccess } from "takibi";
 import { createMigratingStorage } from "../src/migrations";
-import { createDurableObjectStorage } from "../src/storage";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
+import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
+import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import { openSqliteStorage } from "../src/storage";
+import { one } from "./helpers/node-sql";
 import type { AccessContext, CollectionsDef, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
 
@@ -19,9 +22,9 @@ type StoredDocument = Record<string, unknown> & {
   rev?: number;
 };
 
-function createInspectableDurableObjectStorage() {
+async function createInspectableDurableObjectStorage() {
   const storage = createSqliteDurableObjectStorage();
-  const driver = createDurableObjectStorage(storage);
+  const driver = await openSqliteStorage(createDurableObjectSqlExecutor(storage));
 
   return {
     storage,
@@ -137,7 +140,7 @@ test("missing markers migrate in order once, validate, write back, and stay priv
       },
     })
     .actions({});
-  const backing = createInspectableDurableObjectStorage();
+  const backing = await createInspectableDurableObjectStorage();
   await backing.seed("settings", legacy("default", { name: "Clinic" }));
   const object = new handler.DurableObject(createState(backing.storage), {});
 
@@ -209,7 +212,7 @@ test("list migrates each scanned document before current-schema filtering", asyn
       },
     })
     .actions({});
-  const backing = createInspectableDurableObjectStorage();
+  const backing = await createInspectableDurableObjectStorage();
   await backing.seed("posts", legacy("a", { title: "MATCH", visible: true }));
   await backing.seed("posts", legacy("b", { title: "OTHER", visible: false }));
   const object = new handler.DurableObject(createState(backing.storage), {});
@@ -247,7 +250,7 @@ test("unique constraints compare current-schema values during lazy migration", a
       },
     })
     .actions({});
-  const backing = createInspectableDurableObjectStorage();
+  const backing = await createInspectableDurableObjectStorage();
   await backing.seed("posts", legacy("a", { title: " Same " }));
   await backing.seed("posts", legacy("b", { title: "same" }));
   const object = new handler.DurableObject(createState(backing.storage), {});
@@ -284,7 +287,7 @@ test("unique constraints reject current-schema duplicates in Durable Object stor
       },
     })
     .actions({});
-  const backing = createInspectableDurableObjectStorage();
+  const backing = await createInspectableDurableObjectStorage();
   const object = new handler.DurableObject(createState(backing.storage), {});
 
   const first = await invoke(object, {
@@ -339,7 +342,7 @@ test("get, set, update, and delete policies only see migrated existing documents
         },
       })
       .actions({});
-    const backing = createInspectableDurableObjectStorage();
+    const backing = await createInspectableDurableObjectStorage();
     await backing.seed("posts", legacy("p1", { title: "old" }));
     const object = new handler.DurableObject(createState(backing.storage), {});
     const input =
@@ -406,7 +409,7 @@ test("migration throw, validation failure, and versions below base leave storage
         },
       })
       .actions({});
-    const backing = createInspectableDurableObjectStorage();
+    const backing = await createInspectableDurableObjectStorage();
     const original = legacy(`c${index}`, { count: 1 });
     await backing.seed("counters", original);
     const object = new handler.DurableObject(createState(backing.storage), {});
@@ -434,7 +437,7 @@ test("new writes persist the current marker but reject marker input and marker q
       },
     })
     .actions({});
-  const backing = createInspectableDurableObjectStorage();
+  const backing = await createInspectableDurableObjectStorage();
   const object = new handler.DurableObject(createState(backing.storage), {});
 
   const add = await invoke(object, {
@@ -512,8 +515,7 @@ test("collection registration rejects migration bases that are not non-negative 
 });
 
 test("SQLite storage applies lazy migration semantics", async () => {
-  const durableBacking = createInspectableDurableObjectStorage();
-  const raw = createDurableObjectStorage(durableBacking.storage);
+  const raw = await openSqliteStorage(createNodeSqliteExecutor());
   const definition = {
     schema: z.object({ title: z.string(), published: z.boolean() }),
     migrations: {
@@ -546,8 +548,7 @@ test("SQLite storage applies lazy migration semantics", async () => {
 });
 
 test("lazy migration rechecks its source before replacing a concurrently updated row", async () => {
-  const durableBacking = createInspectableDurableObjectStorage();
-  const raw = createDurableObjectStorage(durableBacking.storage);
+  const raw = await openSqliteStorage(createNodeSqliteExecutor());
   const definition = {
     schema: z.object({ title: z.string(), published: z.boolean() }),
     migrations: {
@@ -602,7 +603,7 @@ test("lazy migration rechecks its source before replacing a concurrently updated
 });
 
 test("lazy migration get returns null when the source row disappears", async () => {
-  const raw = createDurableObjectStorage(createInspectableDurableObjectStorage().storage);
+  const raw = await openSqliteStorage(createNodeSqliteExecutor());
   await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
   const { storage, entered, release } = gateBeforeFirstTransaction(raw);
   const migrating = createMigratingStorage({ posts: migratingPostsDefinition() }, storage);
@@ -616,7 +617,7 @@ test("lazy migration get returns null when the source row disappears", async () 
 });
 
 test("lazy migration list omits a row that disappeared before persistence", async () => {
-  const raw = createDurableObjectStorage(createInspectableDurableObjectStorage().storage);
+  const raw = await openSqliteStorage(createNodeSqliteExecutor());
   await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
   await raw.put("posts", legacy("p2", { title: "keep" }) as import("../src/types").StoredDocument);
   const { storage, entered, release } = gateBeforeFirstTransaction(raw);
@@ -656,17 +657,16 @@ test("indexed backfill migrates existing documents before the index is ready", a
   };
   const collections = { posts: definition };
   const registry = compileIndexRegistry(collections);
-  const backing = createSqliteDurableObjectStorage();
-  const durable = createDurableObjectStorage(backing, registry);
+  const durable = await openSqliteStorage(createNodeSqliteExecutor(), registry);
   await durable.put(
     "posts",
     legacy("p1", { title: "old" }) as import("../src/types").StoredDocument,
   );
   const migrating = createMigratingStorage(collections as unknown as CollectionsDef, durable);
   await reconcileCollectionIndexes({
-    sql: backing.sql,
     collections,
-    storage: migrating,
+    storage: durable,
+    reader: migrating,
     registry,
   });
   await expect(durable.get("posts", "p1")).resolves.toMatchObject({
@@ -691,23 +691,22 @@ test("indexed backfill migrates existing documents before the index is ready", a
       },
     },
   };
-  const failingBacking = createSqliteDurableObjectStorage();
-  const failingDurable = createDurableObjectStorage(failingBacking, compileIndexRegistry(failing));
+  const failingSql = createNodeSqliteExecutor();
+  const failingDurable = await openSqliteStorage(failingSql, compileIndexRegistry(failing));
   await failingDurable.put(
     "posts",
     legacy("p2", { title: "old" }) as import("../src/types").StoredDocument,
   );
   await expect(
     reconcileCollectionIndexes({
-      sql: failingBacking.sql,
       collections: failing,
-      storage: createMigratingStorage(failing as unknown as CollectionsDef, failingDurable),
+      storage: failingDurable,
+      reader: createMigratingStorage(failing as unknown as CollectionsDef, failingDurable),
       registry: compileIndexRegistry(failing),
     }),
   ).rejects.toThrow("migration-failed");
   expect(
-    failingBacking.sql
-      .exec<{ count: number }>("SELECT count(*) AS count FROM takibi_index_catalog")
-      .one().count,
+    (await one<{ count: number }>(failingSql, "SELECT count(*) AS count FROM takibi_index_catalog"))
+      .count,
   ).toBe(0);
 });

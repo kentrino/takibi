@@ -2,7 +2,7 @@ import { serveWatchUpgrade } from "../watch-upgrade";
 import { TakibiError, type ActionRegistry, type CollectionsDef } from "@takibi/api";
 import { assignTakibiBrand } from "../brand";
 import { createDurableObjectClass } from "../durable-object";
-import { resolveLogging } from "../logging";
+import { emitFailure, resolveLogging } from "../logging";
 import {
   registerTestingFork,
   type TestingExecutorFactory,
@@ -10,7 +10,7 @@ import {
 } from "../testing-bridge.server";
 import { testingBackend, type BackendFactory } from "./backend";
 import { createHttpHandler } from "./http-handler";
-import { mergeLoggingOptions } from "./runtime";
+import { mergeLoggingOptions, normalizeInvocationFailureForServer } from "./runtime";
 import { serveDecodedCall } from "./worker-call";
 import type {
   ActionScopeMap,
@@ -88,8 +88,18 @@ export class Application<
       TInitial,
       TServices
     >(http, { collections, actions });
-    if (backend.dispose) {
-      Object.defineProperty(handler, Symbol.dispose, { value: backend.dispose, enumerable: false });
+    const close = backend.close;
+    if (close) {
+      // Synchronous disposal cannot hand a failure to its caller. It must not
+      // leave an unhandled rejection either, so a failure goes to the logger;
+      // `await using` / `Symbol.asyncDispose` receives it as a rejection.
+      const dispose = () => {
+        close().catch((error: unknown) =>
+          emitFailure(logger, normalizeInvocationFailureForServer(error)),
+        );
+      };
+      Object.defineProperty(handler, Symbol.dispose, { value: dispose, enumerable: false });
+      Object.defineProperty(handler, Symbol.asyncDispose, { value: close, enumerable: false });
     }
     registerTestingFork(handler, (options, createExecutor) =>
       this.fork(options).mountForTesting(createExecutor, options.services),
@@ -101,8 +111,8 @@ export class Application<
     const handler = this.mount(
       testingBackend(createExecutor, services === undefined ? {} : services),
     );
-    // mount installs the testing backend's non-enumerable disposal method.
-    return handler as typeof handler & Disposable;
+    // mount installs the testing backend's non-enumerable disposal methods.
+    return handler as typeof handler & Disposable & AsyncDisposable;
   }
 
   private fork(options: TestingForkOptions<TCtx, TInitial, TServices>) {

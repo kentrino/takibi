@@ -5,12 +5,25 @@ import { z } from "zod";
 import { createTakibi } from "../src/context";
 import { createMigratingStorage } from "../src/migrations";
 import { fullAccess } from "../src/policy";
-import { createDurableObjectStorage } from "../src/storage";
+import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
+import { openSqliteStorage } from "../src/storage";
+import { SqliteMaintenanceBackend } from "../src/maintenance";
+import {
+  SqlExecutor,
+  type SqlBinding,
+  type SqlConnection,
+  type SqlRow,
+  type SqlStatementExecutor,
+} from "@takibi/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
 
 const TS = "2026-08-19T00:00:00.000Z";
+
+function durableStorage(storage: DurableObjectStorage) {
+  return openSqliteStorage(createDurableObjectSqlExecutor(storage));
+}
 
 function meta<T extends Record<string, unknown>>(
   document: {
@@ -29,7 +42,7 @@ test("Workers Durable Object SQLite satisfies the shared storage contract", asyn
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = await durableStorage(state.storage);
     await expect(observeStorageContract(storage)).resolves.toEqual(
       expectedStorageContractObservation,
     );
@@ -41,7 +54,7 @@ test("actual SQLite-backed DO satisfies query contracts and stores no document K
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const sqlite = createDurableObjectStorage(state.storage);
+    const sqlite = await durableStorage(state.storage);
     const documents = [
       meta({
         id: "a",
@@ -173,9 +186,9 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
   const stub = storageStub("layout-version");
   await stub.ping();
 
-  await runInDurableObject(stub, (_instance, state) => {
-    createDurableObjectStorage(state.storage);
-    createDurableObjectStorage(state.storage);
+  await runInDurableObject(stub, async (_instance, state) => {
+    await durableStorage(state.storage);
+    await durableStorage(state.storage);
     expect(
       state.storage.sql
         .exec<{ value: number }>(
@@ -190,7 +203,7 @@ test("layout initialization is idempotent and rejects a newer layout", async () 
       999,
       "layout_version",
     );
-    expect(() => createDurableObjectStorage(state.storage)).toThrow(
+    await expect(durableStorage(state.storage)).rejects.toThrow(
       /Unsupported Takibi storage layout version/,
     );
   });
@@ -201,7 +214,7 @@ test("SQL pushdown includes stale rows and filters them after lazy migration", a
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const raw = createDurableObjectStorage(state.storage);
+    const raw = await durableStorage(state.storage);
     await raw.put("posts", meta({ id: "a", title: "MATCH", visible: true }));
     await raw.put("posts", meta({ id: "b", title: "OTHER", visible: false }));
     const storage = createMigratingStorage(
@@ -241,7 +254,7 @@ test("documents survive Durable Object eviction", async () => {
   const stub = storageStub("eviction");
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = await durableStorage(state.storage);
     await storage.put("posts", {
       ...meta({ id: "persistent", title: "still here" }),
       rev: 2 ** 63,
@@ -252,7 +265,7 @@ test("documents survive Durable Object eviction", async () => {
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = await durableStorage(state.storage);
     await expect(storage.get("posts", "persistent")).resolves.toEqual({
       ...meta({ id: "persistent", title: "still here" }),
       rev: 2 ** 63,
@@ -305,7 +318,7 @@ test("version 1 rows migrate revisions out of JSON and survive eviction", async 
       );
     }
 
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = await durableStorage(state.storage);
     await expect(storage.get("posts", "valid")).resolves.toMatchObject({
       title: "valid",
       rev: 2 ** 63,
@@ -328,7 +341,7 @@ test("version 1 rows migrate revisions out of JSON and survive eviction", async 
   await evictDurableObject(stub);
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = await durableStorage(state.storage);
     await expect(storage.get("posts", "valid")).resolves.toMatchObject({
       title: "valid",
       rev: 2 ** 63,
@@ -341,7 +354,7 @@ test("Workers SQLite round-trips revisions across numeric storage boundaries", a
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = createDurableObjectStorage(state.storage);
+    const storage = await durableStorage(state.storage);
     const revisions = [1, 2 ** 53, 2 ** 63];
     for (const [index, revision] of revisions.entries()) {
       await storage.put("posts", {
@@ -397,5 +410,150 @@ test("Workers generated Durable Object streams and restores an owner snapshot", 
     await expect(object.$collections.posts.get("p1")).resolves.toMatchObject({
       title: "snapshot",
     });
+  });
+});
+
+test("Workers Durable Object restores a snapshot that omits a seed of an indexed collection", async () => {
+  const stub = storageStub("indexed-seed-restore");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const context = createTakibi()({
+      resolve: () => ({ tenantId: "indexed-seed-restore" }),
+    });
+    const handler = context
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string(), score: z.number() }),
+          accessPolicy: fullAccess,
+          // Two secondary indexes: workerd's write counter would report 3 per inserted seed.
+          indexes: { byTitle: ["title"], byScore: ["score"] },
+          seed: () => ({ seeded: { title: "seed", score: 1 } }),
+        },
+      })
+      .actions({});
+    const object = new handler.DurableObject(state, {});
+    await object.$collections.posts.add({ title: "snapshot", score: 2 }, { id: "p1" });
+    await object.$collections.posts.delete("seeded");
+    const encoded = await new Response(await object.$collections.$exportSnapshot()).text();
+
+    await expect(
+      object.$collections.$restoreSnapshot(
+        new Blob([encoded]).stream() as ReadableStream<Uint8Array>,
+      ),
+    ).resolves.toMatchObject({ documentsRestored: 1, seedsInserted: 1 });
+    await expect(object.$collections.posts.get("seeded")).resolves.toMatchObject({
+      title: "seed",
+    });
+  });
+});
+
+/** The Durable Object SQL connection without the executor's queue in front of it. */
+function rawDurableConnection(storage: DurableObjectStorage): SqlConnection {
+  const statements: SqlStatementExecutor = {
+    async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
+      return { rows: storage.sql.exec(query, ...bindings).toArray() as Row[] };
+    },
+  };
+  return { ...statements, transaction: (body) => storage.transaction(() => body(statements)) };
+}
+
+/** A port that bypasses the queue: every call goes straight to the connection. */
+class UnserialisedExecutor extends SqlExecutor {
+  readonly #connection: SqlConnection;
+  constructor(connection: SqlConnection) {
+    super(connection);
+    this.#connection = connection;
+  }
+  override exec<Row extends SqlRow = SqlRow>(query: string, ...bindings: SqlBinding[]) {
+    return this.#connection.exec<Row>(query, ...bindings);
+  }
+  override transaction<T>(callback: (tx: SqlStatementExecutor) => Promise<T>) {
+    return this.#connection.transaction(callback);
+  }
+}
+
+/**
+ * Open a restore transaction that will fail, and issue a driver write only
+ * once the transaction's closure is known to be running on workerd: the
+ * restore pauses before its document wipe until the write was issued. The
+ * pause waits on a promise resolved from outside, never on a timer (awaiting
+ * a timer inside an open Durable Object transaction stalls). Returns the ids
+ * that survive.
+ */
+async function writeDuringFailingRestore(
+  state: DurableObjectState,
+  executor: (connection: SqlConnection) => SqlExecutor,
+): Promise<string[]> {
+  let wipeReached!: () => void;
+  const reachedWipe = new Promise<void>((resolve) => (wipeReached = resolve));
+  let writeIssued!: () => void;
+  const issued = new Promise<void>((resolve) => (writeIssued = resolve));
+  const pauseBeforeWipe = (connection: SqlConnection): SqlConnection => ({
+    exec: (query, ...bindings) => connection.exec(query, ...bindings),
+    transaction: (body) =>
+      connection.transaction((tx) =>
+        body({
+          async exec(query, ...bindings) {
+            if (query === "DELETE FROM takibi_documents") {
+              wipeReached();
+              await issued;
+            }
+            return tx.exec(query, ...bindings);
+          },
+        }),
+      ),
+  });
+  const sql = executor(pauseBeforeWipe(rawDurableConnection(state.storage)));
+  const storage = await openSqliteStorage(sql);
+  const backend = await SqliteMaintenanceBackend.open(sql);
+  await backend.cleanupAbandoned();
+  await storage.put("posts", meta({ id: "before" }));
+  expect(await backend.acquire("owner", "restore", 30)).toBeDefined();
+
+  const restore = backend.finalizeRestore("owner", [], 1);
+  await reachedWipe;
+  const write = storage.put("posts", meta({ id: "during" }));
+  writeIssued();
+  await expect(restore).rejects.toThrow("Seed reconciliation count mismatch");
+  await write;
+  return (await storage.list("posts")).items.map(({ id }) => id);
+}
+
+test("a driver write during a failing Durable Object restore transaction survives its rollback", async () => {
+  const stub = storageStub("restore-interleaving");
+  await stub.ping();
+  await runInDurableObject(stub, async (_instance, state) => {
+    await expect(
+      writeDuringFailingRestore(state, (connection) => new SqlExecutor(connection)),
+    ).resolves.toEqual(["before", "during"]);
+  });
+});
+
+test("without the executor's queue, that write joins the restore transaction and is rolled back", async () => {
+  // Control for the test above: the scenario really overlaps on workerd, so
+  // the write only survives because the executor queues it.
+  const stub = storageStub("restore-interleaving-unserialised");
+  await stub.ping();
+  await runInDurableObject(stub, async (_instance, state) => {
+    await expect(
+      writeDuringFailingRestore(state, (connection) => new UnserialisedExecutor(connection)),
+    ).resolves.toEqual(["before"]);
+  });
+});
+
+test("a Durable Object storage call before a transaction callback's first await rejects as reentrant", async () => {
+  const stub = storageStub("reentrant-call");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const storage = await durableStorage(state.storage);
+    await storage.transaction(async (tx) => {
+      // Issued synchronously from inside the callback: waiting would deadlock.
+      const reentrant = storage.get("posts", "inside");
+      await tx.put("posts", meta({ id: "inside" }));
+      await expect(reentrant).rejects.toMatchObject({ code: "SQL_REENTRANT_CALL" });
+    });
+    await expect(storage.get("posts", "inside")).resolves.toMatchObject({ id: "inside" });
   });
 });

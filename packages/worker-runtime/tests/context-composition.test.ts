@@ -109,7 +109,7 @@ test("forks own their registry, services, logger and backend disposal", async ()
         ok: true,
         data: { ...ctx, initial: initial === null ? null : "present" },
       }),
-      dispose() {
+      async close() {
         disposals.push(id);
       },
     };
@@ -140,7 +140,9 @@ test("forks own their registry, services, logger and backend disposal", async ()
   expect(dispose?.enumerable).toBe(false);
   dispose?.value();
   expect(disposals).toEqual([1]);
+  expect(Object.getOwnPropertyDescriptor(left, Symbol.asyncDispose)?.enumerable).toBe(false);
   expect(Object.hasOwn(source, Symbol.dispose)).toBe(false);
+  expect(Object.hasOwn(source, Symbol.asyncDispose)).toBe(false);
   expect(Object.getOwnPropertyDescriptor(source, TAKIBI_BRAND)).toMatchObject({
     enumerable: false,
     writable: false,
@@ -259,7 +261,7 @@ test("core HTTP entry preserves its value and rejects the Hono surface", async (
   if (!fork) throw new Error("missing fork");
   const local = fork({}, () => ({
     execute: async ({ ctx }) => ({ ok: true, data: ctx }),
-    dispose() {},
+    close: async () => {},
   }));
   for (const context of [{ token: "session" }, null]) {
     const result = await local.handle(new Request("https://test/posts/p1"), { context });
@@ -280,7 +282,7 @@ test("core HTTP entry preserves its value and rejects the Hono surface", async (
     // @ts-expect-error fork resolver must produce this handler's resolved context
     fork({ resolve: () => ({ tenantId: 1 }) }, () => ({
       execute: async () => ({ ok: true, data: null }),
-      dispose() {},
+      close: async () => {},
     }));
   };
   expectTypeOf(invalid).toBeFunction();
@@ -310,7 +312,10 @@ test("testing forks do not promise user-added handler properties", () => {
   const decorated = Object.assign(handler, { extra: () => 42 });
   const fork = getTestingFork(decorated);
   if (!fork) throw new Error("missing fork");
-  const local = fork({}, () => ({ execute: async () => ({ ok: true, data: null }), dispose() {} }));
+  const local = fork({}, () => ({
+    execute: async () => ({ ok: true, data: null }),
+    close: async () => {},
+  }));
   expect(Object.hasOwn(local, "extra")).toBe(false);
   const invalid = () => {
     // @ts-expect-error a fork recreates the standard handler, not arbitrary extensions

@@ -9,7 +9,8 @@ import type { ContextStubResolver } from "./types";
 export type Backend<TInitial = unknown, TCtx extends object = object> = {
   execute: Executor<TInitial, TCtx>;
   upgrade?: WatchUpgrade<TInitial, TCtx>;
-  dispose?: () => void;
+  /** Present for backends that own resources; see `TestingExecutorFactory`. */
+  close?: () => Promise<void>;
 };
 
 export type BackendInput<TCtx extends object = object> = {
@@ -48,6 +49,6 @@ export function testingBackend<TInitial, TCtx extends object>(
 ): BackendFactory<TInitial, TCtx> {
   return (input) => {
     const backend = create({ ...input, services });
-    return { execute: backend.execute, dispose: () => backend.dispose() };
+    return { execute: backend.execute, close: () => backend.close() };
   };
 }

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
+import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
 import { test } from "vite-plus/test";
 import {
   checkTransactionCallbackContract,
@@ -16,7 +17,11 @@ for (const [name, wrapper] of Object.entries(transactionWrappers)) {
       ) as DurableObjectStub<StorageTestObject>;
       await stub.ping();
       await runInDurableObject(stub, async (_instance, state) => {
-        await checkTransactionCallbackContract(state.storage, wrapper, scenario);
+        await checkTransactionCallbackContract(
+          createDurableObjectSqlExecutor(state.storage),
+          wrapper,
+          scenario,
+        );
       });
     });
   }

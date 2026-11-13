@@ -80,12 +80,27 @@ capabilities captured in application context or closures. For `list/count`, the 
 does not supply a target row as `doc` and evaluates the `list` permission.
 
 `AccessPolicyFn` permits `Promise<AccessGrant>`. The current types and evaluator do not
-detect external I/O or reentry and reject them immediately. Documenting restrictions in the
-README can prevent misuse, but cannot itself guarantee failure before a circular wait.
+detect external I/O or reentry and reject them immediately; only the SQL executor rejects the
+reentrant calls described below. Documenting restrictions in the README can prevent misuse,
+but cannot itself guarantee failure before a circular wait.
 
-Takibi's root driver coordinates operations through one `operationQueue`. Subsequent root
-driver operations wait until the transaction callback finishes. If a policy inside that
-transaction waits for another operation queued behind it, a circular wait results.
+Takibi serialises every use of a tenant's database through one `SqlExecutor`
+([port](../../packages/storage/src/sql-executor.ts)): root driver operations, maintenance,
+layout initialisation, and index reconciliation. Statements and transactions issued outside
+an open transaction wait until its callback finishes. If a policy inside that transaction
+waits for another operation queued behind it, a circular wait results.
+
+The executor rejects the circular waits it can attribute to its own open transaction with
+`SQL_REENTRANT_CALL` instead of waiting: a call on the executor (and so on the outer storage
+driver, outer collections, or a nested execution, which all reach it) made synchronously
+before the transaction callback's first `await`, on every host; and, when the host adapter
+supplies an async context (the Node `node:sqlite` test backend passes `AsyncLocalStorage`),
+such a call made anywhere in the callback's async continuation while the transaction is open.
+The Durable Object adapter supplies no async context, because `@takibi/storage` and the
+worker runtime do not require `nodejs_compat`; there, a reentrant call after the callback's
+first `await` still waits until platform limits end the request. A circular wait that does
+not reach the executor from inside the callback (a fetch or RPC back into the same DO, or a
+wait on work started outside the callback) is not detected on any host.
 A fetch or RPC back into the same DO can cause this. External HTTP does not always produce
 a circular wait, but the coordination boundary remains held while the request is awaited.
 
@@ -162,5 +177,5 @@ or provide an exhaustive safety review.
 Cloudflare's [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transaction)
 includes SQL queries on the SQLite backend in `storage.transaction`. The
 [input/output gate documentation](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/#understand-how-input-and-output-gates-work)
-was also consulted. Those platform gates and Takibi's `operationQueue` described here are
-separate mechanisms.
+was also consulted. Those platform gates and Takibi's `SqlExecutor` serialisation described
+here are separate mechanisms.

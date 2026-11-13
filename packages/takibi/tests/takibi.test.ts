@@ -16,9 +16,16 @@ import {
 } from "takibi";
 import type { AccessContext, QueryExpr, StorageDriver } from "../src/types";
 import type { WireRequest, WireResponse } from "../src/protocol";
-import { createSqliteDurableObjectStorage } from "@takibi/testing/sqlite-storage";
-import { MaintenanceController } from "../src/maintenance";
-import { createDurableObjectStorage } from "../src/storage";
+import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
+import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
+import { openSqliteStorage } from "../src/storage";
+import { MaintenanceController, SqliteMaintenanceBackend } from "../src/maintenance";
+
+async function sqliteMaintenance(storage: DurableObjectStorage): Promise<MaintenanceController> {
+  return new MaintenanceController(
+    await SqliteMaintenanceBackend.open(createDurableObjectSqlExecutor(storage)),
+  );
+}
 
 type User = { id: string; role: "admin" | "member" };
 type AppCtx = { tenantId: string; user: User | null };
@@ -1307,7 +1314,7 @@ test("expired export cannot complete or release a successor maintenance lease", 
   partial.push((await reader.read()).value!);
   backing.sql.exec("UPDATE takibi_maintenance_lease SET expires_at = 0");
 
-  const successor = new MaintenanceController(backing);
+  const successor = await sqliteMaintenance(backing);
   const successorLease = await successor.acquire("reset");
   await expect(async () => {
     while (true) {
@@ -1333,8 +1340,8 @@ test("expired export cannot complete or release a successor maintenance lease", 
 
 test("Durable Object activation clears abandoned maintenance and restore staging", async () => {
   const backing = createSqliteDurableObjectStorage();
-  createDurableObjectStorage(backing);
-  const first = new MaintenanceController(backing);
+  await openSqliteStorage(createDurableObjectSqlExecutor(backing));
+  const first = await sqliteMaintenance(backing);
   const lease = await first.acquire("restore");
   await first.backend.stageDocument(lease.token, {
     collection: "posts",

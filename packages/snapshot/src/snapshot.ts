@@ -44,24 +44,27 @@ type TrailerRecord = {
   sha256: string;
 };
 
+/**
+ * Define `$exportSnapshot`, `$restoreSnapshot`, and `$resetAll` on `trusted`.
+ * Each operation runs through `admit`, which the host uses to wait for
+ * startup, refuse work, or track it (`(operation) => operation()` admits
+ * everything immediately).
+ */
 export function attachSnapshotOperations<TCollections extends CollectionsDef>(
   trusted: TrustedCollectionsApi<TCollections>,
   maintenance: MaintenanceController,
-  ready: Promise<void>,
+  admit: <T>(operation: () => Promise<T>) => Promise<T>,
   lifecycle: SnapshotLifecycle,
 ): DurableObjectCollectionsApi<TCollections> {
   const operations = {
-    async $exportSnapshot() {
-      await ready;
-      return exportSnapshot(lifecycle, maintenance);
+    $exportSnapshot() {
+      return admit(() => exportSnapshot(lifecycle, maintenance));
     },
-    async $restoreSnapshot(source: ReadableStream<Uint8Array>) {
-      await ready;
-      return restoreSnapshot(lifecycle, maintenance, source);
+    $restoreSnapshot(source: ReadableStream<Uint8Array>) {
+      return admit(() => restoreSnapshot(lifecycle, maintenance, source));
     },
-    async $resetAll() {
-      await ready;
-      return resetAll(lifecycle, maintenance);
+    $resetAll() {
+      return admit(() => resetAll(lifecycle, maintenance));
     },
   } satisfies Omit<DurableObjectCollectionsApi<Record<never, never>>, "$transaction">;
   for (const [name, value] of Object.entries(operations)) {
@@ -91,74 +94,100 @@ async function exportSnapshot(
   let page: SnapshotStoredDocument[] = [];
   let pageOffset = 0;
   let cursor: { collection: string; id: string } | undefined;
+  /** Set once the lease is released or about to be; nothing reads the database after it. */
   let finished = false;
+  let cancelRequested = false;
+  /** The pull in progress, if any; settles without rejecting. */
+  let pulling: Promise<void> = Promise.resolve();
 
   const finishWithError = async (error: unknown): Promise<never> => {
-    finished = true;
-    await maintenance.release(lease);
+    if (!finished) {
+      finished = true;
+      await maintenance.release(lease);
+    }
     throw error;
   };
 
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      if (finished) return;
-      try {
-        if (headerPending) {
-          headerPending = false;
-          const bytes = encodeRecord({
-            type: "header",
-            format: SNAPSHOT_FORMAT,
-            version: SNAPSHOT_VERSION,
-            collections: manifest,
-          } satisfies HeaderRecord);
-          checksum.update(bytes);
-          controller.enqueue(bytes);
-          return;
-        }
-
-        if (pageOffset >= page.length) {
-          await maintenance.renew(lease);
-          page = await maintenance.backend.scanDocuments(cursor, SCAN_PAGE_SIZE);
-          pageOffset = 0;
-          if (page.length === 0) {
-            const trailer = encodeRecord({
-              type: "trailer",
-              counts,
-              sha256: bytesToHex(checksum.digest()),
-            } satisfies TrailerRecord);
-            await maintenance.release(lease);
-            finished = true;
-            controller.enqueue(trailer);
-            controller.close();
-            return;
-          }
-        }
-
-        const document = page[pageOffset]!;
-        pageOffset += 1;
-        cursor = { collection: document.collection, id: document.id };
-        if (!known.has(document.collection)) {
-          throw new SnapshotIncompatibleError(
-            `Stored data contains an unregistered collection: ${document.collection}`,
-          );
-        }
-        counts[document.collection] = (counts[document.collection] ?? 0) + 1;
+  const pullOnce = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+    if (finished || cancelRequested) return;
+    try {
+      if (headerPending) {
+        headerPending = false;
         const bytes = encodeRecord({
-          type: "document",
-          ...document,
-        } satisfies DocumentRecord);
+          type: "header",
+          format: SNAPSHOT_FORMAT,
+          version: SNAPSHOT_VERSION,
+          collections: manifest,
+        } satisfies HeaderRecord);
         checksum.update(bytes);
         controller.enqueue(bytes);
-      } catch (error) {
-        await finishWithError(error);
+        return;
       }
+
+      if (pageOffset >= page.length) {
+        await maintenance.renew(lease);
+        if (cancelRequested) return;
+        page = await maintenance.backend.scanDocuments(cursor, SCAN_PAGE_SIZE);
+        if (cancelRequested) return;
+        pageOffset = 0;
+        if (page.length === 0) {
+          const trailer = encodeRecord({
+            type: "trailer",
+            counts,
+            sha256: bytesToHex(checksum.digest()),
+          } satisfies TrailerRecord);
+          finished = true;
+          await maintenance.release(lease);
+          controller.enqueue(trailer);
+          controller.close();
+          return;
+        }
+      }
+
+      const document = page[pageOffset]!;
+      pageOffset += 1;
+      cursor = { collection: document.collection, id: document.id };
+      if (!known.has(document.collection)) {
+        throw new SnapshotIncompatibleError(
+          `Stored data contains an unregistered collection: ${document.collection}`,
+        );
+      }
+      counts[document.collection] = (counts[document.collection] ?? 0) + 1;
+      const bytes = encodeRecord({
+        type: "document",
+        ...document,
+      } satisfies DocumentRecord);
+      checksum.update(bytes);
+      controller.enqueue(bytes);
+    } catch (error) {
+      await finishWithError(error);
+    }
+  };
+
+  // `highWaterMark: 0`: the stream pulls only for a read, never to refill a
+  // queue in the background, so every database read belongs to a read call.
+  return new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        const run = pullOnce(controller);
+        pulling = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        return run;
+      },
+      // A stream may be cancelled while a pull is still reading; release the
+      // lease only after that pull stopped, and stop it before its next read.
+      async cancel() {
+        cancelRequested = true;
+        await pulling;
+        if (finished) return;
+        finished = true;
+        await maintenance.release(lease);
+      },
     },
-    async cancel() {
-      if (finished) return;
-      finished = true;
-      await maintenance.release(lease);
-    },
-  });
+    { highWaterMark: 0 },
+  );
 }
 
 async function restoreSnapshot(

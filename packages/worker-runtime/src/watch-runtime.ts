@@ -2,7 +2,6 @@ import { BadRequestError, MaintenanceLockedError, type CollectionsDef } from "@t
 import {
   decodeWatchAttachment,
   WATCH_VERSION,
-  WATCH_PROTOCOL,
   WATCH_PROTOCOL_CLOSE,
   WATCH_ERROR_CLOSE,
   WATCH_MAINTENANCE_CLOSE,
@@ -15,12 +14,39 @@ import { normalizeInvocationFailure } from "./context/runtime";
 import { WATCH_HEADER, assertWatchProtocols, encodeWatchAttachment } from "./watch-upgrade";
 import type { InternalLogger } from "./logging";
 
-/** The Hibernation sockets and their versioned attachments are the only registry. */
-export class WatchRuntime {
+/** WHATWG `WebSocket.OPEN`; a literal so the runtime needs no `WebSocket` global. */
+const SOCKET_OPEN = 1;
+
+/** The subset of a server-side WebSocket the watch runtime drives. */
+export interface WatchSocket {
+  readonly readyState: number;
+  send(message: string): void;
+  close(code?: number): void;
+  /** The string the host stored when it accepted this socket. */
+  deserializeAttachment(): unknown;
+}
+
+/**
+ * What watch needs from its host. The host's live sockets, each carrying the
+ * serialized attachment it was accepted with, are the only watch registry.
+ */
+export interface WatchHost<TUpgrade = Response> {
+  /** Every live watch socket accepted by this tenant. */
+  sockets(): readonly WatchSocket[];
+  /**
+   * Register a new server socket carrying `attachment`. `respond` is called
+   * after the initial snapshot was sent and produces the host's upgrade result.
+   */
+  accept(attachment: string): { socket: WatchSocket; respond: () => TUpgrade };
+  /** Keep the host alive until background fan-out settles. */
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+export class WatchRuntime<TUpgrade = Response> {
   #dirty = new Set<string>();
   #scheduled = false;
   constructor(
-    private readonly state: DurableObjectState,
+    private readonly host: WatchHost<TUpgrade>,
     private readonly collections: CollectionsDef,
     private readonly storage: StorageDriver,
     private readonly maintenance: MaintenanceController,
@@ -28,7 +54,7 @@ export class WatchRuntime {
   ) {}
 
   recover(): void {
-    for (const socket of this.state.getWebSockets()) {
+    for (const socket of this.host.sockets()) {
       const attachment = this.#attachment(socket);
       if (attachment) this.#dirty.add(attachment.collection);
     }
@@ -36,19 +62,19 @@ export class WatchRuntime {
   }
 
   invalidate = (collections: ReadonlySet<string>): void => {
-    if (this.state.getWebSockets().length === 0) return;
+    if (this.host.sockets().length === 0) return;
     for (const collection of collections) this.#dirty.add(collection);
     this.#schedule();
   };
 
   maintenanceChanged(purpose: MaintenancePurpose | undefined): void {
     if (purpose === "restore" || purpose === "reset") {
-      for (const socket of this.state.getWebSockets()) this.close(socket, WATCH_MAINTENANCE_CLOSE);
+      for (const socket of this.host.sockets()) this.close(socket, WATCH_MAINTENANCE_CLOSE);
     }
     if (purpose === undefined) this.#schedule();
   }
 
-  async upgrade(request: Request): Promise<Response> {
+  async upgrade(request: Request): Promise<TUpgrade> {
     assertWatchProtocols(request);
     let attachment: WatchAttachment;
     try {
@@ -63,25 +89,18 @@ export class WatchRuntime {
       this.storage.transaction(async (storage) => {
         const snapshot = await this.#snapshot(attachment, storage);
         if (this.maintenance.blocked) throw new MaintenanceLockedError();
-        const [client, server] = Object.values(new WebSocketPair());
-        // serializeAttachment itself also enforces the platform's structured-clone limit.
-        server.serializeAttachment(serialized);
-        this.state.acceptWebSocket(server);
+        const { socket, respond } = this.host.accept(serialized);
         try {
-          server.send(snapshot);
+          socket.send(snapshot);
         } catch {
-          this.close(server, WATCH_PROTOCOL_CLOSE);
+          this.close(socket, WATCH_PROTOCOL_CLOSE);
         }
-        return new Response(null, {
-          status: 101,
-          webSocket: client,
-          headers: { "sec-websocket-protocol": WATCH_PROTOCOL },
-        });
+        return respond();
       }),
     );
   }
 
-  protocolError(socket: WebSocket): void {
+  protocolError(socket: WatchSocket): void {
     try {
       socket.send(
         JSON.stringify({
@@ -98,7 +117,7 @@ export class WatchRuntime {
     }
     this.close(socket, WATCH_PROTOCOL_CLOSE);
   }
-  close(socket: WebSocket, code = 1000): void {
+  close(socket: WatchSocket, code = 1000): void {
     try {
       socket.close(code);
     } catch {
@@ -106,7 +125,7 @@ export class WatchRuntime {
     }
   }
 
-  #attachment(socket: WebSocket): WatchAttachment | undefined {
+  #attachment(socket: WatchSocket): WatchAttachment | undefined {
     try {
       const serialized: unknown = socket.deserializeAttachment();
       if (typeof serialized !== "string") throw new Error("Invalid attachment");
@@ -145,14 +164,14 @@ export class WatchRuntime {
         this.#scheduled = false;
         this.#schedule();
       });
-    this.state.waitUntil(pending);
+    this.host.waitUntil(pending);
   }
 
   async #flush(): Promise<void> {
     const changed = this.#dirty;
     this.#dirty = new Set();
-    for (const socket of this.state.getWebSockets()) {
-      if (socket.readyState !== WebSocket.OPEN) continue;
+    for (const socket of this.host.sockets()) {
+      if (socket.readyState !== SOCKET_OPEN) continue;
       const attachment = this.#attachment(socket);
       if (!attachment || !changed.has(attachment.collection)) continue;
       try {
@@ -160,7 +179,7 @@ export class WatchRuntime {
           this.storage.transaction(async (storage) => {
             const snapshot = await this.#snapshot(attachment, storage);
             if (this.maintenance.blocked) throw new MaintenanceLockedError();
-            if (socket.readyState === WebSocket.OPEN) socket.send(snapshot);
+            if (socket.readyState === SOCKET_OPEN) socket.send(snapshot);
           }),
         );
       } catch (error) {

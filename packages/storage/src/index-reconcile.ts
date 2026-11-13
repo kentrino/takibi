@@ -11,6 +11,8 @@ import {
   type IndexedCollectionSource,
   type IndexRegistry,
 } from "./indexes";
+import type { SqlExecutor, SqlStatementExecutor } from "./sql-executor";
+import type { SqliteStorage } from "./storage";
 import type { StorageDriver } from "./types";
 
 const BACKFILL_PAGE_SIZE = 200;
@@ -28,67 +30,99 @@ export async function backfillIndexedCollections(
   }
 }
 
-export async function reconcileCollectionIndexes(args: {
-  sql: SqlStorage;
+export type ReconcileIndexesOptions = {
+  /** Reads documents for the backfill check (default: the opened storage). */
+  reader?: StorageDriver;
   collections: Record<string, IndexedCollectionSource>;
-  storage: StorageDriver;
   registry?: IndexRegistry;
-}): Promise<void> {
+};
+
+/**
+ * Bring the physical indexes and the index catalog of an opened storage in
+ * line with `collections`. Before building an index, every document of its
+ * collection is read through `reader` (default: `storage`; pass a migrating
+ * view so documents are checked in their current shape) and must carry the
+ * indexed fields.
+ *
+ * Atomic: every index drop, index build, and catalog write happens in one
+ * transaction, after all checks passed, so a failure at any point leaves the
+ * catalog and the physical indexes as they were. Run it while nothing else
+ * changes the catalog or indexes (Takibi runs it during startup).
+ */
+export function reconcileCollectionIndexes(
+  args: ReconcileIndexesOptions & { storage: SqliteStorage },
+): Promise<void> {
+  const { storage, ...options } = args;
+  return storage.reconcileIndexes(options);
+}
+
+/** `reconcileCollectionIndexes` on the executor `openSqliteStorage` opened; internal to this package. */
+export async function reconcileIndexes(
+  sql: SqlExecutor,
+  args: ReconcileIndexesOptions & { reader: StorageDriver },
+): Promise<void> {
   const registry = args.registry ?? compileIndexRegistry(args.collections);
   const desired = desiredCatalog(args.collections, registry);
-  const catalog = readCatalog(args.sql);
-  const physicalPresent = listPhysicalTakibiIndexes(args.sql);
-  let ddl = false;
+  const catalog = await readCatalog(sql);
+  const physicalPresent = await listPhysicalTakibiIndexes(sql);
 
+  // Plan every change before making any.
   const desiredByPhysical = new Map(desired.map((row) => [row.physicalName, row]));
   const catalogByKey = new Map(
     catalog.map((row) => [catalogKey(row.collection, row.publicName), row]),
   );
-
+  const staleCatalog: CatalogRecord[] = [];
   for (const existing of catalog) {
     const next = desired.find(
       (row) => row.collection === existing.collection && row.publicName === existing.publicName,
     );
     if (next && next.physicalName === existing.physicalName) continue;
-    args.sql.exec(compileDropIndexSql(existing.physicalName));
-    args.sql.exec(
-      "DELETE FROM takibi_index_catalog WHERE physical_name = ?",
-      existing.physicalName,
-    );
-    ddl = true;
+    staleCatalog.push(existing);
     catalogByKey.delete(catalogKey(existing.collection, existing.publicName));
   }
-
-  for (const name of physicalPresent) {
-    if (!desiredByPhysical.has(name) && !catalog.some((row) => row.physicalName === name)) {
-      args.sql.exec(compileDropIndexSql(name));
-      ddl = true;
-    }
-  }
-
-  const backfilled = new Set<string>();
-  for (const row of desired) {
+  const orphanIndexes = physicalPresent.filter(
+    (name) => !desiredByPhysical.has(name) && !catalog.some((row) => row.physicalName === name),
+  );
+  const builds = desired.filter((row) => {
     const current = catalogByKey.get(catalogKey(row.collection, row.publicName));
-    const needsBuild =
+    return (
       current === undefined ||
       current.schemaVersion !== row.schemaVersion ||
       !sameFields(current.fields, row.fields) ||
-      !physicalPresent.includes(row.physicalName);
+      !physicalPresent.includes(row.physicalName)
+    );
+  });
+  if (staleCatalog.length === 0 && orphanIndexes.length === 0 && builds.length === 0) return;
 
-    if (needsBuild) {
-      if (!backfilled.has(row.collection)) {
-        await backfillCollection(row.definition, args.storage, row.collection);
-        backfilled.add(row.collection);
-      }
-      args.sql.exec(compileCreateIndexSql(row));
-      writeCatalog(args.sql, row);
-      ddl = true;
+  // The backfill check reads through the storage driver, which runs on this
+  // executor, so it must finish before the transaction opens: a driver call
+  // from inside it would wait behind the transaction forever.
+  const backfilled = new Set<string>();
+  for (const row of builds) {
+    if (backfilled.has(row.collection)) continue;
+    await backfillCollection(row.definition, args.reader, row.collection);
+    backfilled.add(row.collection);
+  }
+
+  // SQLite runs CREATE INDEX and DROP INDEX transactionally, so the catalog
+  // and the physical indexes change together or not at all.
+  await sql.transaction(async (tx) => {
+    for (const existing of staleCatalog) {
+      await tx.exec(compileDropIndexSql(existing.physicalName));
+      await tx.exec(
+        "DELETE FROM takibi_index_catalog WHERE physical_name = ?",
+        existing.physicalName,
+      );
     }
-  }
-
-  if (ddl) {
-    args.sql.exec("PRAGMA optimize");
-  }
+    for (const name of orphanIndexes) {
+      await tx.exec(compileDropIndexSql(name));
+    }
+    for (const row of builds) {
+      await tx.exec(compileCreateIndexSql(row));
+      await writeCatalog(tx, row);
+    }
+  });
+  await sql.exec("PRAGMA optimize");
 }
 
 function hasIndexes(definition: IndexedCollectionSource): boolean {
@@ -139,25 +173,23 @@ function desiredCatalog(
   return rows;
 }
 
-function readCatalog(sql: SqlStorage): CatalogRecord[] {
-  return sql
-    .exec<{
-      physical_name: string;
-      collection: string;
-      public_name: string;
-      fields_json: string;
-      schema_version: number;
-    }>(
-      "SELECT physical_name, collection, public_name, fields_json, schema_version FROM takibi_index_catalog",
-    )
-    .toArray()
-    .map((row) => ({
-      physicalName: row.physical_name,
-      collection: row.collection,
-      publicName: row.public_name,
-      fields: parseCatalogFields(row.fields_json, row.collection, row.public_name),
-      schemaVersion: row.schema_version,
-    }));
+async function readCatalog(sql: SqlStatementExecutor): Promise<CatalogRecord[]> {
+  const { rows } = await sql.exec<{
+    physical_name: string;
+    collection: string;
+    public_name: string;
+    fields_json: string;
+    schema_version: number;
+  }>(
+    "SELECT physical_name, collection, public_name, fields_json, schema_version FROM takibi_index_catalog",
+  );
+  return rows.map((row) => ({
+    physicalName: row.physical_name,
+    collection: row.collection,
+    publicName: row.public_name,
+    fields: parseCatalogFields(row.fields_json, row.collection, row.public_name),
+    schemaVersion: row.schema_version,
+  }));
 }
 
 function parseCatalogFields(json: string, collection: string, publicName: string): string[] {
@@ -177,8 +209,8 @@ function parseCatalogFields(json: string, collection: string, publicName: string
   return fields;
 }
 
-function writeCatalog(sql: SqlStorage, row: CatalogRecord): void {
-  sql.exec(
+async function writeCatalog(sql: SqlStatementExecutor, row: CatalogRecord): Promise<void> {
+  await sql.exec(
     `INSERT INTO takibi_index_catalog
        (physical_name, collection, public_name, fields_json, schema_version)
      VALUES (?, ?, ?, ?, ?)
@@ -195,14 +227,12 @@ function writeCatalog(sql: SqlStorage, row: CatalogRecord): void {
   );
 }
 
-function listPhysicalTakibiIndexes(sql: SqlStorage): string[] {
-  return sql
-    .exec<{ name: string }>(
-      `SELECT name FROM sqlite_master
+async function listPhysicalTakibiIndexes(sql: SqlStatementExecutor): Promise<string[]> {
+  const { rows } = await sql.exec<{ name: string }>(
+    `SELECT name FROM sqlite_master
        WHERE type = 'index' AND name LIKE 'takibi_idx_%'`,
-    )
-    .toArray()
-    .map((row) => row.name);
+  );
+  return rows.map((row) => row.name);
 }
 
 function catalogKey(collection: string, publicName: string): string {
