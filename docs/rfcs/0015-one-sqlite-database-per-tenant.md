@@ -18,16 +18,16 @@ deployments may host tenants in one of two ways:
 - **Cloudflare Durable Objects**, one SQLite-backed object per tenant. Unchanged and
   still first class.
 - **One long-lived process that owns one database per tenant**, on Node >= 22.18. The
-  database is a file opened with the built-in `node:sqlite` (`@takibi/node-sqlite`) or a
-  libSQL database opened through `@libsql/client` (`@takibi/libsql`). Bun is not targeted
-  yet, but nothing in the storage port depends on Node; a Bun connection would be one
-  more first-party package.
+  database is a file opened with the built-in `node:sqlite` (`@takibi/node-sqlite`), or a
+  local file or remote libSQL server opened through `@libsql/client` (`@takibi/libsql`).
+  Bun is not targeted yet, but nothing in the storage port depends on Node; a Bun
+  connection would be one more first-party package.
 
-| Backend        | One tenant database is                                                             |
-| -------------- | ---------------------------------------------------------------------------------- |
-| Durable Object | the SQLite storage of the object addressed by the tenant's name                    |
-| SQLite file    | one file (plus its `-wal`/`-shm`) per tenant, in WAL mode with `synchronous=FULL`  |
-| libSQL / Turso | one libSQL database per tenant: a local file, an embedded replica, or a remote URL |
+| Backend        | One tenant database is                                                            |
+| -------------- | --------------------------------------------------------------------------------- |
+| Durable Object | the SQLite storage of the object addressed by the tenant's name                   |
+| SQLite file    | one file (plus its `-wal`/`-shm`) per tenant, in WAL mode with `synchronous=FULL` |
+| libSQL / Turso | one libSQL database per tenant: a local file, or a remote server over HTTP        |
 
 Tenants never share a database, and no table carries a tenant column.
 
@@ -47,7 +47,8 @@ uniqueness, watch, or maintenance exclusion across processes.
 
 Every supported connection must pass one private conformance suite
 (`@takibi/sql-conformance`), which runs the same tests on the Durable Object, `node:sqlite`,
-and local libSQL connections. It covers the SQL port contract, transactions
+local libSQL, and remote libSQL (against a local `sqld`) connections. It covers the SQL
+port contract, transactions
 ([at most once, never replayed](../../packages/takibi/docs/spec/transactions.md), rollback,
 nested joins), uniqueness, list results, cursors and isolation, layout migration, index
 reconciliation, maintenance leases, and snapshot export, restore, and reset. These are
@@ -60,24 +61,28 @@ watch upgrade with `WATCH_UNAVAILABLE` (400; `upgradeWatch` in
 
 ## Remote connections and unknown commit outcomes
 
-A libSQL connection may point at a remote URL. The adapter allows it, but every statement
-becomes a network round trip, and because one tenant's statements run one at a time, a
-tenant's throughput is bounded by round-trip time. An interactive transaction holds the
-server's write lock from `BEGIN IMMEDIATE` until `COMMIT`, across every round trip and the
-application callback in between; server-side transaction timeouts may abort long
-callbacks. An embedded replica reads locally but, unless configured for offline writes,
-sends writes to the primary, so its writes have the same costs.
+A libSQL connection may point at a remote server over HTTP (`libsql:`, `https:`). Every
+statement becomes a network round trip, and because one tenant's statements run one at a
+time, a tenant's throughput is bounded by round-trip time. An interactive transaction holds
+the server's write lock from `BEGIN IMMEDIATE` until `COMMIT`, across every round trip and
+the application callback in between; server-side transaction timeouts may abort long
+callbacks. A remote database gets no session `PRAGMA`s: each HTTP request runs on its own
+server stream, so one would not outlive its request; durability settings are the server's.
 
-When a connection cannot tell whether a commit (or an autocommit write) took effect, for
-example because the response to `COMMIT` was lost, it rejects with the `TakibiError` code
-`SQL_COMMIT_OUTCOME_UNKNOWN`. The executor, storage driver, and runtime pass it through
-unchanged and never retry or replay. Commit observation treats it as possibly committed,
-never as "nothing changed". Durable Objects and local SQLite know their commit outcome and
-do not raise it.
+When a connection sent a write and cannot tell whether it was committed (the response to
+`COMMIT`, or to an autocommit write, was lost), it rejects with the `TakibiError` code
+`SQL_COMMIT_OUTCOME_UNKNOWN`. Reads and statements inside an open transaction commit
+nothing by themselves, so their failures are ordinary errors; the engine marks its reads
+outside transactions so the connection can tell them apart. The libSQL connection treats a
+remote failure as proof that nothing committed only when the client reports a SQLite result
+code (`SQLITE_*`) or refused to send `COMMIT`; anything else is unknown. The executor, storage driver, and runtime pass
+the error through unchanged and never retry or replay. Commit observation treats it as
+possibly committed, never as "nothing changed". Durable Objects and local SQLite know their
+commit outcome and do not raise it.
 
-Remote libSQL and embedded-replica sync are not exercised by the repository's tests, which
-use local files and in-memory databases only; their behaviour above is taken from the
-client's source and documentation.
+Remote behaviour is tested against a local `sqld` 0.24.32 (conformance plus lost requests,
+lost responses, and a killed server), when the test run is given the binary; Turso Cloud is
+not exercised.
 
 ## Driver contract stays private
 
@@ -98,9 +103,14 @@ later remains compatible while retracting it would not. The connection packages 
   socket registry and its lifecycle are the Hibernation API, so another host would need its
   own socket registry, recovery, and shutdown.
 - Queue timeouts or cancellation in the executor.
+- libSQL embedded replicas (a local file synced with a remote primary). Writes go to the
+  primary while reads are local and may lag, which is a different consistency model from
+  the single database this RFC assumes, and they need the native client and a local file.
+  Nothing depends on them; revisit with a use and real tests.
+- libSQL over WebSockets; only HTTP is tested.
 
 ## Implementation
 
-In progress: the `node:sqlite` and libSQL connections, the unknown-outcome signal, and the
-conformance suite exist. Still required: the Node host (tenant registry, startup
-exclusion, lifecycle, public entry point).
+In progress: the `node:sqlite` and libSQL (local and remote) connections, the
+unknown-outcome signal, and the conformance suite exist. Still required: the Node host
+(tenant registry, startup exclusion, lifecycle, public entry point).
