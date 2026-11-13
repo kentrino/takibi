@@ -133,9 +133,14 @@ export async function openSqliteStorage(
   // transaction runs alone, so no driver statement can land inside another
   // transaction on the same database.
   const createDriver = (sql: SqlStatementExecutor, transactionBound: boolean): StorageDriver => {
+    // Outside a transaction, reads go through `read`: a failed read never
+    // reports an unknown commit outcome. Inside one, every statement is `tx`'s.
+    const reader: SqlStatementExecutor = transactionBound
+      ? sql
+      : { exec: (query, ...bindings) => executor.read(query, ...bindings) };
     const driver: StorageDriver = {
       async get(resource, id) {
-        const { rows } = await sql.exec<DocumentRow>(
+        const { rows } = await reader.exec<DocumentRow>(
           `SELECT id, created_at, updated_at, schema_version, revision, data
              FROM takibi_documents
              WHERE collection = ? AND id = ?`,
@@ -178,10 +183,10 @@ export async function openSqliteStorage(
       async list(resource, opts, plan) {
         const prepared = await prepareList(resource, opts, registry);
         if (prepared.scan.kind === "index") {
-          const readChunk = createSqlIndexChunkReader(sql, resource, prepared, plan);
+          const readChunk = createSqlIndexChunkReader(reader, resource, prepared, plan);
           return paginateIndex(prepared, prepared.scan.resolved, readChunk, plan);
         }
-        return paginate(prepared, createSqlChunkReader(sql, resource, prepared, plan), plan);
+        return paginate(prepared, createSqlChunkReader(reader, resource, prepared, plan), plan);
       },
       transaction(callback) {
         if (transactionBound) {

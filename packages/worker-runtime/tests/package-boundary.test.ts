@@ -179,6 +179,28 @@ test("worker-runtime source stays off client, testing, execution-model, and Node
   expect([...reachable].filter((value) => value.startsWith("node:"))).toEqual([]);
 });
 
+test("the tenant-runtime entry reaches no Cloudflare module or Cloudflare type", () => {
+  const runtime = readManifest(join(packageDir, "package.json"));
+  expect(runtime.exports?.["./tenant-runtime"]).toBe("./src/tenant.ts");
+  expect(runtime.publishConfig?.exports).toMatchObject({
+    "./tenant-runtime": {
+      types: "./dist/tenant-runtime.d.mts",
+      import: "./dist/tenant-runtime.mjs",
+    },
+  });
+  const reachable = walkGraph(resolveWorkspaceEntry("@takibi/worker-runtime", "./tenant-runtime"));
+  expect(reachable.has(join(packageDir, "src/tenant-runtime.ts"))).toBe(true);
+  expect([...reachable].filter((value) => value.startsWith("cloudflare:"))).toEqual([]);
+  // Ambient types that only @cloudflare/workers-types declares. Node hosts and
+  // the SQL conformance suite type-check this graph without them.
+  const cloudflareTypes =
+    /\b(?:DurableObject|DurableObjectState|DurableObjectStorage|DurableObjectNamespace|DurableObjectId|DurableObjectStub|ExecutionContext|WebSocketPair|Fetcher|Crypto)\b/;
+  const offenders = [...reachable]
+    .filter((file) => file.endsWith(".ts"))
+    .filter((file) => cloudflareTypes.test(stripComments(readFileSync(file, "utf8"))));
+  expect(offenders).toEqual([]);
+});
+
 test("published runtime declarations do not import Node or higher-layer modules", () => {
   const dtsPath = join(packageDir, "dist/index.d.mts");
   const jsPath = join(packageDir, "dist/index.mjs");

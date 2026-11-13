@@ -288,3 +288,32 @@ test("an unknown commit outcome reaches the caller unchanged and nothing is retr
   // The executor keeps serving later calls.
   await expect(sql.exec("SELECT")).resolves.toEqual({ rows: [] });
 });
+
+test("reads go to the connection's read, in call order with every other call", async () => {
+  const { connection, log } = recordingConnection();
+  const sql = new SqlExecutor({
+    ...connection,
+    async read<Row extends SqlRow>(query: string) {
+      log.push(`read ${query}`);
+      return empty<Row>();
+    },
+  });
+  const transaction = sql.transaction(async (tx) => {
+    await macrotask();
+    await tx.exec("inside");
+  });
+  const read = sql.read("after");
+  await Promise.all([transaction, read, sql.exec("last")]);
+  expect(log).toEqual(["BEGIN", "in-tx inside", "COMMIT", "read after", "last"]);
+
+  await sql.transaction(async () => {
+    await expect(sql.read("reentrant")).rejects.toMatchObject(reentrant);
+  });
+});
+
+test("without a read of its own, a connection serves reads through exec", async () => {
+  const { connection, log } = recordingConnection();
+  const sql = new SqlExecutor(connection);
+  await sql.read("SELECT 1");
+  expect(log).toEqual(["SELECT 1"]);
+});

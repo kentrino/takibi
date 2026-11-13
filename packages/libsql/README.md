@@ -11,20 +11,42 @@ const sql = await openLibsqlExecutor({ url: "file:/var/lib/app/tenants/acme.db" 
 sql.close();
 ```
 
-| URL                                 | Location  | Notes                                                    |
-| ----------------------------------- | --------- | -------------------------------------------------------- |
-| `file:...`, `:memory:`              | `local`   | WAL, `synchronous=FULL`, `foreign_keys=ON`; tested       |
-| `file:...` with `syncUrl`           | `replica` | embedded replica; writes go to the primary; **untested** |
-| `libsql:`, `https:`, `wss:` (Turso) | `remote`  | every statement is a round trip; **untested**            |
+| URL                                  | Location | Notes                                                        |
+| ------------------------------------ | -------- | ------------------------------------------------------------ |
+| `file:...`, `:memory:`               | `local`  | WAL, `synchronous=FULL`, `foreign_keys=ON`                   |
+| `libsql:`, `https:`, `http:` + token | `remote` | every statement is a round trip; server settings, no pragmas |
+
+Embedded replicas (`syncUrl`), WebSocket URLs and other client options are refused.
+`libsqlConnection(client, "remote")` wraps a client created elsewhere, such as
+`@libsql/client/web` inside a Cloudflare Worker.
 
 The connection reads integers as numbers (`intMode: "number"`; an unsafe integer
 rejects) and uses one client connection. Transactions use `write` mode (`BEGIN
 IMMEDIATE`); against a remote database an open transaction holds the server's write lock
-across round trips. A remote or replica commit (or autocommit write) that fails without
-proof that it did not take effect rejects with `SQL_COMMIT_OUTCOME_UNKNOWN`. Neither this
-package nor `@libsql/client` 0.18.0 retries a statement or a commit; re-check that when
-upgrading the client.
+across round trips. A remote `COMMIT`, or an autocommit write, that fails without a SQLite
+result code (`LibsqlError.code` `SQLITE_*`) proving it was rejected rejects with
+`SQL_COMMIT_OUTCOME_UNKNOWN`. Reads and statements inside a transaction fail as
+themselves. Neither this package nor `@libsql/client` 0.18.0 retries a statement or a
+commit; re-check that, and the error codes the classification relies on, when upgrading
+the client.
 
 The package is private: the storage port is internal, and the connection has no use
-until the Node host exists. It must pass the shared `@takibi/sql-conformance` suite,
-which runs here against local files and `:memory:` only.
+until a host exists. It must pass the shared `@takibi/sql-conformance` suite, which runs
+here against local files and `:memory:`, and against a real libSQL server.
+
+## Remote tests against `sqld`
+
+`tests/remote.test.ts` runs the conformance suite against a local `sqld` (libSQL server,
+Hrana over HTTP, one namespace per test), plus real failure paths through a proxy that
+loses a request or a response (reads, autocommit writes, statements in a transaction,
+`COMMIT`) and a server killed mid-transaction. It needs an `sqld` binary:
+
+```sh
+gh release download libsql-server-v0.24.32 -R tursodatabase/libsql \
+  -p 'libsql-server-aarch64-apple-darwin.tar.xz*'   # or x86_64-unknown-linux-gnu, ...
+shasum -a 256 -c libsql-server-*.tar.xz.sha256 && tar xf libsql-server-*.tar.xz
+TAKIBI_SQLD=$PWD/libsql-server-aarch64-apple-darwin/sqld pnpm -C packages/libsql test
+```
+
+Without `TAKIBI_SQLD` those tests are reported as skipped. CI does not set it yet, so
+remote support is verified locally against `sqld` 0.24.32, not against Turso Cloud.

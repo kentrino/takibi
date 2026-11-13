@@ -167,6 +167,28 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
   expect(catalog).toEqual(["byCreator"]);
 });
 
+test("index reconcile succeeds when the database refuses the optimize hint", async () => {
+  // sqld rejects `PRAGMA optimize` as an unsupported statement.
+  const sql = createNodeSqliteExecutor((connection) => ({
+    ...connection,
+    async exec(query, ...bindings) {
+      if (query === "PRAGMA optimize") throw new Error("unsupported statement: PRAGMA optimize");
+      return connection.exec(query, ...bindings);
+    },
+  }));
+  const collections = { posts };
+  const registry = compileIndexRegistry(collections);
+  const { indexes } = await openSqliteStorage(sql, registry);
+  await indexes.reconcile({ collections, registry });
+  const names = (
+    await all<{ name: string }>(
+      sql,
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'takibi_idx_%' ORDER BY name`,
+    )
+  ).map((row) => row.name);
+  expect(names).toHaveLength(2);
+});
+
 test("SQLite backfill preserves indexed order for mixed keys", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);

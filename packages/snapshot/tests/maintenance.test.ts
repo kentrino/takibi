@@ -165,3 +165,71 @@ test("staging a unique value reports an unknown commit outcome as itself, not as
     { code: "SNAPSHOT_INVALID_DOCUMENT" },
   );
 });
+
+test("the backend reads documents and staging outside transactions through read", async () => {
+  const log: string[] = [];
+  const sql = new SqlExecutor({
+    async exec<Row extends SqlRow>(query: string) {
+      log.push(`exec ${query.trim().split(/\s+/)[0]}`);
+      return { rows: [] as Row[] };
+    },
+    async read<Row extends SqlRow>(query: string) {
+      log.push(`read ${query.trim().split(/\s+/)[0]}`);
+      return { rows: [] as Row[] };
+    },
+    transaction: (body) => body({ exec: async <Row extends SqlRow>() => ({ rows: [] as Row[] }) }),
+  });
+  const backend = await SqliteMaintenanceBackend.open(sql);
+  log.length = 0;
+  await backend.scanDocuments(undefined, 10);
+  await backend.scanDocuments({ collection: "records", id: "a" }, 10);
+  await backend.hasStagedDocument("owner", "records", "a");
+  expect(log).toEqual(["read SELECT", "read SELECT", "read SELECT"]);
+});
+
+/** Commits like the memory backend, then reports the outcome as unknown once. */
+class LostAcknowledgementBackend extends MemoryMaintenanceBackend {
+  failNext: "acquire" | "release" | undefined;
+  readonly unknown = sqlCommitOutcomeUnknown();
+
+  #lose(operation: "acquire" | "release"): void {
+    if (this.failNext !== operation) return;
+    this.failNext = undefined;
+    throw this.unknown;
+  }
+
+  override async acquire(...args: Parameters<MemoryMaintenanceBackend["acquire"]>) {
+    const lease = await super.acquire(...args);
+    this.#lose("acquire");
+    return lease;
+  }
+
+  override async release(ownerToken: string) {
+    await super.release(ownerToken);
+    this.#lose("release");
+  }
+}
+
+test("an acquire with an unknown outcome leaves no lease behind and normal work admitted", async () => {
+  const backend = new LostAcknowledgementBackend();
+  const controller = new MaintenanceController(backend);
+  backend.failNext = "acquire";
+  await expect(controller.acquire("export")).rejects.toBe(backend.unknown);
+  expect(controller.blocked).toBe(false);
+  await expect(controller.runNormal(async () => "ok")).resolves.toBe("ok");
+  // The lease the lost acquire committed was dropped, so maintenance can start again.
+  const lease = await controller.acquire("export");
+  await controller.release(lease);
+});
+
+test("a release with an unknown outcome still ends the maintenance window in memory", async () => {
+  const backend = new LostAcknowledgementBackend();
+  const changes: (string | undefined)[] = [];
+  const controller = new MaintenanceController(backend, (purpose) => changes.push(purpose));
+  const lease = await controller.acquire("restore");
+  backend.failNext = "release";
+  await expect(controller.release(lease)).rejects.toBe(backend.unknown);
+  expect(controller.blocked).toBe(false);
+  expect(changes).toEqual(["restore", undefined]);
+  await expect(controller.runNormal(async () => "ok")).resolves.toBe("ok");
+});

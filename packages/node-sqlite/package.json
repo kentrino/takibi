@@ -35,7 +35,6 @@
     "@takibi/storage": "workspace:^"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250803.0",
     "@takibi/sql-conformance": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",

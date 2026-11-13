@@ -19,7 +19,7 @@ import {
   tracedStorage,
   type TakibiTracer,
   type TracingContextBackend,
-} from "@takibi/worker-runtime";
+} from "@takibi/worker-runtime/tenant-runtime";
 import type { ConformanceTarget } from "./target";
 
 export const transactionCases = [
@@ -47,6 +47,7 @@ export async function injectedTransactionStorage(
   let armed = false;
   const executor = new SqlExecutor({
     exec: (query, ...bindings) => raw.exec(query, ...bindings),
+    read: (query, ...bindings) => raw.read(query, ...bindings),
     async transaction(callback) {
       if (!armed) return raw.transaction(callback);
       if (scenario === "admission") throw error;
@@ -215,5 +216,23 @@ export function defineTransactionCallbackTests(target: ConformanceTarget): void 
           ));
       }
     }
+    // The check itself must notice a replay, or every case above passes vacuously.
+    test("the check detects a wrapper that replays the callback", () =>
+      target.withDatabase("callback-replaying-wrapper", async (sql) => {
+        const replaying: TransactionWrapper = {
+          expectsSpans: false,
+          wrap: (driver) => ({
+            ...driver,
+            transaction: (callback) =>
+              driver.transaction(async (scope) => {
+                await callback(scope);
+                return callback(scope);
+              }),
+          }),
+        };
+        await expect(checkTransactionCallbackContract(sql, replaying, "success")).rejects.toThrow(
+          "transaction callbacks must not be replayed",
+        );
+      }));
   });
 }

@@ -38,6 +38,11 @@ export function defineSqlPortTests(target: ConformanceTarget): void {
           (await sql.exec("DELETE FROM t WHERE k = ? RETURNING k", "b")).rows.map(plain),
         ).toEqual([{ k: "b" }]);
         expect((await sql.exec("SELECT k FROM t WHERE k = ?", "missing")).rows).toEqual([]);
+        // `read` serves statements that write nothing, with the same results.
+        expect((await sql.read("SELECT k, i FROM t WHERE k = ?", "a")).rows.map(plain)).toEqual([
+          { k: "a", i: 7 },
+        ]);
+        expect((await sql.read("SELECT k FROM t WHERE k = ?", "missing")).rows).toEqual([]);
       }));
 
     test("numbers bind and read back as JavaScript numbers", () =>

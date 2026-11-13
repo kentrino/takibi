@@ -54,5 +54,17 @@ may or may not be durable. The runtime passes this error through unchanged; it
 neither retries the commit nor replays the callback, and it never reports the
 outcome as a rollback. Watch subscribers to the touched collections are
 re-evaluated as if the write committed. Read the data again before deciding to
-retry. Durable Objects and local SQLite files always know their commit outcome
-and never raise this error.
+retry. A read never raises this error, and neither does a failure before
+`COMMIT` was sent: those are ordinary failures and nothing was committed.
+Durable Objects and local SQLite files always know their commit outcome and
+never raise this error.
+
+The maintenance lease follows the same rule. When acquiring a lease reports an
+unknown outcome, the runtime deletes any lease it may have taken before
+reporting the error; when releasing one does, normal operations are admitted
+again anyway. A lease row left behind by a failure of both refuses a new
+export, restore, or reset with `MAINTENANCE_LOCKED` until it expires (30 seconds).
+A restore or reset whose final commit is unknown may or may not have been
+applied; export again to see which. A startup step (layout, index
+reconciliation, seeding, abandoned-lease cleanup) whose outcome is unknown fails
+startup; every step is idempotent, so the next start completes it.
