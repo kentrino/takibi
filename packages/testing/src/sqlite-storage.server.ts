@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { DatabaseSync } from "node:sqlite";
 import {
   SqlExecutor,
@@ -15,7 +16,10 @@ export type NodeSqliteExecutor = SqlExecutor & {
  * Implements the Takibi SQL port over an in-memory `node:sqlite` database.
  * One connection serves every statement; a transaction is BEGIN/COMMIT on that
  * connection. `intercept` wraps the raw connection before the executor
- * serialises it, for tests that inject faults at the port.
+ * serialises it, for tests that inject faults at the port. The executor tracks
+ * its transactions with `AsyncLocalStorage`, so any call on it from inside one
+ * of its own open transaction callbacks rejects with `SQL_REENTRANT_CALL`
+ * instead of waiting forever.
  */
 export function createNodeSqliteExecutor(
   intercept?: (connection: SqlConnection) => SqlConnection,
@@ -46,7 +50,9 @@ export function createNodeSqliteExecutor(
       }
     },
   };
-  const executor = new SqlExecutor(intercept ? intercept(connection) : connection);
+  const executor = new SqlExecutor(intercept ? intercept(connection) : connection, {
+    asyncContext: new AsyncLocalStorage(),
+  });
   return Object.assign(executor, {
     close() {
       if (closed) return;

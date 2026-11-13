@@ -1,7 +1,14 @@
 export { openSqliteStorage } from "./storage";
 export type { SqliteStorage } from "./storage";
 export { SqlExecutor } from "./sql-executor";
-export type { SqlConnection, SqlResult, SqlRow, SqlStatementExecutor } from "./sql-executor";
+export type {
+  SqlAsyncContext,
+  SqlConnection,
+  SqlExecutorOptions,
+  SqlResult,
+  SqlRow,
+  SqlStatementExecutor,
+} from "./sql-executor";
 export {
   afterIndexCursor,
   assertCollectionIndexes,

@@ -1,4 +1,5 @@
 import { expect, test } from "vite-plus/test";
+import { openSqliteStorage } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 
 test("Node SQLite executor returns rows for SELECT and rowsWritten for writes", async () => {
@@ -94,5 +95,36 @@ test("overlapping transactions run one after the other instead of nesting BEGIN"
     { id: "first" },
     { id: "second" },
   ]);
+  sql.close();
+});
+
+test("the storage driver rejects a reentrant call from inside its transaction instead of hanging", async () => {
+  const sql = createNodeSqliteExecutor();
+  const storage = await openSqliteStorage(sql);
+  const doc = (id: string) => ({
+    id,
+    createdAt: "2026-11-13T00:00:00.000Z",
+    updatedAt: "2026-11-13T00:00:00.000Z",
+  });
+  await storage.transaction(async (tx) => {
+    await tx.put("posts", doc("inside"));
+    // The outer driver would wait for this transaction forever.
+    await expect(storage.get("posts", "inside")).rejects.toMatchObject({
+      code: "SQL_REENTRANT_CALL",
+    });
+    await expect(storage.transaction(async () => "unreached")).rejects.toMatchObject({
+      code: "SQL_REENTRANT_CALL",
+    });
+    // A nested transaction on the transaction's driver joins it.
+    await tx.transaction(async (nested) => nested.put("posts", doc("nested")));
+  });
+  const outside = storage.transaction(async (tx) => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return tx.get("posts", "inside");
+  });
+  // An independent call waits for the open transaction rather than failing.
+  const independent = storage.list("posts");
+  await expect(outside).resolves.toMatchObject({ id: "inside" });
+  expect((await independent).items.map(({ id }) => id)).toEqual(["inside", "nested"]);
   sql.close();
 });

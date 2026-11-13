@@ -442,3 +442,33 @@ test("close waits for watch fan-out still pending in waitUntil", async () => {
   expect(statements).toHaveLength(issued);
   inner.close();
 });
+
+test("outer collections and executions called from inside a $transaction reject instead of hanging", async () => {
+  const sql = createNodeSqliteExecutor();
+  const runtime = runtimeOver(immediateHost(), sql);
+  await runtime.ready;
+  const outcome = await runtime.collectionsApi.$transaction(async ($collections) => {
+    await $collections.posts.update("welcome", { title: "inside" });
+    return Promise.allSettled([
+      runtime.collectionsApi.posts.get("welcome"),
+      runtime.execute(execution(), (local) => local.execute({}, getWelcome)),
+    ]);
+  });
+  expect(outcome).toEqual([
+    { status: "rejected", reason: expect.objectContaining({ code: "SQL_REENTRANT_CALL" }) },
+    // An execution reports failures as a result value.
+    {
+      status: "fulfilled",
+      value: expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: "SQL_REENTRANT_CALL" }),
+      }),
+    },
+  ]);
+  // The transaction itself committed, and independent calls keep working.
+  await expect(runtime.collectionsApi.posts.get("welcome")).resolves.toMatchObject({
+    title: "inside",
+  });
+  await runtime.close();
+  sql.close();
+});

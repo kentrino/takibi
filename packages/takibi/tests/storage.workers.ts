@@ -445,3 +445,19 @@ test("a driver write during a failing Durable Object restore transaction survive
     expect((await storage.list("posts")).items.map(({ id }) => id)).toEqual(["before", "during"]);
   });
 });
+
+test("a Durable Object storage call before a transaction callback's first await rejects as reentrant", async () => {
+  const stub = storageStub("reentrant-call");
+  await stub.ping();
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const storage = await durableStorage(state.storage);
+    await storage.transaction(async (tx) => {
+      // Issued synchronously from inside the callback: waiting would deadlock.
+      const reentrant = storage.get("posts", "inside");
+      await tx.put("posts", meta({ id: "inside" }));
+      await expect(reentrant).rejects.toMatchObject({ code: "SQL_REENTRANT_CALL" });
+    });
+    await expect(storage.get("posts", "inside")).resolves.toMatchObject({ id: "inside" });
+  });
+});

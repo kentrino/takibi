@@ -35,6 +35,28 @@ export type SqlConnection = SqlStatementExecutor & {
 };
 
 /**
+ * An async context store. Node's `AsyncLocalStorage` satisfies it; this
+ * package never imports one, so hosts without async context (a Durable Object
+ * without `nodejs_compat`) simply do not pass it.
+ */
+export interface SqlAsyncContext {
+  run<R>(store: unknown, callback: () => R): R;
+  getStore(): unknown;
+}
+
+export type SqlExecutorOptions = {
+  /**
+   * Lets the executor recognise calls made from inside one of its own
+   * transaction callbacks at any depth, not only before the callback's first
+   * `await`. Give each executor its own store, or share one only among
+   * executors.
+   */
+  asyncContext?: SqlAsyncContext;
+};
+
+type OpenTransaction = { readonly executor: SqlExecutor; open: boolean };
+
+/**
  * The SQL port the storage driver, maintenance backend, layout initialisation
  * and index reconciliation share for one database.
  *
@@ -44,33 +66,51 @@ export type SqlConnection = SqlStatementExecutor & {
  * transaction's `tx` handle, and two transactions never overlap. `tx` is valid
  * until the callback settles; using it afterwards rejects.
  *
- * Inside a callback, use `tx`. A call on the executor itself waits for the
- * open transaction, so awaiting it from inside the callback never settles.
- * Takibi never nests port transactions; nested storage transactions join the
- * outer one above this port.
+ * Inside a callback, use `tx`. A call on the executor itself would wait for
+ * the open transaction, which waits for the callback: it can never settle.
+ * The executor rejects such a reentrant call at once with
+ * `SQL_REENTRANT_CALL` when it can tell the call comes from inside its open
+ * transaction's callback:
+ *
+ * - always, when the call reaches the executor synchronously while the
+ *   callback runs up to its first `await`;
+ * - with {@link SqlExecutorOptions.asyncContext}, at any point in the
+ *   callback's async continuation (including work it started without
+ *   awaiting) while the transaction is open.
+ *
+ * Any other reentrant call (without an async context, one issued after the
+ * callback's first `await`) still waits forever. Calls from independent work
+ * wait for the transaction as usual. Takibi never nests port transactions;
+ * nested storage transactions join the outer one above this port.
  */
 export class SqlExecutor implements SqlStatementExecutor {
   readonly #connection: SqlConnection;
+  readonly #asyncContext: SqlAsyncContext | undefined;
   #tail: Promise<void> = Promise.resolve();
+  /** True while a transaction callback of this executor runs synchronously. */
+  #inCallback = false;
 
-  constructor(connection: SqlConnection) {
+  constructor(connection: SqlConnection, options: SqlExecutorOptions = {}) {
     this.#connection = connection;
+    this.#asyncContext = options.asyncContext;
   }
 
   exec<Row extends SqlRow = SqlRow>(
     query: string,
     ...bindings: SqlBinding[]
   ): Promise<SqlResult<Row>> {
+    if (this.#isReentrant()) return Promise.reject(reentrantCallError());
     return this.#serialize(() => this.#connection.exec<Row>(query, ...bindings));
   }
 
   transaction<T>(callback: (tx: SqlStatementExecutor) => Promise<T>): Promise<T> {
+    if (this.#isReentrant()) return Promise.reject(reentrantCallError());
     return this.#serialize(() =>
       this.#connection.transaction(async (connectionTx) => {
-        let open = true;
+        const current: OpenTransaction = { executor: this, open: true };
         const tx: SqlStatementExecutor = {
           exec(query, ...bindings) {
-            if (!open) {
+            if (!current.open) {
               return Promise.reject(
                 new TakibiError(
                   "SQL_TRANSACTION_CLOSED",
@@ -83,11 +123,39 @@ export class SqlExecutor implements SqlStatementExecutor {
           },
         };
         try {
-          return await callback(tx);
+          return await this.#enter(current, () => callback(tx));
         } finally {
-          open = false;
+          current.open = false;
         }
       }),
+    );
+  }
+
+  /** Run the callback marked as inside `current`, synchronously and (if available) across awaits. */
+  #enter<T>(current: OpenTransaction, callback: () => Promise<T>): Promise<T> {
+    const invoke = () => {
+      this.#inCallback = true;
+      try {
+        return callback();
+      } finally {
+        this.#inCallback = false;
+      }
+    };
+    const context = this.#asyncContext;
+    if (context === undefined) return invoke();
+    const outer = context.getStore();
+    const open = Array.isArray(outer) ? [...(outer as OpenTransaction[]), current] : [current];
+    return context.run(open, invoke);
+  }
+
+  #isReentrant(): boolean {
+    if (this.#inCallback) return true;
+    const store = this.#asyncContext?.getStore();
+    return (
+      Array.isArray(store) &&
+      (store as OpenTransaction[]).some(
+        (transaction) => transaction.executor === this && transaction.open,
+      )
     );
   }
 
@@ -99,4 +167,14 @@ export class SqlExecutor implements SqlStatementExecutor {
     );
     return result;
   }
+}
+
+function reentrantCallError(): TakibiError {
+  return new TakibiError(
+    "SQL_REENTRANT_CALL",
+    "SQL executor called from inside its own open transaction; it would wait for that " +
+      "transaction forever. Use the transaction's handle (or the transaction-scoped " +
+      "storage / collections) instead.",
+    500,
+  );
 }
