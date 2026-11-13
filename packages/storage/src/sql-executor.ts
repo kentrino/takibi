@@ -43,8 +43,8 @@ export type SqlStatementExecutor = {
  *
  * Bindings are strings, finite numbers, and `null`. Result rows map column
  * names to `string`, `number`, or `null`. An INTEGER result outside the safe
- * integer range is backend-defined (rejected by `node:sqlite` and libSQL,
- * rounded to the nearest double by Durable Objects); the engine never reads
+ * integer range is backend-defined (rejected by Node's built-in SQLite and
+ * libSQL, rounded to the nearest double by Durable Objects); the engine never reads
  * one, and the conformance suite pins both behaviours.
  */
 export type SqlConnection = SqlStatementExecutor & {
