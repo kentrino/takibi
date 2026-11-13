@@ -102,9 +102,12 @@ describe("native Hibernation query watches", () => {
   });
   it("checks expired policy before the next snapshot, and terminates without documents", async () => {
     const f = fixture();
-    const { frames, socket } = await f.connect("", { expires: Date.now() + 150 });
+    // The handshake (a cold Durable Object start) must finish before expiry;
+    // 150 ms was too tight for a slow CI runner.
+    const expires = Date.now() + 1_000;
+    const { frames, socket } = await f.connect("", { expires });
     const closed = new Promise<CloseEvent>((resolve) => socket.addEventListener("close", resolve));
-    await new Promise((resolve) => setTimeout(resolve, 160));
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, expires - Date.now()) + 10));
     await f.add("private", 1);
     await expect.poll(() => frames.length).toBe(2);
     expect(frames[1].kind).toBe("error");
