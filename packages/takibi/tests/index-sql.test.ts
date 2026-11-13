@@ -210,3 +210,18 @@ test("SQLite backfill preserves indexed order for mixed keys", async () => {
   expect(durablePage.items.map((document) => document.id)).toEqual(["m", "n", "o"]);
   expect(durablePage.nextCursor).toBeUndefined();
 });
+
+test("the opened SQLite storage exposes driver operations and index reconcile, never a SQL handle", async () => {
+  const sql = createNodeSqliteExecutor();
+  const storage = await openSqliteStorage(sql);
+  expect(Object.keys(storage).sort()).toEqual([
+    "delete",
+    "get",
+    "list",
+    "put",
+    "reconcileIndexes",
+    "transaction",
+  ]);
+  expect(Object.values(storage as object)).not.toContain(sql);
+  sql.close();
+});

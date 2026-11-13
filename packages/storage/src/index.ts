@@ -38,6 +38,7 @@ export {
 } from "./index-sql";
 export type { IndexCatalogRow } from "./index-sql";
 export { backfillIndexedCollections, reconcileCollectionIndexes } from "./index-reconcile";
+export type { ReconcileIndexesOptions } from "./index-reconcile";
 export { documentRevision, withDocumentRevision } from "./revision";
 export type { StorageDriver, StorageListPlan, StorageReadTransform, StoredDocument } from "./types";
 export { observeCommits } from "./observe-commits";

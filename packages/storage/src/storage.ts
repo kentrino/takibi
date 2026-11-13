@@ -15,6 +15,7 @@ import { TAKIBI_REVISION_KEY, TAKIBI_VERSION_KEY } from "@takibi/shared-types";
 import { documentRevision, withDocumentRevision } from "./revision";
 import type { SqlExecutor, SqlResult, SqlRow, SqlStatementExecutor } from "./sql-executor";
 import type { StorageDriver, StorageListPlan, StoredDocument } from "./types";
+import { reconcileIndexes, type ReconcileIndexesOptions } from "./index-reconcile";
 
 type ListIdCursor = {
   index?: never;
@@ -87,10 +88,18 @@ type DocumentRow = {
   data: string;
 };
 
-/** The storage driver over an initialised Takibi SQLite layout. */
+/**
+ * The storage driver over an initialised Takibi SQLite layout, plus the one
+ * catalog operation that needs the database below the driver. It never hands
+ * out the SQL executor: holders and wrappers of the driver see only
+ * {@link StorageDriver}.
+ */
 export type SqliteStorage = StorageDriver & {
-  /** The executor the layout was initialised on, for catalog work such as index reconciliation. */
-  readonly sql: SqlExecutor;
+  /**
+   * Bring physical indexes and the index catalog in line with `collections`;
+   * see `reconcileCollectionIndexes`.
+   */
+  reconcileIndexes(options: ReconcileIndexesOptions): Promise<void>;
 };
 
 /**
@@ -168,7 +177,12 @@ export async function openSqliteStorage(
     };
     return driver;
   };
-  return { ...createDriver(executor, false), sql: executor };
+  const storage: SqliteStorage = {
+    ...createDriver(executor, false),
+    reconcileIndexes: (options) =>
+      reconcileIndexes(executor, { ...options, reader: options.reader ?? storage }),
+  };
+  return storage;
 }
 
 async function initializeStorageLayout(executor: SqlExecutor): Promise<void> {

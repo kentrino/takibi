@@ -11,7 +11,7 @@ import {
   type IndexedCollectionSource,
   type IndexRegistry,
 } from "./indexes";
-import type { SqlStatementExecutor } from "./sql-executor";
+import type { SqlExecutor, SqlStatementExecutor } from "./sql-executor";
 import type { SqliteStorage } from "./storage";
 import type { StorageDriver } from "./types";
 
@@ -30,6 +30,13 @@ export async function backfillIndexedCollections(
   }
 }
 
+export type ReconcileIndexesOptions = {
+  /** Reads documents for the backfill check (default: the opened storage). */
+  reader?: StorageDriver;
+  collections: Record<string, IndexedCollectionSource>;
+  registry?: IndexRegistry;
+};
+
 /**
  * Bring the physical indexes and the index catalog of an opened storage in
  * line with `collections`. Before building an index, every document of its
@@ -37,14 +44,19 @@ export async function backfillIndexedCollections(
  * view so documents are checked in their current shape) and must carry the
  * indexed fields.
  */
-export async function reconcileCollectionIndexes(args: {
-  storage: SqliteStorage;
-  reader?: StorageDriver;
-  collections: Record<string, IndexedCollectionSource>;
-  registry?: IndexRegistry;
-}): Promise<void> {
-  const sql = args.storage.sql;
-  const reader = args.reader ?? args.storage;
+export function reconcileCollectionIndexes(
+  args: ReconcileIndexesOptions & { storage: SqliteStorage },
+): Promise<void> {
+  const { storage, ...options } = args;
+  return storage.reconcileIndexes(options);
+}
+
+/** `reconcileCollectionIndexes` on the executor `openSqliteStorage` opened; internal to this package. */
+export async function reconcileIndexes(
+  sql: SqlExecutor,
+  args: ReconcileIndexesOptions & { reader: StorageDriver },
+): Promise<void> {
+  const reader = args.reader;
   const registry = args.registry ?? compileIndexRegistry(args.collections);
   const desired = desiredCatalog(args.collections, registry);
   const catalog = await readCatalog(sql);
