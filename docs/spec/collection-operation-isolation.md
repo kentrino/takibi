@@ -83,9 +83,11 @@ does not supply a target row as `doc` and evaluates the `list` permission.
 detect external I/O or reentry and reject them immediately. Documenting restrictions in the
 README can prevent misuse, but cannot itself guarantee failure before a circular wait.
 
-Takibi's root driver coordinates operations through one `operationQueue`. Subsequent root
-driver operations wait until the transaction callback finishes. If a policy inside that
-transaction waits for another operation queued behind it, a circular wait results.
+Takibi serialises every use of a tenant's database through one `SqlExecutor`
+([port](../../packages/storage/src/sql-executor.ts)): root driver operations, maintenance,
+layout initialisation, and index reconciliation. Statements and transactions issued outside
+an open transaction wait until its callback finishes. If a policy inside that transaction
+waits for another operation queued behind it, a circular wait results.
 A fetch or RPC back into the same DO can cause this. External HTTP does not always produce
 a circular wait, but the coordination boundary remains held while the request is awaited.
 
@@ -162,5 +164,5 @@ or provide an exhaustive safety review.
 Cloudflare's [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transaction)
 includes SQL queries on the SQLite backend in `storage.transaction`. The
 [input/output gate documentation](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/#understand-how-input-and-output-gates-work)
-was also consulted. Those platform gates and Takibi's `operationQueue` described here are
-separate mechanisms.
+was also consulted. Those platform gates and Takibi's `SqlExecutor` serialisation described
+here are separate mechanisms.

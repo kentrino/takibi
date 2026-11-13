@@ -12,6 +12,7 @@ import {
   type IndexRegistry,
 } from "./indexes";
 import type { SqlStatementExecutor } from "./sql-executor";
+import type { SqliteStorage } from "./storage";
 import type { StorageDriver } from "./types";
 
 const BACKFILL_PAGE_SIZE = 200;
@@ -29,16 +30,25 @@ export async function backfillIndexedCollections(
   }
 }
 
+/**
+ * Bring the physical indexes and the index catalog of an opened storage in
+ * line with `collections`. Before building an index, every document of its
+ * collection is read through `reader` (default: `storage`; pass a migrating
+ * view so documents are checked in their current shape) and must carry the
+ * indexed fields.
+ */
 export async function reconcileCollectionIndexes(args: {
-  sql: SqlStatementExecutor;
+  storage: SqliteStorage;
+  reader?: StorageDriver;
   collections: Record<string, IndexedCollectionSource>;
-  storage: StorageDriver;
   registry?: IndexRegistry;
 }): Promise<void> {
+  const sql = args.storage.sql;
+  const reader = args.reader ?? args.storage;
   const registry = args.registry ?? compileIndexRegistry(args.collections);
   const desired = desiredCatalog(args.collections, registry);
-  const catalog = await readCatalog(args.sql);
-  const physicalPresent = await listPhysicalTakibiIndexes(args.sql);
+  const catalog = await readCatalog(sql);
+  const physicalPresent = await listPhysicalTakibiIndexes(sql);
   let ddl = false;
 
   const desiredByPhysical = new Map(desired.map((row) => [row.physicalName, row]));
@@ -51,8 +61,8 @@ export async function reconcileCollectionIndexes(args: {
       (row) => row.collection === existing.collection && row.publicName === existing.publicName,
     );
     if (next && next.physicalName === existing.physicalName) continue;
-    await args.sql.exec(compileDropIndexSql(existing.physicalName));
-    await args.sql.exec(
+    await sql.exec(compileDropIndexSql(existing.physicalName));
+    await sql.exec(
       "DELETE FROM takibi_index_catalog WHERE physical_name = ?",
       existing.physicalName,
     );
@@ -62,7 +72,7 @@ export async function reconcileCollectionIndexes(args: {
 
   for (const name of physicalPresent) {
     if (!desiredByPhysical.has(name) && !catalog.some((row) => row.physicalName === name)) {
-      await args.sql.exec(compileDropIndexSql(name));
+      await sql.exec(compileDropIndexSql(name));
       ddl = true;
     }
   }
@@ -78,17 +88,17 @@ export async function reconcileCollectionIndexes(args: {
 
     if (needsBuild) {
       if (!backfilled.has(row.collection)) {
-        await backfillCollection(row.definition, args.storage, row.collection);
+        await backfillCollection(row.definition, reader, row.collection);
         backfilled.add(row.collection);
       }
-      await args.sql.exec(compileCreateIndexSql(row));
-      await writeCatalog(args.sql, row);
+      await sql.exec(compileCreateIndexSql(row));
+      await writeCatalog(sql, row);
       ddl = true;
     }
   }
 
   if (ddl) {
-    await args.sql.exec("PRAGMA optimize");
+    await sql.exec("PRAGMA optimize");
   }
 }
 

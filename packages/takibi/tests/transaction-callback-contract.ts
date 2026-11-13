@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { expect } from "vite-plus/test";
 import { z } from "zod";
 import {
-  createSqliteStorage,
+  openSqliteStorage,
   observeCommits,
   SqlExecutor,
   type StorageDriver,
@@ -56,8 +56,7 @@ export async function injectedTransactionStorage(
       return result;
     },
   });
-  const storage = createSqliteStorage(executor);
-  await storage.initialize();
+  const storage = await openSqliteStorage(executor);
   armed = true;
   return storage;
 }

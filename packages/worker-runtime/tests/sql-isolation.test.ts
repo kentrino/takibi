@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { SqliteMaintenanceBackend } from "@takibi/snapshot";
-import { createSqliteStorage, type SqlConnection } from "@takibi/storage";
+import { openSqliteStorage, type SqlConnection } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 
 // The storage driver and the maintenance backend share one SQL executor. A
@@ -27,9 +27,8 @@ function slowRestoreWipe(connection: SqlConnection): SqlConnection {
 
 test("a driver write during a failing restore transaction survives its rollback", async () => {
   const sql = createNodeSqliteExecutor(slowRestoreWipe);
-  const storage = createSqliteStorage(sql);
-  await storage.initialize();
-  const backend = new SqliteMaintenanceBackend(sql);
+  const storage = await openSqliteStorage(sql);
+  const backend = await SqliteMaintenanceBackend.open(sql);
   await backend.cleanupAbandoned();
   const document = (id: string) => ({
     id,

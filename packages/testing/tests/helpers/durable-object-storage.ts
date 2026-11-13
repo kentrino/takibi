@@ -1,5 +1,5 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { createSqliteStorage, type IndexRegistry, type SqliteStorageDriver } from "@takibi/storage";
+import { openSqliteStorage, type IndexRegistry, type SqliteStorage } from "@takibi/storage";
 import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
 
 export { createDurableObjectSqlExecutor };
@@ -8,8 +8,8 @@ export { createDurableObjectSqlExecutor };
 export function durableSqliteStorage(
   storage: DurableObjectStorage,
   registry?: IndexRegistry,
-): SqliteStorageDriver {
-  return createSqliteStorage(createDurableObjectSqlExecutor(storage), registry);
+): Promise<SqliteStorage> {
+  return openSqliteStorage(createDurableObjectSqlExecutor(storage), registry);
 }
 
 /**

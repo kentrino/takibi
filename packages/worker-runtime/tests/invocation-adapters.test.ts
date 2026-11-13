@@ -10,7 +10,7 @@ import {
   type RootActionArgs,
 } from "@takibi/api";
 import { fullAccess, none } from "@takibi/policy";
-import { createSqliteStorage, type StorageDriver } from "@takibi/storage";
+import { openSqliteStorage, type StorageDriver } from "@takibi/storage";
 import { runInvocation, type InvocationAdapters } from "@takibi/invocation-lifecycle";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { createBoundInvocationAdapters, type TakibiAdapterMap } from "@takibi/worker-runtime";
@@ -199,7 +199,7 @@ async function createAdapters(actionEvents?: string[]) {
         return { id: doc.id, value: `${doc.value}!` };
       }),
   });
-  const storage: StorageDriver = createSqliteStorage(createNodeSqliteExecutor());
+  const storage: StorageDriver = await openSqliteStorage(createNodeSqliteExecutor());
   const adapters: InvocationAdapters<Map> = await createBoundInvocationAdapters<Ctx>({
     collections,
     storage,

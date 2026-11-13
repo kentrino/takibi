@@ -4,7 +4,7 @@ import { z } from "zod";
 import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "../src/action";
 import { executeAction } from "../src/action-executor";
 import { fullAccess, none } from "../src/policy";
-import { createSqliteStorage } from "../src/storage";
+import { openSqliteStorage } from "../src/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import type { CollectionsDef, StorageDriver, StoredDocument } from "../src/types";
 
@@ -15,11 +15,11 @@ function document(id: string, value: string): StoredDocument {
 }
 
 function createStorage() {
-  return createSqliteStorage(createNodeSqliteExecutor());
+  return openSqliteStorage(createNodeSqliteExecutor());
 }
 
 test("SQLite transactions commit, roll back, and join nested transactions", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   await storage.put("items", document("existing", "before"));
 
   await storage.transaction(async (scoped) => {
@@ -55,7 +55,7 @@ test("policy and input failures happen before an atomic transaction or handler",
       accessPolicy: fullAccess,
     },
   } satisfies CollectionsDef<Ctx>;
-  const raw = createStorage();
+  const raw = await createStorage();
   let transactions = 0;
   const storage: StorageDriver = {
     ...raw,

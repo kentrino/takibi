@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
-import { createSqliteStorage, compileIndexRegistry } from "@takibi/storage";
+import { openSqliteStorage, compileIndexRegistry } from "@takibi/storage";
 import { grant, none, read, fullAccess } from "@takibi/policy";
 import { createTakibi } from "@takibi/worker-runtime";
 import { createClient } from "@takibi/client";
@@ -95,7 +95,7 @@ async function fixture(size = 5) {
   const definitions: CollectionsDef<Context> = {
     posts: { schema, accessPolicy: (ctx) => (ctx.admin ? read : owner(ctx)) },
   };
-  const storage = createSqliteStorage(
+  const storage = await openSqliteStorage(
     db,
     compileIndexRegistry({
       posts: { indexes: { byOwner: ["owner", "createdAt"] as const } },

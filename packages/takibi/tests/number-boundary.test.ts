@@ -3,7 +3,7 @@ import { BadRequestError } from "../src/errors";
 import { decodePublicHttp } from "../src/http";
 import { decodeWireRequest, isWireResponse } from "../src/protocol";
 import { normalizeValidationIssues } from "../src/result";
-import { createSqliteStorage } from "../src/storage";
+import { openSqliteStorage } from "../src/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import type { StoredDocument } from "../src/types";
 
@@ -32,7 +32,7 @@ function operationFailure(status: number) {
 }
 
 async function seedPosts(count: number) {
-  const storage = createSqliteStorage(createNodeSqliteExecutor());
+  const storage = await openSqliteStorage(createNodeSqliteExecutor());
   const ts = "2026-08-26T00:00:00.000Z";
   for (let index = 0; index < count; index += 1) {
     await storage.put("posts", {

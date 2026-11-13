@@ -8,9 +8,6 @@ import * as SnapshotFacade from "../src/snapshot";
 test("Takibi snapshot modules re-export the owner package bindings", () => {
   expect(MaintenanceFacade.MaintenanceController).toBe(SnapshotPkg.MaintenanceController);
   expect(MaintenanceFacade.SqliteMaintenanceBackend).toBe(SnapshotPkg.SqliteMaintenanceBackend);
-  expect(MaintenanceFacade.initializeMaintenanceLayout).toBe(
-    SnapshotPkg.initializeMaintenanceLayout,
-  );
   expect(MaintenanceFacade.createMaintenanceGatedCollections).toBe(
     SnapshotPkg.createMaintenanceGatedCollections,
   );

@@ -87,108 +87,88 @@ type DocumentRow = {
   data: string;
 };
 
-export type SqliteStorageDriver = StorageDriver & {
-  /**
-   * Creates or migrates the storage layout at most once per driver. Every
-   * operation awaits it implicitly; hosts call it during startup so layout
-   * work runs before anything else touches the database.
-   */
-  initialize(): Promise<void>;
+/** The storage driver over an initialised Takibi SQLite layout. */
+export type SqliteStorage = StorageDriver & {
+  /** The executor the layout was initialised on, for catalog work such as index reconciliation. */
+  readonly sql: SqlExecutor;
 };
 
-export function createSqliteStorage(
+/**
+ * Create or migrate the Takibi document/index layout on `executor`, then
+ * return the storage driver over it. This is the only way to obtain a SQLite
+ * storage driver, so every driver runs on an initialised layout. Rejects
+ * with `STORAGE_LAYOUT_VERSION` when the stored layout is unsupported or its
+ * migration fails.
+ */
+export async function openSqliteStorage(
   executor: SqlExecutor,
   registry: IndexRegistry = EMPTY_INDEX_REGISTRY,
-): SqliteStorageDriver {
-  let initialization: Promise<void> | undefined;
-  const initialize = (): Promise<void> => (initialization ??= initializeStorageLayout(executor));
-
+): Promise<SqliteStorage> {
+  await initializeStorageLayout(executor);
   // Ordering and isolation come from the executor: each statement and each
   // transaction runs alone, so no driver statement can land inside another
   // transaction on the same database.
   const createDriver = (sql: SqlStatementExecutor, transactionBound: boolean): StorageDriver => {
-    const execute = <T>(operation: () => T | Promise<T>): Promise<T> =>
-      transactionBound ? Promise.resolve().then(operation) : initialize().then(operation);
     const driver: StorageDriver = {
-      get(resource, id) {
-        return execute(async () => {
-          const { rows } = await sql.exec<DocumentRow>(
-            `SELECT id, created_at, updated_at, schema_version, revision, data
-               FROM takibi_documents
-               WHERE collection = ? AND id = ?`,
-            resource,
-            id,
-          );
-          return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
-        });
-      },
-      put(resource, doc) {
-        return execute(async () => {
-          const encoded = encodeDocument(doc);
-          await sql.exec(
-            `INSERT INTO takibi_documents
-               (collection, id, created_at, updated_at, schema_version, revision, data)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (collection, id) DO UPDATE SET
-               created_at = excluded.created_at,
-               updated_at = excluded.updated_at,
-               schema_version = excluded.schema_version,
-               revision = excluded.revision,
-               data = excluded.data`,
-            resource,
-            doc.id,
-            doc.createdAt,
-            doc.updatedAt,
-            encoded.schemaVersion,
-            encoded.revision,
-            encoded.data,
-          );
-        });
-      },
-      delete(resource, id) {
-        return execute(
-          async () =>
-            (
-              await sql.exec<{ id: string }>(
-                `DELETE FROM takibi_documents
-                 WHERE collection = ? AND id = ?
-                 RETURNING id`,
-                resource,
-                id,
-              )
-            ).rows.length > 0,
+      async get(resource, id) {
+        const { rows } = await sql.exec<DocumentRow>(
+          `SELECT id, created_at, updated_at, schema_version, revision, data
+             FROM takibi_documents
+             WHERE collection = ? AND id = ?`,
+          resource,
+          id,
         );
+        return rows[0] === undefined ? null : withDocumentRevision(rowToDocument(rows[0]));
+      },
+      async put(resource, doc) {
+        const encoded = encodeDocument(doc);
+        await sql.exec(
+          `INSERT INTO takibi_documents
+             (collection, id, created_at, updated_at, schema_version, revision, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (collection, id) DO UPDATE SET
+             created_at = excluded.created_at,
+             updated_at = excluded.updated_at,
+             schema_version = excluded.schema_version,
+             revision = excluded.revision,
+             data = excluded.data`,
+          resource,
+          doc.id,
+          doc.createdAt,
+          doc.updatedAt,
+          encoded.schemaVersion,
+          encoded.revision,
+          encoded.data,
+        );
+      },
+      async delete(resource, id) {
+        const { rows } = await sql.exec<{ id: string }>(
+          `DELETE FROM takibi_documents
+           WHERE collection = ? AND id = ?
+           RETURNING id`,
+          resource,
+          id,
+        );
+        return rows.length > 0;
       },
       async list(resource, opts, plan) {
         const prepared = await prepareList(resource, opts, registry);
         if (prepared.scan.kind === "index") {
           const readChunk = createSqlIndexChunkReader(sql, resource, prepared, plan);
-          return paginateIndex(
-            prepared,
-            prepared.scan.resolved,
-            (startAfter, limit) => execute(() => readChunk(startAfter, limit)),
-            plan,
-          );
+          return paginateIndex(prepared, prepared.scan.resolved, readChunk, plan);
         }
-        const readChunk = createSqlChunkReader(sql, resource, prepared, plan);
-        return paginate(
-          prepared,
-          (startAfter, limit) => execute(() => readChunk(startAfter, limit)),
-          plan,
-        );
+        return paginate(prepared, createSqlChunkReader(sql, resource, prepared, plan), plan);
       },
       transaction(callback) {
         if (transactionBound) {
           return callback(driver);
         }
-        return initialize().then(() =>
-          executor.transaction((tx) => callback(createDriver(tx, true))),
-        );
+        return executor.transaction((tx) => callback(createDriver(tx, true)));
       },
     };
     return driver;
   };
-  return { ...createDriver(executor, false), initialize };
+  return { ...createDriver(executor, false), sql: executor };
 }
 
 async function initializeStorageLayout(executor: SqlExecutor): Promise<void> {

@@ -1,7 +1,7 @@
 import { requestTakibi } from "./helpers/request";
 import { createClient } from "@takibi/client";
 import { fullAccess, none } from "@takibi/policy";
-import { createSqliteStorage } from "@takibi/storage";
+import { openSqliteStorage } from "@takibi/storage";
 import { createDurableObjectSqlExecutor, createTakibi } from "@takibi/worker-runtime";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
@@ -92,7 +92,7 @@ test("SQLite-backed handler Durable Object applies migrations on read", async ()
     })
     .actions({});
   const storage = createSqliteDurableObjectStorage();
-  const durable = createSqliteStorage(createDurableObjectSqlExecutor(storage));
+  const durable = await openSqliteStorage(createDurableObjectSqlExecutor(storage));
   await durable.put("settings", {
     id: "default",
     name: "Clinic",

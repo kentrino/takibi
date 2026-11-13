@@ -8,16 +8,17 @@ import {
 import {
   attachSnapshotOperations,
   createMaintenanceGatedCollections,
-  initializeMaintenanceLayout,
   MaintenanceController,
   SqliteMaintenanceBackend,
+  type MaintenanceBackend,
 } from "@takibi/snapshot";
 import {
   compileIndexRegistry,
-  createSqliteStorage,
   observeCommits,
+  openSqliteStorage,
   reconcileCollectionIndexes,
   type SqlExecutor,
+  type SqliteStorage,
   type StorageDriver,
 } from "@takibi/storage";
 import { applyStorageLogging } from "./context/runtime";
@@ -74,21 +75,38 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
 };
 
 /**
- * Assemble one tenant: storage layout, maintenance, migrating and logged
- * storage, commit fan-out to watch, and the startup sequence
- * initialize -> maintenance layout -> cleanup -> index reconcile -> seed -> watch recover.
+ * Assemble one tenant: storage, maintenance, migrating and logged storage,
+ * commit fan-out to watch, and the single startup sequence
+ * open storage layout -> open maintenance layout -> maintenance cleanup ->
+ * index reconcile -> seed -> watch recover.
+ *
+ * Startup is the only place that opens the database. Components wired before
+ * it (the maintenance controller, migrating storage, watch, and the trusted
+ * collections) reach the opened storage and backend through forwarders that
+ * throw before startup opened them; every entry point awaits `ready` first.
  */
 export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrade = Response>(
   input: TenantRuntimeInput<TCollections, TUpgrade>,
 ): TenantRuntime<TCollections, TUpgrade> {
   const { collections, registry, logger, services, sql, host } = input;
   const indexRegistry = compileIndexRegistry(collections);
-  const rawStorage = createSqliteStorage(sql, indexRegistry);
+  let opened: { storage: SqliteStorage; backend: SqliteMaintenanceBackend } | undefined;
+  const current = () => {
+    if (opened === undefined) {
+      throw new TakibiError("TENANT_NOT_STARTED", "Tenant storage used before startup", 500);
+    }
+    return opened;
+  };
   let watch: WatchRuntime<TUpgrade> | undefined;
-  const maintenance = new MaintenanceController(new SqliteMaintenanceBackend(sql), (purpose) =>
-    watch?.maintenanceChanged(purpose),
+  const maintenance = new MaintenanceController(
+    openedBackend(() => current().backend),
+    (purpose) => watch?.maintenanceChanged(purpose),
   );
-  const migrating = createMigratingStorage(collections, rawStorage, logger);
+  const migrating = createMigratingStorage(
+    collections,
+    openedStorage(() => current().storage),
+    logger,
+  );
   // Commit observation only feeds watch fan-out.
   const driver = applyStorageLogging(
     host.watch ? observeCommits(migrating, (changed) => watch?.invalidate(changed)) : migrating,
@@ -98,13 +116,13 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     watch = new WatchRuntime(host.watch, collections, driver, maintenance, logger);
   }
   const ready = host.runStartup(async () => {
-    await rawStorage.initialize();
-    await initializeMaintenanceLayout(sql);
+    const storage = await openSqliteStorage(sql, indexRegistry);
+    opened = { storage, backend: await SqliteMaintenanceBackend.open(sql) };
     await maintenance.cleanupAbandoned();
     await reconcileCollectionIndexes({
-      sql,
+      storage,
+      reader: driver,
       collections,
-      storage: driver,
       registry: indexRegistry,
     });
     await seedCollections(collections, driver, logger);
@@ -193,5 +211,35 @@ function afterInitialization(driver: StorageDriver, ready: Promise<void>): Stora
       await ready;
       return driver.transaction(callback);
     },
+  };
+}
+
+/** Storage calls forwarded to the storage startup opened. */
+function openedStorage(current: () => StorageDriver): StorageDriver {
+  return {
+    get: (resource, id) => current().get(resource, id),
+    put: (resource, doc) => current().put(resource, doc),
+    delete: (resource, id) => current().delete(resource, id),
+    list: (resource, options, plan) => current().list(resource, options, plan),
+    transaction: (callback) => current().transaction(callback),
+  };
+}
+
+/** Maintenance backend calls forwarded to the backend startup opened. */
+function openedBackend(current: () => MaintenanceBackend): MaintenanceBackend {
+  return {
+    cleanupAbandoned: () => current().cleanupAbandoned(),
+    acquire: (owner, purpose, ttl) => current().acquire(owner, purpose, ttl),
+    renew: (owner, purpose, ttl) => current().renew(owner, purpose, ttl),
+    release: (owner) => current().release(owner),
+    scanDocuments: (cursor, limit) => current().scanDocuments(cursor, limit),
+    clearStaging: (owner) => current().clearStaging(owner),
+    stageDocument: (owner, document) => current().stageDocument(owner, document),
+    stageUnique: (owner, collection, constraint, valueKey, documentId) =>
+      current().stageUnique(owner, collection, constraint, valueKey, documentId),
+    hasStagedDocument: (owner, collection, id) =>
+      current().hasStagedDocument(owner, collection, id),
+    finalizeRestore: (owner, seeds, expected) => current().finalizeRestore(owner, seeds, expected),
+    reset: (owner, seeds) => current().reset(owner, seeds),
   };
 }

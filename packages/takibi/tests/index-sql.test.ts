@@ -6,7 +6,6 @@ import { reconcileCollectionIndexes } from "../src/index-reconcile";
 import { compileIndexRegistry, resolveIndexedList } from "../src/indexes";
 import { createMigratingStorage } from "../src/migrations";
 import {
-  createDurableObjectSqlExecutor,
   createSqliteDurableObjectStorage,
   durableSqliteStorage,
 } from "../../testing/tests/helpers/durable-object-storage";
@@ -34,10 +33,8 @@ test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
   async (fieldsJson) => {
     const collections = { posts };
     const backing = createSqliteDurableObjectStorage();
-    const storage = durableSqliteStorage(backing, compileIndexRegistry(collections));
-    await storage.initialize();
+    const storage = await durableSqliteStorage(backing, compileIndexRegistry(collections));
     await reconcileCollectionIndexes({
-      sql: createDurableObjectSqlExecutor(backing),
       collections,
       storage,
     });
@@ -45,7 +42,6 @@ test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
     const before = backing.sql.exec("SELECT * FROM takibi_index_catalog").toArray();
     await expect(
       reconcileCollectionIndexes({
-        sql: createDurableObjectSqlExecutor(backing),
         collections,
         storage,
       }),
@@ -57,10 +53,8 @@ test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
 test("index reconcile rejects a registry with missing definitions before dropping existing indexes", async () => {
   const collections = { posts };
   const backing = createSqliteDurableObjectStorage();
-  const storage = durableSqliteStorage(backing, compileIndexRegistry(collections));
-  await storage.initialize();
+  const storage = await durableSqliteStorage(backing, compileIndexRegistry(collections));
   await reconcileCollectionIndexes({
-    sql: createDurableObjectSqlExecutor(backing),
     collections,
     storage,
   });
@@ -75,7 +69,6 @@ test("index reconcile rejects a registry with missing definitions before droppin
 
   await expect(
     reconcileCollectionIndexes({
-      sql: createDurableObjectSqlExecutor(backing),
       collections,
       storage,
       registry,
@@ -88,13 +81,12 @@ test("SQLite query plan uses the declared expression index", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
   const backing = createSqliteDurableObjectStorage();
-  const durable = durableSqliteStorage(backing, registry);
-  await durable.initialize();
+  const durable = await durableSqliteStorage(backing, registry);
   const migrating = createMigratingStorage(collections as unknown as CollectionsDef, durable);
   await reconcileCollectionIndexes({
-    sql: createDurableObjectSqlExecutor(backing),
     collections,
-    storage: migrating,
+    storage: durable,
+    reader: migrating,
     registry,
   });
 
@@ -131,8 +123,7 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
     },
   };
   const firstRegistry = compileIndexRegistry(first);
-  const durable = durableSqliteStorage(backing, firstRegistry);
-  await durable.initialize();
+  const durable = await durableSqliteStorage(backing, firstRegistry);
   const migrating = createMigratingStorage(first as unknown as CollectionsDef, durable);
   let optimizeCount = 0;
   const exec = backing.sql.exec.bind(backing.sql);
@@ -142,17 +133,17 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
   }) as DurableObjectStorage["sql"]["exec"];
 
   await reconcileCollectionIndexes({
-    sql: createDurableObjectSqlExecutor(backing),
     collections: first,
-    storage: migrating,
+    storage: durable,
+    reader: migrating,
     registry: firstRegistry,
   });
   expect(optimizeCount).toBe(1);
 
   await reconcileCollectionIndexes({
-    sql: createDurableObjectSqlExecutor(backing),
     collections: first,
-    storage: migrating,
+    storage: durable,
+    reader: migrating,
     registry: firstRegistry,
   });
   expect(optimizeCount).toBe(1);
@@ -164,9 +155,9 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
     },
   };
   await reconcileCollectionIndexes({
-    sql: createDurableObjectSqlExecutor(backing),
     collections: renamed,
-    storage: createMigratingStorage(renamed as unknown as CollectionsDef, durable),
+    storage: durable,
+    reader: createMigratingStorage(renamed as unknown as CollectionsDef, durable),
     registry: compileIndexRegistry(renamed),
   });
   expect(optimizeCount).toBe(2);
@@ -189,16 +180,15 @@ test("SQLite backfill preserves indexed order for mixed keys", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
   const backing = createSqliteDurableObjectStorage();
-  const durable = durableSqliteStorage(backing, registry);
-  await durable.initialize();
+  const durable = await durableSqliteStorage(backing, registry);
   const migratingDurable = createMigratingStorage(
     collections as unknown as CollectionsDef,
     durable,
   );
   await reconcileCollectionIndexes({
-    sql: createDurableObjectSqlExecutor(backing),
     collections,
-    storage: migratingDurable,
+    storage: durable,
+    reader: migratingDurable,
     registry,
   });
 

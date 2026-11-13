@@ -1,1 +1,1 @@
-export { createSqliteStorage } from "@takibi/storage";
+export { openSqliteStorage } from "@takibi/storage";

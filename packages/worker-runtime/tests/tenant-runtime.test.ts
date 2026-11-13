@@ -100,6 +100,10 @@ test("startup runs once through the host in the documented order", async () => {
     first(/INSERT INTO takibi_documents/),
   ];
   expect(order).toEqual([...order].sort((a, b) => a - b));
+  // Each layout is initialised exactly once, by startup.
+  const count = (pattern: RegExp) => statements.filter((statement) => pattern.test(statement));
+  expect(count(/CREATE TABLE IF NOT EXISTS takibi_metadata/)).toHaveLength(1);
+  expect(count(/CREATE TABLE IF NOT EXISTS takibi_maintenance_lease/)).toHaveLength(1);
 });
 
 test("a request executes against seeded data after startup", async () => {

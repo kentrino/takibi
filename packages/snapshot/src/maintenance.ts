@@ -38,7 +38,7 @@ const LEASE_KEY = "global";
 const LEASE_TTL_SECONDS = 30;
 const DRAIN_TIMEOUT_MS = 5_000;
 
-export async function initializeMaintenanceLayout(sql: SqlStatementExecutor): Promise<void> {
+async function initializeMaintenanceLayout(sql: SqlExecutor): Promise<void> {
   await sql.exec(
     `CREATE TABLE IF NOT EXISTS takibi_maintenance_lease (
       lease_key TEXT PRIMARY KEY CHECK (lease_key = 'global'),
@@ -259,19 +259,22 @@ export function createMaintenanceGatedCollections<TCollections extends Collectio
 
 export class SqliteMaintenanceBackend implements MaintenanceBackend {
   readonly #sql: SqlExecutor;
-  #layout: Promise<void> | undefined;
 
-  /** The maintenance layout is created lazily, before the first backend operation. */
-  constructor(sql: SqlExecutor) {
+  private constructor(sql: SqlExecutor) {
     this.#sql = sql;
   }
 
-  #ready(): Promise<void> {
-    return (this.#layout ??= initializeMaintenanceLayout(this.#sql));
+  /**
+   * Create the maintenance lease and restore staging tables on `sql` if they
+   * are missing, then return the backend over them. This is the only way to
+   * obtain a backend, so every backend runs on an initialised layout.
+   */
+  static async open(sql: SqlExecutor): Promise<SqliteMaintenanceBackend> {
+    await initializeMaintenanceLayout(sql);
+    return new SqliteMaintenanceBackend(sql);
   }
 
   async cleanupAbandoned(): Promise<void> {
-    await this.#ready();
     await this.#sql.transaction(async (tx) => {
       await tx.exec("DELETE FROM takibi_restore_staging_unique");
       await tx.exec("DELETE FROM takibi_restore_staging_documents");
@@ -284,7 +287,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
     purpose: MaintenancePurpose,
     ttlSeconds: number,
   ): Promise<{ expiresAt: number } | undefined> {
-    await this.#ready();
     return this.#sql.transaction(async (tx) => {
       const row = (
         await tx.exec<LeaseRow>(
@@ -313,7 +315,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
     purpose: MaintenancePurpose,
     ttlSeconds: number,
   ): Promise<number | undefined> {
-    await this.#ready();
     return this.#sql.transaction(async (tx) => {
       const row = (
         await tx.exec<LeaseRow>(
@@ -335,7 +336,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   }
 
   async release(ownerToken: string): Promise<void> {
-    await this.#ready();
     await this.#sql.transaction(async (tx) => {
       await tx.exec(
         "DELETE FROM takibi_maintenance_lease WHERE lease_key = ? AND owner_token = ?",
@@ -349,7 +349,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
     cursor: SnapshotScanCursor | undefined,
     limit: number,
   ): Promise<SnapshotStoredDocument[]> {
-    await this.#ready();
     const { rows } =
       cursor === undefined
         ? await this.#sql.exec<SnapshotDocumentRow>(
@@ -374,7 +373,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   }
 
   async clearStaging(ownerToken: string): Promise<void> {
-    await this.#ready();
     await this.#sql.transaction(async (tx) => {
       await tx.exec("DELETE FROM takibi_restore_staging_unique WHERE owner_token = ?", ownerToken);
       await tx.exec(
@@ -385,7 +383,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   }
 
   async stageDocument(ownerToken: string, document: SnapshotStoredDocument): Promise<void> {
-    await this.#ready();
     await this.#sql.exec(
       `INSERT INTO takibi_restore_staging_documents
          (owner_token, collection, id, created_at, updated_at, schema_version, revision, data)
@@ -408,7 +405,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
     valueKey: string,
     documentId: string,
   ): Promise<void> {
-    await this.#ready();
     try {
       await this.#sql.exec(
         `INSERT INTO takibi_restore_staging_unique
@@ -428,7 +424,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   }
 
   async hasStagedDocument(ownerToken: string, collection: string, id: string): Promise<boolean> {
-    await this.#ready();
     return (
       (
         await this.#sql.exec<{ found: number }>(
@@ -448,7 +443,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
     seeds: readonly SnapshotStoredDocument[],
     expectedSeedsInserted: number,
   ): Promise<void> {
-    await this.#ready();
     await this.#sql.transaction(async (tx) => {
       await assertOwner(tx, ownerToken, "restore");
       await tx.exec("DELETE FROM takibi_documents");
@@ -478,7 +472,6 @@ export class SqliteMaintenanceBackend implements MaintenanceBackend {
   }
 
   async reset(ownerToken: string, seeds: readonly SnapshotStoredDocument[]): Promise<void> {
-    await this.#ready();
     await this.#sql.transaction(async (tx) => {
       await assertOwner(tx, ownerToken, "reset");
       await tx.exec("DELETE FROM takibi_documents");

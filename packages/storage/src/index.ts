@@ -1,5 +1,5 @@
-export { createSqliteStorage } from "./storage";
-export type { SqliteStorageDriver } from "./storage";
+export { openSqliteStorage } from "./storage";
+export type { SqliteStorage } from "./storage";
 export { SqlExecutor } from "./sql-executor";
 export type { SqlConnection, SqlResult, SqlRow, SqlStatementExecutor } from "./sql-executor";
 export {

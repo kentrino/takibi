@@ -3,7 +3,7 @@ import { z } from "zod";
 import { NotFoundError, TakibiError } from "../src/errors";
 import { executeOperation } from "../src/executor";
 import { fullAccess, none, write } from "takibi";
-import { createSqliteStorage } from "../src/storage";
+import { openSqliteStorage } from "../src/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
 import { prepareSetDoc, storageAdd, storageSet, storageUpdate } from "../src/typed-storage";
 import type { StoredDocument, WithMetadata } from "../src/types";
@@ -18,12 +18,12 @@ function meta<T extends Record<string, unknown>>(doc: { id: string } & T): WithM
 }
 
 function createStorage() {
-  return createSqliteStorage(createNodeSqliteExecutor());
+  return openSqliteStorage(createNodeSqliteExecutor());
 }
 
 // SQLite orders text keys by their UTF-8 byte representation.
 test("SQLite list has stable order for non-BMP ids", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   for (const id of ["x\uFFFF", "x\u{10000}"]) {
     const doc = meta({ id, title: "t" }) as StoredDocument;
     await storage.put("posts", doc);
@@ -37,7 +37,7 @@ test("SQLite list has stable order for non-BMP ids", async () => {
 // Ids are unbounded, so a paginated list over long ids blows the argument
 // limit and the whole request dies with RangeError instead of returning a page.
 test("list pagination survives long document ids", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   await storage.put("posts", meta({ id: `a${"x".repeat(300_000)}`, title: "1" }) as StoredDocument);
   await storage.put("posts", meta({ id: `b${"x".repeat(300_000)}`, title: "2" }) as StoredDocument);
 
@@ -50,7 +50,7 @@ test("list pagination survives long document ids", async () => {
 // body like ["oops"] is spread into the merge as {"0": "oops"} and the update
 // succeeds silently instead of rejecting a non-object input.
 test("update rejects an array input instead of merging index keys", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   await storageAdd(def, storage, "posts", { title: "keep" }, { id: "p1" });
 
   await expect(storageUpdate(def, storage, "posts", "p1", ["oops"])).rejects.toThrow();
@@ -60,7 +60,7 @@ test("update rejects an array input instead of merging index keys", async () => 
 // replaces the whole document with the empty parse result — data is wiped by
 // garbage input that should have been a validation error.
 test("set rejects a primitive input instead of wiping the document", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   await storageAdd(def, storage, "posts", { title: "keep" }, { id: "p1" });
 
   await expect(storageSet(def, storage, "posts", "p1", 42)).rejects.toThrow();
@@ -85,7 +85,7 @@ test("set keeps revisions strictly increasing at the 2^53 boundary", async () =>
 // permissions gets STALE_WRITE for missing docs but NOT_FOUND for existing
 // ones — an existence-and-revision oracle.
 test("revision precondition must not leak document existence to denied callers", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   const collections = { posts: { schema: Post, accessPolicy: none } };
   await storage.put("posts", meta({ id: "hidden", title: "s" }) as StoredDocument);
 
@@ -113,7 +113,7 @@ test("revision precondition must not leak document existence to denied callers",
 // deeply nested document kills the isolate with RangeError instead of failing
 // cleanly as INVALID_DOCUMENT.
 test("storing a deeply nested document fails with a clean TakibiError, not a stack overflow", async () => {
-  const durable = createSqliteStorage(createNodeSqliteExecutor());
+  const durable = await openSqliteStorage(createNodeSqliteExecutor());
   let tree: unknown = null;
   for (let index = 0; index < 200_000; index += 1) tree = [tree];
 
@@ -129,7 +129,7 @@ test("storing a deeply nested document fails with a clean TakibiError, not a sta
 // PATCHing an empty body. The read needs no schema knowledge and leaves the
 // document content unchanged, so it is invisible to the owner.
 test("update must not return document fields to a caller denied get", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   const Note = z.object({ title: z.string(), ssn: z.string() });
   const collections = { notes: { schema: Note, accessPolicy: write } };
   await storage.put("notes", meta({ id: "n1", title: "t", ssn: "123-45-6789" }) as StoredDocument);
@@ -157,7 +157,7 @@ test("update must not return document fields to a caller denied get", async () =
 // VALIDATION for an existing id and NOT_FOUND for a missing one — an existence
 // oracle that needs no valid payload and no `rev`.
 test("schema validation must not leak document existence to denied callers", async () => {
-  const storage = createStorage();
+  const storage = await createStorage();
   const collections = { posts: { schema: Post, accessPolicy: none } };
   await storage.put("posts", meta({ id: "hidden", title: "s" }) as StoredDocument);
 
