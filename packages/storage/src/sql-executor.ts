@@ -24,7 +24,9 @@ export type SqlStatementExecutor = {
 /**
  * What a host adapter provides for one SQLite database (Durable Object
  * storage, Node's built-in SQLite, ...). A connection needs no ordering
- * guarantees of its own; {@link SqlExecutor} serialises every use of it.
+ * guarantees of its own; {@link SqlExecutor} serialises every use of it,
+ * including statements inside one transaction, and lets `body` settle only
+ * after every statement it issued settled.
  *
  * `transaction` must invoke `body` at most once, commit when it fulfils, roll
  * back when it rejects, and never replay it. Statements `body` issues through
@@ -63,8 +65,11 @@ type OpenTransaction = { readonly executor: SqlExecutor; open: boolean };
  * Every `exec` and `transaction` call on the executor runs alone, in call
  * order: it starts only after every earlier call settled. While a transaction
  * is open, no statement reaches the connection except through that
- * transaction's `tx` handle, and two transactions never overlap. `tx` is valid
- * until the callback settles; using it afterwards rejects.
+ * transaction's `tx` handle, and two transactions never overlap. Statements on
+ * `tx` also run one at a time, in call order, and the transaction commits or
+ * rolls back only after every statement issued through `tx` settled, including
+ * ones the callback did not await. `tx` is valid until the callback settles;
+ * using it afterwards rejects.
  *
  * Inside a callback, use `tx`. A call on the executor itself would wait for
  * the open transaction, which waits for the callback: it can never settle.
@@ -108,8 +113,10 @@ export class SqlExecutor implements SqlStatementExecutor {
     return this.#serialize(() =>
       this.#connection.transaction(async (connectionTx) => {
         const current: OpenTransaction = { executor: this, open: true };
+        /** Settles once every statement issued through `tx` so far settled. */
+        let statements: Promise<void> = Promise.resolve();
         const tx: SqlStatementExecutor = {
-          exec(query, ...bindings) {
+          exec<Row extends SqlRow = SqlRow>(query: string, ...bindings: SqlBinding[]) {
             if (!current.open) {
               return Promise.reject(
                 new TakibiError(
@@ -119,13 +126,20 @@ export class SqlExecutor implements SqlStatementExecutor {
                 ),
               );
             }
-            return connectionTx.exec(query, ...bindings);
+            const result = statements.then(() => connectionTx.exec<Row>(query, ...bindings));
+            statements = result.then(
+              () => undefined,
+              () => undefined,
+            );
+            return result;
           },
         };
         try {
           return await this.#enter(current, () => callback(tx));
         } finally {
           current.open = false;
+          // Commit or roll back only after statements the callback left running.
+          await statements;
         }
       }),
     );

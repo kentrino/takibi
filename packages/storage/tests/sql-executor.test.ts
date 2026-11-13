@@ -114,6 +114,67 @@ test("the tx handle is scoped to its transaction", async () => {
   expect(log).toEqual(["BEGIN", "in-tx inside", "COMMIT"]);
 });
 
+/** A connection whose transaction statements take a macrotask, like a network client. */
+function slowTransactionConnection(): { connection: SqlConnection; log: string[] } {
+  const log: string[] = [];
+  const connection: SqlConnection = {
+    async exec<Row extends SqlRow>(query: string) {
+      log.push(query);
+      return empty<Row>();
+    },
+    async transaction(body) {
+      log.push("BEGIN");
+      try {
+        const result = await body({
+          async exec<Row extends SqlRow>(query: string) {
+            log.push(`start ${query}`);
+            await macrotask();
+            log.push(`end ${query}`);
+            return empty<Row>();
+          },
+        });
+        log.push("COMMIT");
+        return result;
+      } catch (error) {
+        log.push("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  return { connection, log };
+}
+
+test("statements on one tx handle run one at a time, in call order", async () => {
+  const { connection, log } = slowTransactionConnection();
+  const sql = new SqlExecutor(connection);
+  await sql.transaction((tx) => Promise.all([tx.exec("a"), tx.exec("b")]));
+  expect(log).toEqual(["BEGIN", "start a", "end a", "start b", "end b", "COMMIT"]);
+});
+
+test("a transaction settles only after statements its callback left running", async () => {
+  const { connection, log } = slowTransactionConnection();
+  const sql = new SqlExecutor(connection);
+  await sql.transaction(async (tx) => {
+    void tx.exec("unawaited");
+  });
+  await expect(
+    sql.transaction(async (tx) => {
+      void tx.exec("unawaited");
+      throw new Error("roll back");
+    }),
+  ).rejects.toThrow("roll back");
+  expect(log).toEqual([
+    "BEGIN",
+    "start unawaited",
+    "end unawaited",
+    "COMMIT",
+    "BEGIN",
+    "start unawaited",
+    "end unawaited",
+    "ROLLBACK",
+  ]);
+});
+
 const reentrant = { code: "SQL_REENTRANT_CALL" };
 
 test("without an async context, a call reaching the executor before the callback's first await rejects at once", async () => {
