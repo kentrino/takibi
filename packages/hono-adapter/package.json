@@ -1,6 +1,6 @@
 {
   "name": "@takibi/hono-adapter",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Typed Hono middleware for Takibi HTTP handlers.",
   "keywords": [
     "hono",
