@@ -8,7 +8,13 @@ import { fullAccess } from "../src/policy";
 import { createDurableObjectSqlExecutor } from "@takibi/worker-runtime";
 import { openSqliteStorage } from "../src/storage";
 import { SqliteMaintenanceBackend } from "../src/maintenance";
-import { SqlExecutor, type SqlConnection } from "@takibi/storage";
+import {
+  SqlExecutor,
+  type SqlBinding,
+  type SqlConnection,
+  type SqlRow,
+  type SqlStatementExecutor,
+} from "@takibi/storage";
 import type { QueryExpr, WithMetadata } from "../src/types";
 import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
 import type { StorageTestObject } from "./worker";
@@ -407,42 +413,98 @@ test("Workers generated Durable Object streams and restores an owner snapshot", 
   });
 });
 
+/** The Durable Object SQL connection without the executor's queue in front of it. */
+function rawDurableConnection(storage: DurableObjectStorage): SqlConnection {
+  const statements: SqlStatementExecutor = {
+    async exec<Row extends SqlRow>(query: string, ...bindings: SqlBinding[]) {
+      const cursor = storage.sql.exec(query, ...bindings);
+      return { rows: cursor.toArray() as Row[], rowsWritten: cursor.rowsWritten };
+    },
+  };
+  return { ...statements, transaction: (body) => storage.transaction(() => body(statements)) };
+}
+
+/** A port that bypasses the queue: every call goes straight to the connection. */
+class UnserialisedExecutor extends SqlExecutor {
+  readonly #connection: SqlConnection;
+  constructor(connection: SqlConnection) {
+    super(connection);
+    this.#connection = connection;
+  }
+  override exec<Row extends SqlRow = SqlRow>(query: string, ...bindings: SqlBinding[]) {
+    return this.#connection.exec<Row>(query, ...bindings);
+  }
+  override transaction<T>(callback: (tx: SqlStatementExecutor) => Promise<T>) {
+    return this.#connection.transaction(callback);
+  }
+}
+
+/**
+ * Open a restore transaction that will fail, and issue a driver write only
+ * once the transaction's closure is known to be running on workerd: the
+ * restore pauses before its document wipe until the write was issued. The
+ * pause waits on a promise resolved from outside, never on a timer (awaiting
+ * a timer inside an open Durable Object transaction stalls). Returns the ids
+ * that survive.
+ */
+async function writeDuringFailingRestore(
+  state: DurableObjectState,
+  executor: (connection: SqlConnection) => SqlExecutor,
+): Promise<string[]> {
+  let wipeReached!: () => void;
+  const reachedWipe = new Promise<void>((resolve) => (wipeReached = resolve));
+  let writeIssued!: () => void;
+  const issued = new Promise<void>((resolve) => (writeIssued = resolve));
+  const pauseBeforeWipe = (connection: SqlConnection): SqlConnection => ({
+    exec: (query, ...bindings) => connection.exec(query, ...bindings),
+    transaction: (body) =>
+      connection.transaction((tx) =>
+        body({
+          async exec(query, ...bindings) {
+            if (query === "DELETE FROM takibi_documents") {
+              wipeReached();
+              await issued;
+            }
+            return tx.exec(query, ...bindings);
+          },
+        }),
+      ),
+  });
+  const sql = executor(pauseBeforeWipe(rawDurableConnection(state.storage)));
+  const storage = await openSqliteStorage(sql);
+  const backend = await SqliteMaintenanceBackend.open(sql);
+  await backend.cleanupAbandoned();
+  await storage.put("posts", meta({ id: "before" }));
+  expect(await backend.acquire("owner", "restore", 30)).toBeDefined();
+
+  const restore = backend.finalizeRestore("owner", [], 1);
+  await reachedWipe;
+  const write = storage.put("posts", meta({ id: "during" }));
+  writeIssued();
+  await expect(restore).rejects.toThrow("Seed reconciliation count mismatch");
+  await write;
+  return (await storage.list("posts")).items.map(({ id }) => id);
+}
+
 test("a driver write during a failing Durable Object restore transaction survives its rollback", async () => {
   const stub = storageStub("restore-interleaving");
   await stub.ping();
-
   await runInDurableObject(stub, async (_instance, state) => {
-    // Awaiting a timer inside an open Durable Object transaction stalls under
-    // workerd here, so the restore yields microtasks before its document wipe.
-    // workerd also starts the transaction closure later than call time, so this
-    // pins the outcome on the real platform rather than forcing the overlap.
-    const microtasks = async () => {
-      for (let index = 0; index < 50; index += 1) await Promise.resolve();
-    };
-    const slowWipe = (connection: SqlConnection): SqlConnection => ({
-      exec: (query, ...bindings) => connection.exec(query, ...bindings),
-      transaction: (body) =>
-        connection.transaction((tx) =>
-          body({
-            async exec(query, ...bindings) {
-              if (query === "DELETE FROM takibi_documents") await microtasks();
-              return tx.exec(query, ...bindings);
-            },
-          }),
-        ),
-    });
-    const sql = new SqlExecutor(slowWipe(createDurableObjectSqlExecutor(state.storage)));
-    const storage = await openSqliteStorage(sql);
-    const backend = await SqliteMaintenanceBackend.open(sql);
-    await backend.cleanupAbandoned();
-    await storage.put("posts", meta({ id: "before" }));
-    expect(await backend.acquire("owner", "restore", 30)).toBeDefined();
+    await expect(
+      writeDuringFailingRestore(state, (connection) => new SqlExecutor(connection)),
+    ).resolves.toEqual(["before", "during"]);
+  });
+});
 
-    const restore = backend.finalizeRestore("owner", [], 1);
-    const write = storage.put("posts", meta({ id: "during" }));
-    await expect(restore).rejects.toThrow("Seed reconciliation count mismatch");
-    await write;
-    expect((await storage.list("posts")).items.map(({ id }) => id)).toEqual(["before", "during"]);
+test("without the executor's queue, that write joins the restore transaction and is rolled back", async () => {
+  // Control for the test above: the scenario really overlaps on workerd, so
+  // the write only survives because the executor queues it.
+  const stub = storageStub("restore-interleaving-unserialised");
+  await stub.ping();
+  await runInDurableObject(stub, async (_instance, state) => {
+    await expect(
+      writeDuringFailingRestore(state, (connection) => new UnserialisedExecutor(connection)),
+    ).resolves.toEqual(["before"]);
   });
 });
 
