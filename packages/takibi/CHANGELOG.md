@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.9.0](https://github.com/kentrino/takibi/compare/takibi-v0.8.0...takibi-v0.9.0) (2026-11-13)
+
+
+### Features
+
+* **storage:** reject reentrant SQL executor calls instead of deadlocking ([7ba3956](https://github.com/kentrino/takibi/commit/7ba395657feb312b299c129539fc59929d1ae7e2))
+
+
+### Bug Fixes
+
+* **snapshot:** count reconciled seeds with RETURNING, not the host's write counter ([d5892ec](https://github.com/kentrino/takibi/commit/d5892ec697f12e125d0ece16d9edd3f869badc94))
+* **storage:** apply index reconciliation in one transaction ([807ae60](https://github.com/kentrino/takibi/commit/807ae601323462fba86fac7470d290a91231f615))
+* **storage:** serialise every use of the SQL port in the executor ([a094854](https://github.com/kentrino/takibi/commit/a0948541de694cc5304281fc9a27f468267df975))
+* **testing:** never leak a startup failure as an unhandled rejection on dispose ([ae7cc29](https://github.com/kentrino/takibi/commit/ae7cc29ca7163223cc9b8f46c641a0decaa54bca))
+
+
+### Refactoring
+
+* **storage:** introduce SQL executor port ([5fcbb8d](https://github.com/kentrino/takibi/commit/5fcbb8dd02b6803e118e94d520a1ca4f26f03089))
+* **storage:** open storage and maintenance layouts explicitly at startup ([e941567](https://github.com/kentrino/takibi/commit/e94156725eb63d55326ebedc5b7a2674a7782b65))
+* **storage:** stop exposing the SQL executor on the opened storage ([3262c09](https://github.com/kentrino/takibi/commit/3262c09b18d798ed7f690b144a1a73e1a2116360))
+* **worker-runtime:** remove the unused createDurableObjectCollectionsApi ([be511f9](https://github.com/kentrino/takibi/commit/be511f994fbf516d35a3bac5f3dfff5edce3d64c))
+* **worker-runtime:** remove the unused in-process executor ([ea45c80](https://github.com/kentrino/takibi/commit/ea45c806f746e01ea0c588e2224af205c036b6d9))
+
+
+### Tests
+
+* give the Durable Object storage double one home ([3276d0a](https://github.com/kentrino/takibi/commit/3276d0a0e8756a1266450dd30ffc2108d99c3ae2))
+* **takibi:** force the restore/write overlap on workerd and prove it ([ec0c942](https://github.com/kentrino/takibi/commit/ec0c9423dd67e213e93560eaf80b4355af7e1eb0))
+* **worker-runtime:** pin the Durable Object startup failure surface ([babcfd7](https://github.com/kentrino/takibi/commit/babcfd7f2dc0d3555b283b4c59e462385fa244ef))
+
 ## [0.8.0](https://github.com/kentrino/takibi/compare/takibi-v0.7.1...takibi-v0.8.0) (2026-10-07)
 
 
