@@ -15,6 +15,7 @@ export default defineConfig({
     entry: {
       index: "src/index.ts",
       instrumentation: "src/instrumentation.ts",
+      "tenant-runtime": "src/tenant.ts",
       "testing-bridge": "src/testing-bridge.server.ts",
     },
     dts: {

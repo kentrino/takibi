@@ -19,7 +19,7 @@ import {
   tracedStorage,
   type TakibiTracer,
   type TracingContextBackend,
-} from "@takibi/worker-runtime";
+} from "@takibi/worker-runtime/tenant-runtime";
 import type { ConformanceTarget } from "./target";
 
 export const transactionCases = [

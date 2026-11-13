@@ -4,7 +4,7 @@ import { ActionRegistry, defineCollection, type CollectionsDef } from "@takibi/a
 import { fullAccess } from "@takibi/policy";
 import { SqliteMaintenanceBackend } from "@takibi/snapshot";
 import type { SqlExecutor } from "@takibi/storage";
-import { createTenantRuntime } from "@takibi/worker-runtime";
+import { createTenantRuntime } from "@takibi/worker-runtime/tenant-runtime";
 import type { ConformanceTarget } from "./target";
 
 const definitions = {

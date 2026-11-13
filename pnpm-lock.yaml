@@ -606,9 +606,6 @@ importers:
         specifier: workspace:^
         version: link:../storage
     devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^4.20250803.0
-        version: 4.20260702.1
       '@takibi/sql-conformance':
         specifier: workspace:*
         version: link:../sql-conformance
@@ -653,9 +650,6 @@ importers:
         specifier: workspace:^
         version: link:../storage
     devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^4.20250803.0
-        version: 4.20260702.1
       '@takibi/sql-conformance':
         specifier: workspace:*
         version: link:../sql-conformance
@@ -844,9 +838,6 @@ importers:
         specifier: 'catalog:'
         version: 4.6.1
     devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^4.20250803.0
-        version: 4.20260702.1
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.4

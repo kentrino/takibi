@@ -26,14 +26,9 @@ import type { TakibiBrandCarrier, TakibiBrandRecord } from "../brand";
 import type { LoggingOptions } from "../logging";
 import { internalTracerKey, type TakibiTracer } from "../tracing";
 
-export type ContextResolverInput<TInitial = Record<string, never>> = {
-  request: Request;
-  context: TInitial;
-};
+import type { ContextResolver, ContextResolverInput } from "./resolver";
 
-export type ContextResolver<TCtx extends object, TInitial = Record<string, never>> = (
-  input: ContextResolverInput<TInitial>,
-) => TCtx | Promise<TCtx>;
+export type { ContextResolver, ContextResolverInput } from "./resolver";
 
 export type ContextStubResolverInput<
   TCtx extends object,
