@@ -34,7 +34,7 @@ function createSnapshotApi(
   return attachSnapshotOperations(
     {} as TrustedCollectionsApi<{ records: never }>,
     new MaintenanceController(backend),
-    Promise.resolve(),
+    (operation) => operation(),
     lifecycle,
   );
 }

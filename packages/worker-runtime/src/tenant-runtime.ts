@@ -4,6 +4,7 @@ import {
   type CollectionDefinition,
   type CollectionsDef,
   type DurableObjectCollectionsApi,
+  type TrustedCollectionsApi,
 } from "@takibi/api";
 import {
   attachSnapshotOperations,
@@ -67,7 +68,11 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
    * if no call reported it, by `close()`.
    */
   readonly ready: Promise<void>;
-  /** Trusted collections with snapshot export, restore, and reset. */
+  /**
+   * Trusted collections with snapshot export, restore, and reset. Every method
+   * is an entry point like `execute`: it waits for startup and is refused with
+   * `TENANT_CLOSED` once `close()` was called.
+   */
   readonly collectionsApi: DurableObjectCollectionsApi<TCollections>;
   /** Await startup, then run one invocation outside any maintenance window. */
   execute<T>(input: TenantExecutionInput, run: (local: LocalExecution) => Promise<T>): Promise<T>;
@@ -77,10 +82,18 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
   watchMessage(socket: WatchSocket): void;
   watchClose(socket: WatchSocket, code?: number): void;
   /**
-   * Stop accepting executions and watch upgrades (they reject with
-   * `TENANT_CLOSED`), then wait for startup and in-flight executions to settle.
-   * Rejects with the startup failure if startup failed and no call reported it
-   * yet. Idempotent. The host closes the SQL executor after it settles.
+   * Stop admitting work: from this call on, every entry point (`execute`,
+   * `upgradeWatch`, each `collectionsApi` method, and further reads of an
+   * export stream) rejects with `TENANT_CLOSED`. Then wait for startup and for
+   * all work started through the runtime (executions, trusted collection
+   * calls, snapshot operations, watch fan-out handed to `waitUntil`), and
+   * cancel export streams still open. When it settles, nothing started through
+   * the runtime touches the database any more; the host closes the SQL
+   * executor then.
+   *
+   * A startup failure is reported once: by every call that waited for startup,
+   * or, when no call did, by this promise rejecting with it. Idempotent: every
+   * call returns the same promise, so repeated calls share that one outcome.
    */
   close(): Promise<void>;
 };
@@ -94,7 +107,8 @@ export type TenantRuntime<TCollections extends CollectionsDef, TUpgrade = Respon
  * Startup is the only place that opens the database. Components wired before
  * it (the maintenance controller, migrating storage, watch, and the trusted
  * collections) reach the opened storage and backend through forwarders that
- * throw before startup opened them; every entry point waits for startup first.
+ * throw before startup opened them; every entry point goes through one
+ * admission step that waits for startup and tracks the work for `close()`.
  */
 export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrade = Response>(
   input: TenantRuntimeInput<TCollections, TUpgrade>,
@@ -123,13 +137,34 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     host.watch ? observeCommits(migrating, (changed) => watch?.invalidate(changed)) : migrating,
     logger,
   );
-  if (host.watch) {
-    watch = new WatchRuntime(host.watch, collections, driver, maintenance, logger);
-  }
   let closed = false;
   let closing: Promise<void> | undefined;
   let startupFailure: { error: unknown; reported: boolean } | undefined;
   const inflight = new Set<Promise<unknown>>();
+  const openExports = new Set<() => Promise<void>>();
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    inflight.add(work);
+    void work.then(
+      () => inflight.delete(work),
+      () => inflight.delete(work),
+    );
+    return work;
+  };
+  if (host.watch) {
+    const watchHost = host.watch;
+    watch = new WatchRuntime(
+      {
+        sockets: () => watchHost.sockets(),
+        accept: (attachment) => watchHost.accept(attachment),
+        // Fan-out reads the database; close() waits for it like any other work.
+        waitUntil: (promise) => watchHost.waitUntil(track(promise)),
+      },
+      collections,
+      driver,
+      maintenance,
+      logger,
+    );
+  }
   const ready = host.runStartup(async () => {
     const storage = await openSqliteStorage(sql, indexRegistry);
     opened = { storage, backend: await SqliteMaintenanceBackend.open(sql) };
@@ -149,30 +184,81 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
       startupFailure = { error, reported: false };
     },
   );
-  /** Wait for startup; reject when closed or with the startup failure. */
+  /** Wait for startup; reject with the startup failure, which then counts as reported. */
   const started = async (): Promise<void> => {
-    if (closed) throw closedError();
     await startupSettled;
     if (startupFailure !== undefined) {
       startupFailure.reported = true;
       throw startupFailure.error;
     }
   };
-  const track = <T>(work: Promise<T>): Promise<T> => {
-    inflight.add(work);
-    void work.then(
-      () => inflight.delete(work),
-      () => inflight.delete(work),
+  /**
+   * The single admission point of every entry point: refuse once closing has
+   * begun, otherwise wait for startup and run `operation` as tracked work.
+   */
+  const admit = <T>(operation: () => Promise<T>): Promise<T> => {
+    if (closed) return Promise.reject(closedError());
+    return track(started().then(operation));
+  };
+  /**
+   * An export stream keeps reading the database after `$exportSnapshot`
+   * settled. Each pull is tracked work and is refused once closing has begun;
+   * `close()` cancels streams still open, which releases their lease.
+   */
+  const trackExport = (stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => {
+    const reader = stream.getReader();
+    let open = true;
+    const finish = (reason?: unknown): Promise<void> => {
+      if (!open) return Promise.resolve();
+      open = false;
+      openExports.delete(cancelOnClose);
+      return reader.cancel(reason);
+    };
+    const cancelOnClose = () => finish(closedError());
+    openExports.add(cancelOnClose);
+    return new ReadableStream<Uint8Array>(
+      {
+        pull: (controller) => {
+          if (closed) {
+            controller.error(closedError());
+            return;
+          }
+          return track(
+            reader.read().then(
+              (result) => {
+                if (result.done) {
+                  open = false;
+                  openExports.delete(cancelOnClose);
+                  controller.close();
+                } else {
+                  controller.enqueue(result.value);
+                }
+              },
+              (error: unknown) => {
+                open = false;
+                openExports.delete(cancelOnClose);
+                throw error;
+              },
+            ),
+          );
+        },
+        cancel: (reason) => (closed ? undefined : track(finish(reason))),
+      },
+      { highWaterMark: 0 },
     );
-    return work;
   };
   const collectionsApi = attachSnapshotOperations(
     createMaintenanceGatedCollections(
-      createTrustedCollections(collections, afterStartup(driver, started), logger),
+      admitCollections(createTrustedCollections(collections, driver, logger), admit),
       maintenance,
     ),
     maintenance,
-    ready,
+    (operation) =>
+      admit(async () => {
+        const result = await operation();
+        // Only `$exportSnapshot` resolves with a stream; it keeps reading the database.
+        return result instanceof ReadableStream ? (trackExport(result) as typeof result) : result;
+      }),
     createTakibiSnapshotLifecycle(collections, logger),
   );
 
@@ -180,30 +266,29 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     ready,
     collectionsApi,
     execute(execution, run) {
-      return track(
-        started().then(() =>
-          maintenance.runNormal(async () => {
-            const local = await resolveLocalExecution({
-              collections,
-              registry,
-              logger,
-              services,
-              storage: execution.traced ? tracedStorage(driver) : driver,
-              spanKind: execution.spanKind,
-              parentSpan: execution.parentSpan,
-              request: execution.request,
-            });
-            return run(local);
-          }),
-        ),
+      return admit(() =>
+        maintenance.runNormal(async () => {
+          const local = await resolveLocalExecution({
+            collections,
+            registry,
+            logger,
+            services,
+            storage: execution.traced ? tracedStorage(driver) : driver,
+            spanKind: execution.spanKind,
+            parentSpan: execution.parentSpan,
+            request: execution.request,
+          });
+          return run(local);
+        }),
       );
     },
-    async upgradeWatch(request) {
-      await started();
-      if (!watch) {
-        throw new TakibiError("WATCH_UNAVAILABLE", "This host does not support watch", 400);
-      }
-      return watch.upgrade(request);
+    upgradeWatch(request) {
+      return admit(async () => {
+        if (!watch) {
+          throw new TakibiError("WATCH_UNAVAILABLE", "This host does not support watch", 400);
+        }
+        return watch.upgrade(request);
+      });
     },
     watchMessage(socket) {
       watch?.protocolError(socket);
@@ -215,7 +300,14 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
       closed = true;
       return (closing ??= (async () => {
         await startupSettled;
-        while (inflight.size > 0) await Promise.allSettled(inflight);
+        const drain = async () => {
+          while (inflight.size > 0) await Promise.allSettled(inflight);
+        };
+        await drain();
+        // No pull runs any more; cancel export streams still open so their
+        // lease is released before the database closes.
+        for (const cancel of openExports) void track(cancel());
+        await drain();
         if (startupFailure !== undefined && !startupFailure.reported) {
           startupFailure.reported = true;
           throw startupFailure.error;
@@ -245,29 +337,37 @@ export async function seedCollections(
   }
 }
 
-function afterStartup(driver: StorageDriver, started: () => Promise<void>): StorageDriver {
-  return {
-    async get(resource, id) {
-      await started();
-      return driver.get(resource, id);
+/** Route every trusted collection method and `$transaction` through `admit`. */
+function admitCollections<TCollections extends CollectionsDef>(
+  api: TrustedCollectionsApi<TCollections>,
+  admit: <T>(operation: () => Promise<T>) => Promise<T>,
+): TrustedCollectionsApi<TCollections> {
+  const collectionProxies = new Map<PropertyKey, object>();
+  const admitted =
+    (target: object, member: (...args: unknown[]) => unknown) =>
+    (...args: unknown[]) =>
+      admit(async () => Reflect.apply(member, target, args));
+  return new Proxy(api, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver) as unknown;
+      if (property === "$transaction" && typeof value === "function") {
+        return admitted(target, value as (...args: unknown[]) => unknown);
+      }
+      if (typeof value !== "object" || value === null) return value;
+      const cached = collectionProxies.get(property);
+      if (cached !== undefined) return cached;
+      const proxy = new Proxy(value, {
+        get(collection, method, collectionReceiver) {
+          const member = Reflect.get(collection, method, collectionReceiver) as unknown;
+          return typeof member === "function"
+            ? admitted(collection, member as (...args: unknown[]) => unknown)
+            : member;
+        },
+      });
+      collectionProxies.set(property, proxy);
+      return proxy;
     },
-    async put(resource, doc) {
-      await started();
-      return driver.put(resource, doc);
-    },
-    async delete(resource, id) {
-      await started();
-      return driver.delete(resource, id);
-    },
-    async list(resource, options, plan) {
-      await started();
-      return driver.list(resource, options, plan);
-    },
-    async transaction(callback) {
-      await started();
-      return driver.transaction(callback);
-    },
-  };
+  });
 }
 
 /** Storage calls forwarded to the storage startup opened. */

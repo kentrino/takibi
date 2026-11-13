@@ -265,7 +265,7 @@ test("close waits for in-flight executions", async () => {
   close();
 });
 
-test("close reports a startup failure that no call reported, and only once", async () => {
+test("close rejects with a startup failure no call reported; repeated calls share that one outcome", async () => {
   const failure = new Error("seed failed");
   const failing: CollectionsDef = {
     posts: { ...collections.posts!, seed: async () => Promise.reject(failure) },
@@ -278,6 +278,8 @@ test("close reports a startup failure that no call reported, and only once", asy
     sql: createNodeSqliteExecutor(),
     host: immediateHost(),
   });
+  // close() is idempotent: every call returns the one promise that reports the failure.
+  expect(unobserved.close()).toBe(unobserved.close());
   await expect(unobserved.close()).rejects.toBe(failure);
   await expect(unobserved.close()).rejects.toBe(failure);
 
@@ -291,4 +293,152 @@ test("close reports a startup failure that no call reported, and only once", asy
   });
   await expect(observed.execute(execution(), async () => "unreached")).rejects.toBe(failure);
   await expect(observed.close()).resolves.toBeUndefined();
+});
+
+test("a startup failure observed by a snapshot operation is not reported again by close", async () => {
+  const failure = new Error("seed failed");
+  const runtime = createTenantRuntime({
+    collections: { posts: { ...collections.posts!, seed: async () => Promise.reject(failure) } },
+    registry: new ActionRegistry(),
+    logger: undefined,
+    services: {},
+    sql: createNodeSqliteExecutor(),
+    host: immediateHost(),
+  });
+  await expect(runtime.collectionsApi.$resetAll()).rejects.toBe(failure);
+  await expect(runtime.close()).resolves.toBeUndefined();
+});
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Resolves `settled` only once `promise` settled; for asserting that close() is still pending. */
+function watchSettled(promise: Promise<unknown>) {
+  const state = { settled: false };
+  const done = promise.then(
+    () => (state.settled = true),
+    () => (state.settled = true),
+  );
+  return { state, done };
+}
+
+test("close waits for an in-flight trusted collections call and refuses new ones", async () => {
+  const { sql, statements, close } = recordingSql();
+  const runtime = runtimeOver(immediateHost(), sql);
+  await runtime.ready;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const running = runtime.collectionsApi.$transaction(async ($collections) => {
+    await held;
+    return $collections.posts.update("welcome", { title: "updated" });
+  });
+  await tick();
+  const closing = watchSettled(runtime.close());
+  await tick();
+  expect(closing.state.settled).toBe(false);
+  await expect(runtime.collectionsApi.posts.get("welcome")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  await expect(runtime.collectionsApi.$transaction(async () => "unreached")).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  release();
+  await expect(running).resolves.toMatchObject({ id: "welcome", title: "updated" });
+  await closing.done;
+  const issued = statements.length;
+  await tick();
+  expect(statements).toHaveLength(issued);
+  close();
+});
+
+test("close waits for an in-flight snapshot restore and refuses new snapshot operations", async () => {
+  const { sql, statements, close } = recordingSql();
+  const runtime = runtimeOver(immediateHost(), sql);
+  const encoded = await new Response(await runtime.collectionsApi.$exportSnapshot()).text();
+  let source!: ReadableStreamDefaultController<Uint8Array>;
+  const restoring = runtime.collectionsApi.$restoreSnapshot(
+    new ReadableStream<Uint8Array>({ start: (controller) => void (source = controller) }),
+  );
+  await tick();
+  const closing = watchSettled(runtime.close());
+  await tick();
+  expect(closing.state.settled).toBe(false);
+  await expect(runtime.collectionsApi.$resetAll()).rejects.toMatchObject({ code: "TENANT_CLOSED" });
+  await expect(runtime.collectionsApi.$exportSnapshot()).rejects.toMatchObject({
+    code: "TENANT_CLOSED",
+  });
+  source.enqueue(new TextEncoder().encode(encoded));
+  source.close();
+  await expect(restoring).resolves.toMatchObject({ documentsRestored: 1 });
+  await closing.done;
+  const issued = statements.length;
+  await tick();
+  expect(statements).toHaveLength(issued);
+  close();
+});
+
+test("close cancels an open export stream, releasing its lease, and later reads are refused", async () => {
+  const { sql, statements, close } = recordingSql();
+  const runtime = runtimeOver(immediateHost(), sql);
+  const stream = await runtime.collectionsApi.$exportSnapshot();
+  await runtime.close();
+  expect(statements.at(-1)).toMatch(/^DELETE FROM takibi_maintenance_lease WHERE lease_key = \?/);
+  const issued = statements.length;
+  await expect(new Response(stream).text()).rejects.toMatchObject({ code: "TENANT_CLOSED" });
+  expect(statements).toHaveLength(issued);
+  close();
+});
+
+test("close waits for watch fan-out still pending in waitUntil", async () => {
+  const inner = createNodeSqliteExecutor();
+  let hold: Promise<void> | undefined;
+  const statements: string[] = [];
+  const gated = (executor: SqlStatementExecutor): SqlStatementExecutor => ({
+    async exec(query, ...bindings) {
+      statements.push(query);
+      // The watch snapshot is the only ordered list read in this test.
+      if (hold && /ORDER BY/.test(query)) await hold;
+      return executor.exec(query, ...bindings);
+    },
+  });
+  const sql = new SqlExecutor({
+    ...gated(inner),
+    transaction: (callback) => inner.transaction((scoped) => callback(gated(scoped))),
+  });
+  const socket = {
+    readyState: 1,
+    send: vi.fn<(message: string) => void>(),
+    close: vi.fn(),
+    deserializeAttachment: () =>
+      JSON.stringify({ version: 1, collection: "posts", list: { limit: 10 }, context: {} }),
+  };
+  const pending: Promise<unknown>[] = [];
+  const runtime = runtimeOver(
+    immediateHost({
+      sockets: () => [socket],
+      accept: () => {
+        throw new Error("not used");
+      },
+      waitUntil: (promise) => void pending.push(promise),
+    }),
+    sql,
+  );
+  await runtime.ready;
+  while (pending.length) await Promise.all(pending.splice(0));
+  const sentAfterStartup = socket.send.mock.calls.length;
+
+  let release!: () => void;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  await runtime.collectionsApi.posts.add({ title: "second", score: 2 }, { id: "second" });
+  expect(pending.length).toBeGreaterThan(0);
+  const closing = watchSettled(runtime.close());
+  await tick();
+  expect(closing.state.settled).toBe(false);
+  release();
+  await closing.done;
+  expect(socket.send).toHaveBeenCalledTimes(sentAfterStartup + 1);
+  expect(JSON.parse(socket.send.mock.lastCall![0]).items).toHaveLength(2);
+  const issued = statements.length;
+  await tick();
+  expect(statements).toHaveLength(issued);
+  inner.close();
 });

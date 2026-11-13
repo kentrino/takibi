@@ -30,7 +30,7 @@ export function createDurableObjectCollectionsApi<TCollections extends Collectio
   return attachSnapshotOperations(
     trusted,
     maintenance,
-    ready,
+    (operation) => ready.then(operation),
     createTakibiSnapshotLifecycle(collections, logger),
   );
 }

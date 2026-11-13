@@ -44,24 +44,27 @@ type TrailerRecord = {
   sha256: string;
 };
 
+/**
+ * Define `$exportSnapshot`, `$restoreSnapshot`, and `$resetAll` on `trusted`.
+ * Each operation runs through `admit`, which the host uses to wait for
+ * startup, refuse work, or track it (`(operation) => operation()` admits
+ * everything immediately).
+ */
 export function attachSnapshotOperations<TCollections extends CollectionsDef>(
   trusted: TrustedCollectionsApi<TCollections>,
   maintenance: MaintenanceController,
-  ready: Promise<void>,
+  admit: <T>(operation: () => Promise<T>) => Promise<T>,
   lifecycle: SnapshotLifecycle,
 ): DurableObjectCollectionsApi<TCollections> {
   const operations = {
-    async $exportSnapshot() {
-      await ready;
-      return exportSnapshot(lifecycle, maintenance);
+    $exportSnapshot() {
+      return admit(() => exportSnapshot(lifecycle, maintenance));
     },
-    async $restoreSnapshot(source: ReadableStream<Uint8Array>) {
-      await ready;
-      return restoreSnapshot(lifecycle, maintenance, source);
+    $restoreSnapshot(source: ReadableStream<Uint8Array>) {
+      return admit(() => restoreSnapshot(lifecycle, maintenance, source));
     },
-    async $resetAll() {
-      await ready;
-      return resetAll(lifecycle, maintenance);
+    $resetAll() {
+      return admit(() => resetAll(lifecycle, maintenance));
     },
   } satisfies Omit<DurableObjectCollectionsApi<Record<never, never>>, "$transaction">;
   for (const [name, value] of Object.entries(operations)) {
