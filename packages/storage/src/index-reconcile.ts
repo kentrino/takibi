@@ -122,7 +122,11 @@ export async function reconcileIndexes(
       await writeCatalog(tx, row);
     }
   });
-  await sql.exec("PRAGMA optimize");
+  // A statistics hint once the indexes changed. The change above is already
+  // committed and nothing depends on the hint, and some servers refuse it
+  // (sqld rejects `PRAGMA optimize` as an unsupported statement), so its
+  // failure does not fail reconciliation.
+  await sql.exec("PRAGMA optimize").catch(() => undefined);
 }
 
 function hasIndexes(definition: IndexedCollectionSource): boolean {
