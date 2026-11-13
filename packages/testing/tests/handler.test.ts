@@ -2,7 +2,11 @@ import { requestTakibi } from "./helpers/request";
 import { createClient } from "@takibi/client";
 import { fullAccess, none } from "@takibi/policy";
 import { openSqliteStorage } from "@takibi/storage";
-import { createDurableObjectSqlExecutor, createTakibi } from "@takibi/worker-runtime";
+import {
+  createDurableObjectSqlExecutor,
+  createTakibi,
+  type LogEvent,
+} from "@takibi/worker-runtime";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "@takibi/testing";
@@ -250,4 +254,53 @@ test("MISSING_SERVICES is thrown at SQLite test backend assembly", () => {
       code: "MISSING_SERVICES",
     }),
   );
+});
+
+function failingSeedHandler(failure: Error, events: LogEvent[] = []) {
+  const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
+  const production = context
+    .defineCollections({
+      posts: {
+        schema: z.object({ title: z.string() }),
+        accessPolicy: fullAccess,
+        seed: () => Promise.reject(failure),
+      },
+    })
+    .actions({});
+  return withSqliteTestBackend(production, { logger: { log: (event) => events.push(event) } });
+}
+
+test("synchronous dispose of a fork whose startup failed logs the failure without an unhandled rejection", async () => {
+  const failure = new Error("seed failed");
+  const events: LogEvent[] = [];
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const handler = failingSeedHandler(failure, events);
+    expect(() => handler[Symbol.dispose]()).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  expect(unhandled).toEqual([]);
+  expect(events).toContainEqual(
+    expect.objectContaining({ level: "error", event: "takibi.error", message: "seed failed" }),
+  );
+});
+
+test("async dispose rejects with a startup failure no request reported", async () => {
+  const failure = new Error("seed failed");
+  const handler = failingSeedHandler(failure);
+  await expect(handler[Symbol.asyncDispose]()).rejects.toBe(failure);
+  // Disposal is idempotent and shares that one outcome.
+  await expect(handler[Symbol.asyncDispose]()).rejects.toBe(failure);
+});
+
+test("async dispose resolves once a request already reported the startup failure", async () => {
+  const failure = new Error("seed failed");
+  const handler = failingSeedHandler(failure);
+  const response = await requestTakibi(handler, "https://takibi.test/posts/missing");
+  expect(response.status).toBe(500);
+  await expect(handler[Symbol.asyncDispose]()).resolves.toBeUndefined();
 });

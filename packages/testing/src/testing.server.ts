@@ -45,17 +45,17 @@ const createSqliteExecutor: TestingExecutorFactory = ({
     services,
     sql: storage,
   });
-  let disposed = false;
-  const dispose = () => {
-    if (disposed) return;
-    disposed = true;
+  let closing: Promise<void> | undefined;
+  const close = () => {
+    if (closing) return closing;
     storageFinalizer.unregister(runtime.execute);
     // Close the database only after startup and in-flight work settled. A
     // startup failure that no request reported surfaces as this rejection.
-    void runtime.close().finally(() => storage.close());
+    closing = runtime.close().finally(() => storage.close());
+    return closing;
   };
   storageFinalizer.register(runtime.execute, storage, runtime.execute);
-  return { execute: runtime.execute, dispose };
+  return { execute: runtime.execute, close };
 };
 
 export function withSqliteTestBackend<

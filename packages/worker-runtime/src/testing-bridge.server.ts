@@ -22,7 +22,12 @@ export type TestingExecutorFactory = <TCtx extends object>(input: {
   services: unknown;
 }) => {
   execute: Executor<unknown, TCtx>;
-  dispose(): void;
+  /**
+   * Release the backend once startup and in-flight work settled. Idempotent:
+   * every call returns the same promise. Rejects with a startup failure that
+   * no execution reported.
+   */
+  close(): Promise<void>;
 };
 
 export type TestingFork<
@@ -51,7 +56,8 @@ export type TestingForkHandler<
 } & (THandler extends { handle(request: infer TRequest, options: unknown): infer TResult }
     ? { handle(request: TRequest, options: HandleOptions<TInitial>): TResult }
     : {}) &
-  Disposable;
+  Disposable &
+  AsyncDisposable;
 
 type ForkOf<THandler extends BrandedHandler> = <TInitial>(
   options: TestingForkOptions<

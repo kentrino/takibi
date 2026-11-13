@@ -174,8 +174,15 @@ reuses Takibi's production SQLite storage, migrations, index reconciliation,
 seeds, actions, logging, and tracing paths. Each call creates a separate
 database.
 
-The returned handler implements `Symbol.dispose`; use `using` or call the
-method from test teardown when a suite keeps handlers alive for a long time.
+The returned handler implements `Symbol.asyncDispose` and `Symbol.dispose`;
+use `await using` / `using` or call one from test teardown when a suite keeps
+handlers alive for a long time. Both close the database once startup and
+in-flight work settled. If startup failed (for example a `seed` threw) and no
+request reported that failure, `await handler[Symbol.asyncDispose]()` rejects
+with it. `handler[Symbol.dispose]()` returns before closing finishes and never
+throws or leaves an unhandled rejection: it reports such a failure to the
+configured `logger` (as a `takibi.error` event) and otherwise drops it. Use the
+async form when a test must observe startup failures.
 
 ```ts
 import { createClient } from "takibi/client";

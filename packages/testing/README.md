@@ -15,3 +15,9 @@ re-export of this package's public root.
 
 This package imports `node:sqlite` and is for Node integration tests
 only. Do not import it from Worker or browser production entries.
+
+Handlers returned by `withSqliteTestBackend` implement `Symbol.asyncDispose`
+and `Symbol.dispose`. Both close the in-memory database after startup and
+in-flight work settled. A startup failure that no request reported rejects
+`Symbol.asyncDispose`; `Symbol.dispose` cannot return it, so it goes to the
+configured logger instead and never becomes an unhandled rejection.
