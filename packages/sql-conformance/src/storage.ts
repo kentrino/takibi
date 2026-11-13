@@ -6,7 +6,6 @@ import {
   compileIndexRegistry,
   openSqliteStorage,
   physicalIndexName,
-  reconcileCollectionIndexes,
   resolveIndexedList,
   type StorageDriver,
   type StoredDocument,
@@ -86,13 +85,13 @@ export function defineStorageTests(target: ConformanceTarget): void {
   describe("storage driver", () => {
     test("satisfies the shared storage contract", () =>
       target.withDatabase("storage-contract", async (sql) => {
-        const storage = await openSqliteStorage(sql);
+        const { storage } = await openSqliteStorage(sql);
         expect(await observeStorageContract(storage)).toEqual(expectedStorageContractObservation);
       }));
 
     test("pages across internal chunks without gaps or repeats", () =>
       target.withDatabase("storage-paging", async (sql) => {
-        const storage = await openSqliteStorage(sql);
+        const { storage } = await openSqliteStorage(sql);
         const ids = Array.from(
           { length: 300 },
           (_, index) => `doc-${String(index).padStart(3, "0")}`,
@@ -113,7 +112,7 @@ export function defineStorageTests(target: ConformanceTarget): void {
 
     test("query operators match by JSON type", () =>
       target.withDatabase("storage-operators", async (sql) => {
-        const storage = await openSqliteStorage(sql);
+        const { storage } = await openSqliteStorage(sql);
         const docs = [
           document("a", { title: "Alpha beta", score: 1, flag: true, note: null }),
           document("b", { title: "beta", score: 2.5, flag: false }),
@@ -144,7 +143,7 @@ export function defineStorageTests(target: ConformanceTarget): void {
 
     test("collections are isolated and cursors are bound to their collection and query", () =>
       target.withDatabase("storage-isolation", async (sql) => {
-        const storage = await openSqliteStorage(sql);
+        const { storage } = await openSqliteStorage(sql);
         await storage.put("posts", document("same", { owner: "u1" }));
         await storage.put("posts", document("other", { owner: "u1" }));
         await storage.put("users", document("same", { owner: "u2" }));
@@ -170,7 +169,7 @@ export function defineStorageTests(target: ConformanceTarget): void {
 
     test("revisions round-trip across numeric storage boundaries", () =>
       target.withDatabase("storage-revisions", async (sql) => {
-        const storage = await openSqliteStorage(sql);
+        const { storage } = await openSqliteStorage(sql);
         for (const rev of [1, 2 ** 53 - 1, 2 ** 53, 2 ** 63, 2 ** 64, Number.MAX_VALUE]) {
           await storage.put("revs", document(`r${rev}`, { rev }));
           expect((await storage.get("revs", `r${rev}`))?.rev).toBe(rev);
@@ -179,9 +178,9 @@ export function defineStorageTests(target: ConformanceTarget): void {
 
     test("layout initialisation is idempotent and refuses a newer layout", () =>
       target.withDatabase("storage-layout", async (sql) => {
-        const storage = await openSqliteStorage(sql);
+        const { storage } = await openSqliteStorage(sql);
         await storage.put("posts", document("kept"));
-        const reopened = await openSqliteStorage(sql);
+        const reopened = (await openSqliteStorage(sql)).storage;
         expect(await reopened.get("posts", "kept")).toMatchObject({ id: "kept" });
         await sql.exec("UPDATE takibi_metadata SET value = 999 WHERE key = 'layout_version'");
         await expect(openSqliteStorage(sql)).rejects.toMatchObject({
@@ -193,8 +192,8 @@ export function defineStorageTests(target: ConformanceTarget): void {
       target.withDatabase("storage-indexed-list", async (sql) => {
         const collections = { posts: { indexes: { byOwner: ["ownerId", "createdAt"] as const } } };
         const registry = compileIndexRegistry(collections);
-        const storage = await openSqliteStorage(sql, registry);
-        await reconcileCollectionIndexes({ storage, collections, registry });
+        const { storage, indexes } = await openSqliteStorage(sql, registry);
+        await indexes.reconcile({ collections, registry });
         const docs = [
           { ...document("c", { ownerId: "u1" }), createdAt: "2026-01-01T00:00:00.000Z" },
           { ...document("a", { ownerId: "u1" }), createdAt: "2026-01-01T00:00:00.000Z" },
@@ -234,15 +233,14 @@ export function defineStorageTests(target: ConformanceTarget): void {
       target.withDatabase("storage-index-reconcile", async (sql) => {
         const first = { posts: { indexes: { byOwner: ["ownerId", "createdAt"] as const } } };
         const firstRegistry = compileIndexRegistry(first);
-        const storage = await openSqliteStorage(sql, firstRegistry);
+        const { storage, indexes } = await openSqliteStorage(sql, firstRegistry);
         await storage.put("posts", document("p1", { ownerId: "u1" }));
-        await reconcileCollectionIndexes({ storage, collections: first, registry: firstRegistry });
+        await indexes.reconcile({ collections: first, registry: firstRegistry });
         // Reconciling again changes nothing.
-        await reconcileCollectionIndexes({ storage, collections: first, registry: firstRegistry });
+        await indexes.reconcile({ collections: first, registry: firstRegistry });
 
         const renamed = { posts: { indexes: { byCreator: ["ownerId", "createdAt"] as const } } };
-        await reconcileCollectionIndexes({
-          storage,
+        await indexes.reconcile({
           collections: renamed,
           registry: compileIndexRegistry(renamed),
         });
@@ -286,11 +284,9 @@ export function defineStorageTests(target: ConformanceTarget): void {
       target.withDatabase("storage-index-backfill", async (sql) => {
         const collections = { posts: { indexes: { byOwner: ["ownerId"] as const } } };
         const registry = compileIndexRegistry(collections);
-        const storage = await openSqliteStorage(sql, registry);
+        const { storage, indexes } = await openSqliteStorage(sql, registry);
         await storage.put("posts", document("p1"));
-        await expect(
-          reconcileCollectionIndexes({ storage, collections, registry }),
-        ).rejects.toThrow();
+        await expect(indexes.reconcile({ collections, registry })).rejects.toThrow();
         expect(
           (
             await sql.exec(

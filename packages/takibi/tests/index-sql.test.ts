@@ -2,7 +2,6 @@ import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { fullAccess } from "takibi";
 import { compileIndexedScanSql, physicalIndexName } from "../src/index-sql";
-import { reconcileCollectionIndexes } from "../src/index-reconcile";
 import { compileIndexRegistry, resolveIndexedList } from "../src/indexes";
 import { createMigratingStorage } from "../src/migrations";
 import { openSqliteStorage } from "../src/storage";
@@ -32,17 +31,15 @@ test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
   async (fieldsJson) => {
     const collections = { posts };
     const sql = createNodeSqliteExecutor();
-    const storage = await openSqliteStorage(sql, compileIndexRegistry(collections));
-    await reconcileCollectionIndexes({
+    const { indexes } = await openSqliteStorage(sql, compileIndexRegistry(collections));
+    await indexes.reconcile({
       collections,
-      storage,
     });
     await sql.exec("UPDATE takibi_index_catalog SET fields_json = ?", fieldsJson);
     const before = await all(sql, "SELECT * FROM takibi_index_catalog");
     await expect(
-      reconcileCollectionIndexes({
+      indexes.reconcile({
         collections,
-        storage,
       }),
     ).rejects.toThrow(/Invalid index catalog fields/);
     expect(await all(sql, "SELECT * FROM takibi_index_catalog")).toEqual(before);
@@ -53,10 +50,9 @@ test.each(["null", '"score"', "{}", "[1]", '["score", null]', "not-json"])(
 test("index reconcile rejects a registry with missing definitions before dropping existing indexes", async () => {
   const collections = { posts };
   const sql = createNodeSqliteExecutor();
-  const storage = await openSqliteStorage(sql, compileIndexRegistry(collections));
-  await reconcileCollectionIndexes({
+  const { indexes } = await openSqliteStorage(sql, compileIndexRegistry(collections));
+  await indexes.reconcile({
     collections,
-    storage,
   });
   const snapshot = async () => ({
     catalog: await all(sql, "SELECT * FROM takibi_index_catalog"),
@@ -69,9 +65,8 @@ test("index reconcile rejects a registry with missing definitions before droppin
   const registry = compileIndexRegistry({ missing: posts });
 
   await expect(
-    reconcileCollectionIndexes({
+    indexes.reconcile({
       collections,
-      storage,
       registry,
     }),
   ).rejects.toThrow("Missing collection definition for missing");
@@ -83,11 +78,10 @@ test("SQLite query plan uses the declared expression index", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
   const sql = createNodeSqliteExecutor();
-  const durable = await openSqliteStorage(sql, registry);
+  const { storage: durable, indexes } = await openSqliteStorage(sql, registry);
   const migrating = createMigratingStorage(collections as unknown as CollectionsDef, durable);
-  await reconcileCollectionIndexes({
+  await indexes.reconcile({
     collections,
-    storage: durable,
     reader: migrating,
     registry,
   });
@@ -130,20 +124,18 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
     },
   };
   const firstRegistry = compileIndexRegistry(first);
-  const durable = await openSqliteStorage(sql, firstRegistry);
+  const { storage: durable, indexes } = await openSqliteStorage(sql, firstRegistry);
   const migrating = createMigratingStorage(first as unknown as CollectionsDef, durable);
 
-  await reconcileCollectionIndexes({
+  await indexes.reconcile({
     collections: first,
-    storage: durable,
     reader: migrating,
     registry: firstRegistry,
   });
   expect(optimizeCount).toBe(1);
 
-  await reconcileCollectionIndexes({
+  await indexes.reconcile({
     collections: first,
-    storage: durable,
     reader: migrating,
     registry: firstRegistry,
   });
@@ -155,9 +147,8 @@ test("index reconcile drops renamed indexes and optimizes only after DDL", async
       indexes: { byCreator: ["ownerId", "createdAt"] as const },
     },
   };
-  await reconcileCollectionIndexes({
+  await indexes.reconcile({
     collections: renamed,
-    storage: durable,
     reader: createMigratingStorage(renamed as unknown as CollectionsDef, durable),
     registry: compileIndexRegistry(renamed),
   });
@@ -180,14 +171,13 @@ test("SQLite backfill preserves indexed order for mixed keys", async () => {
   const collections = { posts };
   const registry = compileIndexRegistry(collections);
   const sql = createNodeSqliteExecutor();
-  const durable = await openSqliteStorage(sql, registry);
+  const { storage: durable, indexes } = await openSqliteStorage(sql, registry);
   const migratingDurable = createMigratingStorage(
     collections as unknown as CollectionsDef,
     durable,
   );
-  await reconcileCollectionIndexes({
+  await indexes.reconcile({
     collections,
-    storage: durable,
     reader: migratingDurable,
     registry,
   });
@@ -211,18 +201,21 @@ test("SQLite backfill preserves indexed order for mixed keys", async () => {
   expect(durablePage.nextCursor).toBeUndefined();
 });
 
-test("the opened SQLite storage exposes driver operations and index reconcile, never a SQL handle", async () => {
+test("the opened SQLite storage hands back a driver and index reconcile, never a SQL handle", async () => {
   const sql = createNodeSqliteExecutor();
-  const storage = await openSqliteStorage(sql);
-  expect(Object.keys(storage).sort()).toEqual([
+  const opened = await openSqliteStorage(sql);
+  expect(Object.keys(opened).sort()).toEqual(["indexes", "storage"]);
+  expect(Object.keys(opened.storage).sort()).toEqual([
     "delete",
     "get",
     "list",
     "put",
-    "reconcileIndexes",
     "transaction",
   ]);
-  expect(Object.values(storage as object)).not.toContain(sql);
+  expect(Object.keys(opened.indexes)).toEqual(["reconcile"]);
+  for (const part of [opened, opened.storage, opened.indexes]) {
+    expect(Object.values(part as object)).not.toContain(sql);
+  }
   sql.close();
 });
 
@@ -241,8 +234,8 @@ test.each([
       }),
     );
     const first = { posts };
-    const storage = await openSqliteStorage(sql, compileIndexRegistry(first));
-    await reconcileCollectionIndexes({ collections: first, storage });
+    const { indexes } = await openSqliteStorage(sql, compileIndexRegistry(first));
+    await indexes.reconcile({ collections: first });
     const snapshot = async () => ({
       catalog: await all(sql, "SELECT * FROM takibi_index_catalog ORDER BY physical_name"),
       physical: await all(
@@ -262,18 +255,16 @@ test.each([
     };
     fail = true;
     await expect(
-      reconcileCollectionIndexes({
+      indexes.reconcile({
         collections: renamed,
-        storage,
         registry: compileIndexRegistry(renamed),
       }),
     ).rejects.toThrow("reconcile-failed");
     expect(await snapshot()).toEqual(before);
 
     fail = false;
-    await reconcileCollectionIndexes({
+    await indexes.reconcile({
       collections: renamed,
-      storage,
       registry: compileIndexRegistry(renamed),
     });
     const after = await snapshot();

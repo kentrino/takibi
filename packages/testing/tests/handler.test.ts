@@ -96,7 +96,7 @@ test("SQLite-backed handler Durable Object applies migrations on read", async ()
     })
     .actions({});
   const storage = createSqliteDurableObjectStorage();
-  const durable = await openSqliteStorage(createDurableObjectSqlExecutor(storage));
+  const durable = (await openSqliteStorage(createDurableObjectSqlExecutor(storage))).storage;
   await durable.put("settings", {
     id: "default",
     name: "Clinic",

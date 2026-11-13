@@ -17,9 +17,7 @@ import {
   compileIndexRegistry,
   observeCommits,
   openSqliteStorage,
-  reconcileCollectionIndexes,
   type SqlExecutor,
-  type SqliteStorage,
   type StorageDriver,
 } from "@takibi/storage";
 import { applyStorageLogging } from "./context/runtime";
@@ -115,7 +113,7 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
 ): TenantRuntime<TCollections, TUpgrade> {
   const { collections, registry, logger, services, sql, host } = input;
   const indexRegistry = compileIndexRegistry(collections);
-  let opened: { storage: SqliteStorage; backend: SqliteMaintenanceBackend } | undefined;
+  let opened: { storage: StorageDriver; backend: SqliteMaintenanceBackend } | undefined;
   const current = () => {
     if (opened === undefined) {
       throw new TakibiError("TENANT_NOT_STARTED", "Tenant storage used before startup", 500);
@@ -166,15 +164,10 @@ export function createTenantRuntime<TCollections extends CollectionsDef, TUpgrad
     );
   }
   const ready = host.runStartup(async () => {
-    const storage = await openSqliteStorage(sql, indexRegistry);
+    const { storage, indexes } = await openSqliteStorage(sql, indexRegistry);
     opened = { storage, backend: await SqliteMaintenanceBackend.open(sql) };
     await maintenance.cleanupAbandoned();
-    await reconcileCollectionIndexes({
-      storage,
-      reader: driver,
-      collections,
-      registry: indexRegistry,
-    });
+    await indexes.reconcile({ reader: driver, collections, registry: indexRegistry });
     await seedCollections(collections, driver, logger);
     watch?.recover();
   });

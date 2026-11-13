@@ -14,8 +14,8 @@ function document(id: string, value: string): StoredDocument {
   return { id, value, createdAt: TS, updatedAt: TS, rev: 1 };
 }
 
-function createStorage() {
-  return openSqliteStorage(createNodeSqliteExecutor());
+async function createStorage() {
+  return (await openSqliteStorage(createNodeSqliteExecutor())).storage;
 }
 
 test("SQLite transactions commit, roll back, and join nested transactions", async () => {

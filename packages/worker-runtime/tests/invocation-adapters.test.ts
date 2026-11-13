@@ -199,7 +199,7 @@ async function createAdapters(actionEvents?: string[]) {
         return { id: doc.id, value: `${doc.value}!` };
       }),
   });
-  const storage: StorageDriver = await openSqliteStorage(createNodeSqliteExecutor());
+  const storage: StorageDriver = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   const adapters: InvocationAdapters<Map> = await createBoundInvocationAdapters<Ctx>({
     collections,
     storage,

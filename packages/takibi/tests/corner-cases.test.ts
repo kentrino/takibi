@@ -17,8 +17,8 @@ function meta<T extends Record<string, unknown>>(doc: { id: string } & T): WithM
   return { ...doc, createdAt: TS, updatedAt: TS, rev: 1 };
 }
 
-function createStorage() {
-  return openSqliteStorage(createNodeSqliteExecutor());
+async function createStorage() {
+  return (await openSqliteStorage(createNodeSqliteExecutor())).storage;
 }
 
 // SQLite orders text keys by their UTF-8 byte representation.
@@ -113,7 +113,7 @@ test("revision precondition must not leak document existence to denied callers",
 // deeply nested document kills the isolate with RangeError instead of failing
 // cleanly as INVALID_DOCUMENT.
 test("storing a deeply nested document fails with a clean TakibiError, not a stack overflow", async () => {
-  const durable = await openSqliteStorage(createNodeSqliteExecutor());
+  const durable = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   let tree: unknown = null;
   for (let index = 0; index < 200_000; index += 1) tree = [tree];
 

@@ -89,30 +89,45 @@ type DocumentRow = {
 };
 
 /**
- * The storage driver over an initialised Takibi SQLite layout, plus the one
- * catalog operation that needs the database below the driver. It never hands
- * out the SQL executor: holders and wrappers of the driver see only
- * {@link StorageDriver}.
+ * Index administration of one opened SQLite storage: the schema control plane
+ * beside its {@link StorageDriver}. It runs on the same executor as the
+ * driver and never hands that executor out.
  */
-export type SqliteStorage = StorageDriver & {
+export interface SqliteIndexAdmin {
   /**
-   * Bring physical indexes and the index catalog in line with `collections`;
-   * see `reconcileCollectionIndexes`.
+   * Bring the physical indexes and the index catalog in line with
+   * `collections`. Before building an index, every document of its collection
+   * is read through `reader` (default: the opened driver; pass a migrating
+   * view so documents are checked in their current shape) and must carry the
+   * indexed fields.
+   *
+   * Atomic: every index drop, index build, and catalog write happens in one
+   * transaction, after all checks passed, so a failure at any point leaves
+   * the catalog and the physical indexes as they were. Run it while nothing
+   * else changes the catalog or indexes (Takibi runs it during startup).
    */
-  reconcileIndexes(options: ReconcileIndexesOptions): Promise<void>;
+  reconcile(options: ReconcileIndexesOptions): Promise<void>;
+}
+
+/** What opening a Takibi SQLite layout hands back: data plane and index control plane. */
+export type OpenedSqliteStorage = {
+  /** Document reads and writes; what every storage wrapper decorates. */
+  readonly storage: StorageDriver;
+  /** Index catalog and physical index administration. */
+  readonly indexes: SqliteIndexAdmin;
 };
 
 /**
  * Create or migrate the Takibi document/index layout on `executor`, then
- * return the storage driver over it. This is the only way to obtain a SQLite
- * storage driver, so every driver runs on an initialised layout. Rejects
- * with `STORAGE_LAYOUT_VERSION` when the stored layout is unsupported or its
- * migration fails.
+ * return the storage driver and the index administration over it. This is
+ * the only way to obtain either, so both run on an initialised layout.
+ * Rejects with `STORAGE_LAYOUT_VERSION` when the stored layout is unsupported
+ * or its migration fails.
  */
 export async function openSqliteStorage(
   executor: SqlExecutor,
   registry: IndexRegistry = EMPTY_INDEX_REGISTRY,
-): Promise<SqliteStorage> {
+): Promise<OpenedSqliteStorage> {
   await initializeStorageLayout(executor);
   // Ordering and isolation come from the executor: each statement and each
   // transaction runs alone, so no driver statement can land inside another
@@ -177,12 +192,14 @@ export async function openSqliteStorage(
     };
     return driver;
   };
-  const storage: SqliteStorage = {
-    ...createDriver(executor, false),
-    reconcileIndexes: (options) =>
-      reconcileIndexes(executor, { ...options, reader: options.reader ?? storage }),
+  const storage = createDriver(executor, false);
+  return {
+    storage,
+    indexes: {
+      reconcile: (options) =>
+        reconcileIndexes(executor, { ...options, reader: options.reader ?? storage }),
+    },
   };
-  return storage;
 }
 
 async function initializeStorageLayout(executor: SqlExecutor): Promise<void> {

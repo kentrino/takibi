@@ -59,7 +59,7 @@ export async function injectedTransactionStorage(
       return result;
     },
   });
-  const storage = await openSqliteStorage(executor);
+  const storage = (await openSqliteStorage(executor)).storage;
   armed = true;
   return storage;
 }

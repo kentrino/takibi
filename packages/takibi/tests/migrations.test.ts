@@ -24,7 +24,7 @@ type StoredDocument = Record<string, unknown> & {
 
 async function createInspectableDurableObjectStorage() {
   const storage = createSqliteDurableObjectStorage();
-  const driver = await openSqliteStorage(createDurableObjectSqlExecutor(storage));
+  const driver = (await openSqliteStorage(createDurableObjectSqlExecutor(storage))).storage;
 
   return {
     storage,
@@ -515,7 +515,7 @@ test("collection registration rejects migration bases that are not non-negative 
 });
 
 test("SQLite storage applies lazy migration semantics", async () => {
-  const raw = await openSqliteStorage(createNodeSqliteExecutor());
+  const raw = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   const definition = {
     schema: z.object({ title: z.string(), published: z.boolean() }),
     migrations: {
@@ -548,7 +548,7 @@ test("SQLite storage applies lazy migration semantics", async () => {
 });
 
 test("lazy migration rechecks its source before replacing a concurrently updated row", async () => {
-  const raw = await openSqliteStorage(createNodeSqliteExecutor());
+  const raw = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   const definition = {
     schema: z.object({ title: z.string(), published: z.boolean() }),
     migrations: {
@@ -603,7 +603,7 @@ test("lazy migration rechecks its source before replacing a concurrently updated
 });
 
 test("lazy migration get returns null when the source row disappears", async () => {
-  const raw = await openSqliteStorage(createNodeSqliteExecutor());
+  const raw = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
   const { storage, entered, release } = gateBeforeFirstTransaction(raw);
   const migrating = createMigratingStorage({ posts: migratingPostsDefinition() }, storage);
@@ -617,7 +617,7 @@ test("lazy migration get returns null when the source row disappears", async () 
 });
 
 test("lazy migration list omits a row that disappeared before persistence", async () => {
-  const raw = await openSqliteStorage(createNodeSqliteExecutor());
+  const raw = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   await raw.put("posts", legacy("p1", { title: "old" }) as import("../src/types").StoredDocument);
   await raw.put("posts", legacy("p2", { title: "keep" }) as import("../src/types").StoredDocument);
   const { storage, entered, release } = gateBeforeFirstTransaction(raw);
@@ -640,7 +640,6 @@ test("lazy migration list omits a row that disappeared before persistence", asyn
 
 test("indexed backfill migrates existing documents before the index is ready", async () => {
   const { compileIndexRegistry } = await import("../src/indexes");
-  const { reconcileCollectionIndexes } = await import("../src/index-reconcile");
 
   const definition = {
     schema: z.object({ ownerId: z.string(), title: z.string() }),
@@ -657,15 +656,17 @@ test("indexed backfill migrates existing documents before the index is ready", a
   };
   const collections = { posts: definition };
   const registry = compileIndexRegistry(collections);
-  const durable = await openSqliteStorage(createNodeSqliteExecutor(), registry);
+  const { storage: durable, indexes } = await openSqliteStorage(
+    createNodeSqliteExecutor(),
+    registry,
+  );
   await durable.put(
     "posts",
     legacy("p1", { title: "old" }) as import("../src/types").StoredDocument,
   );
   const migrating = createMigratingStorage(collections as unknown as CollectionsDef, durable);
-  await reconcileCollectionIndexes({
+  await indexes.reconcile({
     collections,
-    storage: durable,
     reader: migrating,
     registry,
   });
@@ -692,15 +693,17 @@ test("indexed backfill migrates existing documents before the index is ready", a
     },
   };
   const failingSql = createNodeSqliteExecutor();
-  const failingDurable = await openSqliteStorage(failingSql, compileIndexRegistry(failing));
+  const { storage: failingDurable, indexes: failingIndexes } = await openSqliteStorage(
+    failingSql,
+    compileIndexRegistry(failing),
+  );
   await failingDurable.put(
     "posts",
     legacy("p2", { title: "old" }) as import("../src/types").StoredDocument,
   );
   await expect(
-    reconcileCollectionIndexes({
+    failingIndexes.reconcile({
       collections: failing,
-      storage: failingDurable,
       reader: createMigratingStorage(failing as unknown as CollectionsDef, failingDurable),
       registry: compileIndexRegistry(failing),
     }),

@@ -13,8 +13,8 @@ test("Takibi storage modules re-export the owner package bindings", () => {
   expect(IndexFacade.resolveIndexedList).toBe(StoragePkg.resolveIndexedList);
   expect(IndexSqlFacade.physicalIndexName).toBe(StoragePkg.physicalIndexName);
   expect(IndexSqlFacade.compileIndexedScanSql).toBe(StoragePkg.compileIndexedScanSql);
-  expect(IndexReconcileFacade.reconcileCollectionIndexes).toBe(
-    StoragePkg.reconcileCollectionIndexes,
+  expect(IndexReconcileFacade.backfillIndexedCollections).toBe(
+    StoragePkg.backfillIndexedCollections,
   );
   expect(SqlQueryFacade.compileQueryToSql).toBe(StoragePkg.compileQueryToSql);
   expect(RevisionFacade.documentRevision).toBe(StoragePkg.documentRevision);
