@@ -225,3 +225,64 @@ test("the opened SQLite storage exposes driver operations and index reconcile, n
   expect(Object.values(storage as object)).not.toContain(sql);
   sql.close();
 });
+
+test.each([
+  /^DROP INDEX/,
+  /^DELETE FROM takibi_index_catalog/,
+  /^CREATE INDEX/,
+  /^INSERT INTO takibi_index_catalog/,
+])(
+  "index reconcile failing at %s leaves the catalog and physical indexes unchanged",
+  async (failing) => {
+    let fail = false;
+    const sql = createNodeSqliteExecutor(
+      onStatement((query) => {
+        if (fail && failing.test(query.trim())) throw new Error("reconcile-failed");
+      }),
+    );
+    const first = { posts };
+    const storage = await openSqliteStorage(sql, compileIndexRegistry(first));
+    await reconcileCollectionIndexes({ collections: first, storage });
+    const snapshot = async () => ({
+      catalog: await all(sql, "SELECT * FROM takibi_index_catalog ORDER BY physical_name"),
+      physical: await all(
+        sql,
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'takibi_idx_%' ORDER BY name",
+      ),
+    });
+    const before = await snapshot();
+    expect(before.catalog).toHaveLength(2);
+
+    // Renaming byOwner drops one index and catalog row and builds another.
+    const renamed = {
+      posts: {
+        ...posts,
+        indexes: { byCreator: ["ownerId", "createdAt"] as const, byScore: ["score"] as const },
+      },
+    };
+    fail = true;
+    await expect(
+      reconcileCollectionIndexes({
+        collections: renamed,
+        storage,
+        registry: compileIndexRegistry(renamed),
+      }),
+    ).rejects.toThrow("reconcile-failed");
+    expect(await snapshot()).toEqual(before);
+
+    fail = false;
+    await reconcileCollectionIndexes({
+      collections: renamed,
+      storage,
+      registry: compileIndexRegistry(renamed),
+    });
+    const after = await snapshot();
+    expect(after.catalog.map((row) => row.physical_name)).toEqual(
+      after.physical.map((row) => row.name),
+    );
+    expect(new Set(after.catalog.map((row) => row.public_name))).toEqual(
+      new Set(["byCreator", "byScore"]),
+    );
+    sql.close();
+  },
+);

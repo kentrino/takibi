@@ -43,6 +43,11 @@ export type ReconcileIndexesOptions = {
  * collection is read through `reader` (default: `storage`; pass a migrating
  * view so documents are checked in their current shape) and must carry the
  * indexed fields.
+ *
+ * Atomic: every index drop, index build, and catalog write happens in one
+ * transaction, after all checks passed, so a failure at any point leaves the
+ * catalog and the physical indexes as they were. Run it while nothing else
+ * changes the catalog or indexes (Takibi runs it during startup).
  */
 export function reconcileCollectionIndexes(
   args: ReconcileIndexesOptions & { storage: SqliteStorage },
@@ -56,62 +61,68 @@ export async function reconcileIndexes(
   sql: SqlExecutor,
   args: ReconcileIndexesOptions & { reader: StorageDriver },
 ): Promise<void> {
-  const reader = args.reader;
   const registry = args.registry ?? compileIndexRegistry(args.collections);
   const desired = desiredCatalog(args.collections, registry);
   const catalog = await readCatalog(sql);
   const physicalPresent = await listPhysicalTakibiIndexes(sql);
-  let ddl = false;
 
+  // Plan every change before making any.
   const desiredByPhysical = new Map(desired.map((row) => [row.physicalName, row]));
   const catalogByKey = new Map(
     catalog.map((row) => [catalogKey(row.collection, row.publicName), row]),
   );
-
+  const staleCatalog: CatalogRecord[] = [];
   for (const existing of catalog) {
     const next = desired.find(
       (row) => row.collection === existing.collection && row.publicName === existing.publicName,
     );
     if (next && next.physicalName === existing.physicalName) continue;
-    await sql.exec(compileDropIndexSql(existing.physicalName));
-    await sql.exec(
-      "DELETE FROM takibi_index_catalog WHERE physical_name = ?",
-      existing.physicalName,
-    );
-    ddl = true;
+    staleCatalog.push(existing);
     catalogByKey.delete(catalogKey(existing.collection, existing.publicName));
   }
-
-  for (const name of physicalPresent) {
-    if (!desiredByPhysical.has(name) && !catalog.some((row) => row.physicalName === name)) {
-      await sql.exec(compileDropIndexSql(name));
-      ddl = true;
-    }
-  }
-
-  const backfilled = new Set<string>();
-  for (const row of desired) {
+  const orphanIndexes = physicalPresent.filter(
+    (name) => !desiredByPhysical.has(name) && !catalog.some((row) => row.physicalName === name),
+  );
+  const builds = desired.filter((row) => {
     const current = catalogByKey.get(catalogKey(row.collection, row.publicName));
-    const needsBuild =
+    return (
       current === undefined ||
       current.schemaVersion !== row.schemaVersion ||
       !sameFields(current.fields, row.fields) ||
-      !physicalPresent.includes(row.physicalName);
+      !physicalPresent.includes(row.physicalName)
+    );
+  });
+  if (staleCatalog.length === 0 && orphanIndexes.length === 0 && builds.length === 0) return;
 
-    if (needsBuild) {
-      if (!backfilled.has(row.collection)) {
-        await backfillCollection(row.definition, reader, row.collection);
-        backfilled.add(row.collection);
-      }
-      await sql.exec(compileCreateIndexSql(row));
-      await writeCatalog(sql, row);
-      ddl = true;
+  // The backfill check reads through the storage driver, which runs on this
+  // executor, so it must finish before the transaction opens: a driver call
+  // from inside it would wait behind the transaction forever.
+  const backfilled = new Set<string>();
+  for (const row of builds) {
+    if (backfilled.has(row.collection)) continue;
+    await backfillCollection(row.definition, args.reader, row.collection);
+    backfilled.add(row.collection);
+  }
+
+  // SQLite runs CREATE INDEX and DROP INDEX transactionally, so the catalog
+  // and the physical indexes change together or not at all.
+  await sql.transaction(async (tx) => {
+    for (const existing of staleCatalog) {
+      await tx.exec(compileDropIndexSql(existing.physicalName));
+      await tx.exec(
+        "DELETE FROM takibi_index_catalog WHERE physical_name = ?",
+        existing.physicalName,
+      );
     }
-  }
-
-  if (ddl) {
-    await sql.exec("PRAGMA optimize");
-  }
+    for (const name of orphanIndexes) {
+      await tx.exec(compileDropIndexSql(name));
+    }
+    for (const row of builds) {
+      await tx.exec(compileCreateIndexSql(row));
+      await writeCatalog(tx, row);
+    }
+  });
+  await sql.exec("PRAGMA optimize");
 }
 
 function hasIndexes(definition: IndexedCollectionSource): boolean {
