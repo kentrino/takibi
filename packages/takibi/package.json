@@ -76,6 +76,7 @@
     "@takibi/client": "workspace:^",
     "@takibi/invocation-lifecycle": "workspace:^",
     "@takibi/logger": "workspace:^",
+    "@takibi/node-sqlite": "workspace:^",
     "@takibi/policy": "workspace:^",
     "@takibi/protocol": "workspace:^",
     "@takibi/query": "workspace:^",
