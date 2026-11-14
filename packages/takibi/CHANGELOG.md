@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.10.0](https://github.com/kentrino/takibi/compare/takibi-v0.9.0...takibi-v0.10.0) (2026-11-14)
+
+
+### Features
+
+* **node-sqlite:** add a production node:sqlite connection for one tenant database ([4e75f05](https://github.com/kentrino/takibi/commit/4e75f055a46fc58df606f75f6f76c4cc3ec10d90))
+* **storage:** let a SQL connection report an unknown commit outcome ([f1271a1](https://github.com/kentrino/takibi/commit/f1271a1fc648b0c465b39911598552aa807a7214))
+
+
+### Bug Fixes
+
+* **storage:** do not fail index reconciliation on a refused optimize hint ([8d2eee1](https://github.com/kentrino/takibi/commit/8d2eee1fb62e12516126e9622d788cfaf8fef0bf))
+
+
+### Documentation
+
+* RFC 0015 promises local and remote libSQL only, and how unknown outcomes are bounded ([60ebf02](https://github.com/kentrino/takibi/commit/60ebf02f24a7ec93e2223b2347692025bacd8446))
+
+
+### Tests
+
+* run the transaction callback contract once, in the conformance suite ([b18475e](https://github.com/kentrino/takibi/commit/b18475e3ddd38bf595b4454ea6f5063fcd946e28))
+* **sql-conformance:** run one conformance suite on the Durable Object and node:sqlite connections ([8d624d3](https://github.com/kentrino/takibi/commit/8d624d3fb741b88bafbb40154ef100e56b284c64))
+
 ## [0.9.0](https://github.com/kentrino/takibi/compare/takibi-v0.8.0...takibi-v0.9.0) (2026-11-13)
 
 

@@ -1,7 +1,7 @@
 {
-  "packages/takibi": "0.9.0",
-  "packages/hono-adapter": "0.2.4",
-  "packages/better-auth-adapter": "0.1.10",
-  "packages/opentelemetry": "0.2.9",
-  "packages/cloudflare-tracing": "0.1.9"
+  "packages/takibi": "0.10.0",
+  "packages/hono-adapter": "0.2.5",
+  "packages/better-auth-adapter": "0.1.11",
+  "packages/opentelemetry": "0.2.10",
+  "packages/cloudflare-tracing": "0.1.10"
 }
