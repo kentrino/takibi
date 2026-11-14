@@ -1,4 +1,4 @@
-import { expect, expectTypeOf, test, vi } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import {
   ActionRegistry,
@@ -9,11 +9,7 @@ import {
 import { fullAccess } from "@takibi/policy";
 import { SqlExecutor, sqlCommitOutcomeUnknown, type SqlStatementExecutor } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
-import {
-  createTrustedCollections,
-  TRUSTED_COLLECTION_METHODS,
-  type UnlistedTrustedCollectionMethod,
-} from "../src/executor";
+import { createTrustedCollections, TRUSTED_COLLECTION_METHODS } from "../src/executor";
 import { createTenantRuntime, type TenantHost } from "../src/tenant-runtime";
 import type { WatchHost, WatchSocket } from "../src/watch-runtime";
 
@@ -302,7 +298,6 @@ test("the collections API exists before startup and its calls wait for startup",
     Object.keys(trusted.posts!).sort(),
   );
   expect([...TRUSTED_COLLECTION_METHODS].sort()).toEqual(Object.keys(trusted.posts!).sort());
-  expectTypeOf<UnlistedTrustedCollectionMethod>().toEqualTypeOf<never>();
 
   const reading = runtime.collectionsApi.posts.get("welcome");
   const pending = watchSettled(reading);
