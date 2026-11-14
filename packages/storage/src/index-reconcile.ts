@@ -122,7 +122,11 @@ export async function reconcileIndexes(
       await writeCatalog(tx, row);
     }
   });
-  await sql.exec("PRAGMA optimize");
+  // A statistics hint once the indexes changed. The change above is already
+  // committed and nothing depends on the hint, and some servers refuse it
+  // (sqld rejects `PRAGMA optimize` as an unsupported statement), so its
+  // failure does not fail reconciliation.
+  await sql.exec("PRAGMA optimize").catch(() => undefined);
 }
 
 function hasIndexes(definition: IndexedCollectionSource): boolean {
@@ -173,8 +177,8 @@ function desiredCatalog(
   return rows;
 }
 
-async function readCatalog(sql: SqlStatementExecutor): Promise<CatalogRecord[]> {
-  const { rows } = await sql.exec<{
+async function readCatalog(sql: SqlExecutor): Promise<CatalogRecord[]> {
+  const { rows } = await sql.read<{
     physical_name: string;
     collection: string;
     public_name: string;
@@ -227,8 +231,8 @@ async function writeCatalog(sql: SqlStatementExecutor, row: CatalogRecord): Prom
   );
 }
 
-async function listPhysicalTakibiIndexes(sql: SqlStatementExecutor): Promise<string[]> {
-  const { rows } = await sql.exec<{ name: string }>(
+async function listPhysicalTakibiIndexes(sql: SqlExecutor): Promise<string[]> {
+  const { rows } = await sql.read<{ name: string }>(
     `SELECT name FROM sqlite_master
        WHERE type = 'index' AND name LIKE 'takibi_idx_%'`,
   );

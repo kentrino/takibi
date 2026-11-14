@@ -27,7 +27,13 @@ export type {
   PrettyConsoleLoggerOptions,
 } from "./logging";
 export { createDurableObjectClass } from "./durable-object";
-export { seedCollections } from "./tenant-runtime";
+export { createTenantRuntime, seedCollections } from "./tenant-runtime";
+export type {
+  TenantExecutionInput,
+  TenantHost,
+  TenantRuntime,
+  TenantRuntimeInput,
+} from "./tenant-runtime";
 export { createDurableObjectSqlExecutor } from "./durable-object-sql";
 export { createTakibiSnapshotLifecycle } from "./snapshot";
 export {

@@ -1,4 +1,4 @@
-import { injectedTransactionStorage, transactionCases } from "./transaction-callback-contract";
+import { injectedTransactionStorage, transactionCases } from "@takibi/sql-conformance";
 import { expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { ActionRegistry, createRootActionBuilder, type RootActionArgs } from "../src/action";

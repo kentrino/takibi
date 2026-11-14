@@ -12,6 +12,7 @@
     "api/src",
     "client/src",
     "logger/src",
+    "node-sqlite/src",
     "policy/src",
     "protocol/src",
     "query/src",

@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "@takibi/api": "workspace:^",
+    "@takibi/node-sqlite": "workspace:^",
     "@takibi/storage": "workspace:^",
     "@takibi/worker-runtime": "workspace:^"
   },

@@ -5,8 +5,9 @@ Node-only SQLite test handler adapter for Takibi.
 The package owns `withSqliteTestBackend` and the Node `node:sqlite`
 Durable Object storage emulation used by tests. It consumes runtime
 assembly only through `@takibi/worker-runtime/testing-bridge`
-and depends on `@takibi/api`, `@takibi/storage`, and
-`@takibi/worker-runtime`.
+and depends on `@takibi/api`, `@takibi/node-sqlite`, `@takibi/storage`, and
+`@takibi/worker-runtime`. Its in-memory test databases open through the
+production `node:sqlite` connection of `@takibi/node-sqlite`.
 
 It does not own `createTakibi`, browser `createClient`, production
 Durable Object execution, or unsupported memory executors and storage

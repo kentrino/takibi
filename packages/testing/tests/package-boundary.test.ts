@@ -26,7 +26,12 @@ const extractedPackages = [
   "worker-runtime",
   "testing",
 ] as const;
-const allowedWorkspace = new Set(["@takibi/api", "@takibi/storage", "@takibi/worker-runtime"]);
+const allowedWorkspace = new Set([
+  "@takibi/api",
+  "@takibi/node-sqlite",
+  "@takibi/storage",
+  "@takibi/worker-runtime",
+]);
 const forbiddenSpecifiers = ["takibi", "@takibi/client", "@takibi/execution-model"];
 
 function readManifest(path: string): PackageManifest {
@@ -141,6 +146,7 @@ test("testing package keeps a one-way dependency graph", () => {
   });
   expect(testing.dependencies).toEqual({
     "@takibi/api": "workspace:^",
+    "@takibi/node-sqlite": "workspace:^",
     "@takibi/storage": "workspace:^",
     "@takibi/worker-runtime": "workspace:^",
   });
@@ -175,6 +181,8 @@ test("testing source consumes the runtime bridge and owns node:sqlite", () => {
   );
   expect(reachable.has(resolveWorkspaceEntry("@takibi/api"))).toBe(true);
   expect(reachable.has(resolveWorkspaceEntry("@takibi/storage"))).toBe(true);
+  // Test databases open through the production node:sqlite connection.
+  expect(reachable.has(resolveWorkspaceEntry("@takibi/node-sqlite"))).toBe(true);
   expect(reachable.has("node:sqlite")).toBe(true);
   for (const specifier of forbiddenSpecifiers) {
     expect(reachable.has(specifier)).toBe(false);

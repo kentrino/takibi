@@ -9,7 +9,7 @@ import {
 } from "@takibi/protocol";
 import type { PublicRequest } from "./http";
 import { assertSerializableContext, errorResponse } from "./context/runtime";
-import type { ContextResolver } from "./context/types";
+import type { ContextResolver } from "./context/resolver";
 import type { InternalLogger } from "./logging";
 
 export const WATCH_HEADER = "x-takibi-watch";

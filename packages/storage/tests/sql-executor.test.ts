@@ -1,6 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { expect, test } from "vite-plus/test";
-import { SqlExecutor, type SqlConnection, type SqlResult, type SqlRow } from "@takibi/storage";
+import {
+  isSqlCommitOutcomeUnknown,
+  SQL_COMMIT_OUTCOME_UNKNOWN,
+  SqlExecutor,
+  sqlCommitOutcomeUnknown,
+  type SqlConnection,
+  type SqlResult,
+  type SqlRow,
+} from "@takibi/storage";
 
 const empty = <Row extends SqlRow>(): SqlResult<Row> => ({ rows: [] });
 
@@ -245,4 +253,67 @@ test("an async context store is scoped per executor", async () => {
     );
   });
   expect(second.log).toEqual(["other database", "BEGIN", "ROLLBACK"]);
+});
+
+test("an unknown commit outcome reaches the caller unchanged and nothing is retried", async () => {
+  const unknown = sqlCommitOutcomeUnknown(new Error("connection reset"));
+  let commits = 0;
+  let statements = 0;
+  const sql = new SqlExecutor({
+    async exec<Row extends SqlRow>() {
+      statements += 1;
+      if (statements === 1) throw unknown;
+      return empty<Row>();
+    },
+    async transaction(body) {
+      await body({ exec: async <Row extends SqlRow>() => empty<Row>() });
+      commits += 1;
+      throw unknown;
+    },
+  });
+  let calls = 0;
+  await expect(
+    sql.transaction(async (tx) => {
+      calls += 1;
+      await tx.exec("INSERT");
+    }),
+  ).rejects.toBe(unknown);
+  expect({ calls, commits }).toEqual({ calls: 1, commits: 1 });
+  expect(isSqlCommitOutcomeUnknown(unknown)).toBe(true);
+  expect(unknown).toMatchObject({ code: SQL_COMMIT_OUTCOME_UNKNOWN, status: 500 });
+
+  // An autocommit write with an unknown outcome is not retried either.
+  await expect(sql.exec("INSERT")).rejects.toBe(unknown);
+  expect(statements).toBe(1);
+  // The executor keeps serving later calls.
+  await expect(sql.exec("SELECT")).resolves.toEqual({ rows: [] });
+});
+
+test("reads go to the connection's read, in call order with every other call", async () => {
+  const { connection, log } = recordingConnection();
+  const sql = new SqlExecutor({
+    ...connection,
+    async read<Row extends SqlRow>(query: string) {
+      log.push(`read ${query}`);
+      return empty<Row>();
+    },
+  });
+  const transaction = sql.transaction(async (tx) => {
+    await macrotask();
+    await tx.exec("inside");
+  });
+  const read = sql.read("after");
+  await Promise.all([transaction, read, sql.exec("last")]);
+  expect(log).toEqual(["BEGIN", "in-tx inside", "COMMIT", "read after", "last"]);
+
+  await sql.transaction(async () => {
+    await expect(sql.read("reentrant")).rejects.toMatchObject(reentrant);
+  });
+});
+
+test("without a read of its own, a connection serves reads through exec", async () => {
+  const { connection, log } = recordingConnection();
+  const sql = new SqlExecutor(connection);
+  await sql.read("SELECT 1");
+  expect(log).toEqual(["SELECT 1"]);
 });

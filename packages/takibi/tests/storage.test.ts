@@ -6,7 +6,10 @@ import type { SqlConnection } from "@takibi/storage";
 import { all, one, onStatement } from "./helpers/node-sql";
 import type { QueryExpr, StoredDocument, WithMetadata } from "../src/types";
 import { generateUlid, isUlid, resetUlidStateForTests } from "../src/ulid";
-import { expectedStorageContractObservation, observeStorageContract } from "./storage-contract";
+import {
+  expectedStorageContractObservation,
+  observeStorageContract,
+} from "@takibi/sql-conformance";
 
 const TS = "2026-08-09T14:12:00.000Z";
 

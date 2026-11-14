@@ -1,23 +1,26 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { expect } from "vite-plus/test";
+import { describe, expect, test } from "vite-plus/test";
 import { z } from "zod";
 import {
   openSqliteStorage,
   observeCommits,
   SqlExecutor,
+  sqlCommitOutcomeUnknown,
   type StorageDriver,
 } from "@takibi/storage";
-import { createMigratingStorage } from "../src/migrations";
-import { loggedStorage, resolveLogging } from "../src/logging";
+import { fullAccess } from "@takibi/policy";
 import {
   bindTracer,
+  createMigratingStorage,
+  createTrustedCollections,
+  loggedStorage,
   registerTracingContextBackend,
+  resolveLogging,
   tracedStorage,
+  type TakibiTracer,
   type TracingContextBackend,
-} from "../src/tracing";
-import { createRecordingTracer } from "./helpers/recording-tracer";
-import { createTrustedCollections } from "../src/executor";
-import { fullAccess } from "../src/policy";
+} from "@takibi/worker-runtime/tenant-runtime";
+import type { ConformanceTarget } from "./target";
 
 export const transactionCases = [
   "success",
@@ -44,6 +47,7 @@ export async function injectedTransactionStorage(
   let armed = false;
   const executor = new SqlExecutor({
     exec: (query, ...bindings) => raw.exec(query, ...bindings),
+    read: (query, ...bindings) => raw.read(query, ...bindings),
     async transaction(callback) {
       if (!armed) return raw.transaction(callback);
       if (scenario === "admission") throw error;
@@ -129,7 +133,7 @@ export async function checkTransactionCallbackContract(
     getStore: () => context.getStore(),
     run: (store, fn) => context.run(store, fn),
   });
-  const { tracer, spans } = createRecordingTracer();
+  const { tracer, spans } = countingTracer();
   try {
     for (const [id, run] of Object.entries(entryPoints)) {
       await bindTracer(tracer, () => checkEntryPoint(raw, wrapper.wrap, scenario, id, run));
@@ -149,7 +153,9 @@ async function checkEntryPoint(
   id: string,
   run: EntryPoint,
 ): Promise<void> {
-  const error = new Error(`injected ${scenario}`);
+  // An unknown outcome is reported the way a connection reports it.
+  const error =
+    scenario === "unknown" ? sqlCommitOutcomeUnknown() : new Error(`injected ${scenario}`);
   const storage = wrap(await injectedTransactionStorage(raw, scenario, error));
   const calls = { outer: 0, nested: 0 };
   const result = run(storage, id, async (scope) => {
@@ -170,4 +176,63 @@ async function checkEntryPoint(
   const stored = await storage.get("items", id);
   if (scenario === "success" || scenario === "unknown") expect(stored?.id).toBe(id);
   else expect(stored).toBeNull();
+}
+
+/** A tracer that only records which spans started. */
+function countingTracer(): { tracer: TakibiTracer; spans: string[] } {
+  const spans: string[] = [];
+  const tracer: TakibiTracer = {
+    startSpan(spec, parent) {
+      spans.push(spec.name);
+      return {
+        context: {
+          traceId: parent?.traceId ?? "0".repeat(31) + "1",
+          spanId: "0".repeat(15) + "1",
+          traceFlags: 1,
+        },
+        runWithActiveContext: (fn) => fn(),
+        recordException() {},
+        setStatus() {},
+        end() {},
+      };
+    },
+    inject() {},
+    extract: () => undefined,
+  };
+  return { tracer, spans };
+}
+
+/**
+ * The transaction callback no-replay contract (RFC 0003) for every supported
+ * storage wrapper, entry point, and failure injected at the SQL port.
+ */
+export function defineTransactionCallbackTests(target: ConformanceTarget): void {
+  describe("transaction callbacks are never replayed", () => {
+    for (const [name, wrapper] of Object.entries(transactionWrappers)) {
+      for (const scenario of transactionCases) {
+        test(`${name}: ${scenario}`, () =>
+          target.withDatabase(`callback-${name}-${scenario}`, (sql) =>
+            checkTransactionCallbackContract(sql, wrapper, scenario),
+          ));
+      }
+    }
+    // The check itself must notice a replay, or every case above passes vacuously.
+    test("the check detects a wrapper that replays the callback", () =>
+      target.withDatabase("callback-replaying-wrapper", async (sql) => {
+        const replaying: TransactionWrapper = {
+          expectsSpans: false,
+          wrap: (driver) => ({
+            ...driver,
+            transaction: (callback) =>
+              driver.transaction(async (scope) => {
+                await callback(scope);
+                return callback(scope);
+              }),
+          }),
+        };
+        await expect(checkTransactionCallbackContract(sql, replaying, "success")).rejects.toThrow(
+          "transaction callbacks must not be replayed",
+        );
+      }));
+  });
 }

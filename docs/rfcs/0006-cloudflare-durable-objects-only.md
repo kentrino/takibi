@@ -1,9 +1,9 @@
 ---
 id: "0006"
 title: Cloudflare Durable Objects only
-status: accepted
-implementation: complete
+status: superseded
 created: 2026-09-16
+superseded_by: ["0015"]
 ---
 
 # Cloudflare Durable Objects only
