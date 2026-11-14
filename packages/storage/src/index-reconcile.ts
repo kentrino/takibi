@@ -19,16 +19,6 @@ const BACKFILL_PAGE_SIZE = 200;
 type CatalogRecord = IndexCatalogRow;
 type DesiredCatalogRecord = CatalogRecord & { definition: IndexedCollectionSource };
 
-export async function backfillIndexedCollections(
-  collections: Record<string, IndexedCollectionSource>,
-  storage: StorageDriver,
-): Promise<void> {
-  for (const [collection, definition] of Object.entries(collections)) {
-    if (!hasIndexes(definition)) continue;
-    await backfillCollection(definition, storage, collection);
-  }
-}
-
 export type ReconcileIndexesOptions = {
   /** Reads documents for the backfill check (default: the opened storage driver). */
   reader?: StorageDriver;
@@ -110,10 +100,6 @@ export async function reconcileIndexes(
   // (sqld rejects `PRAGMA optimize` as an unsupported statement), so its
   // failure does not fail reconciliation.
   await sql.exec("PRAGMA optimize").catch(() => undefined);
-}
-
-function hasIndexes(definition: IndexedCollectionSource): boolean {
-  return definition.indexes !== undefined && Object.keys(definition.indexes).length > 0;
 }
 
 async function backfillCollection(
