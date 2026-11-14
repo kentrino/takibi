@@ -292,29 +292,37 @@ test("synchronous dispose of a fork whose startup failed logs the failure withou
 const errorEvents = (events: LogEvent[]) =>
   events.filter((event) => event.event === "takibi.error" && event.message === "seed failed");
 
-test("synchronous dispose without a logger reports the failure on console.error", async () => {
-  const failure = new Error("seed failed");
-  const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
-  const production = context
-    .defineCollections({
-      posts: {
-        schema: z.object({ title: z.string() }),
-        accessPolicy: fullAccess,
-        seed: () => Promise.reject(failure),
-      },
-    })
-    .actions({});
-  const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  try {
-    const handler = withSqliteTestBackend(production);
-    handler[Symbol.dispose]();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(consoleError).toHaveBeenCalledTimes(1);
-    expect(consoleError.mock.calls[0]).toContain(failure);
-  } finally {
-    consoleError.mockRestore();
-  }
-});
+// `logger: false` turns logging off; it does not drop the one report of a
+// startup failure that no request observed.
+test.each([
+  { label: "no logger configured", options: {} },
+  { label: "logger: false", options: { logger: false } },
+] as const)(
+  "synchronous dispose with $label reports the failure on console.error",
+  async ({ options }) => {
+    const failure = new Error("seed failed");
+    const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
+    const production = context
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+          seed: () => Promise.reject(failure),
+        },
+      })
+      .actions({});
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const handler = withSqliteTestBackend(production, options);
+      handler[Symbol.dispose]();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(consoleError.mock.calls[0]).toContain(failure);
+    } finally {
+      consoleError.mockRestore();
+    }
+  },
+);
 
 test("the first disposal owns the startup failure report: sync first, then async", async () => {
   const failure = new Error("seed failed");

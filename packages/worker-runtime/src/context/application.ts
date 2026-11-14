@@ -139,8 +139,9 @@ export class Application<
  *   `Symbol.dispose` adds nothing.
  * - `Symbol.dispose` first: it cannot hand the failure to its caller and must
  *   not leave an unhandled rejection, so it emits a `takibi.error` event to
- *   the configured logger, or `console.error` when none is configured; a later
- *   `Symbol.asyncDispose` resolves once closing finished.
+ *   the configured logger, or `console.error` when logging is off (no logger
+ *   configured, or `logger: false`: turning logging off does not drop the
+ *   report); a later `Symbol.asyncDispose` resolves once closing finished.
  */
 function disposalOf(
   close: () => Promise<void>,

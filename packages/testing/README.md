@@ -23,5 +23,7 @@ in-flight work settled. A startup failure that no request reported is
 reported exactly once, by whichever disposal is called first:
 `Symbol.asyncDispose` rejects with it; `Symbol.dispose` cannot return it, so
 it emits a `takibi.error` event to the configured logger, or calls
-`console.error` when no logger is configured, and never leaves an unhandled
+`console.error` when logging is off (no logger configured, or
+`logger: false`, which turns logging off but does not drop this report),
+and never leaves an unhandled
 rejection. The disposal called second does not report it again.

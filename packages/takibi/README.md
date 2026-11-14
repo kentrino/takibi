@@ -182,8 +182,9 @@ request reported that failure, the disposal called first reports it, exactly
 once: `await handler[Symbol.asyncDispose]()` rejects with it.
 `handler[Symbol.dispose]()` returns before closing finishes and never throws or
 leaves an unhandled rejection: it reports the failure to the configured
-`logger` (as a `takibi.error` event), or with `console.error` when no logger is
-configured. A disposal called after the first does not report it again. Use the
+`logger` (as a `takibi.error` event), or with `console.error` when logging is
+off (no logger configured, or `logger: false`, which turns logging off but does
+not drop this report). A disposal called after the first does not report it again. Use the
 async form when a test must observe startup failures.
 
 ```ts
