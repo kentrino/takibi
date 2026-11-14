@@ -12,7 +12,6 @@ import {
   type IndexRegistry,
 } from "./indexes";
 import type { SqlExecutor, SqlStatementExecutor } from "./sql-executor";
-import type { SqliteStorage } from "./storage";
 import type { StorageDriver } from "./types";
 
 const BACKFILL_PAGE_SIZE = 200;
@@ -20,43 +19,17 @@ const BACKFILL_PAGE_SIZE = 200;
 type CatalogRecord = IndexCatalogRow;
 type DesiredCatalogRecord = CatalogRecord & { definition: IndexedCollectionSource };
 
-export async function backfillIndexedCollections(
-  collections: Record<string, IndexedCollectionSource>,
-  storage: StorageDriver,
-): Promise<void> {
-  for (const [collection, definition] of Object.entries(collections)) {
-    if (!hasIndexes(definition)) continue;
-    await backfillCollection(definition, storage, collection);
-  }
-}
-
 export type ReconcileIndexesOptions = {
-  /** Reads documents for the backfill check (default: the opened storage). */
+  /** Reads documents for the backfill check (default: the opened storage driver). */
   reader?: StorageDriver;
   collections: Record<string, IndexedCollectionSource>;
   registry?: IndexRegistry;
 };
 
 /**
- * Bring the physical indexes and the index catalog of an opened storage in
- * line with `collections`. Before building an index, every document of its
- * collection is read through `reader` (default: `storage`; pass a migrating
- * view so documents are checked in their current shape) and must carry the
- * indexed fields.
- *
- * Atomic: every index drop, index build, and catalog write happens in one
- * transaction, after all checks passed, so a failure at any point leaves the
- * catalog and the physical indexes as they were. Run it while nothing else
- * changes the catalog or indexes (Takibi runs it during startup).
+ * `SqliteIndexAdmin.reconcile` on the executor `openSqliteStorage` opened;
+ * internal to this package.
  */
-export function reconcileCollectionIndexes(
-  args: ReconcileIndexesOptions & { storage: SqliteStorage },
-): Promise<void> {
-  const { storage, ...options } = args;
-  return storage.reconcileIndexes(options);
-}
-
-/** `reconcileCollectionIndexes` on the executor `openSqliteStorage` opened; internal to this package. */
 export async function reconcileIndexes(
   sql: SqlExecutor,
   args: ReconcileIndexesOptions & { reader: StorageDriver },
@@ -127,10 +100,6 @@ export async function reconcileIndexes(
   // (sqld rejects `PRAGMA optimize` as an unsupported statement), so its
   // failure does not fail reconciliation.
   await sql.exec("PRAGMA optimize").catch(() => undefined);
-}
-
-function hasIndexes(definition: IndexedCollectionSource): boolean {
-  return definition.indexes !== undefined && Object.keys(definition.indexes).length > 0;
 }
 
 async function backfillCollection(

@@ -463,6 +463,30 @@ export function createPolicyCollections<
   return api;
 }
 
+type TrustedCollectionMethod = keyof TrustedCollectionApi<unknown>;
+
+// `satisfies Record<…>` fails to compile when a `TrustedCollectionApi` method
+// is missing here or a name here is not one.
+const trustedCollectionMethodSet = {
+  add: true,
+  set: true,
+  get: true,
+  update: true,
+  delete: true,
+  list: true,
+  listAll: true,
+  count: true,
+  updateMany: true,
+  deleteMany: true,
+  consumeOne: true,
+  incrementOne: true,
+} as const satisfies Record<TrustedCollectionMethod, true>;
+
+/** Every method of one trusted collection, as `createTrustedCollections` defines them. */
+export const TRUSTED_COLLECTION_METHODS = Object.keys(
+  trustedCollectionMethodSet,
+) as readonly TrustedCollectionMethod[];
+
 export function createTrustedCollections<TCollections extends CollectionsDef>(
   collections: TCollections,
   storage: StorageDriver,

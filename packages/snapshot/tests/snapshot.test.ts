@@ -31,10 +31,10 @@ function createSnapshotApi(
   backend: MemoryMaintenanceBackend,
   lifecycle: SnapshotLifecycle = passThroughLifecycle,
 ) {
+  const maintenance = new MaintenanceController(backend);
   return attachSnapshotOperations(
     {} as TrustedCollectionsApi<{ records: never }>,
-    new MaintenanceController(backend),
-    (operation) => operation(),
+    { operation: (run) => run(maintenance), exportStream: (stream) => stream },
     lifecycle,
   );
 }

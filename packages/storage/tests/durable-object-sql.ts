@@ -5,7 +5,7 @@ import {
   type SqlBinding,
   type SqlRow,
   type SqlStatementExecutor,
-  type SqliteStorage,
+  type OpenedSqliteStorage,
 } from "@takibi/storage";
 
 /**
@@ -28,6 +28,6 @@ function durableSql(storage: DurableObjectStorage): SqlExecutor {
 export function durableStorage(
   storage: DurableObjectStorage,
   registry?: IndexRegistry,
-): Promise<SqliteStorage> {
+): Promise<OpenedSqliteStorage> {
   return openSqliteStorage(durableSql(storage), registry);
 }

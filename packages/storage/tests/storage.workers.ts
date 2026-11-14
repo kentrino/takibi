@@ -6,7 +6,6 @@ import {
   compileIndexRegistry,
   compileIndexedScanSql,
   physicalIndexName,
-  reconcileCollectionIndexes,
   resolveIndexedList,
   type StoredDocument,
 } from "@takibi/storage";
@@ -63,7 +62,7 @@ test("cursor v4 binds scoped indexed and unindexed queries without embedding the
     const registry = compileIndexRegistry({
       posts: { indexes: { byOwner: ["ownerId", "createdAt"] as const } },
     });
-    const storage = await durableStorage(state.storage, registry);
+    const storage = (await durableStorage(state.storage, registry)).storage;
     for (const [id, ownerId] of [
       ["a", "u1"],
       ["b", "u2"],
@@ -148,7 +147,7 @@ test("Workers Durable Object SQLite satisfies the shared storage contract", asyn
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = await durableStorage(state.storage);
+    const storage = (await durableStorage(state.storage)).storage;
     await expect(observeStorageContract(storage)).resolves.toEqual(
       expectedStorageContractObservation,
     );
@@ -160,7 +159,7 @@ test("actual SQLite-backed DO satisfies query contracts and stores no document K
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const sqlite = await durableStorage(state.storage);
+    const sqlite = (await durableStorage(state.storage)).storage;
     const documents = [
       meta({
         id: "a",
@@ -324,7 +323,7 @@ test("documents survive Durable Object eviction", async () => {
   const stub = storageStub("eviction");
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = await durableStorage(state.storage);
+    const storage = (await durableStorage(state.storage)).storage;
     await storage.put("posts", {
       ...meta({ id: "persistent", title: "still here" }),
       rev: 2 ** 63,
@@ -335,7 +334,7 @@ test("documents survive Durable Object eviction", async () => {
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = await durableStorage(state.storage);
+    const storage = (await durableStorage(state.storage)).storage;
     await expect(storage.get("posts", "persistent")).resolves.toEqual({
       ...meta({ id: "persistent", title: "still here" }),
       rev: 2 ** 63,
@@ -388,7 +387,7 @@ test("version 1 rows migrate revisions out of JSON and survive eviction", async 
       );
     }
 
-    const storage = await durableStorage(state.storage);
+    const storage = (await durableStorage(state.storage)).storage;
     await expect(storage.get("posts", "valid")).resolves.toMatchObject({
       title: "valid",
       rev: 2 ** 63,
@@ -416,7 +415,7 @@ test("version 1 rows migrate revisions out of JSON and survive eviction", async 
   await evictDurableObject(stub);
   await stub.ping();
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = await durableStorage(state.storage);
+    const storage = (await durableStorage(state.storage)).storage;
     await expect(storage.get("posts", "valid")).resolves.toMatchObject({
       title: "valid",
       rev: 2 ** 63,
@@ -429,7 +428,7 @@ test("Workers SQLite round-trips revisions across numeric storage boundaries", a
   await stub.ping();
 
   await runInDurableObject(stub, async (_instance, state) => {
-    const storage = await durableStorage(state.storage);
+    const storage = (await durableStorage(state.storage)).storage;
     const revisions = [1, 2 ** 53, 2 ** 63];
     for (const [index, revision] of revisions.entries()) {
       const document = {
@@ -453,7 +452,7 @@ test("indexed list pages by createdAt and id in both directions", async () => {
     const registry = compileIndexRegistry({
       posts: { indexes: { byOwner: ["ownerId", "createdAt"] as const } },
     });
-    const durable = await durableStorage(state.storage, registry);
+    const durable = (await durableStorage(state.storage, registry)).storage;
     const docs = [
       { ...meta({ id: "c", ownerId: "u1", tag: "keep" }), createdAt: "2026-01-01T00:00:00.000Z" },
       { ...meta({ id: "a", ownerId: "u1", tag: "skip" }), createdAt: "2026-01-01T00:00:00.000Z" },
@@ -528,7 +527,7 @@ test("SQLite query plan uses the declared expression index and reconcile drops r
       posts: { indexes: { byOwner: ["ownerId", "createdAt"] as const } },
     };
     const firstRegistry = compileIndexRegistry(first);
-    const durable = await durableStorage(state.storage, firstRegistry);
+    const { storage: durable, indexes } = await durableStorage(state.storage, firstRegistry);
     let optimizeCount = 0;
     const exec = state.storage.sql.exec.bind(state.storage.sql);
     state.storage.sql.exec = ((query: string, ...bindings: never[]) => {
@@ -536,15 +535,13 @@ test("SQLite query plan uses the declared expression index and reconcile drops r
       return exec(query, ...bindings);
     }) as DurableObjectStorage["sql"]["exec"];
 
-    await reconcileCollectionIndexes({
+    await indexes.reconcile({
       collections: first,
-      storage: durable,
       registry: firstRegistry,
     });
     expect(optimizeCount).toBe(1);
-    await reconcileCollectionIndexes({
+    await indexes.reconcile({
       collections: first,
-      storage: durable,
       registry: firstRegistry,
     });
     expect(optimizeCount).toBe(1);
@@ -579,9 +576,8 @@ test("SQLite query plan uses the declared expression index and reconcile drops r
     const renamed = {
       posts: { indexes: { byCreator: ["ownerId", "createdAt"] as const } },
     };
-    await reconcileCollectionIndexes({
+    await indexes.reconcile({
       collections: renamed,
-      storage: durable,
       registry: compileIndexRegistry(renamed),
     });
     expect(optimizeCount).toBe(2);

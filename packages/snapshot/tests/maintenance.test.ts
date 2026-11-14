@@ -90,8 +90,7 @@ test("export failure and cancellation release the maintenance lease", async () =
   const failureController = new MaintenanceController(failureBackend);
   const failureApi = attachSnapshotOperations(
     {} as TrustedCollectionsApi<{ records: never }>,
-    failureController,
-    (operation) => operation(),
+    { operation: (run) => run(failureController), exportStream: (stream) => stream },
     lifecycle,
   );
   await expect(new Response(await failureApi.$exportSnapshot()).text()).rejects.toMatchObject({
@@ -112,8 +111,7 @@ test("export failure and cancellation release the maintenance lease", async () =
   const cancelController = new MaintenanceController(cancelBackend);
   const cancelApi = attachSnapshotOperations(
     {} as TrustedCollectionsApi<{ records: never }>,
-    cancelController,
-    (operation) => operation(),
+    { operation: (run) => run(cancelController), exportStream: (stream) => stream },
     lifecycle,
   );
   const stream = await cancelApi.$exportSnapshot();

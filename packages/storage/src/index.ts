@@ -1,5 +1,5 @@
 export { openSqliteStorage } from "./storage";
-export type { SqliteStorage } from "./storage";
+export type { OpenedSqliteStorage, SqliteIndexAdmin } from "./storage";
 export {
   isSqlCommitOutcomeUnknown,
   SQL_COMMIT_OUTCOME_UNKNOWN,
@@ -49,7 +49,6 @@ export {
   physicalIndexName,
 } from "./index-sql";
 export type { IndexCatalogRow } from "./index-sql";
-export { backfillIndexedCollections, reconcileCollectionIndexes } from "./index-reconcile";
 export type { ReconcileIndexesOptions } from "./index-reconcile";
 export { documentRevision, withDocumentRevision } from "./revision";
 export type { StorageDriver, StorageListPlan, StorageReadTransform, StoredDocument } from "./types";

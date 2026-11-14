@@ -1,4 +1,5 @@
 export { attachSnapshotOperations } from "./snapshot";
+export type { SnapshotAdmission } from "./snapshot";
 export {
   createMaintenanceGatedCollections,
   MaintenanceController,

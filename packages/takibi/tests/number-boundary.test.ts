@@ -32,7 +32,7 @@ function operationFailure(status: number) {
 }
 
 async function seedPosts(count: number) {
-  const storage = await openSqliteStorage(createNodeSqliteExecutor());
+  const storage = (await openSqliteStorage(createNodeSqliteExecutor())).storage;
   const ts = "2026-08-26T00:00:00.000Z";
   for (let index = 0; index < count; index += 1) {
     await storage.put("posts", {
