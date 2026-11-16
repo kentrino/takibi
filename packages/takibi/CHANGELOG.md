@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.1](https://github.com/kentrino/takibi/compare/takibi-v0.10.0...takibi-v0.10.1) (2026-11-16)
+
+
+### Refactoring
+
+* **storage:** remove backfillIndexedCollections, which lost its last caller ([47dc0c6](https://github.com/kentrino/takibi/commit/47dc0c6e17c6501c9163fd3578068376a7e21af5))
+
+
+### Documentation
+
+* **testing:** state that logger: false keeps the unreported startup failure report ([08cf492](https://github.com/kentrino/takibi/commit/08cf492c298ecaa22fe99efbbcaef109f0083cda))
+
 ## [0.10.0](https://github.com/kentrino/takibi/compare/takibi-v0.9.0...takibi-v0.10.0) (2026-11-14)
 
 
