@@ -197,7 +197,7 @@ const doc = (id: string): StoredDocument => ({
 async function remoteStorage() {
   const remote = remoteShapedClient();
   const sql = new SqlExecutor(libsqlConnection(remote.client, "remote"));
-  const storage = await openSqliteStorage(sql);
+  const { storage } = await openSqliteStorage(sql);
   await storage.put("posts", doc("existing"));
   return { ...remote, sql, storage };
 }

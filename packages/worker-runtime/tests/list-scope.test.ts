@@ -95,7 +95,7 @@ async function fixture(size = 5) {
   const definitions: CollectionsDef<Context> = {
     posts: { schema, accessPolicy: (ctx) => (ctx.admin ? read : owner(ctx)) },
   };
-  const storage = await openSqliteStorage(
+  const { storage } = await openSqliteStorage(
     db,
     compileIndexRegistry({
       posts: { indexes: { byOwner: ["owner", "createdAt"] as const } },

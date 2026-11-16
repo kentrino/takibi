@@ -45,26 +45,47 @@ type TrailerRecord = {
 };
 
 /**
+ * How a host runs the snapshot operations of one tenant.
+ *
+ * `{ operation: (run) => run(maintenance), exportStream: (stream) => stream }`
+ * admits everything immediately.
+ */
+export type SnapshotAdmission = {
+  /**
+   * Admit one snapshot operation (the host may wait for startup, refuse, or
+   * track it), then run it with the tenant's maintenance controller.
+   */
+  operation<T>(run: (maintenance: MaintenanceController) => Promise<T>): Promise<T>;
+  /**
+   * Admit the stream `$exportSnapshot` resolves with. Unlike every other
+   * result, it keeps reading the database (one page per pull, under the
+   * export lease) after its operation settled, so the host may track,
+   * refuse, or cancel those reads. Returns the stream the caller receives.
+   */
+  exportStream(stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array>;
+};
+
+/**
  * Define `$exportSnapshot`, `$restoreSnapshot`, and `$resetAll` on `trusted`.
- * Each operation runs through `admit`, which the host uses to wait for
- * startup, refuse work, or track it (`(operation) => operation()` admits
- * everything immediately).
+ * Each operation runs through `admission.operation`; the export stream also
+ * goes through `admission.exportStream`.
  */
 export function attachSnapshotOperations<TCollections extends CollectionsDef>(
   trusted: TrustedCollectionsApi<TCollections>,
-  maintenance: MaintenanceController,
-  admit: <T>(operation: () => Promise<T>) => Promise<T>,
+  admission: SnapshotAdmission,
   lifecycle: SnapshotLifecycle,
 ): DurableObjectCollectionsApi<TCollections> {
   const operations = {
     $exportSnapshot() {
-      return admit(() => exportSnapshot(lifecycle, maintenance));
+      return admission.operation(async (maintenance) =>
+        admission.exportStream(await exportSnapshot(lifecycle, maintenance)),
+      );
     },
     $restoreSnapshot(source: ReadableStream<Uint8Array>) {
-      return admit(() => restoreSnapshot(lifecycle, maintenance, source));
+      return admission.operation((maintenance) => restoreSnapshot(lifecycle, maintenance, source));
     },
     $resetAll() {
-      return admit(() => resetAll(lifecycle, maintenance));
+      return admission.operation((maintenance) => resetAll(lifecycle, maintenance));
     },
   } satisfies Omit<DurableObjectCollectionsApi<Record<never, never>>, "$transaction">;
   for (const [name, value] of Object.entries(operations)) {

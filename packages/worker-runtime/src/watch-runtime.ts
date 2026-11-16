@@ -42,6 +42,37 @@ export interface WatchHost<TUpgrade = Response> {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+/**
+ * Tell a client that sent a frame that watch sockets are server-push only,
+ * then close the socket terminally. Needs nothing from the tenant's database.
+ */
+export function sendWatchProtocolError(socket: WatchSocket): void {
+  try {
+    socket.send(
+      JSON.stringify({
+        version: WATCH_VERSION,
+        kind: "error",
+        reason: "protocol-error",
+        error: normalizeInvocationFailure(
+          new BadRequestError("Invalid or obsolete watch protocol"),
+        ),
+      }),
+    );
+  } catch {
+    /* The terminal close code still prevents reconnect after a failed send. */
+  }
+  closeWatchSocket(socket, WATCH_PROTOCOL_CLOSE);
+}
+
+/** Close a watch socket, isolating sockets that are already gone. */
+export function closeWatchSocket(socket: WatchSocket, code = 1000): void {
+  try {
+    socket.close(code);
+  } catch {
+    /* Isolate sockets that are already gone. */
+  }
+}
+
 export class WatchRuntime<TUpgrade = Response> {
   #dirty = new Set<string>();
   #scheduled = false;
@@ -101,28 +132,10 @@ export class WatchRuntime<TUpgrade = Response> {
   }
 
   protocolError(socket: WatchSocket): void {
-    try {
-      socket.send(
-        JSON.stringify({
-          version: WATCH_VERSION,
-          kind: "error",
-          reason: "protocol-error",
-          error: normalizeInvocationFailure(
-            new BadRequestError("Invalid or obsolete watch protocol"),
-          ),
-        }),
-      );
-    } catch {
-      /* The terminal close code still prevents reconnect after a failed send. */
-    }
-    this.close(socket, WATCH_PROTOCOL_CLOSE);
+    sendWatchProtocolError(socket);
   }
   close(socket: WatchSocket, code = 1000): void {
-    try {
-      socket.close(code);
-    } catch {
-      /* Isolate sockets that are already gone. */
-    }
+    closeWatchSocket(socket, code);
   }
 
   #attachment(socket: WatchSocket): WatchAttachment | undefined {

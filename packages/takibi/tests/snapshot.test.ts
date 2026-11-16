@@ -587,10 +587,10 @@ test("memory maintenance backend round-trips logical snapshot metadata", async (
     revision: 7,
     data: { value: "memory" },
   });
+  const sourceMaintenance = new MaintenanceController(sourceBackend);
   const sourceApi = attachSnapshotOperations(
     {} as TrustedCollectionsApi<typeof collections>,
-    new MaintenanceController(sourceBackend),
-    (operation) => operation(),
+    { operation: (run) => run(sourceMaintenance), exportStream: (stream) => stream },
     createTakibiSnapshotLifecycle(collections),
   );
   const encoded = await new Response(await sourceApi.$exportSnapshot()).text();
@@ -605,10 +605,10 @@ test("memory maintenance backend round-trips logical snapshot metadata", async (
     revision: 1,
     data: { value: "removed" },
   });
+  const targetMaintenance = new MaintenanceController(targetBackend);
   const targetApi = attachSnapshotOperations(
     {} as TrustedCollectionsApi<typeof collections>,
-    new MaintenanceController(targetBackend),
-    (operation) => operation(),
+    { operation: (run) => run(targetMaintenance), exportStream: (stream) => stream },
     createTakibiSnapshotLifecycle(collections),
   );
 

@@ -7,7 +7,7 @@ import {
   createTakibi,
   type LogEvent,
 } from "@takibi/worker-runtime";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { z } from "zod";
 import { withSqliteTestBackend } from "@takibi/testing";
 import { createSqliteDurableObjectStorage } from "@takibi/testing/durable-object-storage";
@@ -96,7 +96,7 @@ test("SQLite-backed handler Durable Object applies migrations on read", async ()
     })
     .actions({});
   const storage = createSqliteDurableObjectStorage();
-  const durable = await openSqliteStorage(createDurableObjectSqlExecutor(storage));
+  const durable = (await openSqliteStorage(createDurableObjectSqlExecutor(storage))).storage;
   await durable.put("settings", {
     id: "default",
     name: "Clinic",
@@ -287,6 +287,62 @@ test("synchronous dispose of a fork whose startup failed logs the failure withou
   expect(events).toContainEqual(
     expect.objectContaining({ level: "error", event: "takibi.error", message: "seed failed" }),
   );
+});
+
+const errorEvents = (events: LogEvent[]) =>
+  events.filter((event) => event.event === "takibi.error" && event.message === "seed failed");
+
+// `logger: false` turns logging off; it does not drop the one report of a
+// startup failure that no request observed.
+test.each([
+  { label: "no logger configured", options: {} },
+  { label: "logger: false", options: { logger: false } },
+] as const)(
+  "synchronous dispose with $label reports the failure on console.error",
+  async ({ options }) => {
+    const failure = new Error("seed failed");
+    const context = createTakibi()({ resolve: () => ({ tenantId: "tenant-a" }) });
+    const production = context
+      .defineCollections({
+        posts: {
+          schema: z.object({ title: z.string() }),
+          accessPolicy: fullAccess,
+          seed: () => Promise.reject(failure),
+        },
+      })
+      .actions({});
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const handler = withSqliteTestBackend(production, options);
+      handler[Symbol.dispose]();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(consoleError.mock.calls[0]).toContain(failure);
+    } finally {
+      consoleError.mockRestore();
+    }
+  },
+);
+
+test("the first disposal owns the startup failure report: sync first, then async", async () => {
+  const failure = new Error("seed failed");
+  const events: LogEvent[] = [];
+  const handler = failingSeedHandler(failure, events);
+  handler[Symbol.dispose]();
+  await expect(handler[Symbol.asyncDispose]()).resolves.toBeUndefined();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(errorEvents(events)).toHaveLength(1);
+});
+
+test("the first disposal owns the startup failure report: async first, then sync", async () => {
+  const failure = new Error("seed failed");
+  const events: LogEvent[] = [];
+  const handler = failingSeedHandler(failure, events);
+  const disposing = handler[Symbol.asyncDispose]();
+  handler[Symbol.dispose]();
+  await expect(disposing).rejects.toBe(failure);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(errorEvents(events)).toEqual([]);
 });
 
 test("async dispose rejects with a startup failure no request reported", async () => {

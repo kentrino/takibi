@@ -7,7 +7,7 @@ import { fullAccess } from "@takibi/policy";
 it("observes user writes outside migration storage without publishing lazy migration commits", async () => {
   const sqlite = createNodeSqliteExecutor();
   try {
-    const raw = await openSqliteStorage(sqlite);
+    const raw = (await openSqliteStorage(sqlite)).storage;
     const legacy = {
       id: "old",
       title: "legacy",

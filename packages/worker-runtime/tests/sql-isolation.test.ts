@@ -64,7 +64,7 @@ const adapters = {
 for (const [name, open] of Object.entries(adapters)) {
   test(`${name}: a driver write during a failing restore transaction survives its rollback`, async () => {
     const { sql, close } = open();
-    const storage = await openSqliteStorage(sql);
+    const storage = (await openSqliteStorage(sql)).storage;
     const backend = await SqliteMaintenanceBackend.open(sql);
     await backend.cleanupAbandoned();
     const document = (id: string) => ({

@@ -2,7 +2,7 @@ import { serveWatchUpgrade } from "../watch-upgrade";
 import { TakibiError, type ActionRegistry, type CollectionsDef } from "@takibi/api";
 import { assignTakibiBrand } from "../brand";
 import { createDurableObjectClass } from "../durable-object";
-import { emitFailure, resolveLogging } from "../logging";
+import { emitFailure, resolveLogging, type InternalLogger } from "../logging";
 import {
   registerTestingFork,
   type TestingExecutorFactory,
@@ -88,18 +88,13 @@ export class Application<
       TInitial,
       TServices
     >(http, { collections, actions });
-    const close = backend.close;
-    if (close) {
-      // Synchronous disposal cannot hand a failure to its caller. It must not
-      // leave an unhandled rejection either, so a failure goes to the logger;
-      // `await using` / `Symbol.asyncDispose` receives it as a rejection.
-      const dispose = () => {
-        close().catch((error: unknown) =>
-          emitFailure(logger, normalizeInvocationFailureForServer(error)),
-        );
-      };
+    if (backend.close) {
+      const { dispose, asyncDispose } = disposalOf(backend.close, logger);
       Object.defineProperty(handler, Symbol.dispose, { value: dispose, enumerable: false });
-      Object.defineProperty(handler, Symbol.asyncDispose, { value: close, enumerable: false });
+      Object.defineProperty(handler, Symbol.asyncDispose, {
+        value: asyncDispose,
+        enumerable: false,
+      });
     }
     registerTestingFork(handler, (options, createExecutor) =>
       this.fork(options).mountForTesting(createExecutor, options.services),
@@ -132,4 +127,43 @@ export class Application<
       },
     );
   }
+}
+
+/**
+ * Disposal of a backend whose `close()` rejects with a startup failure no
+ * request reported. The first disposal called owns that report, so it is
+ * reported exactly once and never dropped:
+ *
+ * - `Symbol.asyncDispose` first: its promise rejects with the failure (every
+ *   further `Symbol.asyncDispose` returns that same promise); a later
+ *   `Symbol.dispose` adds nothing.
+ * - `Symbol.dispose` first: it cannot hand the failure to its caller and must
+ *   not leave an unhandled rejection, so it emits a `takibi.error` event to
+ *   the configured logger, or `console.error` when logging is off (no logger
+ *   configured, or `logger: false`: turning logging off does not drop the
+ *   report); a later `Symbol.asyncDispose` resolves once closing finished.
+ */
+function disposalOf(
+  close: () => Promise<void>,
+  logger: InternalLogger | undefined,
+): { dispose: () => void; asyncDispose: () => Promise<void> } {
+  let owner: "sync" | "async" | undefined;
+  return {
+    dispose: () => {
+      if (owner !== undefined) return;
+      owner = "sync";
+      close().catch((error: unknown) => {
+        if (logger) {
+          emitFailure(logger, normalizeInvocationFailureForServer(error));
+        } else {
+          console.error("Takibi: startup failed and no request reported it", error);
+        }
+      });
+    },
+    asyncDispose: () => {
+      if (owner === "sync") return close().catch(() => undefined);
+      owner = "async";
+      return close();
+    },
+  };
 }

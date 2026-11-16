@@ -100,7 +100,7 @@ test("overlapping transactions run one after the other instead of nesting BEGIN"
 
 test("the storage driver rejects a reentrant call from inside its transaction instead of hanging", async () => {
   const sql = createNodeSqliteExecutor();
-  const storage = await openSqliteStorage(sql);
+  const storage = (await openSqliteStorage(sql)).storage;
   const doc = (id: string) => ({
     id,
     createdAt: "2026-11-13T00:00:00.000Z",

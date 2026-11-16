@@ -24,8 +24,8 @@ import type { StorageTestObject } from "./worker";
 
 const TS = "2026-08-19T00:00:00.000Z";
 
-function durableStorage(storage: DurableObjectStorage) {
-  return openSqliteStorage(createDurableObjectSqlExecutor(storage));
+async function durableStorage(storage: DurableObjectStorage) {
+  return (await openSqliteStorage(createDurableObjectSqlExecutor(storage))).storage;
 }
 
 function meta<T extends Record<string, unknown>>(
@@ -508,7 +508,7 @@ async function writeDuringFailingRestore(
       ),
   });
   const sql = executor(pauseBeforeWipe(rawDurableConnection(state.storage)));
-  const storage = await openSqliteStorage(sql);
+  const storage = (await openSqliteStorage(sql)).storage;
   const backend = await SqliteMaintenanceBackend.open(sql);
   await backend.cleanupAbandoned();
   await storage.put("posts", meta({ id: "before" }));

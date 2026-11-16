@@ -9,6 +9,7 @@ import {
 import { fullAccess } from "@takibi/policy";
 import { SqlExecutor, sqlCommitOutcomeUnknown, type SqlStatementExecutor } from "@takibi/storage";
 import { createNodeSqliteExecutor } from "@takibi/testing/sqlite-storage";
+import { createTrustedCollections, TRUSTED_COLLECTION_METHODS } from "../src/executor";
 import { createTenantRuntime, type TenantHost } from "../src/tenant-runtime";
 import type { WatchHost, WatchSocket } from "../src/watch-runtime";
 
@@ -285,6 +286,29 @@ function gatedHost(): TenantHost & { release(): void } {
     },
   };
 }
+
+test("the collections API exists before startup and its calls wait for startup", async () => {
+  const { sql, statements, close } = recordingSql();
+  const host = gatedHost();
+  const runtime = runtimeOver(host, sql);
+  // Same shape as the trusted collections startup builds over the database.
+  const trusted = createTrustedCollections(collections, {} as never);
+  expect(Object.keys(runtime.collectionsApi).sort()).toEqual(Object.keys(trusted).sort());
+  expect(Object.keys(runtime.collectionsApi.posts).sort()).toEqual(
+    Object.keys(trusted.posts!).sort(),
+  );
+  expect([...TRUSTED_COLLECTION_METHODS].sort()).toEqual(Object.keys(trusted.posts!).sort());
+
+  const reading = runtime.collectionsApi.posts.get("welcome");
+  const pending = watchSettled(reading);
+  await tick();
+  expect(pending.state.settled).toBe(false);
+  expect(statements).toHaveLength(0);
+  host.release();
+  await expect(reading).resolves.toMatchObject({ id: "welcome", title: "hello" });
+  await runtime.close();
+  close();
+});
 
 test("close waits for startup, then rejects new work without touching the database", async () => {
   const { sql, statements, close } = recordingSql();

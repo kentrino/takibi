@@ -51,7 +51,7 @@ suite(title, () => {
       const namespace = await sqld.createDatabase(name);
       const direct = await openLibsqlExecutor({ url: sqld.url(namespace) });
       const faulty = await openLibsqlExecutor({ url: sqld.url(namespace, proxy.port) });
-      const storage = await openSqliteStorage(faulty);
+      const { storage } = await openSqliteStorage(faulty);
       const committed = async (id: string) =>
         (
           await direct.read<{ n: number }>(
@@ -198,7 +198,7 @@ suite(`${title}: server killed`, () => {
   test("reads fail as themselves and an open transaction is lost, never unknown", async () => {
     const namespace = await sqld.createDatabase("killed");
     sql = await openLibsqlExecutor({ url: sqld.url(namespace) });
-    const storage = await openSqliteStorage(sql);
+    const { storage } = await openSqliteStorage(sql);
     await storage.put("posts", doc("before"));
 
     // Killed mid-transaction: the statement after the kill fails as itself.
